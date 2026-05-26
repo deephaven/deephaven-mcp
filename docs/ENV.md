@@ -11,6 +11,20 @@ a string value is accepted. The templating engine resolves the
 placeholder when the file is loaded. See the *Templating* section of
 `docs/CONFIGURATION.md` for the full syntax.
 
+## Table of Contents
+
+- [Environment Variables Reference](#environment-variables-reference)
+  - [Table of Contents](#table-of-contents)
+  - [Systems Server](#systems-server)
+    - [`DH_MCP_CONFIG_DIR`](#dh_mcp_config_dir)
+    - [`PYTHONLOGLEVEL`](#pythonloglevel)
+  - [Docs Server](#docs-server)
+    - [`INKEEP_API_KEY`](#inkeep_api_key)
+    - [`MCP_DOCS_HOST`](#mcp_docs_host)
+    - [`MCP_DOCS_PORT`](#mcp_docs_port)
+    - [`PORT`](#port)
+  - [Where the systems-server env vars went](#where-the-systems-server-env-vars-went)
+
 ## Systems Server
 
 ### `DH_MCP_CONFIG_DIR`

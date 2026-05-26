@@ -10,6 +10,18 @@ Deephaven MCP servers. It covers:
   environment variables or other files on disk.
 - The default values that apply when a field is omitted.
 
+## Table of Contents
+
+- [Configuration directory](#configuration-directory)
+- [Templating](#templating)
+- [`server.json`](#serverjson)
+- [`community/settings.json`](#communitysettingsjson)
+- [`community/sessions/<name>.json`](#communitysessionsnamejson)
+- [`enterprise/settings.json`](#enterprisesettingsjson)
+- [`enterprise/systems/<name>.json`](#enterprisesystemsnamejson)
+- [Reloading](#reloading)
+- [See also](#see-also)
+
 ## Configuration directory
 
 `dh-mcp-systems-server` reads a *directory tree* (not a single
@@ -173,10 +185,11 @@ to the schema-level defaults shown below.
 
 | Field                                  | Type   | Default  | Description                                                |
 | -------------------------------------- | ------ | -------- | ---------------------------------------------------------- |
-| `security.credential_retrieval_mode`   | enum   | `null`   | One of `none` / `dynamic_only` / `static_only` / `all`.    |
+| `security.credential_retrieval_mode`   | enum   | `"none"` | One of `none` / `dynamic_only` / `static_only` / `all`. The wrapping `security` block is itself optional; omitting it is equivalent to `"none"`. |
 | `session_creation.max_concurrent_sessions` | int \| null | `5` | Hard cap on concurrent dynamic sessions. `null` disables the cap (unbounded). |
 | `session_creation.defaults`            | object | —        | Per-session defaults (see next table).                     |
 | `timeouts`                             | object | `{}` (all defaults) | All operator-tunable durations, grouped under `client` and `eviction`. See next two tables. |
+| `response_limits`                      | object | `{}` (all defaults) | Tool-side response-size guard thresholds. See [`response_limits`](#response_limits). |
 
 ### `community/settings.json` `timeouts.client`
 
@@ -308,6 +321,7 @@ The file is optional; omit it to accept all defaults.
 | -------------------------------------- | ------ | ------------------- | ---------------------------------------------------------- |
 | `timeouts`                             | object | `{}` (all defaults) | All operator-tunable durations, grouped under `client` and `eviction`. See next two tables. |
 | `pq_tools`                             | object — see [below](#pq_tools) | `{}` (all defaults) | Defaults applied by the persistent-query MCP tools.        |
+| `response_limits`                      | object | `{}` (all defaults) | Tool-side response-size guard thresholds. See [`response_limits`](#response_limits). |
 
 ### `pq_tools`
 
@@ -326,6 +340,20 @@ not expose numeric `timeout_seconds` parameters to AI agents;
 `pq_start`, `pq_stop`, and `pq_restart` accept a `wait: bool`
 parameter (default `True`) so agents can choose
 wait-for-completion vs. fire-and-forget without picking a timeout.
+
+### `response_limits`
+
+Thresholds applied by the tool-side response-size guard. The same
+schema is consumed by both `community/settings.json` and
+`enterprise/settings.json` — each section carries its own copy so
+community and enterprise deployments can be tuned independently.
+All fields are optional.
+
+| Field                       | Type | Default               | Description                                                                                                  |
+| --------------------------- | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `max_response_bytes`        | int  | `52428800` (50 MiB)   | Hard ceiling on the estimated serialized response size. Tools refuse to serialize and return a structured error asking the caller to reduce `max_rows`. |
+| `warning_response_bytes`    | int  | `5242880` (5 MiB)     | Threshold above which a warning is logged but the response is still served. Must be ≤ `max_response_bytes`.  |
+| `estimated_bytes_per_cell`  | int  | `50`                  | Conservative bytes-per-cell estimate used to project response size before serialization.                     |
 
 ### `enterprise/settings.json` `timeouts.client`
 

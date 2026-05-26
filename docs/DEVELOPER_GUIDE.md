@@ -305,7 +305,7 @@ Choose **one** of the following launch methods for dynamically creating Deephave
 
 - **Required**: Git, Python 3.12+, virtual environment tool (`venv` or `uv`)
 - **Recommended**: [`uv`](https://github.com/astral-sh/uv) for faster package management
-- **Installation**: See [UV.md](UV.md) for project-specific uv setup and workflows, or the [uv installation guide](https://github.com/astral-sh/uv#installation) for general installation
+- **Installation**: See the [uv installation guide](https://github.com/astral-sh/uv#installation), or [`docs/UV.md`](UV.md) for a quick orientation if you are new to `uv`
 
 **Testing Requirements**
 
@@ -3448,7 +3448,7 @@ uv pip install -e ".[dev]"
 ### Documentation
 
 - [Environment Variables Reference (`docs/ENV.md`)](ENV.md) — full list of env vars recognized by every MCP server in this repo
-- [`docs/UV.md`](UV.md) — project-specific `uv` setup and workflows
+- [`docs/UV.md`](UV.md) — generic `uv` crash course for developers new to the tool
 - [Model Context Protocol (MCP) Specification](https://github.com/modelcontextprotocol/spec)
 - [Deephaven Documentation](https://deephaven.io/docs/)
 - [Inkeep API Documentation](https://inkeep.com/docs)

@@ -71,22 +71,18 @@ Choose the quickstart for your Deephaven deployment type:
 Install with [`uv`](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisites) if you don't have it yet):
 
 ```bash
-uv tool install --python-preference managed "deephaven-mcp[community,enterprise]"
+uv tool install --python-preference managed "deephaven-mcp[community]"
 ```
 
-This places two commands on your PATH — `dh-mcp-systems-server` (the multiplexed binary that hosts every Community session and Enterprise system) and `dh-mcp-docs-server` — with no venv to manage.
+This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH with no venv to manage. Use `"deephaven-mcp[community,enterprise]"` if you also need Deephaven Enterprise support. For full extras and the venv-based alternative, see [Installation & Initial Setup](#installation--initial-setup).
 
-> **What `--python-preference managed` does**: tells uv to download and use its own Python (stored in `~/.local/share/uv/python/`) rather than any Python on your system. The tool environment is unaffected if your system Python is upgraded, moved, or removed. uv picks the latest Python version compatible with `requires-python` in the package.
->
-> **Where tools are installed**: Scripts land in `~/.local/bin/` (macOS/Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows). The tool environment itself lives under `~/.local/share/uv/tools/deephaven-mcp/` — run `uv tool dir` to find the root.
->
-> **Optional extras**: `[community]` adds Python-based session creation; `[enterprise]` adds DHE connectivity. Both together is the recommended default. For more details, see [Installation & Initial Setup](#installation--initial-setup).
->
-> **For stdio-only AI tools** (e.g. Claude Desktop): also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
->
-> ```bash
-> uv tool install --python-preference managed mcp-proxy
-> ```
+> **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
+
+**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
+
+```bash
+uv tool install --python-preference managed mcp-proxy
+```
 
 #### 2. Create Configuration Directory
 
@@ -188,7 +184,7 @@ that bridges through `mcp-proxy` and forwards the PSK header:
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
+> If `mcp-proxy` is reported missing, see [Setup Instructions by Tool](#setup-instructions-by-tool).
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
@@ -220,17 +216,15 @@ Install with [`uv`](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisi
 uv tool install --python-preference managed "deephaven-mcp[enterprise]"
 ```
 
-This places `dh-mcp-systems-server` (the multiplexed binary that hosts every configured Community session *and* every Enterprise system) and `dh-mcp-docs-server` on your PATH with no venv to manage.
+This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH. Use `"deephaven-mcp[community,enterprise]"` if you also need Community Core support. For full extras and venv alternative, see [Installation & Initial Setup](#installation--initial-setup).
 
-> **Installing both server types?** Use `"deephaven-mcp[community,enterprise]"` instead.
->
-> **Where tools are installed**: Scripts land in `~/.local/bin/` (macOS/Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows). The tool environment lives under `~/.local/share/uv/tools/deephaven-mcp/` — run `uv tool dir` to find the root.
->
-> **For stdio-only AI tools** (e.g. Claude Desktop): also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
->
-> ```bash
-> uv tool install --python-preference managed mcp-proxy
-> ```
+> **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
+
+**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
+
+```bash
+uv tool install --python-preference managed mcp-proxy
+```
 
 #### 2. Create Configuration Directory
 
@@ -344,7 +338,7 @@ Or, for an HTTP-bridged setup, use:
 }
 ```
 
-> If your AI tool reports that `mcp-proxy` is not found, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows cmd.exe / PowerShell), and use the full path as the `command` value.
+> If `mcp-proxy` is reported missing, see [Setup Instructions by Tool](#setup-instructions-by-tool).
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
@@ -433,6 +427,12 @@ in the PQ id (form `<system>:<serial>`).
 - `list_systems` - List every configured Community session and Enterprise system as `(name, type)` pairs
 - `enterprise_systems_status(system)` - Get the initialization status / last error of one configured DHE system
 
+*Community sessions:*
+
+- `session_community_create` - Dynamically launch Community Core sessions
+- `session_community_delete(session_id)` - Delete a dynamically created session
+- `session_community_credentials(session_id)` - Retrieve session credentials (subject to `security.credential_retrieval_mode`)
+
 *Enterprise sessions:*
 
 - `session_enterprise_create(system, ...)` - Create a worker session in the named DHE system
@@ -458,12 +458,6 @@ in the PQ id (form `<system>:<serial>`).
 - `catalog_namespaces_list(session_id, ...)` - Browse catalog namespaces
 - `catalog_tables_schema(session_id, ...)` - Get catalog table schemas
 - `catalog_table_sample(session_id, ...)` - Sample catalog table data
-
-*Community sessions:*
-
-- `session_community_create` - Dynamically launch Community Core sessions
-- `session_community_delete(session_id)` - Delete a dynamically created session
-- `session_community_credentials(session_id)` - Retrieve session credentials (subject to `security.credential_retrieval_mode`)
 
 *Session & table operations (any session, community or enterprise):*
 
@@ -554,6 +548,8 @@ uv tool install --python-preference managed "deephaven-mcp[community,enterprise]
 
 After this command, `dh-mcp-systems-server` and `dh-mcp-docs-server` are available on your PATH.
 
+> **About `--python-preference managed`**: this flag tells `uv` to download and use its own managed Python interpreter (stored under `~/.local/share/uv/python/`) rather than any Python already on your system. The tool environment is unaffected if your system Python is upgraded, moved, or removed; `uv` picks the latest Python version compatible with the package's `requires-python`. Recommended for everyone — you do not need to install Python yourself.
+
 **Where tools are installed:**
 
 | Platform | Scripts (on PATH) | Tool environment |
@@ -574,7 +570,7 @@ Run `uv tool dir` to find the tool environment root on your system.
 | `[lint]` | Code quality tools (linting, formatting, type checking) |
 | `[dev]` | Full development environment (all of the above) |
 
-For detailed [`uv`](https://github.com/astral-sh/uv) workflows and project-specific setup, see the [`uv` documentation](docs/UV.md).
+New to [`uv`](https://github.com/astral-sh/uv)? See the [`uv` crash course](docs/UV.md) for a quick orientation.
 
 #### Alternative: Using `uv pip` or standard `pip` with a venv
 
@@ -954,22 +950,10 @@ Before diving into detailed troubleshooting, try these common solutions:
   - **Templating:** Ensure any `${env:VAR}` / `${file:/path}` references resolve at startup — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
   - **Security:** See [`docs/SECURITY.md`](docs/SECURITY.md) for credential handling and directory permissions
 
-### Platform-Specific Issues
+### Platform-Specific Notes
 
-- **Windows-Specific:**
-  - Use forward slashes `/` in JSON file paths, even on Windows
-  - Executable paths should point to `.venv\Scripts\` instead of `.venv/bin/`
-  - PowerShell execution policy may block script execution
-
-- **macOS-Specific:**
-  - Gatekeeper may block unsigned executables
-  - File permissions may need adjustment: `chmod +x /path/to/executable`
-  - Network security settings may block connections
-
-- **Linux-Specific:**
-  - Check firewall settings: `ufw status` or `iptables -L`
-  - Verify user permissions for network binding
-  - SELinux policies may restrict server operations
+- **Windows:** use forward slashes `/` in JSON file paths; venv executables live under `.venv\Scripts\` rather than `.venv/bin/`.
+- **macOS:** Gatekeeper may block unsigned executables on first run; allow them via System Settings or `xattr -d com.apple.quarantine <path>`.
 
 ### Log Analysis and Debugging
 
@@ -1045,7 +1029,7 @@ We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feat
 **Additional Resources:**
 
 - **Developer & Contributor Guide:** Detailed tool APIs, architecture, and development workflows — [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
-- **`uv` Workflow:** Using `uv` for project management — [docs/UV.md](docs/UV.md)
+- **`uv` crash course:** Quick orientation for developers new to `uv` — [docs/UV.md](docs/UV.md)
 - **Deephaven Documentation:** [deephaven.io/docs](https://deephaven.io/docs/) | [Community Core Python API](https://deephaven.io/core/pydoc/) | [Enterprise Python API](https://docs.deephaven.io/pycoreplus/latest/worker/)
 
 ---

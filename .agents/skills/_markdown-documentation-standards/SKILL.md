@@ -77,6 +77,22 @@ description: Documentation format standards for markdown files — JSON/JSON5 co
 2. **No skipped levels**: Do not jump from `##` to `####`. (markdownlint MD001.)
 3. **Title case for H1, sentence case for H2+**: Match the existing style of neighbouring docs (`README.md`, `docs/CONFIGURATION.md`, `docs/DEVELOPER_GUIDE.md`); do not introduce a new convention.
 
+## Table of Contents
+
+Human-facing documentation (anything user- or operator-facing) requires a Table of Contents immediately after the H1 when the document either:
+
+- exceeds approximately 100 lines, **or**
+- contains more than 5 H2 sections.
+
+Requirements:
+
+- Place the TOC under a `## Table of Contents` heading directly after the H1 and any short intro paragraph.
+- Each entry must link to a live anchor in the same file (lowercase, hyphen-separated, generated from the heading text).
+- The TOC must reflect the live H2 / H3 structure — verify after every edit that adds, removes, or renames a heading.
+- Keep entries to H2 (and selected H3) only; deeper levels create noise.
+
+AI-configuration files (e.g. `AGENTS.md`) and skill definitions under `.agents/skills/` do **not** require a TOC, regardless of length — they are not human documentation.
+
 ## Code Block Language Tags
 
 Every fenced code block must declare its language. Use:
