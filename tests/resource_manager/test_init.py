@@ -25,6 +25,7 @@ def test_imports_and_all():
         "Evictor",
         "InitializationPhase",
         "MultiSystemRegistry",
+        "least_advanced_phase",
         "RegistrySnapshot",
         "CommunitySessionManager",
         "StaticCommunitySessionManager",

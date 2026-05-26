@@ -54,7 +54,7 @@ from ._registry import (
 from ._registry_community import CommunitySessionRegistry
 from ._registry_enterprise import EnterpriseSessionRegistry
 
-__all__ = ["MultiSystemRegistry"]
+__all__ = ["MultiSystemRegistry", "least_advanced_phase"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -218,9 +218,13 @@ class MultiSystemRegistry:
         All children's :meth:`initialize` are awaited via
         ``asyncio.gather(..., return_exceptions=True)`` so a failure in one
         child does not cancel the others. After every child has been
-        awaited, if any failed, a single :class:`InternalError` is raised
+        awaited, if any failed, every child that *did* succeed is closed
+        (best-effort) before a single :class:`InternalError` is raised
         with one line per failing child (``ClassName: error``). The
-        registry is left in the uninitialized state in that case.
+        registry is left in the uninitialized state in that case, with
+        no surviving child resources or background tasks (e.g. an
+        :class:`EnterpriseSessionRegistry` whose ``_load_items`` already
+        spawned a discovery task) leaking past the failure.
 
         Raises:
             InternalError: If one or more children raised an exception during
@@ -240,6 +244,34 @@ class MultiSystemRegistry:
             if isinstance(result, BaseException)
         ]
         if failures:
+            # Roll back: close any children that initialized successfully
+            # so partial-init never leaves background tasks or network
+            # resources alive. ``close()`` on the multi-registry itself
+            # short-circuits while ``_initialized`` is False, so the
+            # lifespan's outer cleanup cannot do this for us.
+            succeeded = [
+                child
+                for child, result in zip(children, results, strict=True)
+                if not isinstance(result, BaseException)
+            ]
+            if succeeded:
+                noun = "registry" if len(succeeded) == 1 else "registries"
+                _LOGGER.error(
+                    f"[MultiSystemRegistry] partial-init failure; rolling back "
+                    f"{len(succeeded)} already-initialized child {noun}"
+                )
+                close_results = await asyncio.gather(
+                    *(child.close() for child in succeeded),
+                    return_exceptions=True,
+                )
+                for child, close_result in zip(succeeded, close_results, strict=True):
+                    if isinstance(close_result, BaseException):
+                        _LOGGER.error(
+                            f"[MultiSystemRegistry] error closing "
+                            f"{child.__class__.__name__} during partial-init "
+                            f"rollback: {close_result!r}",
+                            exc_info=close_result,
+                        )
             details = "; ".join(
                 f"{child_cls.__name__}: {err!r}" for child_cls, err in failures
             )
@@ -338,7 +370,7 @@ class MultiSystemRegistry:
 
         return RegistrySnapshot.with_initialization(
             items=merged_items,
-            phase=_least_advanced_phase(phases),
+            phase=least_advanced_phase(phases),
             errors=merged_errors,
         )
 
@@ -417,7 +449,7 @@ _PHASE_ORDER: dict[InitializationPhase, int] = {
     InitializationPhase.LOADING: 3,
     InitializationPhase.COMPLETED: 4,
 }
-"""Ordering used by :func:`_least_advanced_phase` to fold phases.
+"""Ordering used by :func:`least_advanced_phase` to fold phases.
 
 Lower-ordered phases are considered "less advanced". ``FAILED`` ranks
 below every other phase so a single failed child always surfaces in
@@ -426,7 +458,7 @@ or have already completed successfully.
 """
 
 
-def _least_advanced_phase(
+def least_advanced_phase(
     phases: list[InitializationPhase],
 ) -> InitializationPhase:
     """Return the most pessimistic phase across child registries.

@@ -31,6 +31,7 @@ from deephaven_mcp.resource_manager import (
     EnterpriseSessionRegistry,
     InitializationPhase,
     SystemType,
+    least_advanced_phase,
 )
 from deephaven_mcp.sessions import (
     EnterpriseSessionCreationDefaults,
@@ -192,16 +193,11 @@ async def enterprise_systems_status(
         # The merged phase is the *least advanced* across the surveyed
         # systems so an aggregated call surfaces in-flight or failed
         # discovery rather than masking it behind a completed sibling.
-        # ``InitializationPhase`` ordering matches the enum order:
-        # NOT_STARTED < PARTIAL < LOADING < FAILED < COMPLETED.
-        phase_order = {
-            InitializationPhase.NOT_STARTED: 0,
-            InitializationPhase.PARTIAL: 1,
-            InitializationPhase.LOADING: 2,
-            InitializationPhase.FAILED: 3,
-            InitializationPhase.COMPLETED: 4,
-        }
-        merged_phase = InitializationPhase.COMPLETED
+        # Reuse the central fold from MultiSystemRegistry so this tool
+        # and ``MultiSystemRegistry.get_all`` stay in lockstep — in
+        # particular, FAILED outranks every other phase so a single
+        # failed system always surfaces in the aggregated response.
+        phases: list[InitializationPhase] = []
         for sys_name in target_systems:
             (
                 system_info,
@@ -219,9 +215,9 @@ async def enterprise_systems_status(
             else:
                 for source, err in init_errors.items():
                     merged_errors[f"{sys_name}:{source}"] = err
-            if phase_order[init_phase] < phase_order[merged_phase]:
-                merged_phase = init_phase
+            phases.append(init_phase)
 
+        merged_phase = least_advanced_phase(phases)
         response: dict[str, object] = {"success": True, "systems": systems_info}
         init_info = format_initialization_status(merged_phase, merged_errors)
         if init_info:

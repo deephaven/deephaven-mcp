@@ -195,7 +195,7 @@ from ._registry import (
 )
 from ._registry_community import CommunitySessionRegistry
 from ._registry_enterprise import EnterpriseSessionRegistry
-from ._registry_multi import MultiSystemRegistry
+from ._registry_multi import MultiSystemRegistry, least_advanced_phase
 from ._utils import find_available_port, generate_auth_token
 
 __all__ = [
@@ -212,6 +212,7 @@ __all__ = [
     "CommunitySessionRegistry",
     "EnterpriseSessionRegistry",
     "MultiSystemRegistry",
+    "least_advanced_phase",
     "EvictionTimeouts",
     "Evictor",
     "InitializationPhase",

@@ -2500,3 +2500,44 @@ async def test_enterprise_systems_status_aggregation_no_enterprise_group():
     )
     result = await enterprise_systems_status(context)
     assert result == {"success": True, "systems": []}
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_aggregation_failed_outranks_loading():
+    """A single FAILED sibling must surface in the merged phase, not be hidden by LOADING.
+
+    Regression: the aggregation previously used a local ``phase_order`` table
+    that ranked FAILED between LOADING and COMPLETED, which caused
+    ``{FAILED, LOADING}`` to fold to LOADING and silently masked failures.
+    The merge now reuses ``_least_advanced_phase`` from
+    ``MultiSystemRegistry`` so FAILED always wins.
+    """
+    context = _build_aggregating_context(
+        {
+            "prod": {
+                "status": ResourceLivenessStatus.OFFLINE,
+                "detail": "down",
+                "is_alive": False,
+                "raw_config": {"url": "http://prod"},
+                "init_phase": InitializationPhase.FAILED,
+                "init_errors": {"factory": "fatal"},
+            },
+            "staging": {
+                "status": ResourceLivenessStatus.OFFLINE,
+                "detail": "starting",
+                "is_alive": False,
+                "raw_config": {"url": "http://staging"},
+                "init_phase": InitializationPhase.LOADING,
+                "init_errors": {},
+            },
+        }
+    )
+
+    result = await enterprise_systems_status(context)
+
+    assert result["success"] is True
+    assert "initialization" in result
+    # FAILED outranks LOADING so the merged status surfaces the failure
+    # message rather than the in-progress "actively running" message.
+    assert "failed critically" in result["initialization"]["status"]
+    assert "prod:factory" in result["initialization"]["errors"]

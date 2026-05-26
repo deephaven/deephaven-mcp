@@ -27,7 +27,7 @@ from deephaven_mcp.resource_manager._registry import (
 )
 from deephaven_mcp.resource_manager._registry_multi import (
     MultiSystemRegistry,
-    _least_advanced_phase,
+    least_advanced_phase,
 )
 
 # ---------------------------------------------------------------------------
@@ -276,6 +276,83 @@ async def test_initialize_aggregates_multiple_child_failures() -> None:
     assert "staging boom" in message
 
 
+@pytest.mark.asyncio
+async def test_initialize_closes_successful_children_on_partial_failure() -> None:
+    """Partial-init failure must close children that already succeeded.
+
+    Otherwise a successfully initialized child (e.g. an
+    ``EnterpriseSessionRegistry`` whose ``_load_items`` already spawned a
+    discovery task) would leak resources past the raised ``InternalError``,
+    because the lifespan's outer ``registry.close()`` short-circuits while
+    ``_initialized`` is still False.
+    """
+    community = _make_child("community")
+    prod = _make_child("prod")
+    staging = _make_child("staging")
+    staging.initialize.side_effect = RuntimeError("staging boom")
+    registry = _build_registry(
+        community_child=community,
+        enterprise_children={"prod": prod, "staging": staging},
+    )
+
+    with pytest.raises(InternalError):
+        await registry.initialize()
+
+    # The two children that initialized successfully were closed as
+    # part of the rollback; the failed one was not (it never got
+    # past initialize).
+    community.close.assert_awaited_once()
+    prod.close.assert_awaited_once()
+    staging.close.assert_not_awaited()
+    assert registry._initialized is False
+
+
+@pytest.mark.asyncio
+async def test_initialize_rollback_errors_are_logged_not_raised(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Errors raised by rollback ``close()`` calls must not mask the original failure."""
+    import logging
+
+    community = _make_child("community")
+    community.close.side_effect = RuntimeError("close boom")
+    prod = _make_child("prod")
+    prod.initialize.side_effect = RuntimeError("prod boom")
+    registry = _build_registry(
+        community_child=community,
+        enterprise_children={"prod": prod},
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(InternalError) as exc_info:
+        await registry.initialize()
+
+    # The original failure surfaces, not the rollback failure.
+    assert "prod boom" in str(exc_info.value)
+    assert "close boom" not in str(exc_info.value)
+    # The rollback error is logged for operators.
+    assert any("close boom" in record.getMessage() for record in caplog.records)
+    community.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_initialize_no_rollback_when_no_children_succeeded() -> None:
+    """When every child fails to initialize there is nothing to roll back."""
+    prod = _make_child("prod")
+    staging = _make_child("staging")
+    prod.initialize.side_effect = RuntimeError("prod boom")
+    staging.initialize.side_effect = RuntimeError("staging boom")
+    registry = _build_registry(
+        community_child=None,
+        enterprise_children={"prod": prod, "staging": staging},
+    )
+
+    with pytest.raises(InternalError):
+        await registry.initialize()
+
+    prod.close.assert_not_awaited()
+    staging.close.assert_not_awaited()
+
+
 def test_multi_system_registry_is_not_a_mutable_session_registry() -> None:
     """:class:`MultiSystemRegistry` no longer inherits ``MutableSessionRegistry``.
 
@@ -484,13 +561,13 @@ async def test_close_before_initialize_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _least_advanced_phase helper
+# least_advanced_phase helper
 # ---------------------------------------------------------------------------
 
 
 def test_least_advanced_phase_picks_minimum_order() -> None:
     assert (
-        _least_advanced_phase(
+        least_advanced_phase(
             [
                 InitializationPhase.COMPLETED,
                 InitializationPhase.PARTIAL,
@@ -503,7 +580,7 @@ def test_least_advanced_phase_picks_minimum_order() -> None:
 
 def test_least_advanced_phase_failed_outranks_completed() -> None:
     assert (
-        _least_advanced_phase(
+        least_advanced_phase(
             [InitializationPhase.FAILED, InitializationPhase.COMPLETED]
         )
         is InitializationPhase.FAILED
@@ -513,10 +590,10 @@ def test_least_advanced_phase_failed_outranks_completed() -> None:
 def test_least_advanced_phase_failed_outranks_loading() -> None:
     """FAILED beats LOADING so a single failure is never masked by an in-flight peer."""
     assert (
-        _least_advanced_phase([InitializationPhase.LOADING, InitializationPhase.FAILED])
+        least_advanced_phase([InitializationPhase.LOADING, InitializationPhase.FAILED])
         is InitializationPhase.FAILED
     )
 
 
 def test_least_advanced_phase_empty_returns_completed() -> None:
-    assert _least_advanced_phase([]) is InitializationPhase.COMPLETED
+    assert least_advanced_phase([]) is InitializationPhase.COMPLETED
