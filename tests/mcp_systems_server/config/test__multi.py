@@ -776,7 +776,7 @@ async def test_enterprise_settings_json_loads_and_logs(
 async def test_examples_ai_config_loads_end_to_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The bundled ``examples/ai/config/`` tree validates against the schemas.
+    """The bundled ``config-samples/ai/config/`` tree validates against the schemas.
 
     Guards ``docs/CONFIGURATION.md``'s claim that the example tree is
     "copy-paste-ready": copies it to a tmp dir, supplies the env vars
@@ -787,7 +787,7 @@ async def test_examples_ai_config_loads_end_to_end(
     import shutil
 
     repo_root = Path(__file__).resolve().parents[3]
-    src = repo_root / "examples" / "ai" / "config"
+    src = repo_root / "config-samples" / "ai" / "config"
     assert src.is_dir(), f"missing example tree at {src}"
 
     config_dir = tmp_path / "config"

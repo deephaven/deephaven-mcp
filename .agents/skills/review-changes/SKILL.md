@@ -27,7 +27,7 @@ If no changeset is specified, default to uncommitted changes.
    |---|---|
    | `.py` | `review-python-file` |
    | `.md`, `.rst` | `docs-accuracy` |
-   | Pydantic config (`mcp_systems_server/config/*.py`, `_*_config.py`), `*.json5` examples under `examples/ai/config/`, `docs/CONFIGURATION.md` | `_configuration-conventions` |
+   | Pydantic config (`mcp_systems_server/config/*.py`, `_*_config.py`), `*.json5` examples under `config-samples/ai/config/`, `docs/CONFIGURATION.md` | `_configuration-conventions` |
    | Other (scripts, CI, etc.) | Review for correctness and appropriateness |
 
 3. **Cross-cutting review** — assess the changeset as a whole:

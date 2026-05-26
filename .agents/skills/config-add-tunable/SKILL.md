@@ -17,7 +17,7 @@ Apply the `_configuration-conventions` skill — it is the canonical reference f
 
    `tests/test__pydantic_field_docs.py` will fail otherwise.
 4. **Read the field through the config object** at the call site. Use **attribute access** on the validated model (e.g. `settings.session_creation.defaults.heap_size_gb`) — do not call `.get()` on `model_dump(...)` results, do not round-trip through dicts, and never `os.environ[...]` (if the value should be env-overridable, that is what `${env:VAR}` templating in JSON5 is for). Attribute access preserves types, defaults, and IDE/mypy support; dict access loses all three.
-5. **Update the example config** under `examples/ai/config/` and the docs under `docs/CONFIGURATION.md`.
+5. **Update the example config** under `config-samples/ai/config/` and the docs under `docs/CONFIGURATION.md`.
 6. **Add tests**: a unit test for the schema (default, override, validation failure) and a test that the consumer reads the field correctly.
 7. **Run** `run-precommit` and `tests-run-file` on the changed test files.
 

@@ -89,7 +89,7 @@ uv tool install --python-preference managed mcp-proxy
 `dh-mcp-systems-server` reads a **directory tree** of small JSON files
 (default `~/.deephaven/ai/config/` on POSIX, `%APPDATA%/Deephaven/ai/config/`
 on Windows). A complete sample tree lives in
-[`examples/ai/config/`](examples/ai/config/). For a minimal Community-only
+[`config-samples/ai/config/`](config-samples/ai/config/). For a minimal Community-only
 setup, create a single per-session file:
 
 ```text
@@ -630,7 +630,7 @@ type, the `${env:VAR}` / `${file:/path}` templating syntax, the
 `server.json` transport / PSK options.
 
 **Working examples**:
-[`examples/ai/config/`](examples/ai/config/) contains a complete,
+[`config-samples/ai/config/`](config-samples/ai/config/) contains a complete,
 copy-pasteable sample tree for both Community and Enterprise.
 
 **Security**: [`docs/SECURITY.md`](docs/SECURITY.md) covers directory

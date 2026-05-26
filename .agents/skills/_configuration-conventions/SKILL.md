@@ -257,7 +257,7 @@ of live in `deephaven_mcp.config` (`_file_loader`, `_templating`,
    - The Pydantic model (field + trailing docstring).
    - `docs/CONFIGURATION.md` — table row, default value, any
      cross-references in surrounding prose.
-   - `examples/ai/config/` — the corresponding example file when
+   - `config-samples/ai/config/` — the corresponding example file when
      the field is operator-facing.
    - Tests under `tests/mcp_systems_server/config/` (loader path)
      and `tests/sessions/` (per-session schema path) covering

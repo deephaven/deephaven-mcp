@@ -255,7 +255,7 @@ Before using the Deephaven MCP servers, ensure you have the following prerequisi
 
 - **Requirement**: A directory tree of JSON5 configuration files (not a single file) for the Systems Server
 - **Location**: Default `~/.deephaven/ai/config/` (POSIX) or `%APPDATA%/Deephaven/ai/config/` (Windows). Override with the `DH_MCP_CONFIG_DIR` env var or the `--config-dir` CLI flag.
-- **Details**: See [Configuration Directory Tree](#configuration-directory-tree) for the layout summary, [`docs/CONFIGURATION.md`](CONFIGURATION.md) for the authoritative schema reference, and [`examples/ai/config/`](../examples/ai/config/) for a sample tree.
+- **Details**: See [Configuration Directory Tree](#configuration-directory-tree) for the layout summary, [`docs/CONFIGURATION.md`](CONFIGURATION.md) for the authoritative schema reference, and [`config-samples/ai/config/`](../config-samples/ai/config/) for a sample tree.
 
 ### Systems Server Prerequisites
 
@@ -351,7 +351,7 @@ pip install -e ".[dev]"
 Before proceeding with the Quick Start Guide, verify your setup:
 
 - ✅ Python 3.12+ installed: `python --version`
-- ✅ Configuration directory populated (for Systems Server): see [`examples/ai/config/`](../examples/ai/config/)
+- ✅ Configuration directory populated (for Systems Server): see [`config-samples/ai/config/`](../config-samples/ai/config/)
 - ✅ Environment variable set when overriding the default location: `export DH_MCP_CONFIG_DIR=/path/to/your/config`
 - ✅ Inkeep API key set (for Docs Server): `export INKEEP_API_KEY=your-key`
 - ✅ Docker running (for docker launch method): `docker ps`
@@ -375,7 +375,7 @@ Before proceeding with the Quick Start Guide, verify your setup:
    }
    ```
 
-   See [`examples/ai/config/`](../examples/ai/config/) for a complete
+   See [`config-samples/ai/config/`](../config-samples/ai/config/) for a complete
    sample tree (community sessions, enterprise systems, and
    `server.json` for the HTTP-transport PSK).
 
@@ -637,11 +637,11 @@ The configuration is split across files in the directory tree shown above:
 
 Authentication credentials live exclusively under `auth.credentials` as a discriminated union (`type`: `anonymous`, `psk`, `password`, `private_key`, `custom`). The legacy flat fields (`auth_type`, `auth_token`, `auth_token_env_var`, `client_private_key`, `tls_root_certs` paths, etc.) are gone. Authors who want to pull a value from an environment variable or file write `"${env:NAME}"` / `"${file:/path}"` directly inside the JSON value.
 
-For the **complete schema** — every field, every default, every example — see [`docs/CONFIGURATION.md`](CONFIGURATION.md). For ready-to-edit example files, see [`examples/ai/config/`](../examples/ai/config/).
+For the **complete schema** — every field, every default, every example — see [`docs/CONFIGURATION.md`](CONFIGURATION.md). For ready-to-edit example files, see [`config-samples/ai/config/`](../config-samples/ai/config/).
 
 #### Systems Sessions Configuration
 
-This section formerly mirrored the per-session schema for community sessions. The schema is now authoritative in [`docs/CONFIGURATION.md`](CONFIGURATION.md#per-session-community-files); a sample file lives at [`examples/ai/config/community/sessions/local_dev.json`](../examples/ai/config/community/sessions/local_dev.json). Quick orientation only — the per-file shape is:
+This section formerly mirrored the per-session schema for community sessions. The schema is now authoritative in [`docs/CONFIGURATION.md`](CONFIGURATION.md#per-session-community-files); a sample file lives at [`config-samples/ai/config/community/sessions/local_dev.json`](../config-samples/ai/config/community/sessions/local_dev.json). Quick orientation only — the per-file shape is:
 
 ```json5
 {

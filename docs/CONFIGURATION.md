@@ -440,5 +440,5 @@ hot-reload path; restart the server to pick up changes.
   server processes themselves consume.
 - `docs/DEVELOPER_GUIDE.md` — building and running the servers.
 - `docs/SECURITY.md` — secret-handling guarantees.
-- `examples/ai/config/` — copy-paste-ready example configuration
+- `config-samples/ai/config/` — copy-paste-ready example configuration
   directory.
