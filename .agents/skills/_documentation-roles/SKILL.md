@@ -12,14 +12,22 @@ Every top-level markdown file in this repository has a single, intentional role.
 
 | File | Reader | In scope | Out of scope |
 | --- | --- | --- | --- |
-| `README.md` | end user (not developer) | Get a user installed, configured, and connected to their AI tool with minimum friction. Quick start, install (including extras), upgrade path, AI-tool setup, capability list, troubleshooting, architecture overview. | Detailed schema reference, internal mechanics, contributor workflows. |
+| `README.md` | end user (not developer) | Get a user installed, configured, and connected to their AI tool with minimum friction. Quick start, install (including extras), upgrade path, AI-tool setup, capability list (one line per tool), troubleshooting, architecture overview. | Detailed schema reference, per-tool reference detail, internal mechanics, contributor workflows. |
 | `docs/CONFIGURATION.md` | operator | Configuration *files and directories* — schema, fields, defaults, templating syntax. | Install options (uv extras, pip), security narrative, developer workflows. |
 | `docs/ENV.md` | operator | Environment variables consumed by the server processes. | Templating syntax (lives in `CONFIGURATION.md`), uv. |
 | `docs/SECURITY.md` | operator deploying the server | **Short, self-contained** guide. A reader must be able to stand up a secure deployment without leaving the page. Trust model, hardening checklist, authentication, transport security, secret handling, rotation. | Anything that requires bouncing to `DEVELOPER_GUIDE.md` to act on. |
 | `docs/UV.md` | developer new to `uv` | Generic `uv` crash course. | Project-specific commands, project env vars, project tests, project install lines. |
 | `docs/CLI.md` | operator + AI agent using the local `dh-mcp` CLI | Full `dh-mcp` reference: command surface (noun-verb tree), global flags, env-var bindings, exit codes, `error_code` registry, output modes (`human` / `json` / `yaml`), examples, shell completion, `dh-mcp introspect` agent self-discovery. | Server-side configuration (lives in `CONFIGURATION.md`); developer/contributor mechanics (lives in `DEVELOPER_GUIDE.md`); environment variables consumed by the server processes (those live in `ENV.md`; CLI-specific env vars stay here). |
-| `docs/DEVELOPER_GUIDE.md` | contributor | Everything a developer working *on* the project needs. Catch-all. | (No restrictions.) |
+| `docs/DEVELOPER_GUIDE.md` | contributor | Everything a developer working *on* the project needs. Catch-all. | Per-tool reference (parameters, returns, examples) — see [Tool reference is owned by code](#tool-reference-is-owned-by-code). |
 | `AGENTS.md` | AI agent | Agent process rules. Not human documentation; **no TOC**. | Anything intended for humans. |
+
+## Tool reference is owned by code
+
+MCP tool reference — each tool's parameters, return shape, and examples — has one source of truth: the tool's **docstring**. It is sent to AI agents over MCP and surfaced live by `dh-mcp tool show <name>`, so it cannot drift from the installed code. **No markdown document hand-maintains this content** — a hand-kept copy drifts the moment a signature changes (the prior guide had accumulated fabricated and missing parameters).
+
+- **README** (*Available MCP Tools*) — the one-line-per-tool capability list (name + purpose), nothing deeper.
+- **Every other doc** — links to `dh-mcp tool show` / the `_tools/` source; it never reproduces a tool's parameters or returns.
+- **Adding or removing a tool** — the docstring is the reference; README's one-liner is the only doc that changes. See `mcp-tool-add`.
 
 ## Editing rules
 

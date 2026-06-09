@@ -14,7 +14,7 @@ Apply the `_mcp-module-organization` skill for module placement and the `pydocs-
 5. **Add helpers** with a leading underscore. Place them in the same module unless used by 3+ modules, in which case promote to `_tools/shared.py`.
 6. **Add logging.** Apply the `_logging-standards` skill: log entry, success, and the failure path for the tool in its canonical message format; never log secrets.
 7. **Add tests.** A new tool gets its own test cases covering the happy path, error paths, and any session-id parsing. Apply the `tests-improve` skill for coverage targets.
-8. **Update docs.** `docs/CONFIGURATION.md` and `docs/DEVELOPER_GUIDE.md` if the tool changes the user-visible surface.
+8. **Update the capability list.** Add the tool to the *Available MCP Tools* list in `README.md` (one line: name + one-line purpose). The docstring from step 3 is the tool's reference — no other doc needs a per-tool entry. Update `docs/CONFIGURATION.md` only if the tool adds a configuration field.
 9. **Run** `run-precommit` and `tests-run-file` on the changed test files, then `tests-run` for a full-suite check.
 
 ## Anti-patterns

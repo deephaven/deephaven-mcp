@@ -479,7 +479,7 @@ in the PQ id (form `<system>:<serial>`).
 - `session_script_run(session_id, ...)` - Execute Python/Groovy scripts
 - `session_pip_list(session_id)` - Query installed packages
 
-> For detailed tool documentation with parameters and examples, see the [Developer & Contributor Guide](docs/DEVELOPER_GUIDE.md).
+> For each tool's full parameters, return shape, and examples, run `dh-mcp tool show <name>` (or `dh-mcp tool list` to enumerate them) — see [`docs/CLI.md`](docs/CLI.md). The authoritative detail is each tool's source docstring, which is also what the command surfaces live.
 
 ---
 
@@ -970,7 +970,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 **Log File Locations:**
 
-- **Claude Desktop (macOS):** `~/Library/Logs/Claude/mcp-server-*.log`
+- **Claude Desktop:** macOS `~/Library/Logs/Claude/`, Windows `%APPDATA%\Claude\logs\` — `mcp.log` holds general MCP connection logging; `mcp-server-<name>.log` holds each server's stderr.
 - **VS Code/Copilot:** Check VS Code's Output panel and Developer Console
 - **Cursor IDE:** Check the IDE's log panel and developer tools
 - **Windsurf IDE:** Check the IDE's integrated terminal and log outputs

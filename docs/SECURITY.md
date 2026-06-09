@@ -178,6 +178,10 @@ perform TLS termination; choose one of:
 | **TLS-terminating reverse proxy** | Production. nginx / Caddy / Envoy / cloud LB on the same host terminates TLS and forwards to `127.0.0.1:<port>`. The proxy verifies its peer; the server trusts everything that arrives on the loopback port (subject to the PSK gate). |
 | **mcp-proxy / IDE bridge** | When an IDE-side MCP client speaks stdio but the server runs over HTTP, run an stdio-↔-HTTP bridge on the client host and forward the PSK in `X-Deephaven-PSK`. |
 
+Whichever reverse proxy you choose, ensure it forwards the client's
+`X-Deephaven-PSK` header through to the loopback port — the server still
+applies the PSK gate to proxied requests.
+
 Outbound TLS for Community sessions is configured per session under
 the optional `tls` block on each `community/sessions/<name>.json`
 file. Presence of the block (even `"tls": {}`) enables TLS; the

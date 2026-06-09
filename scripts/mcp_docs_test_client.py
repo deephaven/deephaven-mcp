@@ -21,9 +21,10 @@ import asyncio
 import json
 import logging
 import sys
+from contextlib import AsyncExitStack
 
-import httpx
-from mcp.client.streamable_http import streamable_http_client
+from mcp import ClientSession
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 # Configure logging
 logging.basicConfig(
@@ -97,55 +98,52 @@ async def main():
     _LOGGER.info(f"Connecting to MCP Docs server via streamable-http")
     _LOGGER.info(f"Server URL: {args.url}")
 
-    headers = {}
-    if args.token:
-        headers["Authorization"] = f"Bearer {args.token}"
+    async with AsyncExitStack() as stack:
+        # Only pre-build a client when we need to inject the Authorization
+        # header (Bearer token for a proxied/prod deployment). Otherwise let
+        # the library create its default client with recommended MCP timeouts.
+        http_client = None
+        if args.token:
+            http_client = await stack.enter_async_context(
+                create_mcp_http_client(
+                    headers={"Authorization": f"Bearer {args.token}"}
+                )
+            )
+        read, write, _get_session_id = await stack.enter_async_context(
+            streamable_http_client(args.url, http_client=http_client)
+        )
+        session = await stack.enter_async_context(ClientSession(read, write))
 
-    http_client = httpx.AsyncClient(headers=headers) if headers else None
+        init_result = await session.initialize()
+        _LOGGER.info(f"Connected to MCP server: {init_result!r}")
 
-    try:
-        async with streamable_http_client(args.url, http_client=http_client) as (
-            read,
-            write,
-        ):
-            async with read, write:
-                await write.send_initialize()
-                result = await read.recv_initialize()
-                _LOGGER.info(f"Connected to MCP server: {result}")
+        # List tools
+        tools_result = await session.list_tools()
+        tool_names = [t.name for t in tools_result.tools]
+        _LOGGER.info(f"Available tools: {tool_names}")
 
-                session = await write.get_result(read)
+        if "docs_chat" not in tool_names:
+            _LOGGER.error("docs_chat tool not found on server!")
+            print("docs_chat tool not found on server!", file=sys.stderr)
+            sys.exit(1)
 
-                # List tools
-                tools_result = await session.list_tools()
-                tools = tools_result.tools
-                tool_names = [t.name for t in tools]
-                _LOGGER.info(f"Available tools: {tool_names}")
+        # Call docs_chat
+        _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
+        if history:
+            _LOGGER.info(f"Using chat history with {len(history)} messages")
 
-                if "docs_chat" not in tool_names:
-                    _LOGGER.error("docs_chat tool not found on server!")
-                    print("docs_chat tool not found on server!", file=sys.stderr)
-                    sys.exit(1)
-
-                # Call docs_chat
-                _LOGGER.info(f"Calling docs_chat with prompt: {args.prompt!r}")
-                if history:
-                    _LOGGER.info(f"Using chat history with {len(history)} messages")
-
-                try:
-                    call_args = {"prompt": args.prompt}
-                    if history:
-                        call_args["history"] = history
-                    result = await session.call_tool("docs_chat", arguments=call_args)
-                    _LOGGER.info("docs_chat call completed successfully")
-                    print("\ndocs_chat result:")
-                    print(result.content[0].text if result.content else str(result))
-                except Exception as e:
-                    _LOGGER.error(f"Error calling docs_chat: {e}")
-                    print(f"Error calling docs_chat: {e}", file=sys.stderr)
-                    sys.exit(3)
-    finally:
-        if http_client:
-            await http_client.aclose()
+        try:
+            call_args = {"prompt": args.prompt}
+            if history:
+                call_args["history"] = history
+            result = await session.call_tool("docs_chat", arguments=call_args)
+            _LOGGER.info("docs_chat call completed successfully")
+            print("\ndocs_chat result:")
+            print(result.content[0].text if result.content else str(result))
+        except Exception as e:
+            _LOGGER.error(f"Error calling docs_chat: {e}")
+            print(f"Error calling docs_chat: {e}", file=sys.stderr)
+            sys.exit(3)
 
 
 if __name__ == "__main__":
