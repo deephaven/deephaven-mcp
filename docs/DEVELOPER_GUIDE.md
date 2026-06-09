@@ -948,7 +948,7 @@ deephaven-mcp/
 - Provides LLM-powered documentation Q&A capabilities
 - Integrates with the Inkeep LLM API (OpenAI-compatible endpoint) for conversational assistance
 - HTTP-only (streamable-http transport)
-- Rate-limits its own outbound Inkeep API calls; the server does not rate-limit inbound requests (front it with a gateway — see [`docs/SECURITY.md`](SECURITY.md))
+- Does not rate-limit inbound requests; protect it with an API gateway / ingress rate limiting (see [`docs/SECURITY.md`](SECURITY.md)).
 
 **Resource Manager (`resource_manager/`)**:
 
