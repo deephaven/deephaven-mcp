@@ -1,7 +1,7 @@
 """MCP systems-server lifespan factory.
 
 The multiplexed systems server is built from an already-loaded
-:class:`~deephaven_mcp.mcp_systems_server.config.ConfigTree`
+:class:`~deephaven_mcp.config.tree.ConfigTree`
 (produced by the entry-point in :mod:`deephaven_mcp.mcp_systems_server.server`)
 and constructs a single
 :class:`~deephaven_mcp.resource_manager.MultiSystemRegistry` over the
@@ -40,7 +40,7 @@ from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
 
-from deephaven_mcp.mcp_systems_server.config import ConfigTree
+from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.resource_manager import (
     InstanceTracker,
     MultiSystemRegistry,
@@ -147,7 +147,7 @@ def make_lifespan(
     Args:
         multi_config (ConfigTree): Pre-validated multi-system
             configuration (already produced by
-            :class:`~deephaven_mcp.mcp_systems_server.config.ConfigTreeLoader`
+            :class:`~deephaven_mcp.config.tree.ConfigTreeLoader`
             in the server entry-point). The lifespan does **not**
             re-parse the on-disk tree, and there are no parallel
             scalar override kwargs — every duration knob the lifespan

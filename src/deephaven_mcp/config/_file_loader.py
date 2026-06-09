@@ -14,7 +14,7 @@ Lives next to :mod:`deephaven_mcp.config._templating` inside the
 :mod:`deephaven_mcp.config` package because together they form a
 small, self-contained config-loading primitive layer. Any subpackage
 that loads a JSON configuration file — the per-section loaders in
-:mod:`deephaven_mcp.mcp_systems_server.config` today, the docs
+:mod:`deephaven_mcp.config.schema` today, the docs
 server or other tooling tomorrow — can import it directly.
 """
 

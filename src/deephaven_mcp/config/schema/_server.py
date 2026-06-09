@@ -35,7 +35,7 @@ want to pull a value from an environment variable write
 from __future__ import annotations
 
 __all__ = [
-    "DaemonConfig",
+    "DaemonProcessConfig",
     "ServerConfig",
     "load_server",
 ]
@@ -52,7 +52,7 @@ from deephaven_mcp.config._loaders import load_named_json
 _LOGGER = logging.getLogger(__name__)
 
 
-class DaemonConfig(RedactableSchema):
+class DaemonProcessConfig(RedactableSchema):
     """Daemon-mode tunables for ``dh-mcp-systems-server --daemon``.
 
     All fields are optional and have safe defaults. Consulted only
@@ -134,7 +134,7 @@ class ServerConfig(RedactableSchema):
     the PSK is auto-generated per-process and this field is
     ignored."""
 
-    daemon: DaemonConfig = Field(default_factory=lambda: DaemonConfig())
+    daemon: DaemonProcessConfig = Field(default_factory=lambda: DaemonProcessConfig())
     """Daemon-mode tunables (idle shutdown, startup deadline,
     process name). Consulted only when the server is launched
     with ``--daemon``. All fields have safe defaults."""

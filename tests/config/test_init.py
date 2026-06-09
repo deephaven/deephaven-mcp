@@ -1,9 +1,10 @@
 """Tests for the slim ``deephaven_mcp.config`` package surface.
 
-This package now owns only general-purpose primitives. All
-systems-server-specific schemas/orchestration live in
-:mod:`deephaven_mcp.mcp_systems_server.config` and are pinned by a
-separate ``test_init.py`` there.
+This package root owns only general-purpose primitives. The Pydantic
+section schemas live in :mod:`deephaven_mcp.config.schema` (pinned by
+``schema/test_init.py``) and the aggregator lives in
+:mod:`deephaven_mcp.config.tree`; neither is re-exported from the
+package root, so importing :mod:`deephaven_mcp.config` stays cheap.
 """
 
 from __future__ import annotations
@@ -64,30 +65,19 @@ def test_no_private_names_leak_into_package_surface() -> None:
     assert private == set()
 
 
-def test_systems_server_schemas_are_not_reexported_here() -> None:
-    """Schema models must live in ``mcp_systems_server.config`` only.
+def test_schemas_and_tree_are_not_reexported_from_package_root() -> None:
+    """Schemas and the aggregator must stay out of the package root.
 
-    The set below mirrors ``mcp_systems_server.config.__all__`` so that
-    if a new schema is added there, this test enforces the same "lives
-    only in the systems-server config package" rule for it.
+    Every name on :mod:`deephaven_mcp.config.schema`, plus the
+    aggregator types, must be reachable only via the ``config.schema``
+    / ``config.tree`` submodules — never re-exported from the
+    ``deephaven_mcp.config`` root, so the primitive import path stays
+    cheap. Sourcing the set from ``config.schema.__all__`` keeps this
+    test current as schemas are added.
     """
-    moved = {
-        "CommunityConfig",
-        "CommunitySecurity",
-        "CommunitySessionCreation",
-        "CommunitySessionCreationDefaults",
-        "CommunitySettings",
-        "CommunityTimeouts",
-        "EnterpriseConfig",
-        "EnterpriseSettings",
-        "EnterpriseTimeouts",
-        "ConfigTree",
-        "ConfigTreeLoader",
-        "ServerConfig",
-        "SessionOrigin",
-        "SystemRef",
-        "SystemType",
-    }
-    for name in moved:
+    import deephaven_mcp.config.schema as schema_pkg
+
+    must_not_leak = set(schema_pkg.__all__) | {"ConfigTree", "ConfigTreeLoader"}
+    for name in must_not_leak:
         assert name not in config_pkg.__all__, name
         assert not hasattr(config_pkg, name), name

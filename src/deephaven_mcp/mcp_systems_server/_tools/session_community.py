@@ -24,15 +24,15 @@ from deephaven_mcp.auth.credentials import (
     PasswordCredentials,
     PSKCredentials,
 )
+from deephaven_mcp.config.schema import (
+    CommunitySessionCreationDefaults,
+    CommunitySettings,
+)
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_session_limit,
     error_response,
     get_community_registry,
     get_community_settings,
-)
-from deephaven_mcp.mcp_systems_server.config import (
-    CommunitySessionCreationDefaults,
-    CommunitySettings,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,

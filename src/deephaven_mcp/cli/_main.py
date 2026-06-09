@@ -35,7 +35,7 @@ from deephaven_mcp.cli._errors import CliError, ErrorCode, render_error
 from deephaven_mcp.cli._format import OUTPUT_MODES, OutputMode
 from deephaven_mcp.cli._help import build_help
 from deephaven_mcp.cli._runtime import load_runtime
-from deephaven_mcp.cli.config import CliConfig
+from deephaven_mcp.config.schema import CliConfig
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -24,7 +24,7 @@ from deephaven_mcp.mcp_systems_server import server as server_module
 def test_help_text_lists_supported_transports():
     """``--help`` advertises only stdio + http (sse is gone)."""
     proc = subprocess.run(
-        [sys.executable, "-m", "deephaven_mcp.mcp_systems_server.server", "--help"],
+        [sys.executable, "-m", "deephaven_mcp.mcp_systems_server", "--help"],
         capture_output=True,
         text=True,
         timeout=30,

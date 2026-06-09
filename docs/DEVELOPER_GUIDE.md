@@ -3111,8 +3111,10 @@ deephaven-mcp/
 
 **Configuration (`config/`):**
 
-- Pydantic v2 schemas built on the project's `StrictSchema` / `RedactableSchema` bases
-- Support for Community and Enterprise session configurations
+- The single home for all product configuration, shared by both the systems server and the `dh-mcp` CLI
+- Path, permission, and JSON5-loading **primitives** at the package root (`config/__init__.py` re-exports only these, so `import deephaven_mcp.config` stays cheap)
+- `config/schema/` — the Pydantic v2 section schemas built on the project's `StrictSchema` / `RedactableSchema` bases, one module per on-disk section: `_server.py` (`server.json`), `_cli.py` (`cli.json`), `_community.py` (`community/`), `_enterprise.py` (`enterprise/`)
+- `config/tree.py` — `ConfigTree` (mirrors the on-disk directory one-for-one) and `ConfigTreeLoader` (the aggregator both subsystems load)
 - `${env:VAR}` and `${file:PATH}` templating resolved at file-load time, with `SecretStr`-typed fields for sensitive values
 - Comprehensive validation with detailed error messages
 

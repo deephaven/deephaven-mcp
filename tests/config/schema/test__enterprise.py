@@ -1,4 +1,4 @@
-"""Tests for :mod:`deephaven_mcp.mcp_systems_server.config._enterprise`.
+"""Tests for :mod:`deephaven_mcp.config.schema._enterprise`.
 
 Covers the (currently empty) :class:`EnterpriseSettings` placeholder
 schema and the :class:`EnterpriseConfig` umbrella that aggregates
@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from deephaven_mcp.mcp_systems_server.config import EnterpriseConfig, EnterpriseSettings
+from deephaven_mcp.config.schema import EnterpriseConfig, EnterpriseSettings
 from deephaven_mcp.sessions import EnterpriseSystemConfig
 
 # ---------------------------------------------------------------------------

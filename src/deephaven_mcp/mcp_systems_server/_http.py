@@ -39,11 +39,12 @@ from deephaven_mcp._health import HEALTH_PATH
 from deephaven_mcp._processes import ProcessIdentity
 from deephaven_mcp.auth.middleware import PSK_HEADER_NAME, PSKMiddleware
 from deephaven_mcp.config import harden_private_dir, resolve_runtime_dir
+from deephaven_mcp.config.schema import DaemonProcessConfig, ServerConfig
+from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.daemon_registry import DaemonDirectory, DaemonRegistryEntry
 
 from ._idle import ActivityMiddleware, IdleTimer, IdleWatcher
 from ._lifespan import LifespanContext
-from .config import ConfigTree, DaemonConfig, ServerConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -521,7 +522,7 @@ def _plan_daemon(
             (``0`` is allowed and disables supervision in the
             runner), and a handoff-mode ``_BindSpec``.
     """
-    daemon_cfg: DaemonConfig = server_cfg.daemon
+    daemon_cfg: DaemonProcessConfig = server_cfg.daemon
     runtime_dir = resolve_runtime_dir(runtime_dir_override)
     handle = DaemonDirectory.for_runtime_dir(runtime_dir)
     harden_private_dir(handle.path)

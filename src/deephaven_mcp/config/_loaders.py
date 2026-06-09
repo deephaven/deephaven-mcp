@@ -7,8 +7,8 @@ returns a validated model instance or raises
 :class:`~deephaven_mcp._exceptions.ConfigurationError` on any failure.
 
 Callers: the `dh-mcp` CLI's ``cli.json`` loader
-(:mod:`deephaven_mcp.cli.config._cli`) and every per-section loader
-under :mod:`deephaven_mcp.mcp_systems_server.config` (``server.json``,
+(:mod:`deephaven_mcp.config.schema._cli`) and every per-section loader
+under :mod:`deephaven_mcp.config.schema` (``server.json``,
 ``community/settings.json``, ``community/sessions/<name>.json``,
 ``enterprise/settings.json``, ``enterprise/systems/<name>.json``).
 

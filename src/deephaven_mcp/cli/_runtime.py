@@ -44,8 +44,8 @@ from deephaven_mcp.config import (
     resolve_config_dir,
     resolve_runtime_dir,
 )
+from deephaven_mcp.config.tree import ConfigTree, ConfigTreeLoader
 from deephaven_mcp.daemon_registry import DaemonDirectory
-from deephaven_mcp.mcp_systems_server.config import ConfigTree, ConfigTreeLoader
 
 _LOGGER = logging.getLogger(__name__)
 

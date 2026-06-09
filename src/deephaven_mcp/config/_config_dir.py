@@ -1,7 +1,7 @@
 """Resolution of the MCP configuration directory.
 
 The configuration directory holds the per-file tree that
-:class:`~deephaven_mcp.mcp_systems_server.config.ConfigTreeLoader`
+:class:`~deephaven_mcp.config.tree.ConfigTreeLoader`
 reads at startup. It is one of the subdirectories that lives under
 the shared user-data root managed by
 :mod:`deephaven_mcp.config._data_root`.

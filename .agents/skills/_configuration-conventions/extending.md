@@ -5,7 +5,7 @@ Procedure and design guidance for adding or changing a configuration knob. Load 
 ## Adding a new tunable — checklist
 
 1. **Decide where it lives.** Server-wide knobs go in
-   `mcp_systems_server/config/_server.py` (`ServerConfig`);
+   `config/schema/_server.py` (`ServerConfig`);
    community-client knobs in `_community.py`; enterprise-system knobs
    in `_enterprise.py`. Per-session knobs use the relevant
    session-config model (`CommunitySettings`, or its
@@ -34,7 +34,7 @@ Procedure and design guidance for adding or changing a configuration knob. Load 
      cross-references in surrounding prose.
    - `config-samples/ai/config/` — the corresponding example file when
      the field is operator-facing.
-   - Tests under `tests/mcp_systems_server/config/` (loader path)
+   - Tests under `tests/config/schema/` (loader path)
      and `tests/sessions/` (per-session schema path) covering
      both the typed access path (model-validate a dict, read the
      attribute) and the loader path when templating is involved

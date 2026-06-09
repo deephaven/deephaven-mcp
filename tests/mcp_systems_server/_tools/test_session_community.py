@@ -17,7 +17,7 @@ from conftest import (
 
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.client import CommunityClientTimeouts
-from deephaven_mcp.mcp_systems_server import config
+from deephaven_mcp.config.schema import CommunitySessionCreationDefaults
 from deephaven_mcp.mcp_systems_server._tools.session_community import (
     _ANONYMOUS_AUTH_HANDLER,
     _PSK_AUTH_HANDLER,
@@ -28,7 +28,6 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_credentials,
     session_community_delete,
 )
-from deephaven_mcp.mcp_systems_server.config import CommunitySessionCreationDefaults
 from deephaven_mcp.resource_manager import (
     CommunitySessionRegistry,
     DockerLaunchedSession,
@@ -1459,7 +1458,7 @@ def test_session_creation_defaults_rejects_invalid_programming_language():
     """
     from pydantic import ValidationError
 
-    from deephaven_mcp.mcp_systems_server.config import CommunitySettings
+    from deephaven_mcp.config.schema import CommunitySettings
 
     with pytest.raises(ValidationError, match="programming_language"):
         CommunitySettings.model_validate(

@@ -20,8 +20,8 @@ from deephaven_mcp.cli._main import (
     main,
 )
 from deephaven_mcp.cli._runtime import Runtime
-from deephaven_mcp.cli.config import CliConfig
-from deephaven_mcp.mcp_systems_server.config import ConfigTree, ServerConfig
+from deephaven_mcp.config.schema import CliConfig, ServerConfig
+from deephaven_mcp.config.tree import ConfigTree
 
 from ._helpers import fake_load_runtime
 

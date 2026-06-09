@@ -2,7 +2,7 @@
 
 Covers the shared JSON-to-Pydantic loader helpers used by both the
 ``dh-mcp`` CLI (``cli.json``) and every per-section loader under
-``deephaven_mcp.mcp_systems_server.config``.
+``deephaven_mcp.config.schema``.
 """
 
 from __future__ import annotations

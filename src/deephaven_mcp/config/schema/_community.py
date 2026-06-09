@@ -8,7 +8,7 @@ Contains:
   :class:`CommunitySessionCreationDefaults`) - the Pydantic schema
   for ``community/settings.json``.
 - :class:`CommunityConfig` - the umbrella that
-  :class:`~deephaven_mcp.mcp_systems_server.config.ConfigTreeLoader`
+  :class:`~deephaven_mcp.config.tree.ConfigTreeLoader`
   produces after loading ``community/settings.json`` and every
   ``community/sessions/<name>.json`` file.
 - :func:`load_community` - the section loader the manager invokes.
@@ -49,9 +49,10 @@ from deephaven_mcp._pydantic import (
 from deephaven_mcp.auth.credentials import CredentialsUnion
 from deephaven_mcp.client._timeouts import CommunityClientTimeouts
 from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
-from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
 from deephaven_mcp.sessions import CommunitySessionConfig
+
+from ._response_limits import ResponseLimits
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -285,14 +286,14 @@ class CommunitySettings(StrictSchema):
     """Operator-tunable thresholds for the tool-side response-size
     guard applied when a community tool projects how large a
     serialized response will be. See
-    :class:`deephaven_mcp.mcp_systems_server._tools._response_limits.ResponseLimits`."""
+    :class:`deephaven_mcp.config.schema._response_limits.ResponseLimits`."""
 
 
 class CommunityConfig(StrictSchema):
     """Validated community configuration block.
 
     Sibling of
-    :class:`~deephaven_mcp.mcp_systems_server.config.EnterpriseConfig`.
+    :class:`~deephaven_mcp.config.schema.EnterpriseConfig`.
     Duration knobs exposed via ``settings.timeouts`` always carry
     effective values (per-file overrides if present, project-wide
     defaults otherwise), so consumers can read

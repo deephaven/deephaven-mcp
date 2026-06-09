@@ -19,7 +19,7 @@ Schema location and consumers:
 
 The umbrella ``CommunityTimeouts`` / ``EnterpriseTimeouts`` schemas
 that wrap these classes (alongside an ``eviction`` block) live in
-:mod:`deephaven_mcp.mcp_systems_server.config` next to the operator
+:mod:`deephaven_mcp.config.schema` next to the operator
 configuration loader. The eviction block lives with its consumer in
 :mod:`deephaven_mcp.resource_manager._evictor`. This module owns only
 the client-layer timeouts.

@@ -8,7 +8,7 @@ For every file in `src/deephaven_mcp` except `_version.py`:
 1. **Make sure that there is a test file.**
     - **`__init__.py` files count.** Every `__init__.py` — even one that only declares `__all__` or re-exports from siblings — gets its own `test_init.py`. The package surface is part of the API contract; an untested `__init__.py` is a silent-refactor hazard.
     - **What the `test_init.py` must pin**: the exact set of names in `__all__`, that each re-export is the same object as the internal definition, and that no `_`-prefixed names leak into the public surface.
-    - **Canonical implementations**: `tests/mcp_systems_server/config/test_init.py`, `tests/auth/middleware/test_init.py`, `tests/cli/config/test_init.py`.
+    - **Canonical implementations**: `tests/config/schema/test_init.py`, `tests/config/test_init.py`, `tests/auth/middleware/test_init.py`.
 2. **Make sure the test file is in the correct directory with a name that meets project standards.**
     - Unit tests: `test_<file>.py`. Integration tests: `test_<file>_integration.py`. Both live in `tests/<package>/` mirroring the source (see `_python-coding-practices` rule 5).
     - For `__init__.py` the test file is `test_init.py` (single underscore between `test` and `init`, matching `tests/auth/middleware/test_init.py`).

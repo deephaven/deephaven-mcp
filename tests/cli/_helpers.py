@@ -11,9 +11,9 @@ from unittest.mock import MagicMock
 from pydantic import SecretStr
 
 from deephaven_mcp.cli._runtime import Runtime
-from deephaven_mcp.cli.config import CliConfig
+from deephaven_mcp.config.schema import CliConfig, ServerConfig
+from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
-from deephaven_mcp.mcp_systems_server.config import ConfigTree, ServerConfig
 
 
 def make_runtime(tmp_path: Path | None = None, **overrides: object) -> Runtime:

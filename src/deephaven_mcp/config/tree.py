@@ -46,15 +46,18 @@ from pydantic import Field
 from deephaven_mcp._exceptions import ConfigurationError, InternalError
 from deephaven_mcp._pydantic import StrictSchema
 from deephaven_mcp._taxonomy import SystemRef, SystemType
-from deephaven_mcp.cli.config import CliConfig, load_cli
-from deephaven_mcp.config import (
-    resolve_config_dir,
-    verify_config_directory_permissions,
-)
 
-from ._community import CommunityConfig, load_community
-from ._enterprise import EnterpriseConfig, load_enterprise
-from ._server import ServerConfig, load_server
+from . import resolve_config_dir, verify_config_directory_permissions
+from .schema import (
+    CliConfig,
+    CommunityConfig,
+    EnterpriseConfig,
+    ServerConfig,
+    load_cli,
+    load_community,
+    load_enterprise,
+    load_server,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -216,8 +219,7 @@ class ConfigTreeLoader:
         """Audit the resolved config dir and load every file."""
         config_dir = self._config_dir
         _LOGGER.info(
-            f"[_tree:ConfigTreeLoader._load] Loading configuration "
-            f"from {config_dir}"
+            f"[tree:ConfigTreeLoader._load] Loading configuration " f"from {config_dir}"
         )
         verify_config_directory_permissions(config_dir)
 
@@ -230,7 +232,7 @@ class ConfigTreeLoader:
         if errors:
             joined = "\n".join(f"  - {e}" for e in errors)
             msg = f"Configuration directory {config_dir} contains errors:\n{joined}"
-            _LOGGER.error(f"[_tree:ConfigTreeLoader._load] {msg}")
+            _LOGGER.error(f"[tree:ConfigTreeLoader._load] {msg}")
             raise ConfigurationError(msg)
 
         if community is None and enterprise is None:
@@ -239,7 +241,7 @@ class ConfigTreeLoader:
                 "community session under community/sessions/ or one "
                 "enterprise system under enterprise/systems/."
             )
-            _LOGGER.error(f"[_tree:ConfigTreeLoader._load] {msg}")
+            _LOGGER.error(f"[tree:ConfigTreeLoader._load] {msg}")
             raise ConfigurationError(msg)
 
         # ``cli`` is ``None`` only when ``_safe`` swallowed an error,
@@ -253,7 +255,7 @@ class ConfigTreeLoader:
             enterprise=enterprise,
         )
         _LOGGER.info(
-            f"[_tree:ConfigTreeLoader._load] Loaded "
+            f"[tree:ConfigTreeLoader._load] Loaded "
             f"{len(result.list_systems())} system(s) from {config_dir}"
         )
         return result

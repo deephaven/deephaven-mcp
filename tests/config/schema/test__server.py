@@ -10,8 +10,8 @@ from pydantic import SecretStr, ValidationError
 
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp._redaction import REDACTED
-from deephaven_mcp.mcp_systems_server.config._server import (
-    DaemonConfig,
+from deephaven_mcp.config.schema._server import (
+    DaemonProcessConfig,
     ServerConfig,
     load_server,
 )
@@ -125,34 +125,34 @@ def test_server_config_repr_masks_psk() -> None:
 
 
 # ---------------------------------------------------------------------------
-# DaemonConfig
+# DaemonProcessConfig
 # ---------------------------------------------------------------------------
 
 
 def test_daemon_config_defaults() -> None:
-    cfg = DaemonConfig.model_validate({})
+    cfg = DaemonProcessConfig.model_validate({})
     assert cfg.idle_shutdown_seconds == 3600
     assert cfg.process_name == "dh-mcp-systems-server"
 
 
 def test_daemon_config_accepts_zero_idle_shutdown() -> None:
     """``idle_shutdown_seconds=0`` disables auto-shutdown and is permitted."""
-    cfg = DaemonConfig.model_validate({"idle_shutdown_seconds": 0})
+    cfg = DaemonProcessConfig.model_validate({"idle_shutdown_seconds": 0})
     assert cfg.idle_shutdown_seconds == 0
 
 
 def test_daemon_config_rejects_negative_idle_shutdown() -> None:
     with pytest.raises(ValidationError, match="idle_shutdown_seconds"):
-        DaemonConfig.model_validate({"idle_shutdown_seconds": -1})
+        DaemonProcessConfig.model_validate({"idle_shutdown_seconds": -1})
 
 
 def test_daemon_config_rejects_unknown_field() -> None:
     with pytest.raises(ValidationError, match="Extra inputs"):
-        DaemonConfig.model_validate({"bogus": 1})
+        DaemonProcessConfig.model_validate({"bogus": 1})
 
 
 def test_daemon_config_is_frozen() -> None:
-    cfg = DaemonConfig.model_validate({})
+    cfg = DaemonProcessConfig.model_validate({})
     with pytest.raises(ValidationError):
         cfg.idle_shutdown_seconds = 1  # type: ignore[misc]
 

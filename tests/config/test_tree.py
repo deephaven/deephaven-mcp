@@ -1,4 +1,4 @@
-"""End-to-end tests for :class:`deephaven_mcp.mcp_systems_server.config._tree.ConfigTreeLoader`.
+"""End-to-end tests for :class:`deephaven_mcp.config.tree.ConfigTreeLoader`.
 
 These tests drive the manager against real on-disk fixture trees and
 exercise the cooperation between :mod:`_tree`, :mod:`_config_dir`,
@@ -26,7 +26,7 @@ from deephaven_mcp.auth.credentials import (
     PrivateKeyCredentials,
 )
 from deephaven_mcp.config._data_root import DATA_DIR_ENV_VAR, _default_data_root
-from deephaven_mcp.mcp_systems_server.config._tree import (
+from deephaven_mcp.config.tree import (
     ConfigTreeLoader,
 )
 
@@ -761,9 +761,7 @@ async def test_enterprise_settings_json_loads_and_logs(
     """An ``enterprise/settings.json`` file is loaded and logged at INFO."""
     enterprise_dir = _make_dir(config_dir / "enterprise")
     _write_json(enterprise_dir / "settings.json", {})  # empty schema today
-    with caplog.at_level(
-        "INFO", logger="deephaven_mcp.mcp_systems_server.config._enterprise"
-    ):
+    with caplog.at_level("INFO", logger="deephaven_mcp.config.schema._enterprise"):
         cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
     msgs = " ".join(rec.message for rec in caplog.records)
@@ -789,7 +787,7 @@ async def test_examples_ai_config_loads_end_to_end(
     """
     import shutil
 
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[2]
     src = repo_root / "config-samples" / "ai" / "config"
     assert src.is_dir(), f"missing example tree at {src}"
 

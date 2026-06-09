@@ -18,7 +18,7 @@ import asyncio
 import logging
 from collections.abc import Iterator
 
-from deephaven_mcp.mcp_systems_server.config import ConfigTree
+from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.resource_manager import (
     BaseRegistry,
     EvictionTimeouts,

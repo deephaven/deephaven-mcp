@@ -17,7 +17,7 @@ function returns:
 - :func:`resolve_data_root` — env override or platform default; the
   *only* function that consults the env var.
 - :func:`resolve_config_dir` — read-only configuration tree consumed
-  by :class:`~deephaven_mcp.mcp_systems_server.config.ConfigTreeLoader`.
+  by :class:`~deephaven_mcp.config.tree.ConfigTreeLoader`.
 - :func:`resolve_runtime_dir` — mutable per-user state owned by the
   running daemon (registry, lock, log).
 - :func:`daemon_dir` — the ``daemon/`` subdirectory under the
@@ -52,11 +52,20 @@ project-private:
   resolving ``${env:VAR}`` / ``${env:VAR:-default}`` / ``${file:PATH}``
   inside a parsed JSON tree.
 
-The systems-server-specific schema models (``ServerConfig``,
-``CommunitySettings``, ``EnterpriseSystemConfig`` umbrellas, the
-``ConfigTreeLoader`` orchestrator, etc.) live in
-:mod:`deephaven_mcp.mcp_systems_server.config`; per-session and
-per-system declaration types live in :mod:`deephaven_mcp.sessions`.
+Schema tier
+-----------
+
+The Pydantic section schemas (``ServerConfig``, ``CliConfig``,
+``CommunityConfig``, ``EnterpriseConfig`` and their nested models)
+live in :mod:`deephaven_mcp.config.schema`, and the aggregator that
+composes them into a validated tree
+(:class:`~deephaven_mcp.config.tree.ConfigTree`,
+:class:`~deephaven_mcp.config.tree.ConfigTreeLoader`) lives in
+:mod:`deephaven_mcp.config.tree`. These are deliberately *not*
+re-exported here: importing :mod:`deephaven_mcp.config` for the path
+and audit primitives stays cheap and never pulls in the schema graph.
+Per-session and per-system declaration types live in
+:mod:`deephaven_mcp.sessions`.
 """
 
 __all__ = [

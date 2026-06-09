@@ -11,8 +11,8 @@ import pytest
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._runtime import Runtime, load_runtime
-from deephaven_mcp.cli.config import CliConfig
-from deephaven_mcp.mcp_systems_server.config import ConfigTree
+from deephaven_mcp.config.schema import CliConfig
+from deephaven_mcp.config.tree import ConfigTree
 
 
 def _seed_minimal_config_dir(d: Path) -> None:

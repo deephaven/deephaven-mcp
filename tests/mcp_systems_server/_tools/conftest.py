@@ -96,11 +96,11 @@ def _adapt_lifespan_context(ctx: Any) -> Any:
             community_settings = stashed
 
     if "multi_config" not in adapted:
-        from deephaven_mcp.mcp_systems_server._tools._pq_config import PqToolsConfig
-        from deephaven_mcp.mcp_systems_server._tools._response_limits import (
+        from deephaven_mcp.config.schema import (
+            CommunitySettings,
+            PqToolsConfig,
             ResponseLimits,
         )
-        from deephaven_mcp.mcp_systems_server.config import CommunitySettings
 
         multi_config = MagicMock()
         community = MagicMock()

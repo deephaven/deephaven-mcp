@@ -5,12 +5,12 @@ Contains:
 - :class:`EnterpriseSettings` - the Pydantic schema for
   ``enterprise/settings.json``.
 - :class:`EnterpriseConfig` - the umbrella that
-  :class:`~deephaven_mcp.mcp_systems_server.config.ConfigTreeLoader`
+  :class:`~deephaven_mcp.config.tree.ConfigTreeLoader`
   produces after loading ``enterprise/settings.json`` and every
   ``enterprise/systems/<name>.json`` file.
 - :func:`load_enterprise` - the section loader the manager invokes.
 
-Sibling of :mod:`deephaven_mcp.mcp_systems_server.config._community`.
+Sibling of :mod:`deephaven_mcp.config.schema._community`.
 
 The per-system declaration type itself
 (:class:`~deephaven_mcp.sessions.EnterpriseSystemConfig`) and its
@@ -37,10 +37,11 @@ from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp._pydantic import StrictSchema
 from deephaven_mcp.client._timeouts import EnterpriseClientTimeouts
 from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
-from deephaven_mcp.mcp_systems_server._tools._pq_config import PqToolsConfig
-from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
 from deephaven_mcp.sessions import EnterpriseSystemConfig
+
+from ._pq_config import PqToolsConfig
+from ._response_limits import ResponseLimits
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,20 +90,20 @@ class EnterpriseSettings(StrictSchema):
     settings file). PQ tools are enterprise-only, which is why this
     block sits on :class:`EnterpriseSettings` rather than
     :class:`ServerConfig`. See
-    :class:`deephaven_mcp.mcp_systems_server._tools._pq_config.PqToolsConfig`."""
+    :class:`deephaven_mcp.config.schema._pq_config.PqToolsConfig`."""
 
     response_limits: ResponseLimits = Field(default_factory=ResponseLimits)
     """Operator-tunable thresholds for the tool-side response-size
     guard applied when an enterprise tool projects how large a
     serialized response will be. See
-    :class:`deephaven_mcp.mcp_systems_server._tools._response_limits.ResponseLimits`."""
+    :class:`deephaven_mcp.config.schema._response_limits.ResponseLimits`."""
 
 
 class EnterpriseConfig(StrictSchema):
     """Validated enterprise configuration block.
 
     Sibling of
-    :class:`~deephaven_mcp.mcp_systems_server.config.CommunityConfig`.
+    :class:`~deephaven_mcp.config.schema.CommunityConfig`.
     Duration knobs live on :class:`EnterpriseSettings` under
     ``timeouts.client`` (outbound RPC + state-wait deadlines) and
     ``timeouts.eviction`` (MCP-side idle-session sweeper, applied

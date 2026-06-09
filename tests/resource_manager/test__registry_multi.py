@@ -16,7 +16,7 @@ import pytest
 
 from deephaven_mcp._exceptions import InternalError, InvalidSessionNameError
 from deephaven_mcp._taxonomy import SystemType
-from deephaven_mcp.mcp_systems_server.config import (
+from deephaven_mcp.config.schema import (
     CommunityTimeouts,
     EnterpriseTimeouts,
 )

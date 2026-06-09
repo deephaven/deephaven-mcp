@@ -26,6 +26,6 @@ Perform a comprehensive review of the specified Python file as it currently exis
         - That every name in `__all__` resolves on the package (`hasattr(pkg, name)`).
         - That each re-export is the same object as the internal definition (`pkg.X is _module.X`).
         - That no `_`-prefixed names leak into the public surface.
-    - **Canonical implementations**: `tests/mcp_systems_server/config/test_init.py`, `tests/auth/middleware/test_init.py`, `tests/cli/config/test_init.py`.
+    - **Canonical implementations**: `tests/config/schema/test_init.py`, `tests/config/test_init.py`, `tests/auth/middleware/test_init.py`.
 
 Do not remove TODOs without a very good reason.

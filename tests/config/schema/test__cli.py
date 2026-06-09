@@ -1,4 +1,4 @@
-"""Tests for ``deephaven_mcp.cli.config._cli``."""
+"""Tests for ``deephaven_mcp.config.schema._cli``."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import pytest
 from pydantic import ValidationError
 
 from deephaven_mcp._exceptions import ConfigurationError
-from deephaven_mcp.cli.config._cli import (
+from deephaven_mcp.config.schema._cli import (
     CliConfig,
-    DaemonConfig,
+    DaemonControlConfig,
     DaemonTimeouts,
     OutputConfig,
     RequestConfig,
@@ -177,7 +177,7 @@ def test_output_config_defaults() -> None:
 
 
 def test_daemon_config_defaults() -> None:
-    cfg = DaemonConfig()
+    cfg = DaemonControlConfig()
     assert cfg.auto_start is True
     assert isinstance(cfg.timeouts, DaemonTimeouts)
     assert cfg.timeouts.startup_deadline_seconds == 30

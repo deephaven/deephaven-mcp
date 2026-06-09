@@ -1,11 +1,11 @@
-"""Tests for :mod:`deephaven_mcp.mcp_systems_server._tools._response_limits`."""
+"""Tests for :mod:`deephaven_mcp.config.schema._response_limits`."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
 
-from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
+from deephaven_mcp.config.schema._response_limits import ResponseLimits
 
 
 def test_default_values():

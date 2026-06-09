@@ -47,6 +47,8 @@ from deephaven_mcp._logging import (
 )
 from deephaven_mcp._monkeypatch import monkeypatch_uvicorn_exception_handling
 from deephaven_mcp.config import DATA_DIR_ENV_VAR
+from deephaven_mcp.config.schema import ServerConfig
+from deephaven_mcp.config.tree import ConfigTree, ConfigTreeLoader
 
 from ._http import _plan_daemon, _plan_default, _run_http
 from ._idle import IdleWatcher
@@ -60,7 +62,6 @@ from ._tools import (
     session_enterprise,
     table,
 )
-from .config import ConfigTree, ConfigTreeLoader, ServerConfig
 
 __all__ = ["main"]
 

@@ -33,6 +33,7 @@ import pytest
 from pydantic import SecretStr
 
 from deephaven_mcp._exceptions import DaemonAlreadyPublishedError
+from deephaven_mcp.config.schema import ServerConfig
 from deephaven_mcp.daemon_registry import (
     DaemonDirectory,
     DaemonRegistryEntry,
@@ -49,7 +50,6 @@ from deephaven_mcp.mcp_systems_server._idle import (
     IdleTimer,
     IdleWatcher,
 )
-from deephaven_mcp.mcp_systems_server.config import ServerConfig
 
 
 def _multi_config_with(

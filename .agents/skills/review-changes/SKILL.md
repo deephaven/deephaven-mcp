@@ -28,7 +28,7 @@ If no changeset is specified, default to uncommitted changes.
    | `.py` | `review-python-file` |
    | CLI help-bearing files (`cli/_commands/*.py`, `cli/_help.py`, `cli/_errors.py`) | `review-python-file` **plus** `cli-help-accuracy` (the surfaced help, error-code registry, and output schema must match the code and `docs/CLI.md`) |
    | `.md`, `.rst` | `docs-accuracy` |
-   | Pydantic config (`mcp_systems_server/config/*.py`, `cli/config/*.py`, `_*_config.py`), `*.json5` examples under `config-samples/ai/config/`, `docs/CONFIGURATION.md` | `_configuration-conventions` |
+   | Pydantic config (`config/schema/*.py`, `config/tree.py`), `*.json5` examples under `config-samples/ai/config/`, `docs/CONFIGURATION.md` | `_configuration-conventions` |
    | `.agents/skills/**/SKILL.md`, `AGENTS.md` | `skill-review` |
    | `.json`, `.json5`, `.yaml`, `.toml` (config files outside the schemas above) | `_markdown-documentation-standards` for inline doc-block formatting; verify syntax + cross-reference with any matching Pydantic schema |
    | `.sh`, `bin/*`, `.github/workflows/*.yml` (shell scripts, CI) | Verify shellcheck-clean, `set -euo pipefail` for new scripts, idempotent, and that any failure mode produces a non-zero exit |

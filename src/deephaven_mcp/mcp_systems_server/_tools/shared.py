@@ -38,14 +38,14 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp._redaction import REDACTED
 from deephaven_mcp.client import BaseSession, CorePlusSession
+from deephaven_mcp.config.schema import (
+    CommunitySettings,
+    EnterpriseSettings,
+    ResponseLimits,
+)
+from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._lifespan import LifespanContext
-from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
-from deephaven_mcp.mcp_systems_server.config import (
-    CommunitySettings,
-    ConfigTree,
-    EnterpriseSettings,
-)
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     CommunitySessionRegistry,

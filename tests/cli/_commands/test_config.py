@@ -11,8 +11,8 @@ from click.testing import CliRunner
 from deephaven_mcp.cli import _main
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
-from deephaven_mcp.cli.config import CliConfig
-from deephaven_mcp.mcp_systems_server.config import ConfigTree, ServerConfig
+from deephaven_mcp.config.schema import CliConfig, ServerConfig
+from deephaven_mcp.config.tree import ConfigTree
 
 from .._helpers import fake_load_runtime, make_runtime
 
@@ -45,7 +45,7 @@ def test_config_show_includes_community_and_enterprise_when_present(
     tmp_path: Path,
 ) -> None:
     """When the tree has all four sections, all four appear in the dump."""
-    from deephaven_mcp.mcp_systems_server.config import (
+    from deephaven_mcp.config.schema import (
         CommunityConfig,
         CommunitySettings,
         EnterpriseConfig,
@@ -71,14 +71,14 @@ def test_config_show_redacts_secrets(tmp_path: Path) -> None:
     """Secret-bearing fields under any section are redacted in the dump."""
     from pydantic import SecretStr
 
-    from deephaven_mcp.mcp_systems_server.config import (
-        DaemonConfig,
+    from deephaven_mcp.config.schema import (
+        DaemonProcessConfig,
         ServerConfig,
     )
 
     server = ServerConfig(
         psk=SecretStr("supersecret-token"),
-        daemon=DaemonConfig(),
+        daemon=DaemonProcessConfig(),
     )
     config = ConfigTree(config_dir=tmp_path / "cfg", cli=CliConfig(), server=server)
     rt = make_runtime(tmp_path, config=config)

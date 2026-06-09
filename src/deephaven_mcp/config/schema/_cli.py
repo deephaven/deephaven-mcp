@@ -11,7 +11,7 @@ Loader: :func:`load_cli`.
 The schema is organised into three top-level domain sections:
 
 - :class:`OutputConfig` — presentation knobs (currently ``format``).
-- :class:`DaemonConfig` — CLI-side daemon lifecycle settings, including a
+- :class:`DaemonControlConfig` — CLI-side daemon lifecycle settings, including a
   :class:`DaemonTimeouts` sub-section for daemon-lifecycle timeouts.
 - :class:`RequestConfig` — outbound MCP request settings, including a
   :class:`RequestTimeouts` sub-section for request-level timeouts.
@@ -48,7 +48,7 @@ from __future__ import annotations
 
 __all__ = [
     "CliConfig",
-    "DaemonConfig",
+    "DaemonControlConfig",
     "DaemonTimeouts",
     "OutputConfig",
     "RequestConfig",
@@ -99,10 +99,10 @@ class DaemonTimeouts(RedactableSchema):
     never reads it."""
 
 
-class DaemonConfig(RedactableSchema):
+class DaemonControlConfig(RedactableSchema):
     """CLI-side daemon lifecycle settings.
 
-    Distinct from the daemon-side ``DaemonConfig`` in
+    Distinct from the daemon-side ``DaemonProcessConfig`` in
     ``server.json``: these knobs govern how the CLI *interacts with*
     the daemon, not how the daemon configures itself.
     """
@@ -151,7 +151,7 @@ class CliConfig(RedactableSchema):
     output: OutputConfig = Field(default_factory=OutputConfig)
     """Output / presentation settings."""
 
-    daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    daemon: DaemonControlConfig = Field(default_factory=DaemonControlConfig)
     """CLI-side daemon lifecycle settings."""
 
     request: RequestConfig = Field(default_factory=RequestConfig)
@@ -182,15 +182,13 @@ async def load_cli(config_dir: Path) -> CliConfig:
     """
     path = config_dir / "cli.json"
     if not path.is_file():
-        _LOGGER.info(
-            "[cli._cli:load_cli] cli.json absent; using all-defaults CliConfig."
-        )
+        _LOGGER.info("[_cli:load_cli] cli.json absent; using all-defaults CliConfig.")
         return CliConfig()
     return await load_named_json(
         CliConfig,
         path=path,
         config_dir=config_dir,
         error_label="cli.json",
-        log_label="cli._cli:cli.json",
+        log_label="_cli:cli.json",
         logger=_LOGGER,
     )

@@ -1,11 +1,11 @@
-"""Tests for :mod:`deephaven_mcp.mcp_systems_server._tools._pq_config`."""
+"""Tests for :mod:`deephaven_mcp.config.schema._pq_config`."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
 
-from deephaven_mcp.mcp_systems_server._tools._pq_config import PqToolsConfig
+from deephaven_mcp.config.schema._pq_config import PqToolsConfig
 
 
 def test_default_values():

@@ -371,7 +371,7 @@ async def test_get_enterprise_session_propagates_lookup_error():
 
 
 def _default_limits():
-    from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
+    from deephaven_mcp.config.schema import ResponseLimits
 
     return ResponseLimits()
 

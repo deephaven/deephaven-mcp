@@ -139,7 +139,7 @@ When defining a new secret field:
 Configuration is read **once** at server startup. The historical
 `mcp_reload` tool was removed. If you change a JSON file you
 restart the server. Add tests that exercise the loader path
-(`tests/mcp_systems_server/config/test__tree.py`) rather than
+(`tests/config/test_tree.py`) rather than
 mutating live `ConfigTree` instances; the model is frozen.
 
 ### 5. Colocate config models with their consumers
@@ -149,13 +149,13 @@ consumes them, even when that creates an "upward"-looking import.
 Working examples in this codebase:
 
 - **`PqToolsConfig`** lives in
-  `deephaven_mcp.mcp_systems_server._tools._pq_config` (next to the
+  `deephaven_mcp.config.schema._pq_config` (next to the
   PQ tools that read it), even though it is referenced by
-  `mcp_systems_server.config._enterprise.EnterpriseSettings.pq_tools`.
+  `config.schema._enterprise.EnterpriseSettings.pq_tools`.
 - **`ConfigTree`** (the canonical aggregator that mirrors the
   on-disk layout `server.json` / `cli.json` / `community/` /
   `enterprise/` one-for-one) lives in
-  `deephaven_mcp.mcp_systems_server.config._tree` and is consumed
+  `deephaven_mcp.config.tree` and is consumed
   directly by `deephaven_mcp.resource_manager._registry_multi`.
   The composite registry stays with the other registries; the
   config stays with its loader.
@@ -224,13 +224,13 @@ model field-by-field. Both were deleted; tests now build the
 
 | File                                | Schema model                                                       |
 | ----------------------------------- | ------------------------------------------------------------------ |
-| `server.json`                       | `deephaven_mcp.mcp_systems_server.config.ServerConfig`             |
-| `community/settings.json`           | `deephaven_mcp.mcp_systems_server.config.CommunitySettings`        |
+| `server.json`                       | `deephaven_mcp.config.schema.ServerConfig`             |
+| `community/settings.json`           | `deephaven_mcp.config.schema.CommunitySettings`        |
 | `community/sessions/<name>.json`    | `deephaven_mcp.sessions.CommunitySessionConfig`                    |
 | `enterprise/systems/<name>.json`    | `deephaven_mcp.sessions.EnterpriseSystemConfig`                    |
 
 The systems-server schemas and per-section loaders live in
-`deephaven_mcp.mcp_systems_server.config` — each per-section module
+`deephaven_mcp.config.schema` — each per-section module
 (`_server`, `_community`, `_enterprise`) owns its umbrella schema
 and a matching `load_<section>` function; `_tree` aggregates them
 through `ConfigTreeLoader` (whose loader produces a `ConfigTree`).

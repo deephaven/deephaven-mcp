@@ -24,13 +24,13 @@ import click
 import pytest
 
 from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp.config.schema import ServerConfig
 from deephaven_mcp.mcp_systems_server import _http as http_module
 from deephaven_mcp.mcp_systems_server import server as server_module
 from deephaven_mcp.mcp_systems_server._http import (
     _is_loopback_host,
     _resolve_psk_or_exit,
 )
-from deephaven_mcp.mcp_systems_server.config import ServerConfig
 from deephaven_mcp.mcp_systems_server.server import _load_multi_config_or_exit, main
 
 # ---------------------------------------------------------------------------

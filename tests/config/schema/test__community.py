@@ -1,4 +1,4 @@
-"""Tests for :mod:`deephaven_mcp.mcp_systems_server.config._community`.
+"""Tests for :mod:`deephaven_mcp.config.schema._community`.
 
 Covers both the :class:`CommunitySettings` Pydantic schema for
 ``community/settings.json`` (with its nested ``security`` and
@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from deephaven_mcp._redaction import REDACTED
 from deephaven_mcp.auth.credentials import AnonymousCredentials, PSKCredentials
-from deephaven_mcp.mcp_systems_server.config import (
+from deephaven_mcp.config.schema import (
     CommunityConfig,
     CommunitySettings,
 )

@@ -1,22 +1,9 @@
-"""Runtime tunables for MCP-tool response-size guards.
+"""Schema for the tool-side response-size guard.
 
-Defines :class:`ResponseLimits`, the Pydantic v2 model carrying the
-operator-tunable thresholds applied by the tool-side response-size
-guard in
-:func:`deephaven_mcp.mcp_systems_server._tools.shared.check_response_size`.
-The model is loaded from each section's ``settings.json`` block at
-startup (community and enterprise carry independent copies so the two
-deployments can tune the guard separately) and published into the
-lifespan context as part of the validated
-:class:`~deephaven_mcp.mcp_systems_server.config.ConfigTree`.
-Tool functions read the appropriate copy via
-:func:`deephaven_mcp.mcp_systems_server._tools.shared.get_response_limits`
-at call time and pass it down to the size-check helper.
-
-Every field carries its schema-level default so the JSON block is
-fully optional. Authors who want to pull a value from an environment
-variable write ``"<field>": "${env:NAME}"`` in the source JSON; the
-templating engine resolves the placeholder before validation.
+Defines :class:`ResponseLimits`, the Pydantic model of operator-tunable
+byte-size thresholds that bound how large a tool response may be before
+it is refused or flagged. The community and enterprise sections each
+carry an independent copy.
 """
 
 from __future__ import annotations

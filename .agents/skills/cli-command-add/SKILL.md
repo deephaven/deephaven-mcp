@@ -17,7 +17,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 4. **Errors.** Raise `CliError(message, code=ErrorCode.X, exit_code=2)` from `cli/_errors.py`. If no existing `ErrorCode` fits, add a new enum value with a single-line docstring describing what triggers it.
 
-5. **Output.** `click.echo(format_output(payload, output=runtime.config.cli.output.format))`. The `format_output` function (`cli/_format.py`) handles `human` / `json` / `yaml` consistently. Do not branch on the output mode in the command body. Note: `output.format` is a nested field — `CliConfig` groups domain-specific knobs under `output.*` / `daemon.*` / `request.*`. Canonical implementation: `cli/config/_cli.py` (`CliConfig`, `OutputConfig`).
+5. **Output.** `click.echo(format_output(payload, output=runtime.config.cli.output.format))`. The `format_output` function (`cli/_format.py`) handles `human` / `json` / `yaml` consistently. Do not branch on the output mode in the command body. Note: `output.format` is a nested field — `CliConfig` groups domain-specific knobs under `output.*` / `daemon.*` / `request.*`. Canonical implementation: `config/schema/_cli.py` (`CliConfig`, `OutputConfig`).
 
 6. **Tests.** Add cases to `tests/cli/test__commands_<noun>.py` (one test file per source file under `_commands/`). Use `click.testing.CliRunner` with `load_runtime` patched to return a test `Runtime`. Cover:
    - Happy path in each output mode (`human`, `json`, `yaml`).

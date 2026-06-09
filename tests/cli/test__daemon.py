@@ -51,8 +51,8 @@ def _make_entry(**overrides: Any) -> DaemonRegistryEntry:
 
 
 def _build_runtime(tmp_path: Path, *, auto_start: bool = True) -> MagicMock:
-    from deephaven_mcp.cli.config import CliConfig
-    from deephaven_mcp.mcp_systems_server.config import ConfigTree, ServerConfig
+    from deephaven_mcp.config.schema import CliConfig, ServerConfig
+    from deephaven_mcp.config.tree import ConfigTree
 
     runtime = MagicMock()
     cli_config = CliConfig.model_validate({"daemon": {"auto_start": auto_start}})
