@@ -668,7 +668,7 @@ async def list_systems(context: Context) -> dict:
             "community"|"enterprise"}, ...]}``.
 
             The list is built from
-            :class:`~deephaven_mcp.config.MultiSystemConfig` and
+            :class:`~deephaven_mcp.config.ConfigTree` and
             therefore reflects exactly what the server validated at
             startup; restart the server to pick up changes.
     """

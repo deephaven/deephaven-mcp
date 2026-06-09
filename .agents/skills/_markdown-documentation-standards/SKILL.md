@@ -1,6 +1,7 @@
 ---
 name: _markdown-documentation-standards
 description: Documentation format standards for markdown files — JSON/JSON5 code block requirements, placeholder formatting, copy-paste readiness — invoke when editing or creating markdown documentation
+user-invocable: false
 ---
 
 # Documentation Standards
@@ -12,6 +13,7 @@ description: Documentation format standards for markdown files — JSON/JSON5 co
    **Rationale**: Users copy-paste these examples into configuration files. Many JSON parsers and text editors have issues with non-ASCII characters, leading to parsing errors.
 
    **Correct**:
+
    ```json5
    // community/sessions/local_dev.json
    {
@@ -27,6 +29,7 @@ description: Documentation format standards for markdown files — JSON/JSON5 co
    ```
 
    **Incorrect**:
+
    ```json5
    // community/sessions/local_dev.json
    {
@@ -41,9 +44,10 @@ description: Documentation format standards for markdown files — JSON/JSON5 co
    }
    ```
 
-2. **Use ```json5 for code blocks with comments**: If a JSON code block contains comments (// or /* */), mark it as ```json5, not ```json. Standard JSON does not support comments.
+2. **Use ```json5 for code blocks with comments**: If a JSON code block contains comments (// or /* */), mark it as```json5, not ```json. Standard JSON does not support comments.
 
    **Correct**:
+
    ```json5
    // This is a valid JSON5 comment
    {
@@ -52,6 +56,7 @@ description: Documentation format standards for markdown files — JSON/JSON5 co
    ```
 
    **Incorrect**:
+
    ```json
    // This will cause a parser error
    {
@@ -122,4 +127,3 @@ Untagged ` ``` ` blocks defeat syntax highlighting and bypass language-specific 
 - Plain prose may use Unicode em dashes and curly quotes. The ASCII-only rule applies **only inside JSON / JSON5 code blocks** for copy-paste safety.
 - Emoji are discouraged in production documentation unless explicitly requested by the user. The ASCII-only rule for JSON/JSON5 blocks is strict; the no-emoji preference is the default for prose.
 - American English spelling throughout (matches `_python-coding-practices` rule 8).
-

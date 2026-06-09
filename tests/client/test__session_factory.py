@@ -528,7 +528,7 @@ def test_get_programming_language_defaults_on_attribute_error(caplog):
 async def test_from_url_when_enterprise_not_available(monkeypatch):
     """Test that from_url handles enterprise not available appropriately."""
     monkeypatch.setattr(
-        "deephaven_mcp.client._session_factory.is_enterprise_available", False
+        "deephaven_mcp.client._session_factory.is_enterprise_available", lambda: False
     )
 
     import deephaven_mcp.client._session_factory as sm_mod
@@ -650,7 +650,10 @@ def _patches_for_from_url(side_effect=None):
     mock_enterprise_module = MagicMock()
     mock_enterprise_module.client = mock_client_module
     return [
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch(
+            "deephaven_mcp.client._session_factory.is_enterprise_available",
+            lambda: True,
+        ),
         patch.dict(
             "sys.modules",
             {
@@ -780,7 +783,10 @@ def _patches_for_from_credentials(side_effect=None):
     """
     sm_mod, client_mod, ent_mod = _make_session_manager_modules(side_effect)
     return [
-        patch("deephaven_mcp.client._session_factory.is_enterprise_available", True),
+        patch(
+            "deephaven_mcp.client._session_factory.is_enterprise_available",
+            lambda: True,
+        ),
         patch.dict(
             "sys.modules",
             {
@@ -889,7 +895,10 @@ async def test_from_credentials_no_enterprise_package():
     from deephaven_mcp.auth.credentials import PasswordCredentials
 
     creds = PasswordCredentials(username="u", password="p")
-    with patch("deephaven_mcp.client._session_factory.is_enterprise_available", False):
+    with patch(
+        "deephaven_mcp.client._session_factory.is_enterprise_available",
+        lambda: False,
+    ):
         import deephaven_mcp.client._session_factory as sm_mod
 
         with pytest.raises(exc.MissingEnterprisePackageError):

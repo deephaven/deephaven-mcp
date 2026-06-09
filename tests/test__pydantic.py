@@ -14,6 +14,7 @@ from deephaven_mcp._pydantic import (
     RedactableSchema,
     StrictSchema,
     as_configuration_error,
+    dump_redacted,
     format_validation_error,
     log_redacted,
     reconcile_filename_stem,
@@ -394,13 +395,59 @@ class TestReconcileFilenameStem:
 
 
 # ---------------------------------------------------------------------------
-# log_redacted
+# dump_redacted
 # ---------------------------------------------------------------------------
 
 
 class _SampleLogModel(RedactableSchema):
     name: str
     token: SecretStr
+
+
+def test_dump_redacted_replaces_secret_with_sentinel() -> None:
+    """``SecretStr`` fields are emitted as the project's ``REDACTED`` sentinel."""
+    model = _SampleLogModel(name="alice", token=SecretStr("shh"))
+    dumped = dump_redacted(model)
+    assert dumped == {"name": "alice", "token": REDACTED}
+
+
+def test_dump_redacted_emits_json_safe_values() -> None:
+    """``mode="json"`` is pinned so non-JSON Pydantic types round-trip cleanly.
+
+    Regression guard: callers that forget ``mode="json"`` would leak
+    raw ``SecretStr`` instances (or other Pydantic-native types) into
+    output destined for JSON serialization.
+    """
+    model = _SampleLogModel(name="alice", token=SecretStr("shh"))
+    dumped = dump_redacted(model)
+    # The ``token`` value is a plain ``str`` (the sentinel), not a SecretStr.
+    assert isinstance(dumped["token"], str)
+
+
+def test_dump_redacted_passes_through_extra_kwargs() -> None:
+    """``exclude``/``exclude_none``/etc. forward to ``model_dump`` verbatim."""
+    model = _SampleLogModel(name="alice", token=SecretStr("shh"))
+    dumped = dump_redacted(model, exclude={"token"})
+    assert dumped == {"name": "alice"}
+
+
+def test_dump_redacted_rejects_mode_override() -> None:
+    """Passing ``mode=`` defeats the redaction protocol; reject it loudly."""
+    model = _SampleLogModel(name="x", token=SecretStr("y"))
+    with pytest.raises(TypeError, match="'mode' is reserved"):
+        dump_redacted(model, mode="python")
+
+
+def test_dump_redacted_rejects_context_override() -> None:
+    """Passing ``context=`` defeats the redaction protocol; reject it loudly."""
+    model = _SampleLogModel(name="x", token=SecretStr("y"))
+    with pytest.raises(TypeError, match="'context' is reserved"):
+        dump_redacted(model, context={"redact": False})
+
+
+# ---------------------------------------------------------------------------
+# log_redacted
+# ---------------------------------------------------------------------------
 
 
 def test_log_redacted_redacts_secrets(caplog: pytest.LogCaptureFixture) -> None:

@@ -1,6 +1,7 @@
 ---
 name: _project-reference
 description: Reference guide for this project — architecture, server commands and ports, config layout, code quality check commands, test clients — invoke when working with server configuration, running checks, or navigating the codebase
+user-invocable: false
 ---
 
 # Deephaven MCP Repository Reference
@@ -8,19 +9,25 @@ description: Reference guide for this project — architecture, server commands 
 ## Architecture and Key Files
 
 - `src/deephaven_mcp/mcp_systems_server/server.py` — Multiplexed systems server entry point (`main()`); CLI parsing, transport selection, PSK resolution.
-- `src/deephaven_mcp/mcp_systems_server/_lifespan.py` — FastMCP lifespan factory: builds `MultiSystemRegistry` from `MultiSystemConfig`, starts one `Evictor` per child registry.
+- `src/deephaven_mcp/mcp_systems_server/_lifespan.py` — FastMCP lifespan factory: builds `MultiSystemRegistry` from `ConfigTree`, starts one `Evictor` per child registry.
 - `src/deephaven_mcp/auth/middleware/_psk.py` — `PSKMiddleware`: Starlette middleware gating inbound HTTP requests on a single shared PSK (`X-Deephaven-PSK` header). Mounted by the systems server's HTTP transport; reusable by other MCP servers.
 - `src/deephaven_mcp/auth/credentials/` — Outbound credential dataclasses passed to `CorePlusSessionFactory.from_credentials`.
 - `src/deephaven_mcp/mcp_systems_server/_tools/` — MCP tool modules. All registered on the single multiplexed server: `session`, `table`, `script`, `session_community`, `session_enterprise`, `catalog`, `pq`. Shared helpers in `shared.py`. Tools that name a system take a `system` argument; tools that take a `session_id` (`<type>:<source>:<name>`) parse the system out of it. There is no `mcp_reload` tool — config changes require a restart.
 - `src/deephaven_mcp/mcp_docs_server/` — Docs MCP server for documentation Q&A.
-- `src/deephaven_mcp/config/` — General-purpose config primitives reusable by any MCP server: `_file_loader.py` (async JSON5 reader + `ConfigurationError` wrapping), `_templating.py` (`${env:VAR}` / `${env:VAR:-default}` / `${file:PATH}` placeholder engine), `_config_dir.py` (default directory + `DH_MCP_CONFIG_DIR` resolver), `_dir_permissions.py` (POSIX strict / Windows best-effort permission audit).
-- `src/deephaven_mcp/mcp_systems_server/config/` — Systems-server-specific Pydantic schemas and orchestration: `_multi.py` (walks the configuration directory; `MultiSystemConfigManager`) plus the per-section schema/loader modules `_server.py`, `_community.py`, `_enterprise.py` (each owns its umbrella schema and `load_<section>` function).
+- `src/deephaven_mcp/config/` — General-purpose config primitives reusable by any MCP server: `_file_loader.py` (async JSON5 reader + `ConfigurationError` wrapping), `_templating.py` (`${env:VAR}` / `${env:VAR:-default}` / `${file:PATH}` placeholder engine), `_config_dir.py` (default directory + `DH_MCP_DATA_DIR` resolver), `_dir_permissions.py` (`verify_config_directory_permissions` — the startup *policy*: existence/is-dir checks, refuse-to-start, and aggregation of audit violations into one `ConfigurationError`; the per-OS audit mechanics are delegated to `_platform.dir_permissions.audit_tree`).
+- `src/deephaven_mcp/_platform/` — OS abstraction layer (HAL): the single home for code that branches on `os.name`. `_os_support.py` (leaf module — `SUPPORTED_OS_NAMES = frozenset({"posix", "nt"})` plus `unsupported_os_error(component)`, the one dispatch-error factory every site uses), `fsutil.py` (advisory file locking, atomic private writes, Windows-retry filesystem helpers), `spawn.py` (`spawn_detached` detached-process launcher — `start_new_session` on POSIX, `creationflags` on Windows, fail-fast `InternalError` otherwise), `dir_permissions.py` (`harden_private_dir` + `audit_tree`, with per-OS `_harden_*`/`_audit_*` impls). The package `__init__.py` is docstring-only and imports no submodules (cycle-safety); submodules import the contract from the leaf `._os_support`. Note: `sys.platform`-keyed path/venv resolution (`config/_data_root.py`, `resource_manager/_launcher.py`) is a different axis and intentionally stays in its domain modules.
+- `src/deephaven_mcp/config/schema/` — Pydantic section schemas for the whole product (consumed by both the systems server and the `dh-mcp` CLI): the per-section schema/loader modules `_server.py` (`ServerConfig` + `DaemonProcessConfig`), `_cli.py` (`CliConfig` + `DaemonControlConfig`), `_community.py`, `_enterprise.py` (each owns its umbrella schema and `load_<section>` function), plus the tool-tunable schemas `_response_limits.py` (`ResponseLimits`) and `_pq_config.py` (`PqToolsConfig`) embedded by the community/enterprise schemas.
+- `src/deephaven_mcp/config/tree.py` — `ConfigTree` (mirrors the on-disk layout `server.json`, `cli.json`, `community/`, `enterprise/` one-for-one; the canonical aggregator type) and `ConfigTreeLoader` (walks the configuration directory and produces a validated `ConfigTree`). Lives at the top of the `config` package so both `cli` and `mcp_systems_server` depend on it without depending on each other; `config/__init__.py` stays primitives-only so `import deephaven_mcp.config` does not pull in the schema graph.
 - `src/deephaven_mcp/resource_manager/_registry_multi.py` — `MultiSystemRegistry`: composite registry over one community child + one enterprise child per configured system; routes session-id reads to the correct child.
+- `src/deephaven_mcp/cli/` — Local `dh-mcp` CLI (click + Pattern B). `_main.py` (root group), `_commands/{daemon,tool,config,introspect}.py` (noun groups), `_async.py` (`run_async` async-to-sync adapter), `_errors.py` (`CliError` + `ErrorCode` registry), `_help.py` (Examples / Environment / Exit-codes templating), `_format.py` (human/json/yaml renderers), `_runtime.py` (resolved `Runtime` context on `ctx.obj`), `_daemon.py` (pure daemon-lifecycle orchestration: registry poll + `get_or_start_daemon(ctx, *, auto_start, startup_deadline_seconds) -> DaemonRegistryEntry` / `stop_daemon(directory, *, kill_after_seconds)`; commands build the `DaemonContext` from a `Runtime` via `build_daemon_context(runtime)` and read tunables from `runtime.config.cli.daemon`; the OS-specific spawn mechanic is delegated to `_platform.spawn.spawn_detached`), `_mcp_client.py` (loopback HTTP client). Async handlers must be wrapped with `@run_async` — see `_python-coding-practices` rule 15 and the `cli-command-add` skill.
+- `src/deephaven_mcp/daemon_registry.py` — Shared wire contract between the CLI and a local daemon process. `DaemonRegistryEntry` (Pydantic model for `daemon.json` with field-level invariants — `Literal["127.0.0.1"]` host, port range, `AwareDatetime` started_at, etc.; the recorded `(pid, create_time_ns, process_name)` triple is exposed as a `ProcessIdentity` via the `.identity` property, and `DaemonRegistryEntry.is_live()` is the single PID-reuse-safe liveness predicate shared by the CLI lifecycle and the server's registry-publish refusal), `DaemonDirectory` (typed handle to `<runtime_dir>/daemon/` exposing `registry_path`/`lock_path`/`log_path` and atomic registry CRUD via `tempfile.mkstemp`), `RegistryCorruptError`, and filename constants. Imported by both `mcp_systems_server` (daemon entry point writes the registry) and `cli` (spawn/poll/stop reads it; reachable via `runtime.daemon_dir`).
+- `src/deephaven_mcp/_processes.py` — Portable process primitives (no `os.name` branch; stays top-level rather than under `_platform`). `ProcessIdentity` value object: a frozen `(pid, create_time_ns)` pair that anchors all PID-reuse-safe operations on a process. Provides `is_alive()`, `send_signal_safely(sig) -> SignalOutcome` (`DELIVERED`/`GONE`/`DENIED`/`RECYCLED`), and `capture(pid, process_name)` for first-publish capture. The recorded `create_time_ns` is compared by integer equality (no float drift). Replaces the `_capture_create_time` / `_send_sigterm` / `_force_kill` / `_process_still_running` helpers that previously had to trade a raw `(pid, create_time)` tuple by hand at every call site. The OS-dispatched detached-process launcher that used to live here moved to `_platform.spawn.spawn_detached`.
+- `src/deephaven_mcp/mcp_systems_server/_idle.py` — Generic idle-shutdown machinery: `IdleTimer` (monotonic-clock data), `ActivityMiddleware` (Starlette middleware bumping the timer), `idle_watcher` (lifespan coroutine that calls a supplied `exit_fn` on expiry). Opted into via `make_lifespan(..., idle=IdleWatcher(...))`; daemon mode always sets it.
 - `scripts/` — Test clients and utilities.
 - `tests/` — Comprehensive test suite with high line coverage on `src/deephaven_mcp/` (run `tests-run` for the current count and report).
-- `pyproject.toml` — Project configuration and dependencies.
+- `pyproject.toml` — Project configuration and dependencies. Authoritative source for the supported Python floor (`requires-python`); check it before using version-gated syntax.
 
-Entry points: `dh-mcp-systems-server` (multiplexed community + enterprise; default HTTP port 8000), `dh-mcp-docs-server` (port 8001).
+Entry points: `dh-mcp-systems-server` (multiplexed community + enterprise; default HTTP port 8000), `dh-mcp-docs-server` (port 8001), `dh-mcp` (local thin client; auto-spawns a per-user daemon and dispatches MCP tool calls over loopback).
 
 ## MCP Server Commands
 
@@ -28,10 +35,10 @@ Entry points: `dh-mcp-systems-server` (multiplexed community + enterprise; defau
 
 ```bash
 # stdio (no auth; OS pipe is the trust boundary). Default transport.
-DH_MCP_CONFIG_DIR=/path/to/config-dir dh-mcp-systems-server --transport stdio
+DH_MCP_DATA_DIR=/path/to/data-root dh-mcp-systems-server --transport stdio
 
 # HTTP with PSK (loopback only).
-DH_MCP_CONFIG_DIR=/path/to/config-dir DH_MCP_PSK=$(openssl rand -hex 32) \
+DH_MCP_DATA_DIR=/path/to/data-root DH_MCP_PSK=$(openssl rand -hex 32) \
   dh-mcp-systems-server --transport http --host 127.0.0.1 --port 8000
 
 # CLI flags also available: --config-dir, --psk, --host, --port.
@@ -53,9 +60,15 @@ INKEEP_API_KEY=your-key MCP_DOCS_HOST=0.0.0.0 MCP_DOCS_PORT=8001 dh-mcp-docs-ser
 # Production endpoint: https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp
 ```
 
+## Local CLI (`dh-mcp`)
+
+Thin local client for the systems server: auto-spawns a per-user background daemon on first use and dispatches MCP tool calls over loopback HTTP with a PSK. Built on `click` (>=8.4) with Pattern B async wrapping (`@run_async` from `cli/_async.py`). Noun-verb command tree under `cli/_commands/{daemon,tool,config,introspect}.py`.
+
+For the full command/flag/exit-code/error-code surface, see `docs/CLI.md`. For agent self-discovery, run `dh-mcp introspect` (JSON manifest of the live tree, including a per-command output schema). These three surfaces — `docs/CLI.md`, `--help`, and the introspect manifest — must agree; the help-content contract is `_cli-help-standards`. To add a new command, apply the `cli-command-add` skill; to improve or verify a command's help, apply `cli-help-improve` / `cli-help-accuracy`.
+
 ## Configuration
 
-The systems server reads a per-user **directory tree** (not a single file). Default location: `~/.deephaven/ai/config/` on POSIX, `%APPDATA%\Deephaven\ai\config\` on Windows. Override via `--config-dir` or `$DH_MCP_CONFIG_DIR`.
+The systems server reads a per-user **directory tree** (not a single file). Default location: `~/.deephaven/ai/config/` on POSIX, `%APPDATA%\Deephaven\ai\config\` on Windows. Override via `--config-dir` or `$DH_MCP_DATA_DIR/config`.
 
 Layout:
 
@@ -133,7 +146,7 @@ uv run pytest                                   # full test suite (~19 seconds)
 For testing MCP wire protocol directly:
 
 ```bash
-python scripts/mcp_community_test_client.py \
+python scripts/mcp_systems_test_client.py \
   --transport streamable-http --url http://127.0.0.1:8000/mcp
 
 INKEEP_API_KEY=your-key python scripts/mcp_docs_test_client.py \

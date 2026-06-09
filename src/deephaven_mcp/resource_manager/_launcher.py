@@ -752,7 +752,7 @@ class DockerLaunchedSession(LaunchedSession):
                         f"  1. Install/start Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
                         f"     - Install: pip install deephaven-server\n"
-                        f'     - Configure: Set launch_method to "python" in community/settings.json under $DH_MCP_CONFIG_DIR\n'
+                        f'     - Configure: Set launch_method to "python" in community/settings.json in your configuration directory\n'
                         f"Original error: {error_msg}"
                     )
                 elif (
@@ -765,7 +765,7 @@ class DockerLaunchedSession(LaunchedSession):
                         f"  1. Install Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
                         f"     - Install: pip install deephaven-server\n"
-                        f'     - Configure: Set launch_method to "python" in community/settings.json under $DH_MCP_CONFIG_DIR\n'
+                        f'     - Configure: Set launch_method to "python" in community/settings.json in your configuration directory\n'
                         f"Original error: {error_msg}"
                     )
                 else:

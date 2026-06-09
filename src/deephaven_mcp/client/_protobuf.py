@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 
 from ._base import is_enterprise_available
 
-if is_enterprise_available:
+if is_enterprise_available():
     from deephaven_enterprise.client.controller import ControllerClient
 else:
     ControllerClient = None  # type: ignore[misc,assignment]  # pragma: no cover

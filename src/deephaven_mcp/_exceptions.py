@@ -58,6 +58,18 @@ __all__ = [
     "RegistryItemNotFoundError",
     # Configuration exceptions
     "ConfigurationError",
+    # File-lock exceptions
+    "FileLockTimeoutError",
+    # Daemon registry exceptions
+    "DaemonRegistryError",
+    "DaemonAlreadyPublishedError",
+    "RegistryCorruptError",
+    # CLI daemon lifecycle exceptions
+    "DaemonClientError",
+    "DaemonStartupTimeoutError",
+    "SpawnError",
+    # CLI MCP client exceptions
+    "McpClientError",
 ]
 
 
@@ -123,7 +135,7 @@ class MissingEnterprisePackageError(InternalError):
 
     Examples:
         ```python
-        if not is_enterprise_available:
+        if not is_enterprise_available():
             raise MissingEnterprisePackageError()
         ```
     """
@@ -558,6 +570,146 @@ class UnsupportedOperationError(McpError):
         This is distinct from NotImplementedError, which indicates planned but unimplemented
         features. UnsupportedOperationError indicates operations that are fundamentally
         incompatible with the current context.
+    """
+
+    pass
+
+
+# File-Lock Exceptions
+
+
+class FileLockTimeoutError(McpError):
+    """An advisory file lock could not be acquired before the deadline.
+
+    Raised by :class:`deephaven_mcp._platform.fsutil.AdvisoryFileLock` when
+    its bounded-acquire loop exhausts the configured timeout without
+    obtaining the lock. Converts an indefinite block on a wedged or
+    crashed lock holder into an actionable, time-bounded failure
+    rather than a hang.
+    """
+
+    pass
+
+
+# Daemon Registry Exceptions
+
+
+class DaemonRegistryError(McpError):
+    """Base exception for failures in the on-disk daemon registry.
+
+    The daemon registry (``<runtime_dir>/daemon/daemon.json``) is the
+    wire contract between the ``dh-mcp`` CLI and the daemon process.
+    This base groups every named failure mode of that contract so
+    callers can catch the family with a single ``except`` while
+    distinguishing specific cases (e.g. corruption) by subclass.
+    """
+
+    pass
+
+
+class DaemonAlreadyPublishedError(DaemonRegistryError):
+    """A second daemon attempted to publish over a still-live registry entry.
+
+    Raised inside the daemon's publish path when the defensive
+    re-check (under the registry lock) finds an existing entry
+    whose recorded :class:`~deephaven_mcp._processes.ProcessIdentity`
+    is still alive. Refusing to overwrite stops a non-CLI-spawned
+    second daemon from displacing the running one and orphaning its
+    bound loopback port from the CLI's perspective.
+
+    The CLI's spawn path already serializes via the registry lock,
+    so this only fires when a daemon was started outside the CLI
+    (manual ``python -m deephaven_mcp.mcp_systems_server --daemon``,
+    a stale test harness, etc.).
+    """
+
+    pass
+
+
+class RegistryCorruptError(DaemonRegistryError):
+    """The on-disk ``daemon.json`` exists but cannot be parsed.
+
+    Raised by :meth:`deephaven_mcp.daemon_registry.DaemonDirectory.read_entry`
+    for every failure mode that is *not* "the file is genuinely
+    absent": invalid JSON, schema validation errors (missing /
+    extra / wrong-type fields), and OS read errors. The original
+    exception is chained via ``__cause__``.
+
+    Distinguishes a corrupt registry from a genuinely absent one
+    (``read_entry`` returns ``None`` only for ``FileNotFoundError``).
+    Conflating the two is dangerous: the CLI's auto-spawn path
+    treats ``None`` as "no daemon, spawn one", so silently mapping
+    a corrupt file to ``None`` would race a spawn against an actual
+    still-running daemon and surface the resulting bind failure
+    rather than the actionable diagnostic the operator needs.
+
+    Caller recovery policy is per-site:
+
+    - ``daemon status`` / ``daemon stop`` / ``daemon restart`` /
+      ``daemon start`` surface the error to the operator with a
+      hint pointing at ``dh-mcp daemon reset``.
+    - :func:`deephaven_mcp.cli._daemon.get_or_start_daemon` and
+      :func:`deephaven_mcp.cli._daemon.poll_for_registry` both
+      propagate: auto-recovery is the explicit operator verb
+      ``dh-mcp daemon reset``, not an implicit rename, because a
+      silent quarantine that runs alongside a still-live daemon
+      would orphan the loopback port from the CLI's perspective.
+    """
+
+    pass
+
+
+# CLI Daemon Lifecycle Exceptions
+
+
+class DaemonClientError(McpError):
+    """Raised for any client-side daemon-management failure.
+
+    Covers "no daemon running with ``--no-auto-start``", "caller
+    lacks permission to signal the registered PID", and similar
+    failures that prevent the CLI from acting on the daemon.
+    The CLI's ``main`` translates this exception to a non-zero
+    exit code and prints the message; subcommand handlers raise
+    it freely without needing to format errors themselves.
+    """
+
+    pass
+
+
+class SpawnError(McpError):
+    """Raised for any subprocess-spawn failure during daemon start.
+
+    The CLI's ``main`` translates this exception to a non-zero
+    exit code and prints the message; subcommand handlers raise
+    it freely without needing to format errors themselves.
+    """
+
+    pass
+
+
+class DaemonStartupTimeoutError(SpawnError):
+    """The daemon did not publish a registry entry before the deadline.
+
+    Raised by :func:`deephaven_mcp.cli._daemon.poll_for_registry`
+    after waiting ``cli.daemon.timeouts.startup_deadline_seconds``
+    for the spawned process to write ``daemon.json``. The original
+    spawned process, if any, is *not* terminated by this code: the
+    CLI logs the path to ``daemon.log`` so the operator can
+    investigate.
+    """
+
+    pass
+
+
+# CLI MCP Client Exceptions
+
+
+class McpClientError(McpError):
+    """Raised when an MCP request fails or its response cannot be parsed.
+
+    Used by :class:`deephaven_mcp.cli._mcp_client.McpClient`.
+    Subcommand handlers translate this exception to a non-zero
+    exit code; the message is printed verbatim to stderr.
     """
 
     pass

@@ -36,11 +36,13 @@ from deephaven_mcp.resource_manager import (
 
 
 def _ctx(*, registry: object = None, multi_config: object = None) -> MockContext:
-    """Build a ``MockContext`` whose lifespan dict has the given keys.
+    """Build a ``MockContext`` whose lifespan context has the given fields.
 
-    Mirrors the production ``LifespanContext`` shape (a ``TypedDict`` with
-    ``registry`` and ``multi_config``). Tests pass in mocks so each helper
-    can be exercised without a live server.
+    Mirrors the production ``LifespanContext`` shape (a frozen dataclass
+    with ``registry``, ``multi_config``, ``evictors``, ``instance_tracker``).
+    Tests pass in mocks for the fields they assert on; the conftest's
+    ``_adapt_lifespan_context`` fills in defaults for the remaining
+    fields so attribute access does not raise.
     """
     lifespan: dict[str, object] = {}
     if registry is not None:
@@ -100,10 +102,11 @@ def test_format_initialization_status_includes_errors():
 # ---------------------------------------------------------------------------
 
 
-def test_get_lifespan_context_returns_dict():
+def test_get_lifespan_context_returns_dataclass():
     ctx = _ctx(registry="r", multi_config="c")
     out = shared.get_lifespan_context(ctx)
-    assert out == {"registry": "r", "multi_config": "c"}
+    assert out.registry == "r"
+    assert out.multi_config == "c"
 
 
 def test_get_registry_returns_lifespan_registry():
@@ -368,7 +371,7 @@ async def test_get_enterprise_session_propagates_lookup_error():
 
 
 def _default_limits():
-    from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
+    from deephaven_mcp.config.schema import ResponseLimits
 
     return ResponseLimits()
 

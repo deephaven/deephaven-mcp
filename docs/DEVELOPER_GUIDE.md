@@ -158,7 +158,7 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
 
 ### About This Project
 
-The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides Python implementations of three [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers:
+The [deephaven-mcp](https://github.com/deephaven/deephaven-mcp) project provides Python implementations of two [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers:
 
 1. **Deephaven MCP Systems Server** (`dh-mcp-systems-server`):  <!-- markdownlint-disable-line MD029 -->
    - A single multiplexed binary that hosts every configured Community session **and** every Enterprise (Core+) system in one process.
@@ -254,7 +254,7 @@ Before using the Deephaven MCP servers, ensure you have the following prerequisi
 **Configuration File**
 
 - **Requirement**: A directory tree of JSON5 configuration files (not a single file) for the Systems Server
-- **Location**: Default `~/.deephaven/ai/config/` (POSIX) or `%APPDATA%/Deephaven/ai/config/` (Windows). Override with the `DH_MCP_CONFIG_DIR` env var or the `--config-dir` CLI flag.
+- **Location**: Default `~/.deephaven/ai/config/` (POSIX) or `%APPDATA%/Deephaven/ai/config/` (Windows). Override with the `DH_MCP_DATA_DIR` env var or the `--config-dir` CLI flag.
 - **Details**: See [Configuration Directory Tree](#configuration-directory-tree) for the layout summary, [`docs/CONFIGURATION.md`](CONFIGURATION.md) for the authoritative schema reference, and [`config-samples/ai/config/`](../config-samples/ai/config/) for a sample tree.
 
 ### Systems Server Prerequisites
@@ -352,7 +352,7 @@ Before proceeding with the Quick Start Guide, verify your setup:
 
 - ✅ Python 3.12+ installed: `python --version`
 - ✅ Configuration directory populated (for Systems Server): see [`config-samples/ai/config/`](../config-samples/ai/config/)
-- ✅ Environment variable set when overriding the default location: `export DH_MCP_CONFIG_DIR=/path/to/your/config`
+- ✅ Environment variable set when overriding the default location: `export DH_MCP_DATA_DIR=/path/to/your/data-root`
 - ✅ Inkeep API key set (for Docs Server): `export INKEEP_API_KEY=your-key`
 - ✅ Docker running (for docker launch method): `docker ps`
 - ✅ OR deephaven-server installed (for python launch method): `deephaven server --help`
@@ -471,6 +471,7 @@ This package registers the following console entry points for easy command-line 
 
 | Command | Description | Source |
 |---------|-------------|--------|
+| `dh-mcp` | Thin local client for the Systems Server: manages a per-user background daemon and calls MCP tools. See [`docs/CLI.md`](CLI.md). | `deephaven_mcp.cli._main:main` |
 | `dh-mcp-systems-server` | Start the multiplexed Systems Server (hosts every configured Community session and Enterprise system in one process). Supports `--transport stdio` (default) or `--transport http`. | `deephaven_mcp.mcp_systems_server.server:main` |
 | `dh-mcp-docs-server` | Start the Docs Server | `deephaven_mcp.mcp_docs_server.main:main` |
 
@@ -506,7 +507,7 @@ middleware enforces this with a constant-time comparison
 are rejected with HTTP `401`.
 
 ```json5
-// $DH_MCP_CONFIG_DIR/server.json
+// $DH_MCP_DATA_DIR/config/server.json
 {
   "psk": "${env:DH_MCP_PSK}"   // server reads $DH_MCP_PSK at startup
 }
@@ -578,7 +579,7 @@ Key architectural features include:
 
 ##### Configuration Directory Tree
 
-The multiplexed `dh-mcp-systems-server` reads a *directory tree* of small JSON5 files (not a single configuration file). The default location is `~/.deephaven/ai/config/` on POSIX or `%APPDATA%/Deephaven/ai/config/` on Windows; override with the `DH_MCP_CONFIG_DIR` env var or the `--config-dir` CLI flag.
+The multiplexed `dh-mcp-systems-server` reads a *directory tree* of small JSON5 files (not a single configuration file). The default location is `~/.deephaven/ai/config/` on POSIX or `%APPDATA%/Deephaven/ai/config/` on Windows; override with the `DH_MCP_DATA_DIR` env var or the `--config-dir` CLI flag.
 
 > **Authoritative reference:** [`docs/CONFIGURATION.md`](CONFIGURATION.md) is
 > the single source of truth for the on-disk layout, every Pydantic schema,
@@ -589,7 +590,7 @@ The multiplexed `dh-mcp-systems-server` reads a *directory tree* of small JSON5 
 Layout:
 
 ```text
-$DH_MCP_CONFIG_DIR/
+$DH_MCP_DATA_DIR/config/
   server.json                       # optional; HTTP transport + PSK
   community/
     settings.json                   # optional; session-creation defaults, timeouts, security
@@ -617,7 +618,7 @@ The Community Server's behavior, particularly how it finds its configuration, ca
 
 | Variable             | Required | Description                                                                                                                                                              | Where Used              |
 |----------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| `DH_MCP_CONFIG_DIR`  | No       | Path to the configuration *directory* (the systems server reads a directory tree, not a single file). When unset, the platform default is used (`~/.deephaven/ai/config/` on POSIX, `%APPDATA%/Deephaven/ai/config/` on Windows). Overridden by the `--config-dir` CLI flag.<br><br>Example:<br>`export DH_MCP_CONFIG_DIR="/home/user/.deephaven/ai/config"`<br>`uv run dh-mcp-systems-server`                                                                                                                                          | Systems Server, Test Client |
+| `DH_MCP_DATA_DIR`  | No       | Path to the user-data **root** under which both `config/` (configuration tree) and `runtime/` (daemon registry / lock / log) live. When unset, the platform default is used (`~/.deephaven/ai/` on POSIX, `%APPDATA%/Deephaven/ai/` on Windows). The `--config-dir` and `--runtime-dir` CLI flags target individual subdirectories and **bypass** this env var.<br><br>Example:<br>`export DH_MCP_DATA_DIR="/home/user/.deephaven/ai"`<br>`uv run dh-mcp-systems-server`                                                                                                                                          | Systems Server, Test Client |
 | (HTTP port)          | No       | Set the `port` field in `server.json` (default: `8000`). Only relevant under `--transport http`. Overridden by the `--port` CLI flag. There is no `DH_MCP_HTTP_PORT` env var; use `"port": "${env:NAME}"` for env-var indirection.                                    | Systems Server (optional)              |
 | `PYTHONLOGLEVEL`     | No       | Sets the Python logging level for the server (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).                                                                                    | Server (optional)       |
 
@@ -844,7 +845,7 @@ This is similar to how Jupyter displays tokens when starting a notebook server.
 > **Note:** This describes the enterprise-side capabilities exposed by the unified `dh-mcp-systems-server`. There is no longer a separate Enterprise server process — community sessions and enterprise systems are multiplexed inside the single systems server.
 
 Each Enterprise system gets one file under
-`$DH_MCP_CONFIG_DIR/enterprise/systems/<system_name>.json`. The
+`$DH_MCP_DATA_DIR/config/enterprise/systems/<system_name>.json`. The
 filename stem must equal the `system_name` field. The single
 multiplexed `dh-mcp-systems-server` hosts every file it finds.
 
@@ -866,7 +867,7 @@ is specific to operational use.
 **Example `enterprise/systems/prod.json`:**
 
 ```json5
-// $DH_MCP_CONFIG_DIR/enterprise/systems/prod.json
+// $DH_MCP_DATA_DIR/config/enterprise/systems/prod.json
 {
   "system_name": "prod",
   "connection_json_url": "https://enterprise.example.com/iris/connection.json",
@@ -938,7 +939,7 @@ are rejected on enterprise systems.
   terminate TLS at a reverse proxy on the same host — see
   [HTTP Transport Security](#http-transport-security).
 - Per-system files contain credentials (or the names of env vars or
-  files that hold them). Lock down `$DH_MCP_CONFIG_DIR` with
+  files that hold them). Lock down `$DH_MCP_DATA_DIR/config` with
   `chmod 700` and per-file `chmod 600`; the startup permission audit
   fails fast otherwise.
 
@@ -960,7 +961,8 @@ Community session and Enterprise system. Choose your transport:
 | `--transport {stdio,http}` | Transport to expose. `stdio` carries no authentication and is intended for AI clients launching the server as a subprocess. `http` serves streamable-HTTP gated by `server.json`'s PSK. | `stdio` |
 | `--host` | HTTP transport bind address. Must be a loopback host (`127.0.0.1`, `::1`, or `localhost`). Ignored under `stdio`. | `127.0.0.1` |
 | `--port` | HTTP transport TCP port (overrides `server.json`'s `port` field). Ignored under `stdio`. | `8000` |
-| `--config-dir` | Override for the configuration directory (overrides `DH_MCP_CONFIG_DIR`). | platform default |
+| `--config-dir` | Override for the `config` subdirectory only. Bypasses `DH_MCP_DATA_DIR` for the config subdir; the env var still applies to the runtime subdir unless `--runtime-dir` also overrides it. | `$DH_MCP_DATA_DIR/config` or platform default |
+| `--runtime-dir` | Override for the `runtime` subdirectory (daemon registry, lock, and log). Bypasses `DH_MCP_DATA_DIR` for the runtime subdir; the env var still applies to the config subdir unless `--config-dir` also overrides it. Only meaningful under `--daemon`. | `$DH_MCP_DATA_DIR/runtime` or platform default |
 | `-h, --help` | Show help message | - |
 
 > **Note:** Non-loopback `--host` values are rejected at startup — the
@@ -977,7 +979,7 @@ export DH_MCP_PSK='your-shared-secret'
 uv run dh-mcp-systems-server --transport http >dh-mcp-systems.log 2>&1 &
 
 # Custom config directory and port
-DH_MCP_CONFIG_DIR=/etc/deephaven/mcp uv run dh-mcp-systems-server \
+DH_MCP_DATA_DIR=/opt/deephaven/mcp uv run dh-mcp-systems-server \
     --transport http --port 8010 >dh-mcp-systems.log 2>&1 &
 ```
 
@@ -2417,7 +2419,7 @@ uv run scripts/mcp_systems_test_client.py --transport {stdio|streamable-http} [O
 **Key Arguments:**
 
 - `--transport`: Choose `streamable-http` (default) or `stdio`
-- `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_CONFIG_DIR=/path/to/your/config`). Can be repeated for multiple variables
+- `--env`: Pass environment variables as `KEY=VALUE` (e.g., `DH_MCP_DATA_DIR=/path/to/your/data-root`). Can be repeated for multiple variables
 - `--url`: URL for HTTP transport. Default `http://127.0.0.1:8000/mcp` (match the systems server's port — default `8000`)
 - `--stdio-cmd`: Command to launch the server as a subprocess (default `uv run dh-mcp-systems-server --transport stdio`)
 - `--psk`: Pre-shared key for HTTP transport, sent in the `X-Deephaven-PSK` header (required when the server has a PSK configured)
@@ -2939,7 +2941,7 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
 
   Use the MCP Inspector or test client for interactive debugging.
   Enterprise systems are picked up automatically from
-  `$DH_MCP_CONFIG_DIR/enterprise/systems/`.
+  `$DH_MCP_DATA_DIR/config/enterprise/systems/`.
 
 - **Interactive Tools:**
   Use the Inspector or the test client for interactive tool calls and debugging during development.
@@ -3044,7 +3046,6 @@ deephaven-mcp/
 │       ├── _monkeypatch.py     # Runtime patches
 │       ├── _redaction.py       # Sensitive-value redaction utilities
 │       ├── _version.py         # Version information
-│       ├── io.py               # I/O utilities
 │       ├── openai.py           # OpenAI client integration
 │       └── queries.py          # Query management
 ├── tests/                    # Unit and integration tests
@@ -3110,8 +3111,10 @@ deephaven-mcp/
 
 **Configuration (`config/`):**
 
-- Pydantic v2 schemas built on the project's `StrictSchema` / `RedactableSchema` bases
-- Support for Community and Enterprise session configurations
+- The single home for all product configuration, shared by both the systems server and the `dh-mcp` CLI
+- Path, permission, and JSON5-loading **primitives** at the package root (`config/__init__.py` re-exports only these, so `import deephaven_mcp.config` stays cheap)
+- `config/schema/` — the Pydantic v2 section schemas built on the project's `StrictSchema` / `RedactableSchema` bases, one module per on-disk section: `_server.py` (`server.json`), `_cli.py` (`cli.json`), `_community.py` (`community/`), `_enterprise.py` (`enterprise/`)
+- `config/tree.py` — `ConfigTree` (mirrors the on-disk directory one-for-one) and `ConfigTreeLoader` (the aggregator both subsystems load)
 - `${env:VAR}` and `${file:PATH}` templating resolved at file-load time, with `SecretStr`-typed fields for sensitive values
 - Comprehensive validation with detailed error messages
 
@@ -3133,8 +3136,7 @@ deephaven-mcp/
 
 - **`openai.py`**: OpenAI client integration with async support and rate limiting
 - **`queries.py`**: Query management and execution framework
-- **`io.py`**: I/O utilities for file operations and data handling
-- **`_env.py`**: Typed environment-variable helpers (`env_str`, `env_int`, `env_float`, `env_bool`, `env_required`). The systems server itself reads only `DH_MCP_CONFIG_DIR` and `PYTHONLOGLEVEL` from the environment; the helpers are used by the docs server and by utility scripts.
+- **`_env.py`**: Typed environment-variable helpers (`env_str`, `env_int`, `env_float`, `env_bool`, `env_required`). The systems server itself reads only `DH_MCP_DATA_DIR` and `PYTHONLOGLEVEL` from the environment; the helpers are used by the docs server and by utility scripts.
 - **`_exceptions.py`**: Custom exception classes for MCP-specific errors
 - **`_health.py`**: Single source of truth for the `/health` probe path
 - **`_logging.py`**: Centralized logging configuration with sensitive data redaction
@@ -3372,7 +3374,7 @@ uv pip install -e ".[dev]"
    - Check for authentication issues if using secured connections
 
 5. **Environment Variable Problems**:
-   - Make sure `DH_MCP_CONFIG_DIR` points to a valid, readable directory (or unset both `DH_MCP_CONFIG_DIR` and `--config-dir` to use the platform default)
+   - Make sure `DH_MCP_DATA_DIR` points to a valid, readable directory (or unset both `DH_MCP_DATA_DIR` and `--config-dir` to use the platform default)
    - The value should be an absolute path for reliability across different working directories
    - Environment variables must be set in the shell before starting the server; there is no built-in `.env` file support
 
@@ -3384,7 +3386,7 @@ uv pip install -e ".[dev]"
 ### Common Errors & Solutions
 
 1. **Config Directory Not Found / permissions audit failure:**
-   - Ensure `DH_MCP_CONFIG_DIR` (or `--config-dir`) points to a valid directory containing the expected `community/` and/or `enterprise/` subtrees
+   - Ensure `DH_MCP_DATA_DIR` (or `--config-dir`) points to a valid directory containing the expected `community/` and/or `enterprise/` subtrees
    - Example error: `FileNotFoundError: No such file or directory: ...` or a permission audit failure naming the offending file
    - Fix: Verify the directory path; on POSIX, `chmod 700` the directory and `chmod 600` each file
 

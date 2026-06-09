@@ -1,6 +1,7 @@
 ---
 name: _documentation-roles
 description: Defines the role (audience and scope) of every top-level markdown document in this project — invoked by `docs-improve` and `docs-accuracy` to keep edits in-scope and prevent content drift between documents
+user-invocable: false
 ---
 
 # Documentation Roles
@@ -16,6 +17,7 @@ Every top-level markdown file in this repository has a single, intentional role.
 | `docs/ENV.md` | operator | Environment variables consumed by the server processes. | Templating syntax (lives in `CONFIGURATION.md`), uv. |
 | `docs/SECURITY.md` | operator deploying the server | **Short, self-contained** guide. A reader must be able to stand up a secure deployment without leaving the page. Trust model, hardening checklist, authentication, transport security, secret handling, rotation. | Anything that requires bouncing to `DEVELOPER_GUIDE.md` to act on. |
 | `docs/UV.md` | developer new to `uv` | Generic `uv` crash course. | Project-specific commands, project env vars, project tests, project install lines. |
+| `docs/CLI.md` | operator + AI agent using the local `dh-mcp` CLI | Full `dh-mcp` reference: command surface (noun-verb tree), global flags, env-var bindings, exit codes, `error_code` registry, output modes (`human` / `json` / `yaml`), examples, shell completion, `dh-mcp introspect` agent self-discovery. | Server-side configuration (lives in `CONFIGURATION.md`); developer/contributor mechanics (lives in `DEVELOPER_GUIDE.md`); environment variables consumed by the server processes (those live in `ENV.md`; CLI-specific env vars stay here). |
 | `docs/DEVELOPER_GUIDE.md` | contributor | Everything a developer working *on* the project needs. Catch-all. | (No restrictions.) |
 | `AGENTS.md` | AI agent | Agent process rules. Not human documentation; **no TOC**. | Anything intended for humans. |
 
@@ -36,10 +38,12 @@ When editing any of the documents above:
 
 - A document may link to another document for *further reading* without violating its role.
 - A document **may not** rely on another document for content that is in-scope for itself. (E.g. `SECURITY.md` may link to `CONFIGURATION.md` "for the full schema reference," but it must inline the credential kinds an operator needs to act on the security checklist.)
+- `docs/CLI.md` may link to `CONFIGURATION.md` for the server config schema, but it must inline its own command/flag/exit-code/error-code reference — a CLI user must not have to bounce to another document to learn what `dh-mcp` accepts and how it fails.
+- `docs/CLI.md` is one of **three surfaces that must agree** — alongside the `--help` text and the `introspect` manifest (both generated in `cli/`). When a command's flags, arguments, exit codes, `error_code`s, or output fields change, update all three in the same edit. The contract lives in `_cli-help-standards`; `docs/CLI.md` is the only one of the three with no automated check, so verify it by hand.
 - README must never send an end user to `DEVELOPER_GUIDE.md`. Linking from README to `DEVELOPER_GUIDE.md` is acceptable only in the Contributing / Community sections, where the reader has self-identified as a contributor.
 
 ## When to invoke this skill
 
 - Before any `docs-improve` or `docs-accuracy` edit to a top-level markdown file.
 - When deciding where new documentation content belongs.
-- When a section feels out of place — consult the role table above; the answer is usually "move it, don't rewrite it."
+- When a section feels out of place — consult the role table above; the answer is "move it, don't rewrite it." Relocation preserves intent and the original author's framing; in-place rewrite loses both.

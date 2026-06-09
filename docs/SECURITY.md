@@ -48,8 +48,9 @@ with two transports:
 
 Outbound credentials (the secrets the server uses to talk to
 Deephaven Community workers and Deephaven Enterprise controllers)
-are configured in the JSON tree under `$DH_MCP_CONFIG_DIR` and
-resolved once at startup. Restart to rotate.
+are configured in the JSON tree under the resolved configuration
+directory (see [`docs/ENV.md`](ENV.md) for the resolution order)
+and resolved once at startup. Restart to rotate.
 
 ## Hardening checklist
 
@@ -58,10 +59,12 @@ anything beyond the local process group.
 
 - [ ] **Use stdio if you can.** stdio has no network surface and is
       the recommended transport for local-IDE integrations.
-- [ ] **Configure a non-empty PSK** for HTTP. Set `psk` in
-      `server.json` (or pass `--psk`); the server refuses to start
-      the HTTP transport without one. Use `${env:NAME}` templating
-      to source it from an environment variable.
+- [ ] **Configure a PSK of at least 16 characters** for HTTP. Set
+      `psk` in `server.json` (or pass `--psk`); the server refuses
+      to start the HTTP transport without one, and rejects any PSK
+      shorter than 16 characters (including the empty string) so the
+      gate is not brute-forceable. Use `${env:NAME}` templating to
+      source it from an environment variable.
 - [ ] **Bind to loopback only.** Default `host` is `127.0.0.1`; do
       not change it. Reach the server from another host through a
       reverse proxy on the same host.
@@ -70,7 +73,7 @@ anything beyond the local process group.
       `127.0.0.1:<port>`.
 - [ ] **Use `${env:NAME}` or `${file:PATH}` for every secret** in
       the config tree. Never commit literal secrets.
-- [ ] **Lock down `$DH_MCP_CONFIG_DIR` permissions.** POSIX:
+- [ ] **Lock down configuration-directory permissions.** POSIX:
       `chmod 700` the directory, `chmod 600` every file inside.
       Windows: place the directory under the current user profile
       (`%APPDATA%/Deephaven/ai/config/` satisfies this). The startup
@@ -98,8 +101,8 @@ anything beyond the local process group.
   configuration dumps emit `[REDACTED]` for every secret field.
 - **Tampered or world-readable config tree.** The startup permission
   audit refuses to start the server if any file or subdirectory
-  under `$DH_MCP_CONFIG_DIR` is owned by another UID or accessible
-  to anyone other than the running user.
+  under the resolved configuration directory is owned by another
+  UID or accessible to anyone other than the running user.
 
 **Does NOT protect against:**
 
@@ -119,9 +122,10 @@ anything beyond the local process group.
   is the trust boundary.
 - **HTTP transport:** every request must carry the configured PSK in
   the `X-Deephaven-PSK` header. Comparison uses
-  `hmac.compare_digest`. Empty PSKs are refused at startup. The
-  `/health` endpoint is exempt so external liveness probes work
-  without sharing the PSK.
+  `hmac.compare_digest`. PSKs shorter than 16 characters (including
+  the empty string) are refused at startup. The `/health` endpoint
+  is exempt so external liveness probes work without sharing the
+  PSK.
 
 A failed gate produces an HTTP 401 with this body:
 

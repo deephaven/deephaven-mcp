@@ -1,30 +1,31 @@
 """Tests for ``deephaven_mcp.mcp_systems_server._lifespan``.
 
-The lifespan factory has a single entry point — ``make_lifespan`` —
-that takes a pre-loaded :class:`MultiSystemConfig` and wires up an
-InstanceTracker, MultiSystemRegistry, and one ``Evictor`` per child
-registry. There is no longer a community/enterprise split, and the
-lifespan no longer parses configuration itself.
+The lifespan factory is now a thin orchestrator: it builds an
+``InstanceTracker`` + ``MultiSystemRegistry``, hands the per-child
+evictor lifecycle off to :class:`EvictorPool`, and (when supplied)
+the idle-watcher lifecycle off to :class:`IdleWatcher`. These tests
+cover the orchestrator wiring and its teardown discipline; the
+subsystem behaviours are covered in ``test__evictors.py`` and
+``test__idle.py``.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import is_dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from deephaven_mcp._exceptions import InternalError
 from deephaven_mcp._taxonomy import SystemRef, SystemType
 from deephaven_mcp.mcp_systems_server import _lifespan as lifespan_module
 from deephaven_mcp.mcp_systems_server._lifespan import (
     LifespanContext,
-    _build_and_start_per_child_evictors,
     make_lifespan,
 )
 
 # ---------------------------------------------------------------------------
-# _build_and_start_per_child_evictors — pure unit tests
+# Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -36,12 +37,7 @@ def _make_multi_config(
     enterprise_idle: float | None = None,
     enterprise_sweep: float | None = None,
 ) -> MagicMock:
-    """Build a ``MultiSystemConfig`` mock with the given timer values.
-
-    Idle/sweep timers live on the umbrella ``settings`` block (community
-    or enterprise) and apply uniformly to every child system within
-    that side.
-    """
+    """Build a ``ConfigTree`` mock with the given timer values."""
     mc = MagicMock()
     if community_idle is None and community_sweep is None:
         mc.community = None
@@ -71,321 +67,38 @@ def _make_multi_config(
     return mc
 
 
-def _make_registry(
-    *,
-    community: AsyncMock | None,
-    enterprise: dict[str, AsyncMock] | None = None,
-) -> MagicMock:
+def _build_registry_mock(*, community: bool, enterprise: list[str]) -> MagicMock:
     reg = MagicMock()
-    reg.community = community
-    reg.enterprise_systems = dict(enterprise or {})
+    reg.initialize = AsyncMock()
+    reg.close = AsyncMock()
+    reg.community = AsyncMock() if community else None
+    reg.enterprise_systems = {name: AsyncMock() for name in enterprise}
     return reg
 
 
-@pytest.mark.asyncio
-async def test_build_evictors_returns_empty_when_no_children():
-    """No community and no enterprise systems means no evictors."""
-    mc = _make_multi_config()
-    registry = _make_registry(community=None)
-    started: list[tuple[float, float]] = []
-
-    def _factory(child, timeouts):
-        started.append(
-            (timeouts.session_idle_timeout_seconds, timeouts.sweep_interval_seconds)
-        )
-        ev = AsyncMock()
-        ev.start = AsyncMock()
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        evictors = await _build_and_start_per_child_evictors(registry, mc)
-    assert evictors == []
-    assert started == []
-
-
-@pytest.mark.asyncio
-async def test_build_evictors_uses_settings_timers():
-    """Each child registry receives an Evictor parameterized by its umbrella settings."""
-    mc = _make_multi_config(
-        community_idle=100,
-        community_sweep=10,
-        enterprise_systems=["prod", "dev"],
-        enterprise_idle=300,
-        enterprise_sweep=5,
-    )
-    community_child = AsyncMock()
-    prod_child = AsyncMock()
-    dev_child = AsyncMock()
-    registry = _make_registry(
-        community=community_child,
-        enterprise={"prod": prod_child, "dev": dev_child},
-    )
-
-    captured: list[tuple[object, float, float]] = []
-
-    def _factory(child, timeouts):
-        captured.append(
-            (
-                child,
-                timeouts.session_idle_timeout_seconds,
-                timeouts.sweep_interval_seconds,
-            )
-        )
-        ev = AsyncMock()
-        ev.start = AsyncMock()
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        evictors = await _build_and_start_per_child_evictors(registry, mc)
-
-    # Three children -> three evictors, all started.
-    assert len(evictors) == 3
-    for ev in evictors:
-        ev.start.assert_awaited_once()
-
-    # Community evictor goes first; its timers come from community settings.
-    assert captured[0] == (community_child, 100, 10)
-    # Enterprise evictors follow; both share the system-wide (idle, sweep).
-    enterprise_calls = {child: (idle, sweep) for child, idle, sweep in captured[1:]}
-    assert enterprise_calls[prod_child] == (300, 5)
-    assert enterprise_calls[dev_child] == (300, 5)
-
-
-@pytest.mark.asyncio
-async def test_build_evictors_community_only():
-    mc = _make_multi_config(community_idle=42, community_sweep=7)
-    community_child = AsyncMock()
-    registry = _make_registry(community=community_child)
-    captured: list[tuple[float, float]] = []
-
-    def _factory(child, timeouts):
-        captured.append(
-            (timeouts.session_idle_timeout_seconds, timeouts.sweep_interval_seconds)
-        )
-        ev = AsyncMock()
-        ev.start = AsyncMock()
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        evictors = await _build_and_start_per_child_evictors(registry, mc)
-    assert len(evictors) == 1
-    assert captured == [(42, 7)]
-
-
-@pytest.mark.asyncio
-async def test_build_evictors_enterprise_only():
-    mc = _make_multi_config(
-        enterprise_systems=["only"], enterprise_idle=15, enterprise_sweep=3
-    )
-    only_child = AsyncMock()
-    registry = _make_registry(community=None, enterprise={"only": only_child})
-    captured: list[tuple[float, float]] = []
-
-    def _factory(child, timeouts):
-        captured.append(
-            (timeouts.session_idle_timeout_seconds, timeouts.sweep_interval_seconds)
-        )
-        ev = AsyncMock()
-        ev.start = AsyncMock()
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        evictors = await _build_and_start_per_child_evictors(registry, mc)
-    assert len(evictors) == 1
-    assert captured == [(15, 3)]
-
-
-@pytest.mark.asyncio
-async def test_build_evictors_per_section_eviction_reaches_every_child():
-    """Each child evictor reads its section's ``timeouts.eviction`` block.
-
-    There is no parallel scalar override path on the lifespan or the
-    evictor builder — callers that want different timers must build a
-    ``MultiSystemConfig`` whose ``settings.timeouts.eviction`` carries
-    the values they want. This test pins that contract: per-section
-    values flow through, and every enterprise system receives the same
-    enterprise eviction block.
-    """
-    mc = _make_multi_config(
-        community_idle=100,
-        community_sweep=10,
-        enterprise_systems=["prod", "dev"],
-        enterprise_idle=300,
-        enterprise_sweep=5,
-    )
-    registry = _make_registry(
-        community=AsyncMock(),
-        enterprise={"prod": AsyncMock(), "dev": AsyncMock()},
-    )
-    captured: list[tuple[float, float]] = []
-
-    def _factory(child, timeouts):
-        captured.append(
-            (timeouts.session_idle_timeout_seconds, timeouts.sweep_interval_seconds)
-        )
-        ev = AsyncMock()
-        ev.start = AsyncMock()
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        await _build_and_start_per_child_evictors(registry, mc)
-
-    # Community section: its own eviction block. Enterprise section:
-    # one shared block applied to every enterprise child.
-    assert captured == [(100, 10), (300, 5), (300, 5)]
-
-
-@pytest.mark.asyncio
-async def test_build_evictors_partial_start_failure_stops_already_started_and_reraises():
-    """A mid-loop ``start()`` failure stops every previously-started evictor and re-raises.
-
-    Regression for the original lifespan partial-startup leak. Old
-    behavior: the helper returned a list; a raise inside ``start()``
-    prevented the caller's assignment from running, orphaning already-
-    started evictors. New contract: startup is atomic — the helper
-    stops every started evictor (best-effort) before re-raising, so the
-    caller never observes a partial list.
-    """
-    mc = _make_multi_config(
-        community_idle=10,
-        community_sweep=2,
-        enterprise_systems=["a", "b", "c"],
-        enterprise_idle=300,
-        enterprise_sweep=5,
-    )
-    registry = _make_registry(
-        community=AsyncMock(),
-        enterprise={"a": AsyncMock(), "b": AsyncMock(), "c": AsyncMock()},
-    )
-
-    call_count = 0
-    built_evictors: list[AsyncMock] = []
-
-    def _factory(child, timeouts):
-        nonlocal call_count
-        call_count += 1
-        ev = AsyncMock()
-        if call_count == 3:
-            ev.start = AsyncMock(side_effect=RuntimeError("evictor #3 boom"))
-        else:
-            ev.start = AsyncMock()
-        ev.stop = AsyncMock()
-        built_evictors.append(ev)
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        with pytest.raises(RuntimeError, match="evictor #3 boom"):
-            await _build_and_start_per_child_evictors(registry, mc)
-
-    # All three were constructed: #1 (community) + #2 (enterprise "a")
-    # + #3 (enterprise "b" — the one whose start() raised).
-    assert len(built_evictors) == 3
-    # #1 and #2 started successfully and were stopped on cleanup.
-    built_evictors[0].stop.assert_awaited_once()
-    built_evictors[1].stop.assert_awaited_once()
-    # #3 raised at start; its stop() is not called (was never started).
-    built_evictors[2].stop.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_build_evictors_partial_start_failure_swallows_stop_errors():
-    """Cleanup is best-effort: a stop() failure during partial-startup cleanup is logged, not raised."""
-    mc = _make_multi_config(
-        community_idle=10,
-        community_sweep=2,
-        enterprise_systems=["a", "b"],
-        enterprise_idle=300,
-        enterprise_sweep=5,
-    )
-    registry = _make_registry(
-        community=AsyncMock(),
-        enterprise={"a": AsyncMock(), "b": AsyncMock()},
-    )
-
-    call_count = 0
-
-    def _factory(child, timeouts):
-        nonlocal call_count
-        call_count += 1
-        ev = AsyncMock()
-        if call_count == 3:
-            ev.start = AsyncMock(side_effect=RuntimeError("evictor #3 boom"))
-            ev.stop = AsyncMock()
-        else:
-            ev.start = AsyncMock()
-            # Force cleanup of the earlier evictors' stop() to itself raise.
-            ev.stop = AsyncMock(side_effect=RuntimeError(f"stop boom {call_count}"))
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        # The original RuntimeError from start() propagates; the cleanup
-        # stop() failures are swallowed (logged via _LOGGER.exception).
-        with pytest.raises(RuntimeError, match="evictor #3 boom"):
-            await _build_and_start_per_child_evictors(registry, mc)
-
-
-@pytest.mark.asyncio
-async def test_build_evictors_orphan_enterprise_child_raises_internal_error_and_rolls_back():
-    """An enterprise child registry with no matching config entry triggers the defensive ``InternalError``.
-
-    Constructs a registry whose ``enterprise_systems`` contains a name
-    (``"ghost"``) that does NOT appear in ``multi_config.enterprise.systems``
-    (which only declares ``"prod"``). The community evictor starts
-    successfully on iteration one, then the enterprise loop raises
-    :class:`InternalError` when it hits the orphan name. The atomic-
-    startup contract requires the already-started community evictor to
-    be ``stop()``-rolled back before the original exception re-raises.
-    """
-    mc = _make_multi_config(
-        community_idle=10,
-        community_sweep=2,
-        enterprise_systems=["prod"],
-        enterprise_idle=300,
-        enterprise_sweep=5,
-    )
-    registry = _make_registry(
-        community=AsyncMock(),
-        enterprise={"ghost": AsyncMock()},
-    )
-
-    built_evictors: list[AsyncMock] = []
-
-    def _factory(child, timeouts):
-        ev = AsyncMock()
-        ev.start = AsyncMock()
-        ev.stop = AsyncMock()
-        built_evictors.append(ev)
-        return ev
-
-    with patch.object(lifespan_module, "Evictor", side_effect=_factory):
-        with pytest.raises(
-            InternalError,
-            match=r"'ghost' has a child registry but no matching config entry",
-        ):
-            await _build_and_start_per_child_evictors(registry, mc)
-
-    # Only the community evictor was ever constructed/started; the
-    # orphan-name check fires before any enterprise Evictor is built.
-    assert len(built_evictors) == 1
-    built_evictors[0].start.assert_awaited_once()
-    # Atomic-startup roll-back: the community evictor was stopped before
-    # the defensive InternalError propagated.
-    built_evictors[0].stop.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# make_lifespan — startup / yield / shutdown
-# ---------------------------------------------------------------------------
-
-
-def _patch_lifespan_deps(
+def _patch_subsystems(
     *,
     multi_config: MagicMock,
     registry: MagicMock,
-    evictor: AsyncMock,
     instance_tracker: MagicMock,
+    evictor_pool: MagicMock | None = None,
+    idle_watcher: MagicMock | None = None,
 ):
-    """Patch every ``_lifespan`` external dependency in one place."""
+    """Patch every external dependency the orchestrator drives.
+
+    ``EvictorPool`` and ``IdleWatcher`` are patched as *classes* whose
+    instances expose explicit ``start`` / ``stop`` AsyncMocks. Tests
+    configure those mocks (or supply their own) if they want to assert
+    per-call behaviour.
+    """
+    if evictor_pool is None:
+        evictor_pool = MagicMock()
+        evictor_pool.start = AsyncMock()
+        evictor_pool.stop = AsyncMock()
+    if idle_watcher is None:
+        idle_watcher = MagicMock()
+        idle_watcher.start = AsyncMock()
+        idle_watcher.stop = AsyncMock()
     return (
         patch.object(
             lifespan_module.InstanceTracker,
@@ -402,50 +115,67 @@ def _patch_lifespan_deps(
             "MultiSystemRegistry",
             MagicMock(return_value=registry),
         ),
-        # Single Evictor mock used for every child; per-child topology
-        # is exercised by the unit tests above.
         patch.object(
             lifespan_module,
-            "Evictor",
-            MagicMock(return_value=evictor),
+            "EvictorPool",
+            MagicMock(return_value=evictor_pool),
+        ),
+        patch.object(
+            lifespan_module,
+            "IdleWatcher",
+            MagicMock(return_value=idle_watcher),
         ),
     )
 
 
-def _build_registry_mock(*, community: bool, enterprise: list[str]) -> MagicMock:
-    reg = MagicMock()
-    reg.initialize = AsyncMock()
-    reg.close = AsyncMock()
-    reg.community = AsyncMock() if community else None
-    reg.enterprise_systems = {name: AsyncMock() for name in enterprise}
-    return reg
+# ---------------------------------------------------------------------------
+# LifespanContext
+# ---------------------------------------------------------------------------
+
+
+def test_lifespan_context_is_frozen_dataclass():
+    """LifespanContext is a frozen dataclass with three fields."""
+    assert is_dataclass(LifespanContext)
+    fields = set(LifespanContext.__dataclass_fields__)
+    assert fields == {"multi_config", "registry", "instance_tracker"}
+    # Frozen: assignment raises.
+    ctx = LifespanContext(
+        multi_config=MagicMock(),
+        registry=MagicMock(),
+        instance_tracker=MagicMock(),
+    )
+    with pytest.raises((AttributeError, Exception)):
+        ctx.registry = MagicMock()  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# make_lifespan: startup wiring
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_make_lifespan_yields_context_and_shuts_down_cleanly(caplog):
+    """Happy-path: every subsystem is started, the context is yielded, and
+    every subsystem is torn down in reverse order."""
     multi_config = _make_multi_config(community_idle=10, community_sweep=2)
     multi_config.list_systems = MagicMock(
         return_value=[SystemRef(name="default", type=SystemType.COMMUNITY)]
     )
-
     registry = _build_registry_mock(community=True, enterprise=[])
+    instance_tracker = MagicMock(instance_id="inst-1", unregister=AsyncMock())
 
-    evictor = AsyncMock()
-    evictor.start = AsyncMock()
-    evictor.stop = AsyncMock()
-
-    instance_tracker = MagicMock()
-    instance_tracker.instance_id = "inst-1"
-    instance_tracker.unregister = AsyncMock()
+    evictor_pool = MagicMock()
+    evictor_pool.start = AsyncMock()
+    evictor_pool.stop = AsyncMock()
 
     server = MagicMock()
     server.name = "test-server"
 
-    patches = _patch_lifespan_deps(
+    patches = _patch_subsystems(
         multi_config=multi_config,
         registry=registry,
-        evictor=evictor,
         instance_tracker=instance_tracker,
+        evictor_pool=evictor_pool,
     )
     for p in patches:
         p.start()
@@ -453,18 +183,16 @@ async def test_make_lifespan_yields_context_and_shuts_down_cleanly(caplog):
         caplog.set_level(
             logging.INFO, logger="deephaven_mcp.mcp_systems_server._lifespan"
         )
-        cm = make_lifespan(multi_config)(server)
+        cm = make_lifespan(multi_config, idle=None)(server)
         async with cm as ctx:
-            assert isinstance(ctx, dict)
-            assert ctx["multi_config"] is multi_config
-            assert ctx["registry"] is registry
-            # One community child -> exactly one evictor.
-            assert ctx["evictors"] == [evictor]
-            assert ctx["instance_tracker"] is instance_tracker
+            assert isinstance(ctx, LifespanContext)
+            assert ctx.multi_config is multi_config
+            assert ctx.registry is registry
+            assert ctx.instance_tracker is instance_tracker
 
         registry.initialize.assert_awaited_once()
-        evictor.start.assert_awaited_once()
-        evictor.stop.assert_awaited_once()
+        evictor_pool.start.assert_awaited_once()
+        evictor_pool.stop.assert_awaited_once()
         registry.close.assert_awaited_once()
         instance_tracker.unregister.assert_awaited_once()
     finally:
@@ -483,7 +211,6 @@ async def test_make_lifespan_forwards_multi_config_to_registry():
     multi_config.list_systems = MagicMock(return_value=[])
 
     registry = _build_registry_mock(community=False, enterprise=[])
-    evictor = AsyncMock(start=AsyncMock(), stop=AsyncMock())
     tracker = MagicMock(instance_id="i", unregister=AsyncMock())
 
     with (
@@ -492,11 +219,7 @@ async def test_make_lifespan_forwards_multi_config_to_registry():
             "create_and_register",
             AsyncMock(return_value=tracker),
         ),
-        patch.object(
-            lifespan_module,
-            "cleanup_orphaned_resources",
-            AsyncMock(),
-        ),
+        patch.object(lifespan_module, "cleanup_orphaned_resources", AsyncMock()),
         patch.object(
             lifespan_module,
             "MultiSystemRegistry",
@@ -504,11 +227,16 @@ async def test_make_lifespan_forwards_multi_config_to_registry():
         ) as mock_registry_cls,
         patch.object(
             lifespan_module,
-            "Evictor",
-            MagicMock(return_value=evictor),
+            "EvictorPool",
+            MagicMock(
+                return_value=MagicMock(
+                    start=AsyncMock(),
+                    stop=AsyncMock(),
+                )
+            ),
         ),
     ):
-        async with make_lifespan(multi_config)(MagicMock(name="srv")):
+        async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
             pass
         mock_registry_cls.assert_called_once_with(
             community_sessions=multi_config.community.sessions,
@@ -516,6 +244,11 @@ async def test_make_lifespan_forwards_multi_config_to_registry():
             enterprise_systems=multi_config.enterprise.systems,
             enterprise_client_timeouts=multi_config.enterprise.settings.timeouts.client,
         )
+
+
+# ---------------------------------------------------------------------------
+# make_lifespan: failure-path teardown discipline
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -527,41 +260,78 @@ async def test_make_lifespan_failure_during_startup_still_cleans_up():
     registry = _build_registry_mock(community=False, enterprise=[])
     registry.initialize = AsyncMock(side_effect=RuntimeError("boom"))
 
-    evictor = AsyncMock(start=AsyncMock(), stop=AsyncMock())
     tracker = MagicMock(instance_id="i", unregister=AsyncMock())
 
-    with (
-        patch.object(
-            lifespan_module.InstanceTracker,
-            "create_and_register",
-            AsyncMock(return_value=tracker),
-        ),
-        patch.object(
-            lifespan_module,
-            "cleanup_orphaned_resources",
-            AsyncMock(),
-        ),
-        patch.object(
-            lifespan_module,
-            "MultiSystemRegistry",
-            MagicMock(return_value=registry),
-        ),
-        patch.object(
-            lifespan_module,
-            "Evictor",
-            MagicMock(return_value=evictor),
-        ),
-    ):
+    evictor_pool = MagicMock()
+    evictor_pool.start = AsyncMock()
+    evictor_pool.stop = AsyncMock()
+
+    patches = _patch_subsystems(
+        multi_config=multi_config,
+        registry=registry,
+        instance_tracker=tracker,
+        evictor_pool=evictor_pool,
+    )
+    for p in patches:
+        p.start()
+    try:
         with pytest.raises(RuntimeError, match="boom"):
-            async with make_lifespan(multi_config)(MagicMock(name="srv")):
+            async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
                 pass
 
-    # Evictor never started, so it was never stopped. But the tracker
-    # was registered, so it must be unregistered.
-    evictor.start.assert_not_called()
-    evictor.stop.assert_not_called()
-    registry.close.assert_awaited_once()
-    tracker.unregister.assert_awaited_once()
+        # registry.initialize raised before EvictorPool was started, so
+        # the pool was never started — but the tracker was registered
+        # and the registry-close fallback runs unconditionally.
+        evictor_pool.start.assert_not_called()
+        evictor_pool.stop.assert_not_called()
+        registry.close.assert_awaited_once()
+        tracker.unregister.assert_awaited_once()
+    finally:
+        for p in patches:
+            p.stop()
+
+
+@pytest.mark.asyncio
+async def test_make_lifespan_pool_start_failure_still_cleans_up():
+    """If EvictorPool.start raises, the tracker and registry are still torn down.
+
+    The ``pool.stop`` teardown callback is pushed only *after*
+    ``await pool.start()`` succeeds, so a start failure leaves stop
+    unregistered — but the tracker-unregister and registry-close
+    callbacks (registered earlier) must still run via the
+    :class:`AsyncExitStack`.
+    """
+    multi_config = _make_multi_config()
+    multi_config.list_systems = MagicMock(return_value=[])
+
+    registry = _build_registry_mock(community=False, enterprise=[])
+
+    tracker = MagicMock(instance_id="i", unregister=AsyncMock())
+
+    evictor_pool = MagicMock()
+    evictor_pool.start = AsyncMock(side_effect=RuntimeError("pool-boom"))
+    evictor_pool.stop = AsyncMock()
+
+    patches = _patch_subsystems(
+        multi_config=multi_config,
+        registry=registry,
+        instance_tracker=tracker,
+        evictor_pool=evictor_pool,
+    )
+    for p in patches:
+        p.start()
+    try:
+        with pytest.raises(RuntimeError, match="pool-boom"):
+            async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
+                pass
+
+        evictor_pool.start.assert_awaited_once()
+        evictor_pool.stop.assert_not_called()
+        registry.close.assert_awaited_once()
+        tracker.unregister.assert_awaited_once()
+    finally:
+        for p in patches:
+            p.stop()
 
 
 @pytest.mark.asyncio
@@ -572,90 +342,84 @@ async def test_make_lifespan_swallows_shutdown_errors(caplog):
 
     registry = _build_registry_mock(community=True, enterprise=[])
     registry.close = AsyncMock(side_effect=RuntimeError("close-fail"))
-    evictor = AsyncMock(
-        start=AsyncMock(),
-        stop=AsyncMock(side_effect=RuntimeError("stop-fail")),
-    )
     tracker = MagicMock(
         instance_id="i",
         unregister=AsyncMock(side_effect=RuntimeError("unreg-fail")),
     )
 
-    with (
-        patch.object(
-            lifespan_module.InstanceTracker,
-            "create_and_register",
-            AsyncMock(return_value=tracker),
-        ),
-        patch.object(
-            lifespan_module,
-            "cleanup_orphaned_resources",
-            AsyncMock(),
-        ),
-        patch.object(
-            lifespan_module,
-            "MultiSystemRegistry",
-            MagicMock(return_value=registry),
-        ),
-        patch.object(
-            lifespan_module,
-            "Evictor",
-            MagicMock(return_value=evictor),
-        ),
-    ):
+    # ``EvictorPool.stop`` is contractually responsible for
+    # logging-and-swallowing its own errors; here we simulate that by
+    # making stop return cleanly.
+    evictor_pool = MagicMock()
+    evictor_pool.start = AsyncMock()
+    evictor_pool.stop = AsyncMock()
+
+    patches = _patch_subsystems(
+        multi_config=multi_config,
+        registry=registry,
+        instance_tracker=tracker,
+        evictor_pool=evictor_pool,
+    )
+    for p in patches:
+        p.start()
+    try:
         caplog.set_level(logging.ERROR)
-        async with make_lifespan(multi_config)(MagicMock(name="srv")):
+        async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
             pass
+    finally:
+        for p in patches:
+            p.stop()
 
     msgs = [rec.message for rec in caplog.records]
-    assert any("Error stopping evictor" in m for m in msgs)
-    assert any("Error closing registry" in m for m in msgs)
-    assert any("Error unregistering" in m for m in msgs)
+    assert any("Error during close registry" in m for m in msgs)
+    assert any("Error during unregister tracker" in m for m in msgs)
 
 
-def test_lifespan_context_is_typed_dict():
-    """LifespanContext is a TypedDict with the documented keys."""
-    keys = set(LifespanContext.__annotations__)
-    assert keys == {"multi_config", "registry", "evictors", "instance_tracker"}
+# ---------------------------------------------------------------------------
+# Idle-watcher integration (orchestrator wiring only)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_stops_all_evictors_in_parallel_even_when_one_raises(
-    caplog,
-):
-    """Every evictor receives ``stop()`` even when an earlier ``stop()`` raises.
-
-    The lifespan shutdown calls ``asyncio.gather(..., return_exceptions=True)``
-    on every evictor's ``stop()``, so a single failure does not block the
-    rest from being cancelled. This regression test pins that contract by
-    constructing three evictors where the middle one raises from ``stop()``
-    and asserting all three were awaited (not just the first two) and that
-    the failure was logged but did not propagate.
-    """
-    multi_config = _make_multi_config(
-        community_idle=10,
-        community_sweep=2,
-        enterprise_systems=["a", "b"],
-        enterprise_idle=300,
-        enterprise_sweep=5,
-    )
+async def test_make_lifespan_uses_idle_watcher_when_idle_supplied():
+    """When ``idle`` is supplied, the orchestrator drives its lifecycle."""
+    multi_config = _make_multi_config(community_idle=10, community_sweep=2)
     multi_config.list_systems = MagicMock(return_value=[])
 
-    registry = _build_registry_mock(community=True, enterprise=["a", "b"])
+    registry = _build_registry_mock(community=True, enterprise=[])
+    tracker = MagicMock(instance_id="i", unregister=AsyncMock())
 
-    evictors = [
-        AsyncMock(start=AsyncMock(), stop=AsyncMock()),
-        AsyncMock(
-            start=AsyncMock(),
-            stop=AsyncMock(side_effect=RuntimeError("middle stop boom")),
-        ),
-        AsyncMock(start=AsyncMock(), stop=AsyncMock()),
-    ]
-    evictor_iter = iter(evictors)
+    # The caller now constructs the watcher and hands it to the
+    # lifespan; the orchestrator just calls start() and registers
+    # stop(). Pass a mock with explicit start/stop AsyncMocks.
+    idle_mock = MagicMock()
+    idle_mock.start = AsyncMock()
+    idle_mock.stop = AsyncMock()
 
-    def _factory(_child, _timeouts):
-        return next(evictor_iter)
+    patches = _patch_subsystems(
+        multi_config=multi_config,
+        registry=registry,
+        instance_tracker=tracker,
+    )
+    for p in patches:
+        p.start()
+    try:
+        async with make_lifespan(multi_config, idle=idle_mock)(MagicMock(name="srv")):
+            pass
+        idle_mock.start.assert_awaited_once()
+        idle_mock.stop.assert_awaited_once()
+    finally:
+        for p in patches:
+            p.stop()
 
+
+@pytest.mark.asyncio
+async def test_make_lifespan_does_not_construct_idle_watcher_when_idle_none():
+    """When ``idle`` is ``None``, ``IdleWatcher`` is never constructed or driven."""
+    multi_config = _make_multi_config(community_idle=10, community_sweep=2)
+    multi_config.list_systems = MagicMock(return_value=[])
+
+    registry = _build_registry_mock(community=True, enterprise=[])
     tracker = MagicMock(instance_id="i", unregister=AsyncMock())
 
     with (
@@ -664,32 +428,95 @@ async def test_make_lifespan_stops_all_evictors_in_parallel_even_when_one_raises
             "create_and_register",
             AsyncMock(return_value=tracker),
         ),
-        patch.object(
-            lifespan_module,
-            "cleanup_orphaned_resources",
-            AsyncMock(),
-        ),
+        patch.object(lifespan_module, "cleanup_orphaned_resources", AsyncMock()),
         patch.object(
             lifespan_module,
             "MultiSystemRegistry",
             MagicMock(return_value=registry),
         ),
-        patch.object(lifespan_module, "Evictor", side_effect=_factory),
+        patch.object(
+            lifespan_module,
+            "EvictorPool",
+            MagicMock(
+                return_value=MagicMock(
+                    start=AsyncMock(),
+                    stop=AsyncMock(),
+                )
+            ),
+        ),
+        patch.object(lifespan_module, "IdleWatcher") as mock_idle_watcher_cls,
     ):
-        caplog.set_level(
-            logging.ERROR, logger="deephaven_mcp.mcp_systems_server._lifespan"
-        )
-        async with make_lifespan(multi_config)(MagicMock(name="srv")):
+        async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
             pass
+        mock_idle_watcher_cls.assert_not_called()
 
-    # All three evictors were stopped, regardless of the middle one raising.
-    for ev in evictors:
-        ev.stop.assert_awaited_once()
-    # The failure was logged at ERROR (not re-raised).
-    assert any(
-        "Error stopping evictor" in rec.message and "middle stop boom" in rec.message
-        for rec in caplog.records
+
+# ---------------------------------------------------------------------------
+# _build_registry helper
+# ---------------------------------------------------------------------------
+
+
+def test_build_registry_unpacks_per_section_ingredients():
+    """``_build_registry`` forwards per-section ingredients to ``MultiSystemRegistry``."""
+    multi_config = _make_multi_config(
+        community_idle=10,
+        community_sweep=2,
+        enterprise_systems=["prod"],
     )
-    # The registry and tracker were still cleaned up after the evictor sweep.
-    registry.close.assert_awaited_once()
-    tracker.unregister.assert_awaited_once()
+    with patch.object(lifespan_module, "MultiSystemRegistry") as mock_cls:
+        lifespan_module._build_registry(multi_config)
+    mock_cls.assert_called_once_with(
+        community_sessions=multi_config.community.sessions,
+        community_client_timeouts=multi_config.community.settings.timeouts.client,
+        enterprise_systems=multi_config.enterprise.systems,
+        enterprise_client_timeouts=multi_config.enterprise.settings.timeouts.client,
+    )
+
+
+def test_build_registry_handles_missing_sections():
+    """When community/enterprise are absent, their kwargs are ``None``."""
+    multi_config = _make_multi_config()  # no community, no enterprise
+    with patch.object(lifespan_module, "MultiSystemRegistry") as mock_cls:
+        lifespan_module._build_registry(multi_config)
+    mock_cls.assert_called_once_with(
+        community_sessions=None,
+        community_client_timeouts=None,
+        enterprise_systems=None,
+        enterprise_client_timeouts=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Teardown wrappers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_log_teardown_failure_logs_and_swallows(caplog):
+    """``_log_teardown_failure`` logs the labelled failure but never raises."""
+
+    async def _boom() -> None:
+        raise RuntimeError("teardown boom")
+
+    caplog.set_level(logging.ERROR, logger="deephaven_mcp.mcp_systems_server._lifespan")
+    # Must not raise.
+    await lifespan_module._log_teardown_failure(_boom(), label="boom step")
+    assert any(
+        "Error during boom step" in rec.message
+        and "teardown boom" in (rec.exc_text or "")
+        for rec in caplog.records
+        if rec.levelno >= logging.ERROR
+    )
+
+
+@pytest.mark.asyncio
+async def test_log_teardown_failure_passes_through_on_success():
+    """A teardown coroutine that returns cleanly is awaited without logging."""
+
+    seen: list[str] = []
+
+    async def _ok() -> None:
+        seen.append("ran")
+
+    await lifespan_module._log_teardown_failure(_ok(), label="ok step")
+    assert seen == ["ran"]

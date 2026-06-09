@@ -32,7 +32,7 @@ This workflow stress tests a deephaven-docs MCP server by making N sequential ca
 5. **Monitor for Issues**
    - Watch for connection failures, timeouts, or rate limiting
    - Note any variations in response content or format
-   - Track response times if possible
+   - Track response times
 
 6. **Report Results**
    - Summarize the total number of successful vs failed calls

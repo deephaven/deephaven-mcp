@@ -16,7 +16,8 @@ Manager Types:
         deployments; in practice one of the two concrete subclasses below is used.
     StaticCommunitySessionManager: Manages CoreSession instances connecting to
         pre-configured Community servers declared in per-session files under
-        ``$DH_MCP_CONFIG_DIR/community/sessions/``.
+        the resolved configuration directory's ``community/sessions/``
+        subtree (see :func:`deephaven_mcp.config.resolve_config_dir`).
     DynamicCommunitySessionManager: Manages CoreSession instances for on-demand
         servers launched by the MCP server itself (Docker / Python).
     EnterpriseSessionManager: Manages CorePlusSession instances for Enterprise deployments
@@ -1873,7 +1874,7 @@ class StaticCommunitySessionManager(CommunitySessionManager):
     Key Characteristics:
         - **Origin**: Automatically set to ``SessionOrigin.STATIC`` to distinguish from dynamic sessions
         - **Server Lifecycle**: Does NOT manage server startup/shutdown (server must exist)
-        - **Configuration**: Loaded from per-session files under ``$DH_MCP_CONFIG_DIR/community/sessions/``
+        - **Configuration**: Loaded from per-session files under the resolved configuration directory's ``community/sessions/`` subtree
         - **Full Name Format**: ``"community:community:{name}"`` (the middle segment is the umbrella system name; the static/dynamic distinction lives in :attr:`origin`, not in the id)
 
     Usage:

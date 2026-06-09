@@ -17,7 +17,7 @@ from conftest import (
 
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.client import CommunityClientTimeouts
-from deephaven_mcp.mcp_systems_server import config
+from deephaven_mcp.config.schema import CommunitySessionCreationDefaults
 from deephaven_mcp.mcp_systems_server._tools.session_community import (
     _ANONYMOUS_AUTH_HANDLER,
     _PSK_AUTH_HANDLER,
@@ -28,7 +28,6 @@ from deephaven_mcp.mcp_systems_server._tools.session_community import (
     session_community_credentials,
     session_community_delete,
 )
-from deephaven_mcp.mcp_systems_server.config import CommunitySessionCreationDefaults
 from deephaven_mcp.resource_manager import (
     CommunitySessionRegistry,
     DockerLaunchedSession,
@@ -1459,7 +1458,7 @@ def test_session_creation_defaults_rejects_invalid_programming_language():
     """
     from pydantic import ValidationError
 
-    from deephaven_mcp.mcp_systems_server.config import CommunitySettings
+    from deephaven_mcp.config.schema import CommunitySettings
 
     with pytest.raises(ValidationError, match="programming_language"):
         CommunitySettings.model_validate(
@@ -2610,6 +2609,42 @@ async def test_session_community_create_default_programming_language_in_config()
         assert captured_config.programming_language is not None
         # Should default to Python
         assert captured_config.programming_language == "Python"
+
+
+def test_credentials_to_auth_type_unrecognized_kind_returns_error():
+    """An unrecognized credentials object yields a structured error.
+
+    Covers the fallthrough branch in ``_credentials_to_auth_type`` for
+    credential kinds outside the documented ``CredentialsUnion``.
+    """
+
+    class _BogusCreds:
+        pass
+
+    result, error = _credentials_to_auth_type(_BogusCreds())  # type: ignore[arg-type]
+    assert result == ""
+    assert error is not None
+    assert "Unsupported credentials kind" in error
+    assert "_BogusCreds" in error
+
+
+def test_resolve_auth_token_non_psk_returns_none():
+    """Only the PSK handler consumes a token; other handlers get ``(None, False)``.
+
+    Covers the early-return branch in ``_resolve_auth_token`` for any
+    auth_type that is not the PSK handler FQCN.
+    """
+    from deephaven_mcp.mcp_systems_server._tools.session_community import (
+        _ANONYMOUS_AUTH_HANDLER,
+        _resolve_auth_token,
+    )
+
+    defaults = CommunitySessionCreationDefaults()
+    token, auto = _resolve_auth_token(
+        _ANONYMOUS_AUTH_HANDLER, auth_token=None, defaults=defaults
+    )
+    assert token is None
+    assert auto is False
 
 
 def test_register_tools_registers_community_tools():

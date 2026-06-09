@@ -134,7 +134,7 @@ try:
     )
 except Exception:
     _PQConfigMessage = None
-from deephaven_mcp.mcp_systems_server._tools._pq_config import PqToolsConfig
+from deephaven_mcp.config.schema import PqToolsConfig
 from deephaven_mcp.mcp_systems_server._tools.pq import (
     _apply_pq_config_list_fields,
     _apply_pq_config_modifications,

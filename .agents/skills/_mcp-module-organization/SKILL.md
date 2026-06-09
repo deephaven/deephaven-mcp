@@ -1,18 +1,21 @@
 ---
 name: _mcp-module-organization
 description: Module organization and design patterns for MCP tool development in this project — invoke when creating or modifying MCP tool modules
+user-invocable: false
 ---
 
 # MCP Tools Module Organization Guidelines
+
+> **Scope.** This skill applies only to MCP server tool modules under `src/deephaven_mcp/mcp_systems_server/_tools/`. For commands in the local `dh-mcp` CLI under `src/deephaven_mcp/cli/_commands/`, apply the `cli-command-add` skill instead — the CLI uses a different framework (`click`), a different async pattern (`@run_async` from `cli/_async.py`), and a different error contract (`CliError` from `cli/_errors.py`). Do not transplant patterns between the two.
 
 ## File Organization Principles
 
 1. **Module Cohesion**: Each file in `_tools/` should contain MCP tools and helpers for a single, well-defined domain (e.g., table operations, session lifecycle, script execution).
 
 2. **Helper Function Placement**:
-   - If used by 1 module → keep it in that module (private with `_` prefix)
-   - If used by 2 modules → duplicate is acceptable, consider shared
-   - If used by 3+ modules → move to `_tools/shared.py`
+   - If used by 1 module → keep it in that module (private with `_` prefix).
+   - If used by 2 modules → duplicate is acceptable. Promote to `_tools/shared.py` when a third consumer appears (rule below).
+   - If used by 3+ modules → move to `_tools/shared.py`.
 
 3. **Constant Placement**:
    - Module-specific constants → keep in that module after imports
@@ -52,9 +55,10 @@ Common shared utilities (import only what you need):
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     error_response,                   # Build a standard error response dict
     format_initialization_status,     # Format registry initialization phase/errors
-    get_config_manager,               # Get ConfigManager from MCP context
-    get_mcp_session_id,               # Get MCP session ID from context (errors if missing)
-    get_registry_from_context,        # Get BaseRegistry from context
+    get_lifespan_context,             # Get the LifespanContext from MCP context
+    get_registry,                     # Get the MultiSystemRegistry from context
+    get_multi_config,                 # Get the merged ConfigTree from context
+    parse_session_id,                 # Parse + validate a session-id string (raises if malformed)
     get_community_registry,           # Get CommunitySessionRegistry from context
     get_enterprise_registry,          # Get EnterpriseSessionRegistry from context
     get_session_from_context,         # Get session from MCP context
@@ -69,18 +73,21 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 ## Naming Conventions
 
 ### MCP Tool Functions (Public API)
+
 - **Pattern**: `{domain}_{action}` (e.g., `session_table_data`, `pq_create`, `catalog_tables_list`)
 - **No underscore prefix**: These are the public MCP tools exposed to AI agents
-- **Descriptive and specific**: Name should clearly indicate what the tool does
+- **Descriptive and specific**: Name states what the tool does in `{domain}_{action}` form
 - **Registered explicitly**: via `server.tool()(fn)` inside `register_tools()`
 
 ### Helper Functions (Internal Use Only)
+
 - **Always private**: Use underscore prefix (e.g., `_validate_launch_method`, `_build_response`)
 - **Purpose**: Support MCP tools within the same module or shared utilities
 - **Not exported**: Never include in `__all__` (if present)
 - **Local scope**: Keep in the module where used, unless used by 3+ modules
 
 ### Module-Level Objects
+
 - **Constants**: ALLCAPS with docstring (e.g., `MAX_RESPONSE_SIZE`, `DEFAULT_TIMEOUT`)
 - **Logger**: `_LOGGER = logging.getLogger(__name__)` (private, standard pattern)
 - **Type variables**: Follow typing conventions (e.g., `T = TypeVar("T")`)

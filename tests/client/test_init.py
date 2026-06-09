@@ -161,4 +161,5 @@ def test_import_star_behavior():
 def test_is_enterprise_available_type():
     import deephaven_mcp.client as client
 
-    assert isinstance(client.is_enterprise_available, bool)
+    assert callable(client.is_enterprise_available)
+    assert isinstance(client.is_enterprise_available(), bool)

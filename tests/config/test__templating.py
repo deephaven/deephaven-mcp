@@ -184,6 +184,29 @@ def test_file_template_rejects_path_outside_config_dir(tmp_path):
         )
 
 
+def test_file_template_resolve_oserror_raises(tmp_path, monkeypatch):
+    """``OSError`` while resolving paths surfaces a clear ``ConfigurationError``.
+
+    Covers the ``except OSError`` branch in the containment check, which
+    wraps ``Path.resolve`` failures (e.g. permission errors, ELOOP) into
+    a structured configuration error.
+    """
+    path = tmp_path / "file.pem"
+    path.write_text("DATA", encoding="utf-8")
+
+    def _raise_oserror(self, strict=False):
+        raise OSError("resolve failed")
+
+    monkeypatch.setattr(Path, "resolve", _raise_oserror)
+    with pytest.raises(ConfigurationError, match="cannot resolve file"):
+        expand_string(
+            f"${{file:{path}}}",
+            source="t.json",
+            path="x",
+            config_dir=tmp_path,
+        )
+
+
 def test_file_template_rejects_too_large_file(tmp_path):
     """A file exceeding the size cap raises ``ConfigurationError``."""
     path = tmp_path / "big.bin"

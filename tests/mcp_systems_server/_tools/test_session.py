@@ -20,6 +20,7 @@ from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp._taxonomy import SystemRef, SystemType
 from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.mcp_systems_server._tools.session import (
+    list_systems,
     session_details,
     sessions_list,
 )
@@ -814,7 +815,6 @@ async def test_session_details_logs_version_info():
     from deephaven_mcp.resource_manager._registry import BaseRegistry
 
     # Create mocks
-    context = MagicMock()
     session_id = "test-session"
     session = AsyncMock()
 
@@ -844,12 +844,12 @@ async def test_session_details_logs_version_info():
     session_registry.get = AsyncMock(return_value=mgr)
 
     # Setup context.request_context.lifespan_context properly
-    request_context = MagicMock()
-    request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": session_registry,
-    }
-    context.request_context = request_context
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": session_registry,
+        }
+    )
 
     # Mock the queries module to return version information
     mock_queries = MagicMock()
@@ -920,11 +920,12 @@ async def test_sessions_list_success():
     )
 
     # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     # Call function
     result = await sessions_list(mock_context)
@@ -994,12 +995,13 @@ async def test_sessions_list_filters_by_system():
         SystemRef(name="prod", type=SystemType.ENTERPRISE),
         SystemRef(name="staging", type=SystemType.ENTERPRISE),
     ]
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "multi_config": mock_multi_config,
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "multi_config": mock_multi_config,
+            "registry": mock_registry,
+        }
+    )
 
     # system="prod" yields exactly the prod enterprise session.
     result = await sessions_list(mock_context, system="prod")
@@ -1053,11 +1055,12 @@ async def test_sessions_list_with_unknown_type():
     )
 
     # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     # Call function
     result = await sessions_list(mock_context)
@@ -1092,11 +1095,12 @@ async def test_sessions_list_with_processing_error():
     )
 
     # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     # Call function
     result = await sessions_list(mock_context)
@@ -1115,9 +1119,11 @@ async def test_sessions_list_registry_error():
     """Test sessions_list when the session registry raises an exception."""
     # Mock context with registry that raises an exception
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception(
-        "Registry error"
-    )
+    # Production reads ``.registry`` on the lifespan context;
+    # make that attribute access raise to simulate a registry-fetch failure.
+    _raising = MagicMock()
+    type(_raising).registry = PropertyMock(side_effect=Exception("Registry error"))
+    mock_context.request_context.lifespan_context = _raising
 
     # Call function
     result = await sessions_list(mock_context)
@@ -1132,11 +1138,12 @@ async def test_session_details_session_not_found():
     mock_registry = AsyncMock()
     mock_registry.get.side_effect = Exception("Session not found")
 
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     result = await session_details(mock_context, "nonexistent")
 
@@ -1166,11 +1173,12 @@ async def test_session_details_with_session_error():
     mock_registry.get.return_value = mock_session_mgr
 
     # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     # Call function
     result = await session_details(mock_context, "session1")
@@ -1207,11 +1215,12 @@ async def test_session_details_with_processing_error():
     mock_registry.get.return_value = mock_session_mgr
 
     # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     # Call function
     result = await session_details(mock_context, "session1")
@@ -1228,9 +1237,11 @@ async def test_session_details_registry_error():
     """Test session_details when the session registry raises an exception."""
     # Mock context with registry that raises an exception
     mock_context = MagicMock()
-    mock_context.request_context.lifespan_context.__getitem__.side_effect = Exception(
-        "Registry error"
-    )
+    # Production reads ``.registry`` on the lifespan context;
+    # make that attribute access raise to simulate a registry-fetch failure.
+    _raising = MagicMock()
+    type(_raising).registry = PropertyMock(side_effect=Exception("Registry error"))
+    mock_context.request_context.lifespan_context = _raising
 
     # Call function
     result = await session_details(mock_context, "session1")
@@ -1272,11 +1283,12 @@ async def test_session_details_success_with_programming_language():
     mock_registry.get.return_value = mock_session_mgr
 
     # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     # Call function
     result = await session_details(mock_context, "session1", attempt_to_connect=True)
@@ -1324,11 +1336,12 @@ async def test_session_details_success_without_programming_language():
     mock_registry.get.return_value = mock_session_mgr
 
     # Mock context
-    mock_context = MagicMock()
-    mock_context.request_context.lifespan_context = {
-        "config_manager": MagicMock(),
-        "registry": mock_registry,
-    }
+    mock_context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_registry,
+        }
+    )
 
     # Call function
     result = await session_details(mock_context, "session1", attempt_to_connect=True)
@@ -1594,7 +1607,7 @@ async def test_sessions_list_shows_errors_even_with_sessions():
 
 
 def test_register_tools_registers_session_tools():
-    """register_tools() registers sessions_list and session_details."""
+    """register_tools() registers sessions_list, session_details, list_systems."""
     from mcp.server.fastmcp import FastMCP
 
     from deephaven_mcp.mcp_systems_server._tools.session import register_tools
@@ -1604,3 +1617,162 @@ def test_register_tools_registers_session_tools():
     tools = server._tool_manager._tools
     assert "sessions_list" in tools
     assert "session_details" in tools
+    assert "list_systems" in tools
+
+
+# ---------------------------------------------------------------------------
+# list_systems — thin read-through over multi_config.list_systems()
+# ---------------------------------------------------------------------------
+
+
+def _ctx_with_systems(systems: list[SystemRef]) -> MockContext:
+    """Build a MockContext whose ``multi_config.list_systems()`` returns ``systems``."""
+    multi_config = MagicMock()
+    multi_config.list_systems = MagicMock(return_value=list(systems))
+    return MockContext({"multi_config": multi_config})
+
+
+@pytest.mark.asyncio
+async def test_list_systems_empty_config() -> None:
+    ctx = _ctx_with_systems([])
+    result = await list_systems(ctx)
+    assert result == {"success": True, "systems": []}
+
+
+@pytest.mark.asyncio
+async def test_list_systems_community_only() -> None:
+    ctx = _ctx_with_systems([SystemRef(name="community", type=SystemType.COMMUNITY)])
+    result = await list_systems(ctx)
+    assert result == {
+        "success": True,
+        "systems": [{"name": "community", "type": "community"}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_systems_enterprise_only() -> None:
+    ctx = _ctx_with_systems(
+        [
+            SystemRef(name="prod", type=SystemType.ENTERPRISE),
+            SystemRef(name="dev", type=SystemType.ENTERPRISE),
+        ]
+    )
+    result = await list_systems(ctx)
+    assert result == {
+        "success": True,
+        "systems": [
+            {"name": "prod", "type": "enterprise"},
+            {"name": "dev", "type": "enterprise"},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_systems_mixed_preserves_order() -> None:
+    """list_systems ordering is preserved verbatim into the response."""
+    ctx = _ctx_with_systems(
+        [
+            SystemRef(name="community", type=SystemType.COMMUNITY),
+            SystemRef(name="prod", type=SystemType.ENTERPRISE),
+            SystemRef(name="dev", type=SystemType.ENTERPRISE),
+        ]
+    )
+    result = await list_systems(ctx)
+    assert result == {
+        "success": True,
+        "systems": [
+            {"name": "community", "type": "community"},
+            {"name": "prod", "type": "enterprise"},
+            {"name": "dev", "type": "enterprise"},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_systems_propagates_underlying_error() -> None:
+    """An exception raised by ``list_systems`` is not caught by the tool."""
+    multi_config = MagicMock()
+    multi_config.list_systems = MagicMock(side_effect=RuntimeError("boom"))
+    ctx = MockContext({"multi_config": multi_config})
+    with pytest.raises(RuntimeError, match="boom"):
+        await list_systems(ctx)
+
+
+# =============================================================================
+# sessions_list filter validation — additional error branches
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_invalid_type():
+    """An unrecognized ``type`` value yields a structured error response."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
+    result = await sessions_list(ctx, type="bogus")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Invalid type" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_invalid_origin():
+    """An unrecognized ``origin`` value yields a structured error response."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
+    result = await sessions_list(ctx, origin="bogus")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Invalid origin" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_origin_with_enterprise_type():
+    """``origin`` is community-only; combining it with enterprise errors."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
+    result = await sessions_list(ctx, type="enterprise", origin="static")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "origin filter is meaningful only for community" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_system_type_mismatch():
+    """system='community' with type='enterprise' (and vice versa) is rejected."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    mock_multi_config = MagicMock()
+    mock_multi_config.list_systems.return_value = [
+        SystemRef(name="community", type=SystemType.COMMUNITY),
+        SystemRef(name="prod", type=SystemType.ENTERPRISE),
+    ]
+    ctx = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "multi_config": mock_multi_config,
+            "registry": mock_registry,
+        }
+    )
+    result = await sessions_list(ctx, system="community", type="enterprise")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "implies type='community'" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_skips_factory_managers():
+    """Factory-kind managers are never listed as sessions."""
+    from deephaven_mcp.resource_manager import CorePlusSessionFactoryManager
+
+    mock_registry = AsyncMock()
+    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(
+        items={"enterprise:prod:factory": mock_factory},
+    )
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
+    result = await sessions_list(ctx)
+    assert result["success"] is True
+    assert result["sessions"] == []

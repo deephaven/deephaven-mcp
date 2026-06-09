@@ -1372,6 +1372,34 @@ class TestDynamicCommunitySessionManager:
             with pytest.raises(SessionCreationError, match="has been stopped"):
                 await manager.get()
 
+    @pytest.mark.asyncio
+    async def test_create_item_directly_refuses_when_stopped(self):
+        """Calling ``_create_item`` directly after ``_is_stopped`` is set must raise.
+
+        The override in ``DynamicCommunitySessionManager._create_item``
+        is a defense-in-depth check that complements the ``_get_unlocked``
+        gate. This test exercises it directly so the safety net is
+        verified independently of the cache-miss caller path.
+        """
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="anonymous",
+            auth_token=None,
+            container_id="test_container",
+        )
+
+        manager = DynamicCommunitySessionManager(
+            name="direct-stopped",
+            session_config=_stub_session_config(),
+            launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
+        )
+        manager._is_stopped = True
+
+        with pytest.raises(SessionCreationError, match="has been stopped"):
+            await manager._create_item()
+
     def test_process_id_none_when_no_process(self):
         """Test process_id returns None when there's no process."""
         launched_session = DockerLaunchedSession(

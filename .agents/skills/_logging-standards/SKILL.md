@@ -1,6 +1,7 @@
 ---
 name: _logging-standards
-description: "Python logging conventions — module-level _LOGGER instantiation, message format ([module:function] Action: details), log levels, and coverage rules"
+description: "Python logging conventions — module-level _LOGGER instantiation, message format ([module:function] Action: details), log levels, sensitive-data redaction, and coverage rules — invoke when writing or reviewing logging statements in Python code"
+user-invocable: false
 ---
 
 ## Logger Instantiation
@@ -35,6 +36,7 @@ _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] Failed to create 
 ## When to Log
 
 Add log statements for:
+
 - Entry to any significant operation (`Invoked:` with key parameters)
 - Successful completion (`Success:` or a summary of what was done)
 - Failures and exceptions (`Failed to ...: {e!r}`)
@@ -73,4 +75,3 @@ _LOGGER.info(f"[mcp_systems_server:session_create] Created: {session_config!r}")
 ```
 
 For dicts that may contain secrets, redact at the call site or use a redacted projection — never rely on a downstream filter to scrub the message.
-

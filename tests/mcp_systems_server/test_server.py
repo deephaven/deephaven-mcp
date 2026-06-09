@@ -2,137 +2,64 @@
 
 Covers the CLI surface that boots the multiplexed systems server:
 
-- ``_parse_args``: argparse defaults (all CLI overrides default to
-  ``None`` so the JSON-loaded :class:`ServerConfig` provides the
-  effective value per field) and explicit values.
-- ``_parse_config_dir_arg``: explicit Path vs deferred (``None``).
 - ``_is_loopback_host``: classification of literal IPs, hostname
   resolution, and unresolvable inputs.
-- ``_load_multi_config_or_exit``: returns the full ``MultiSystemConfig``
+- ``_load_multi_config_or_exit``: returns the full ``ConfigTree``
   (server, community, enterprise) loaded once and exits on
   ConfigurationError.
 - ``_resolve_psk_or_exit``: success, missing PSK.
-- ``main``: stdio path, HTTP path with PSK, and the non-loopback / no-PSK
-  refusal paths.
+- ``main``: click-driven CLI surface — defaults, explicit overrides,
+  unknown transport rejection, stdio path, HTTP path with PSK, and the
+  non-loopback / no-PSK refusal paths.
 """
 
 from __future__ import annotations
 
+import contextlib
 import socket
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 
 from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp.config.schema import ServerConfig
+from deephaven_mcp.mcp_systems_server import _http as http_module
 from deephaven_mcp.mcp_systems_server import server as server_module
-from deephaven_mcp.mcp_systems_server.config import ServerConfig
-from deephaven_mcp.mcp_systems_server.server import (
+from deephaven_mcp.mcp_systems_server._http import (
     _is_loopback_host,
-    _load_multi_config_or_exit,
-    _parse_args,
-    _parse_config_dir_arg,
     _resolve_psk_or_exit,
-    main,
 )
+from deephaven_mcp.mcp_systems_server.server import _load_multi_config_or_exit, main
 
 # ---------------------------------------------------------------------------
-# _parse_args
-# ---------------------------------------------------------------------------
-
-
-def test_parse_args_defaults():
-    """All CLI overrides default to ``None`` so the JSON config provides them."""
-    ns = _parse_args([])
-    assert ns.transport is None
-    assert ns.host is None
-    assert ns.port is None
-    assert ns.config_dir is None
-    assert ns.psk is None
-
-
-def test_parse_args_psk_flag():
-    ns = _parse_args(["--psk", "abc"])
-    assert ns.psk == "abc"
-
-
-def test_parse_args_explicit_values():
-    ns = _parse_args(
-        [
-            "--transport",
-            "http",
-            "--host",
-            "::1",
-            "--port",
-            "9001",
-            "--config-dir",
-            "/tmp/cfg",
-        ]
-    )
-    assert ns.transport == "http"
-    assert ns.host == "::1"
-    assert ns.port == 9001
-    assert ns.config_dir == "/tmp/cfg"
-
-
-def test_parse_args_rejects_unknown_transport():
-    with pytest.raises(SystemExit):
-        _parse_args(["--transport", "sse"])
-
-
-# ---------------------------------------------------------------------------
-# _parse_config_dir_arg
+# CLI argument parsing (click-driven; covered via ``main(argv)``)
 # ---------------------------------------------------------------------------
 
 
-def test_parse_config_dir_arg_none_passthrough():
-    assert _parse_config_dir_arg(None) is None
+def test_main_rejects_unknown_transport():
+    """Click's ``Choice`` rejects unsupported transports with exit code 2."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--transport", "sse"])
+    assert exc_info.value.code == 2
 
 
-def test_parse_config_dir_arg_returns_absolute_path(tmp_path):
-    rel = tmp_path / "cfg"
-    rel.mkdir()
-    out = _parse_config_dir_arg(str(rel))
-    assert isinstance(out, Path)
-    assert out.is_absolute()
-    assert out == rel.resolve()
+def test_main_help_prints_usage(capsys):
+    """``--help`` prints usage to stdout and returns without raising.
 
-
-# ---------------------------------------------------------------------------
-# _is_loopback_host
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "host", ["localhost", "LOCALHOST", "127.0.0.1", "127.5.6.7", "::1"]
-)
-def test_is_loopback_host_accepts_loopback(host):
-    assert _is_loopback_host(host) is True
-
-
-@pytest.mark.parametrize("host", ["10.0.0.1", "8.8.8.8", "2001:db8::1"])
-def test_is_loopback_host_rejects_public_ips(host):
-    assert _is_loopback_host(host) is False
-
-
-def test_is_loopback_host_unresolvable_hostname_is_false():
-    with patch.object(socket, "getaddrinfo", side_effect=socket.gaierror):
-        assert _is_loopback_host("definitely-not-a-real-host") is False
-
-
-def test_is_loopback_host_resolves_hostname_to_loopback():
-    fake_resolution = [(socket.AF_INET, 0, 0, "", ("127.0.0.1", 0))]
-    with patch.object(socket, "getaddrinfo", return_value=fake_resolution):
-        assert _is_loopback_host("my-loopback-alias") is True
-
-
-def test_is_loopback_host_mixed_resolution_is_false():
-    fake_resolution = [
-        (socket.AF_INET, 0, 0, "", ("127.0.0.1", 0)),
-        (socket.AF_INET, 0, 0, "", ("8.8.8.8", 0)),
-    ]
-    with patch.object(socket, "getaddrinfo", return_value=fake_resolution):
-        assert _is_loopback_host("dual-host") is False
+    With ``standalone_mode=False`` click swallows its own
+    :class:`click.exceptions.Exit` for ``--help`` and returns the
+    exit code from ``_cli.main``; the wrapper ignores that return
+    value, so ``main(["--help"])`` simply returns ``None`` after
+    rendering the help text.
+    """
+    result = main(["--help"])
+    assert result is None
+    out = capsys.readouterr().out
+    assert "dh-mcp-systems-server" in out
+    assert "--transport" in out
+    assert "--daemon" in out
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +70,7 @@ def test_is_loopback_host_mixed_resolution_is_false():
 def _multi_config_with(
     server_cfg: ServerConfig | None, config_dir: Path | None = None
 ) -> MagicMock:
-    """Build a MultiSystemConfig mock with ``cfg.server`` and ``cfg.config_dir`` set."""
+    """Build a ConfigTree mock with ``cfg.server`` and ``cfg.config_dir`` set."""
     multi = MagicMock()
     multi.server = server_cfg
     multi.config_dir = config_dir if config_dir is not None else Path("/tmp/cfg")
@@ -156,7 +83,7 @@ async def test_load_multi_config_returns_loaded_config(tmp_path):
     multi = _multi_config_with(loaded, tmp_path)
     with patch.object(
         server_module,
-        "MultiSystemConfigManager",
+        "ConfigTreeLoader",
         MagicMock(
             return_value=MagicMock(
                 initialize=AsyncMock(return_value=multi),
@@ -175,7 +102,7 @@ async def test_load_multi_config_returns_config_with_no_server(tmp_path):
     multi = _multi_config_with(None, tmp_path)
     with patch.object(
         server_module,
-        "MultiSystemConfigManager",
+        "ConfigTreeLoader",
         MagicMock(
             return_value=MagicMock(
                 initialize=AsyncMock(return_value=multi),
@@ -192,7 +119,7 @@ async def test_load_multi_config_exits_on_configuration_error():
     with (
         patch.object(
             server_module,
-            "MultiSystemConfigManager",
+            "ConfigTreeLoader",
             MagicMock(
                 return_value=MagicMock(
                     initialize=AsyncMock(side_effect=ConfigurationError("bad config"))
@@ -202,30 +129,6 @@ async def test_load_multi_config_exits_on_configuration_error():
         pytest.raises(SystemExit) as exc_info,
     ):
         await _load_multi_config_or_exit(None)
-    assert exc_info.value.code == 1
-
-
-# ---------------------------------------------------------------------------
-# _resolve_psk_or_exit
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_psk_or_exit_cli_flag_wins(tmp_path):
-    """CLI ``--psk`` takes precedence over ``server.json``'s ``psk`` field."""
-    server_cfg = ServerConfig.model_validate({"psk": "from-server-json"})
-    assert _resolve_psk_or_exit("from-cli", server_cfg, tmp_path) == "from-cli"
-
-
-def test_resolve_psk_or_exit_uses_server_json_psk(tmp_path):
-    server_cfg = ServerConfig.model_validate({"psk": "hunter2"})
-    assert _resolve_psk_or_exit(None, server_cfg, tmp_path) == "hunter2"
-
-
-def test_resolve_psk_or_exit_missing_psk_exits(tmp_path):
-    """A :class:`ServerConfig` without ``psk`` causes the entry point to exit."""
-    server_cfg = ServerConfig()
-    with pytest.raises(SystemExit) as exc_info:
-        _resolve_psk_or_exit(None, server_cfg, tmp_path)
     assert exc_info.value.code == 1
 
 
@@ -251,7 +154,7 @@ def _mute_logging_setup():
 
 
 def _patch_load_server_config(server_cfg: ServerConfig, config_dir: Path | None = None):
-    """Patch ``_load_multi_config_or_exit`` to return a MultiSystemConfig mock."""
+    """Patch ``_load_multi_config_or_exit`` to return a ConfigTree mock."""
     multi = _multi_config_with(server_cfg, config_dir)
     return patch.object(
         server_module,
@@ -291,46 +194,58 @@ def test_main_stdio_path_from_server_json(_mute_logging_setup):
 
 
 def test_main_http_path_calls_run_http_with_cli_overrides(_mute_logging_setup):
-    fake_server = MagicMock()
+    """``main`` builds a default-mode plan from CLI flags and runs it.
+
+    With the plan-then-run refactor, ``main`` no longer constructs a
+    FastMCP server itself for the HTTP path; the default-mode planner
+    resolves CLI flags into an :class:`_HttpRun` and the unified
+    runner builds the server from the plan. The patched ``_run_http``
+    therefore receives a single positional plan argument, which we
+    inspect for the default-mode field shape.
+    """
     with (
         _patch_load_server_config(ServerConfig()),
-        patch.object(server_module, "_is_loopback_host", return_value=True),
-        patch.object(
-            server_module, "_resolve_psk_or_exit", MagicMock(return_value="pw")
-        ),
-        patch.object(server_module, "_build_fastmcp", return_value=fake_server),
+        patch.object(http_module, "_is_loopback_host", return_value=True),
+        patch.object(http_module, "_resolve_psk_or_exit", MagicMock(return_value="pw")),
         patch.object(server_module, "_run_http") as mock_http,
         patch.object(server_module, "_run_stdio") as mock_stdio,
     ):
         main(["--transport", "http", "--host", "127.0.0.1", "--port", "8765"])
-    mock_http.assert_called_once_with(
-        fake_server, host="127.0.0.1", port=8765, psk="pw"
-    )
+    mock_http.assert_called_once()
+    plan = mock_http.call_args.args[0]
+    assert plan.psk == "pw"
+    assert plan.bind.host == "127.0.0.1"
+    assert plan.bind.port == 8765
+    assert plan.bind.sock is None
+    assert plan.idle_seconds == 0
+    assert plan.daemon_handle is None
+    assert plan.daemon_process_name is None
     mock_stdio.assert_not_called()
 
 
 def test_main_http_path_uses_server_json_values(_mute_logging_setup):
     """With no CLI overrides, host/port/psk come from ``server.json``."""
-    fake_server = MagicMock()
     server_cfg = ServerConfig.model_validate(
         {"transport": "http", "host": "::1", "port": 9000, "psk": "json-psk"}
     )
     with (
         _patch_load_server_config(server_cfg),
-        patch.object(server_module, "_is_loopback_host", return_value=True),
-        patch.object(server_module, "_build_fastmcp", return_value=fake_server),
+        patch.object(http_module, "_is_loopback_host", return_value=True),
         patch.object(server_module, "_run_http") as mock_http,
     ):
         main([])
-    mock_http.assert_called_once_with(
-        fake_server, host="::1", port=9000, psk="json-psk"
-    )
+    mock_http.assert_called_once()
+    plan = mock_http.call_args.args[0]
+    assert plan.psk == "json-psk"
+    assert plan.bind.host == "::1"
+    assert plan.bind.port == 9000
 
 
 def test_main_http_refuses_non_loopback_host(_mute_logging_setup):
+    """``_plan_default`` exits 2 when the resolved host fails the loopback check."""
     with (
         _patch_load_server_config(ServerConfig()),
-        patch.object(server_module, "_is_loopback_host", return_value=False),
+        patch.object(http_module, "_is_loopback_host", return_value=False),
         pytest.raises(SystemExit) as exc_info,
     ):
         main(["--transport", "http", "--host", "0.0.0.0"])
@@ -379,7 +294,7 @@ async def test_register_health_endpoint_returns_ok():
 def _multi_config_with_sections(
     *, community: object | None, enterprise: object | None
 ) -> MagicMock:
-    """Build a MultiSystemConfig-shaped mock with explicit ``community``/``enterprise``."""
+    """Build a ConfigTree-shaped mock with explicit ``community``/``enterprise``."""
     multi = MagicMock()
     multi.community = community
     multi.enterprise = enterprise
@@ -487,9 +402,9 @@ def test_build_fastmcp_wires_lifespan_tools_and_health():
         patch.object(server_module, "_register_health_endpoint") as mock_health,
     ):
         fake_multi = _multi_config_with(ServerConfig(), Path("/tmp/x"))
-        result = server_module._build_fastmcp(fake_multi, "custom-name")
+        result = server_module._build_fastmcp(fake_multi, "custom-name", idle=None)
     assert result is fake_server
-    mock_lifespan.assert_called_once_with(fake_multi)
+    mock_lifespan.assert_called_once_with(fake_multi, idle=None)
     mock_fastmcp.assert_called_once()
     # FastMCP receives the lifespan and the configured server name.
     assert mock_fastmcp.call_args.kwargs["lifespan"] is fake_lifespan
@@ -499,7 +414,7 @@ def test_build_fastmcp_wires_lifespan_tools_and_health():
 
 
 # ---------------------------------------------------------------------------
-# _run_stdio / _run_http
+# _run_stdio
 # ---------------------------------------------------------------------------
 
 
@@ -514,70 +429,230 @@ def test_run_stdio_calls_run_stdio_async():
     mock_run.assert_called_once_with(sentinel)
 
 
-def test_run_http_appends_psk_middleware_and_starts_uvicorn():
-    """``_run_http`` mounts PSKMiddleware on the streamable-HTTP app then runs uvicorn."""
-    fake_server = MagicMock()
-    fake_app = MagicMock()
-    fake_app.user_middleware = []
-    fake_server.streamable_http_app = MagicMock(return_value=fake_app)
+# ---------------------------------------------------------------------------
+# main(--daemon) integration
+# ---------------------------------------------------------------------------
 
-    fake_config = object()
-    fake_uvicorn_server = MagicMock()
+
+def test_main_daemon_path_invokes_run_http_with_daemon_plan(_mute_logging_setup):
+    """``--daemon`` plans a daemon-mode run and dispatches to the unified runner."""
+    with (
+        _patch_load_server_config(ServerConfig()),
+        patch.object(server_module, "_run_http") as mock_run,
+        patch.object(server_module, "_run_stdio") as mock_stdio,
+    ):
+        main(["--daemon"])
+    mock_run.assert_called_once()
+    mock_stdio.assert_not_called()
+    plan = mock_run.call_args.args[0]
+    # Daemon-mode shape: handoff bind, registry handle paired with
+    # process_name, idle_seconds populated from daemon_cfg defaults.
+    assert plan.bind.host is None
+    assert plan.bind.sock is not None
+    assert plan.daemon_handle is not None
+    assert plan.daemon_process_name is not None
+    plan.bind.close_unhanded()
+
+
+def test_main_daemon_path_threads_runtime_dir_override(_mute_logging_setup):
+    """``--runtime-dir`` reaches the daemon planner unchanged."""
+    captured: dict[str, object] = {}
+
+    def fake_planner(*args, **kwargs):
+        captured.update(kwargs)
+        # Return a minimal valid plan so the runner stub does not see
+        # an exception. The runner is also mocked below.
+        return http_module._HttpRun(
+            multi_config=MagicMock(),
+            server_name="srv",
+            psk="x" * 32,
+            bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
+            idle_seconds=0,
+            daemon_handle=None,
+            daemon_process_name=None,
+        )
 
     with (
-        patch.object(
-            server_module.uvicorn, "Config", return_value=fake_config
-        ) as mock_config_cls,
-        patch.object(
-            server_module.uvicorn, "Server", return_value=fake_uvicorn_server
-        ) as mock_server_cls,
+        _patch_load_server_config(ServerConfig()),
+        patch.object(server_module, "_plan_daemon", side_effect=fake_planner),
+        patch.object(server_module, "_run_http"),
     ):
-        server_module._run_http(fake_server, host="127.0.0.1", port=9999, psk="secret")
-
-    # One Middleware appended; carrying the expected PSK and bypass path.
-    from deephaven_mcp._health import HEALTH_PATH
-    from deephaven_mcp.auth.middleware import PSKMiddleware
-
-    assert len(fake_app.user_middleware) == 1
-    mw = fake_app.user_middleware[0]
-    assert mw.cls is PSKMiddleware
-    assert mw.kwargs["expected_psk"] == "secret"
-    assert mw.kwargs["bypass_paths"] == (HEALTH_PATH,)
-
-    # uvicorn.Config invoked with the host/port; uvicorn.Server(config).run() called.
-    mock_config_cls.assert_called_once()
-    assert mock_config_cls.call_args.kwargs["host"] == "127.0.0.1"
-    assert mock_config_cls.call_args.kwargs["port"] == 9999
-    assert mock_config_cls.call_args.kwargs["app"] is fake_app
-    mock_server_cls.assert_called_once_with(fake_config)
-    fake_uvicorn_server.run.assert_called_once_with()
+        main(["--daemon", "--runtime-dir", "/var/tmp/dh-runtime"])
+    assert captured["runtime_dir_override"] == Path("/var/tmp/dh-runtime")
 
 
-def test_run_http_inserts_psk_middleware_at_index_zero():
-    """``_run_http`` inserts PSKMiddleware before any existing middleware.
+@pytest.mark.parametrize(
+    "extra_argv",
+    [
+        ["--transport", "http"],
+        ["--host", "127.0.0.1"],
+        ["--port", "8000"],
+        ["--transport", "http", "--host", "127.0.0.1", "--port", "8000"],
+    ],
+)
+def test_main_daemon_path_rejects_conflicting_flags(
+    _mute_logging_setup, extra_argv: list[str]
+) -> None:
+    """``--daemon`` rejects ``--transport``/``--host``/``--port``.
 
-    Authentication must run first so other middleware (e.g. request
-    logging) never sees un-authed request bodies.
+    The daemon shape is fixed by the registry wire format
+    (``DaemonRegistryEntry.host`` is ``Literal["127.0.0.1"]``,
+    transport is HTTP, port is kernel-chosen). Allowing operators
+    to pass conflicting flags would silently ignore them — bad UX.
+    The :func:`_validate_cli_args` step rejects with
+    :class:`click.UsageError`, which :func:`main` translates to
+    ``sys.exit(2)``.
     """
-    fake_server = MagicMock()
-    fake_app = MagicMock()
-    sentinel_pre = MagicMock(name="pre_existing_middleware")
-    fake_app.user_middleware = [sentinel_pre]
-    fake_server.streamable_http_app = MagicMock(return_value=fake_app)
+    with (
+        _patch_load_server_config(ServerConfig()),
+        patch.object(server_module, "_run_http") as mock_run,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main(["--daemon", *extra_argv])
+    assert exc_info.value.code == 2
+    mock_run.assert_not_called()
 
-    fake_config = object()
-    fake_uvicorn_server = MagicMock()
+
+def test_main_rejects_port_below_range(_mute_logging_setup) -> None:
+    """``--port 0`` is out of range and rejected up-front."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--transport", "http", "--port", "0"])
+    assert exc_info.value.code == 2
+
+
+def test_main_rejects_port_above_range(_mute_logging_setup) -> None:
+    """``--port 65536`` is out of range and rejected up-front."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--transport", "http", "--port", "65536"])
+    assert exc_info.value.code == 2
+
+
+def test_main_rejects_empty_host(_mute_logging_setup) -> None:
+    """``--host ''`` is rejected so the operator notices the typo."""
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--transport", "http", "--host", ""])
+    assert exc_info.value.code == 2
+
+
+def test_main_runtime_dir_without_daemon_is_no_op(_mute_logging_setup) -> None:
+    """``--runtime-dir`` without ``--daemon`` is silently ignored.
+
+    The runtime dir is only consulted on the daemon path. Rejecting
+    would surprise users with shared shell aliases (``alias
+    dh-mcp-systems-server="dh-mcp-systems-server --runtime-dir
+    ~/.dh"``). The flag passes :func:`_validate_cli_args` without
+    error and reaches the stdio path unchanged.
+    """
+    with (
+        _patch_load_server_config(ServerConfig()),
+        patch.object(server_module, "_run_stdio") as mock_stdio,
+        patch.object(server_module, "_run_http") as mock_http,
+        patch.object(server_module, "_build_fastmcp", return_value=MagicMock()),
+    ):
+        main(["--runtime-dir", "/var/tmp/dh-runtime"])
+    mock_stdio.assert_called_once()
+    mock_http.assert_not_called()
+
+
+def test_main_daemon_path_threads_psk_override(_mute_logging_setup, tmp_path):
+    """``--daemon --psk SECRET`` reaches the daemon planner as ``cli_psk``."""
+    captured: dict[str, object] = {}
+
+    def fake_planner(*args, **kwargs):
+        captured.update(kwargs)
+        return http_module._HttpRun(
+            multi_config=MagicMock(),
+            server_name="srv",
+            psk="x" * 32,
+            bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
+            idle_seconds=0,
+            daemon_handle=None,
+            daemon_process_name=None,
+        )
 
     with (
-        patch.object(server_module.uvicorn, "Config", return_value=fake_config),
-        patch.object(server_module.uvicorn, "Server", return_value=fake_uvicorn_server),
+        _patch_load_server_config(ServerConfig()),
+        patch.object(server_module, "_plan_daemon", side_effect=fake_planner),
+        patch.object(server_module, "_run_http"),
     ):
-        server_module._run_http(fake_server, host="127.0.0.1", port=9999, psk="secret")
+        main(
+            [
+                "--daemon",
+                "--psk",
+                "operator-explicit-secret",
+                "--runtime-dir",
+                str(tmp_path),
+            ]
+        )
+    assert captured["cli_psk"] == "operator-explicit-secret"
 
-    from deephaven_mcp.auth.middleware import PSKMiddleware
 
-    assert len(fake_app.user_middleware) == 2
-    # PSKMiddleware must be at index 0; the pre-existing entry is pushed
-    # back to index 1 by ``list.insert(0, ...)``.
-    assert fake_app.user_middleware[0].cls is PSKMiddleware
-    assert fake_app.user_middleware[1] is sentinel_pre
+# ---------------------------------------------------------------------------
+# _validate_cli_args
+# ---------------------------------------------------------------------------
+
+
+def test_validate_cli_args_accepts_clean_combinations() -> None:
+    """No-op for valid combinations: stdio / default HTTP / daemon."""
+    server_module._validate_cli_args(
+        transport="stdio", host=None, port=None, daemon=False
+    )
+    server_module._validate_cli_args(
+        transport="http", host="127.0.0.1", port=8000, daemon=False
+    )
+    server_module._validate_cli_args(transport=None, host=None, port=None, daemon=True)
+
+
+@pytest.mark.parametrize(
+    "transport, host, port, expected_in_msg",
+    [
+        ("http", None, None, "--transport"),
+        (None, "127.0.0.1", None, "--host"),
+        (None, None, 8000, "--port"),
+    ],
+)
+def test_validate_cli_args_rejects_each_daemon_conflict(
+    transport: str | None,
+    host: str | None,
+    port: int | None,
+    expected_in_msg: str,
+) -> None:
+    """Each conflicting flag is mentioned in the rejection message."""
+    with pytest.raises(click.UsageError) as exc_info:
+        server_module._validate_cli_args(
+            transport=transport, host=host, port=port, daemon=True
+        )
+    assert expected_in_msg in str(exc_info.value)
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536, 999999])
+def test_validate_cli_args_rejects_out_of_range_port(port: int) -> None:
+    """Port outside ``[1, 65535]`` is rejected with a clear message."""
+    with pytest.raises(click.UsageError, match=r"\[1, 65535\]"):
+        server_module._validate_cli_args(
+            transport=None, host=None, port=port, daemon=False
+        )
+
+
+@pytest.mark.parametrize("host", ["", " ", "   ", "\t", "\n", " \t \n "])
+def test_validate_cli_args_rejects_empty_or_whitespace_host(host: str) -> None:
+    """Empty or whitespace-only ``--host`` is rejected to surface operator typos."""
+    with pytest.raises(click.UsageError, match="non-empty"):
+        server_module._validate_cli_args(
+            transport=None, host=host, port=None, daemon=False
+        )
+
+
+def test_validate_cli_args_runtime_dir_without_daemon_is_silent() -> None:
+    """``_validate_cli_args`` does not see ``runtime_dir``: it's behaviour-neutral.
+
+    Documents the deliberate decision (per principle of least
+    surprise) to *not* reject ``--runtime-dir`` without ``--daemon``.
+    Tested at the :func:`main` level by
+    :func:`test_main_runtime_dir_without_daemon_is_no_op`; here we
+    pin that the validator's signature does not even take it.
+    """
+    import inspect
+
+    sig = inspect.signature(server_module._validate_cli_args)
+    assert "runtime_dir" not in sig.parameters

@@ -44,6 +44,8 @@ dependencies = [
     "psutil>=5.9.0",               # Process and system monitoring
     # Table formatting for AI agents
     "pyyaml>=6.0",                 # YAML formatting support
+    # CLI framework for the dh-mcp local client (noun-verb command tree, async via Pattern B)
+    "click>=8.4.0",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +56,7 @@ test = [
     "pytest-asyncio>=1.3.0",   # Async test support
     "pytest-cov>=7.1.0",       # Code coverage reporting
     "pytest-timeout>=2.1.0",   # Test timeout support for integration tests
+    "httpx2>=2.3.0",           # Required by starlette.testclient >=1.2 (replaces httpx)
     "deephaven-server>=0.39",  # Deephaven server for integration tests
     "pytz",                    # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
     # Stress testing dependencies
@@ -96,6 +99,7 @@ Repository = "https://github.com/deephaven/deephaven-mcp"
 Issues = "https://github.com/deephaven/deephaven-mcp/issues"
 
 [project.scripts]
+dh-mcp = "deephaven_mcp.cli._main:main"
 dh-mcp-systems-server = "deephaven_mcp.mcp_systems_server.server:main"
 dh-mcp-docs-server = "deephaven_mcp.mcp_docs_server.main:main"
 

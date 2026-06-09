@@ -3,7 +3,7 @@
 The multiplexed systems server reads its configuration once at startup
 and yields a single ``LifespanContext`` to every tool invocation. The
 mocks below mirror that shape so individual test modules can drop in
-their own ``MultiSystemRegistry`` and ``MultiSystemConfig`` fakes
+their own ``MultiSystemRegistry`` and ``ConfigTree`` fakes
 without re-implementing the plumbing.
 """
 
@@ -83,7 +83,7 @@ def _adapt_lifespan_context(ctx: Any) -> Any:
     # ``community_settings`` is a test-only shortcut: tests that want the
     # production code to observe a populated ``community/settings.json``
     # block can pass the dict here without constructing a full
-    # ``MultiSystemConfig``. We pop it from the lifespan dict (it is not
+    # ``ConfigTree``. We pop it from the lifespan dict (it is not
     # part of the real shape) and route it into ``multi_config``.
     community_settings = adapted.pop("community_settings", None)
     # Convenience for tests that stash the settings dict on their
@@ -96,11 +96,11 @@ def _adapt_lifespan_context(ctx: Any) -> Any:
             community_settings = stashed
 
     if "multi_config" not in adapted:
-        from deephaven_mcp.mcp_systems_server._tools._pq_config import PqToolsConfig
-        from deephaven_mcp.mcp_systems_server._tools._response_limits import (
+        from deephaven_mcp.config.schema import (
+            CommunitySettings,
+            PqToolsConfig,
             ResponseLimits,
         )
-        from deephaven_mcp.mcp_systems_server.config import CommunitySettings
 
         multi_config = MagicMock()
         community = MagicMock()
@@ -231,7 +231,19 @@ def _adapt_lifespan_context(ctx: Any) -> Any:
         # required there.
         adapted["multi_config"] = multi_config
 
-    return adapted
+    # Production yields a frozen :class:`LifespanContext` dataclass.
+    # Tests pass partial dicts; fill in defaults for fields the test
+    # did not supply so attribute access does not raise.
+    from deephaven_mcp.mcp_systems_server._lifespan import LifespanContext
+
+    adapted.setdefault("registry", MagicMock())
+    adapted.setdefault("multi_config", MagicMock())
+    adapted.setdefault("instance_tracker", create_mock_instance_tracker())
+    return LifespanContext(
+        multi_config=adapted["multi_config"],
+        registry=adapted["registry"],
+        instance_tracker=adapted["instance_tracker"],
+    )
 
 
 class MockRequestContext:

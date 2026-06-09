@@ -3,15 +3,23 @@ import pytest
 from deephaven_mcp._exceptions import (
     AuthenticationError,
     ConfigurationError,
+    DaemonAlreadyPublishedError,
+    DaemonClientError,
+    DaemonRegistryError,
+    DaemonStartupTimeoutError,
     DeephavenConnectionError,
+    FileLockTimeoutError,
     InternalError,
+    McpClientError,
     McpError,
     MissingEnterprisePackageError,
     QueryError,
+    RegistryCorruptError,
     ResourceError,
     SessionCreationError,
     SessionError,
     SessionLaunchError,
+    SpawnError,
     UnsupportedOperationError,
 )
 
@@ -99,6 +107,27 @@ class TestExceptionParameterized:
                 [InternalError, McpError, RuntimeError],
                 "Core+ features are not available (deephaven-coreplus-client Python package not installed)",
             ),
+            # File-lock, daemon-registry, and CLI exceptions
+            (FileLockTimeoutError, [McpError], "lock timeout"),
+            (DaemonRegistryError, [McpError], "registry error"),
+            (
+                DaemonAlreadyPublishedError,
+                [DaemonRegistryError, McpError],
+                "already published",
+            ),
+            (
+                RegistryCorruptError,
+                [DaemonRegistryError, McpError],
+                "registry corrupt",
+            ),
+            (DaemonClientError, [McpError], "client error"),
+            (SpawnError, [McpError], "spawn error"),
+            (
+                DaemonStartupTimeoutError,
+                [SpawnError, McpError],
+                "startup timeout",
+            ),
+            (McpClientError, [McpError], "mcp client error"),
         ],
     )
     def test_exception_basics(self, exception_class, parent_classes, message):
@@ -133,34 +162,26 @@ class TestExceptionModule:
     """Tests for module-level functionality of the exceptions module."""
 
     def test_all_exceptions_exported(self):
-        """Test that all exceptions are properly exported in __all__."""
+        """Test that __all__ lists exactly the McpError subclasses defined in the module.
+
+        The expected set is derived from the module's actual contents rather than
+        hardcoded, so a newly added exception that is omitted from __all__ fails
+        this test instead of silently passing.
+        """
+        import inspect
+
         from deephaven_mcp import _exceptions
 
         exported = set(_exceptions.__all__)
-        expected_exceptions = {
-            # Base exceptions
-            "McpError",
-            "InternalError",
-            "UnsupportedOperationError",
-            "MissingEnterprisePackageError",
-            # Session exceptions
-            "SessionError",
-            "SessionCreationError",
-            "SessionLaunchError",
-            "InvalidSessionNameError",
-            # Authentication exceptions
-            "AuthenticationError",
-            # Query exceptions
-            "QueryError",
-            # Connection exceptions
-            "DeephavenConnectionError",
-            # Resource exceptions
-            "ResourceError",
-            "RegistryItemNotFoundError",
-            # Configuration exceptions
-            "ConfigurationError",
+        defined = {
+            name
+            for name, obj in vars(_exceptions).items()
+            if inspect.isclass(obj)
+            and issubclass(obj, McpError)
+            and obj.__module__ == _exceptions.__name__
         }
-        # Check that the exported set exactly matches the expected exceptions
-        assert (
-            exported == expected_exceptions
-        ), f"Exported exceptions don't match expected. Missing: {expected_exceptions - exported}, Extra: {exported - expected_exceptions}"
+        assert exported == defined, (
+            "__all__ does not match the module's McpError subclasses. "
+            f"Missing from __all__: {defined - exported}, "
+            f"Extra in __all__: {exported - defined}"
+        )

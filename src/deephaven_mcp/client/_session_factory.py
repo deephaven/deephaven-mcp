@@ -260,7 +260,7 @@ class CorePlusSessionFactory(
             before calling this method, as it uses the system's default HTTP client
             configuration for the initial connection.json download.
         """
-        if not is_enterprise_available:
+        if not is_enterprise_available():
             raise MissingEnterprisePackageError()
         else:
             timeout_seconds = timeouts.session_connect_timeout_seconds
@@ -375,7 +375,7 @@ class CorePlusSessionFactory(
                 time, not here.
         """
         timeout_seconds = timeouts.session_connect_timeout_seconds
-        if not is_enterprise_available:
+        if not is_enterprise_available():
             raise MissingEnterprisePackageError()
 
         url = system_config.connection_json_url

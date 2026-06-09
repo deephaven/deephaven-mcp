@@ -1,0 +1,67 @@
+# Exercises the dh-mcp CLI end-to-end against a real Community worker.
+#
+# This drives the full operator workflow on a live worker subprocess: starting
+# the daemon, querying its status, and stopping it. It is the CLI counterpart
+# to the broader Integration Tests workflow and guards against regressions in
+# the daemon lifecycle that unit tests (which mock the subprocess) cannot catch.
+#
+# The pytest integration test (tests/cli/test__daemon_integration.py) is the
+# single source of truth for the community flow. The standalone
+# scripts/run_cli_e2e.py covers the same path for local dev plus an
+# operator-only --enterprise mode that CI cannot provision, so it is not run
+# here. Java 17 is required because the worker subprocess runs the Deephaven JVM.
+
+name: CLI E2E (Community)
+
+on:
+  push:
+    branches: ["main", "mcp2"]
+  pull_request:
+    branches: ["main", "mcp2"]
+  workflow_dispatch:
+
+jobs:
+  cli-e2e-community:
+    name: dh-mcp CLI end-to-end (community)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --extra test --extra community
+
+      - name: Verify dh-mcp entry point
+        run: uv run dh-mcp --help
+
+      # The pytest integration test is the single source of truth for the
+      # community end-to-end flow. The standalone scripts/run_cli_e2e.py
+      # covers the same path for local dev plus the operator-only
+      # --enterprise mode that CI cannot provision, so it is not run here.
+      # -s is required: pytest output capture breaks the worker subprocess
+      # stdio pipes (see tests/cli/test__daemon_integration.py).
+      - name: Run CLI integration tests
+        run: >-
+          uv run pytest -s -v --no-cov --log-cli-level=INFO
+          -m integration tests/cli/test__daemon_integration.py

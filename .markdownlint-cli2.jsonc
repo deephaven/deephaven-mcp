@@ -1,28 +1,24 @@
 {
   "config": {
-    "default": true,
-    // MD013: Line length - disabled because URLs and tables can't be wrapped
-    "MD013": false,
-    // MD024: Duplicate headings - siblings_only allows same headings in different sections
-    // (e.g. parallel Community/Enterprise quickstart steps like "1. Create Virtual Environment")
-    "MD024": { "siblings_only": true },
-    // MD028: No blank lines in blockquotes - disabled, blank lines improve readability for multi-paragraph blockquotes
-    "MD028": false,
-    // MD033: Inline HTML - allow specific elements needed in docs
-    "MD033": {
-      "allowed_elements": ["br", "div"]
-    },
-    // MD036: Emphasis as heading - disabled, linter is inconsistent and bold labels are acceptable documentation style
-    "MD036": false,
-    // MD060: Table column style - disabled, table alignment is too tedious to maintain manually
-    "MD060": false
+    // Rule tweaks are single-sourced in .markdownlint-base.jsonc and
+    // shared with the agent-facing relaxed config. Edit rules there.
+    "extends": ".markdownlint-base.jsonc"
   },
   "globs": [
-    "**/*.md"
+    "**/*.md",
+    // The .agents tree is excluded from linting EXCEPT the skill catalog
+    // (README + every SKILL.md), which is re-included via the trailing
+    // positive glob. markdownlint-cli2 does not honor "!" negation inside
+    // "ignores" (it renders as "!!" and is not treated as re-inclusion),
+    // so the .agents exclusion lives here as ordered globs, not in
+    // "ignores". The skills tree is linted under a relaxed rule set: see
+    // .agents/skills/.markdownlint.jsonc, which extends the shared
+    // .markdownlint-base.jsonc and relaxes MD041.
+    "!**/.agents/**",
+    "**/.agents/skills/**/*.md"
   ],
   "ignores": [
     "**/.windsurf/**",
-    "**/.agents/**",
     "**/venv*/**",
     "**/.venv*/**",
     "**/TEST*/**",

@@ -14,7 +14,7 @@ There is one CLI entry point — ``dh-mcp-systems-server`` (see
   (``127.0.0.1``, ``::1``, or ``localhost``); no TLS is performed.
 
 Configuration is read from a per-user directory tree validated by
-:class:`~deephaven_mcp.config.MultiSystemConfigManager`; ``server.json``
+:class:`~deephaven_mcp.config.ConfigTreeLoader`; ``server.json``
 inside that tree carries the PSK. There is no per-request authentication,
 no auth backends, and no ``mcp_reload`` tool — configuration changes
 require a restart.

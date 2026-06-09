@@ -3,8 +3,8 @@
 The client module owns only ``CommunityClientTimeouts`` and
 ``EnterpriseClientTimeouts``. The umbrella ``CommunityTimeouts`` /
 ``EnterpriseTimeouts`` schemas live in
-:mod:`deephaven_mcp.mcp_systems_server.config` (tested in
-``tests/mcp_systems_server/config/``) and the eviction sub-block lives
+:mod:`deephaven_mcp.config.schema` (tested in
+``tests/config/schema/``) and the eviction sub-block lives
 with its consumer in :mod:`deephaven_mcp.resource_manager._evictor`
 (tested in ``tests/resource_manager/test__evictor.py``).
 """

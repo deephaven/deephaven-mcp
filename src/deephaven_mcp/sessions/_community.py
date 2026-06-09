@@ -11,7 +11,7 @@ of loading one ``community/sessions/<name>.json`` file.
 The same class is produced from two sources:
 
 1. The on-disk loader
-   (:func:`deephaven_mcp.mcp_systems_server.config._community.load_community`),
+   (:func:`deephaven_mcp.config.schema._community.load_community`),
    which validates a JSON file's contents (with filename-stem
    cross-checks via the ``model_validator(mode="before")`` below).
 2. The dynamic-session tool

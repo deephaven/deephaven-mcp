@@ -1,0 +1,29 @@
+{
+  // Shared base markdownlint rule set for this repo. Single source of
+  // truth for the rule tweaks that apply to ALL markdown here. Both the
+  // root .markdownlint-cli2.jsonc (via config.extends) and the
+  // agent-facing .markdownlint-agent.jsonc (via extends) pull from this
+  // file, so the rules are defined exactly once.
+  //
+  // Why this is a separate file: markdownlint-cli2 does NOT merge a
+  // nested .markdownlint.jsonc with the root .markdownlint-cli2.jsonc
+  // "config" block — a directory-level config replaces it. Extracting the
+  // base rules here lets the per-tree configs inherit them explicitly via
+  // "extends" instead of silently losing them.
+  "default": true,
+  // MD013: Line length - disabled because URLs and tables can't be wrapped
+  "MD013": false,
+  // MD024: Duplicate headings - siblings_only allows same headings in different sections
+  // (e.g. parallel Community/Enterprise quickstart steps like "1. Create Virtual Environment")
+  "MD024": { "siblings_only": true },
+  // MD028: No blank lines in blockquotes - disabled, blank lines improve readability for multi-paragraph blockquotes
+  "MD028": false,
+  // MD033: Inline HTML - allow specific elements needed in docs
+  "MD033": {
+    "allowed_elements": ["br", "div"]
+  },
+  // MD036: Emphasis as heading - disabled, linter is inconsistent and bold labels are acceptable documentation style
+  "MD036": false,
+  // MD060: Table column style - disabled, table alignment is too tedious to maintain manually
+  "MD060": false
+}

@@ -9,6 +9,7 @@ the absence of references to retired transports.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -16,13 +17,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from deephaven_mcp.mcp_systems_server import _http as http_module
 from deephaven_mcp.mcp_systems_server import server as server_module
 
 
 def test_help_text_lists_supported_transports():
     """``--help`` advertises only stdio + http (sse is gone)."""
     proc = subprocess.run(
-        [sys.executable, "-m", "deephaven_mcp.mcp_systems_server.server", "--help"],
+        [sys.executable, "-m", "deephaven_mcp.mcp_systems_server", "--help"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -31,7 +33,10 @@ def test_help_text_lists_supported_transports():
     out = proc.stdout
     assert "stdio" in out
     assert "http" in out
-    assert "sse" not in out.lower()
+    # The retired SSE transport must not appear as a transport choice.
+    # Use a word-boundary check; substring matching produces
+    # false positives on legitimate words like "Bypasses".
+    assert not re.search(r"\bsse\b", out, flags=re.IGNORECASE)
     assert "loopback" in out.lower()
 
 
@@ -63,7 +68,7 @@ def _mute_logging_setup():
 
 
 def _patch_default_server_config():
-    """Stub ``_load_multi_config_or_exit`` with a default ``MultiSystemConfig`` mock."""
+    """Stub ``_load_multi_config_or_exit`` with a default ``ConfigTree`` mock."""
     multi = MagicMock()
     multi.server = None  # main() falls back to ServerConfig() defaults
     multi.config_dir = Path("/tmp/cfg")
@@ -91,14 +96,16 @@ def test_main_http_with_default_loopback_host(_mute_logging_setup):
     """``--transport http`` with default host '127.0.0.1' is allowed."""
     with (
         _patch_default_server_config(),
-        patch.object(
-            server_module, "_resolve_psk_or_exit", MagicMock(return_value="pw")
-        ),
+        patch.object(http_module, "_resolve_psk_or_exit", MagicMock(return_value="pw")),
         patch.object(server_module, "_build_fastmcp", return_value=MagicMock()),
         patch.object(server_module, "_run_http") as mock_http,
     ):
         server_module.main(["--transport", "http"])
     mock_http.assert_called_once()
-    kwargs = mock_http.call_args.kwargs
-    assert kwargs["host"] == "127.0.0.1"
-    assert kwargs["psk"] == "pw"
+    # Plan-then-run: ``main`` builds an ``_HttpRun`` plan and passes it
+    # positionally to the unified runner. Inspect the plan rather than
+    # the previous host/psk kwargs.
+    plan = mock_http.call_args.args[0]
+    assert plan.bind.host == "127.0.0.1"
+    assert plan.bind.sock is None
+    assert plan.psk == "pw"

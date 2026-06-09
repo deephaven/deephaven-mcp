@@ -9,7 +9,7 @@ directory and edit them in place.
 - POSIX (Linux/macOS): `~/.deephaven/ai/config/`
 - Windows: `%APPDATA%/Deephaven/ai/config/`
 
-Override with the `DH_MCP_CONFIG_DIR` environment variable or the
+Override with the `DH_MCP_DATA_DIR` environment variable or the
 `--config-dir` CLI flag.
 
 ## Layout
@@ -17,6 +17,7 @@ Override with the `DH_MCP_CONFIG_DIR` environment variable or the
 ```text
 config_dir/
 ├── server.json                      # PSK (HTTP transport only)
+├── cli.json                         # optional; dh-mcp CLI defaults (see docs/CLI.md)
 ├── community/
 │   ├── settings.json                # optional
 │   └── sessions/
@@ -45,4 +46,4 @@ best-effort).
 
 See `docs/CONFIGURATION.md` for the full schema reference (the
 authoritative end-user guide); `docs/ENV.md` documents the single
-`DH_MCP_CONFIG_DIR` environment variable.
+`DH_MCP_DATA_DIR` environment variable.
