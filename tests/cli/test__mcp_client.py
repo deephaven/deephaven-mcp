@@ -59,6 +59,24 @@ async def test_call_tool_before_aenter_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_aenter_failure_closes_stack_and_reraises() -> None:
+    """A failure during ``__aenter__`` must close the AsyncExitStack and re-raise.
+
+    Covers the ``except BaseException`` cleanup branch in ``__aenter__``.
+    """
+    with patch.object(mc, "create_mcp_http_client") as mock_http:
+        # Entering the HTTP-client context raises before transport/session
+        # are entered, so any partially-entered stack must be unwound.
+        mock_http.return_value.__aenter__ = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_http.return_value.__aexit__ = AsyncMock(return_value=None)
+        client = McpClient(_handle())
+        with pytest.raises(RuntimeError, match="boom"):
+            await client.__aenter__()
+        # Stack closed and session not assigned.
+        assert client._session is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
 async def test_aenter_aexit_drives_session() -> None:
     """Happy path: ``__aenter__`` initializes; ``__aexit__`` closes."""
     fake_session = AsyncMock()

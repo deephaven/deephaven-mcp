@@ -1696,3 +1696,91 @@ async def test_list_systems_propagates_underlying_error() -> None:
     ctx = MockContext({"multi_config": multi_config})
     with pytest.raises(RuntimeError, match="boom"):
         await list_systems(ctx)
+
+
+# =============================================================================
+# sessions_list filter validation — additional error branches
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_invalid_type():
+    """An unrecognized ``type`` value yields a structured error response."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    ctx = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_registry}
+    )
+    result = await sessions_list(ctx, type="bogus")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Invalid type" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_invalid_origin():
+    """An unrecognized ``origin`` value yields a structured error response."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    ctx = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_registry}
+    )
+    result = await sessions_list(ctx, origin="bogus")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Invalid origin" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_origin_with_enterprise_type():
+    """``origin`` is community-only; combining it with enterprise errors."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    ctx = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_registry}
+    )
+    result = await sessions_list(ctx, type="enterprise", origin="static")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "origin filter is meaningful only for community" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_rejects_system_type_mismatch():
+    """system='community' with type='enterprise' (and vice versa) is rejected."""
+    mock_registry = AsyncMock()
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
+    mock_multi_config = MagicMock()
+    mock_multi_config.list_systems.return_value = [
+        SystemRef(name="community", type=SystemType.COMMUNITY),
+        SystemRef(name="prod", type=SystemType.ENTERPRISE),
+    ]
+    ctx = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "multi_config": mock_multi_config,
+            "registry": mock_registry,
+        }
+    )
+    result = await sessions_list(ctx, system="community", type="enterprise")
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "implies type='community'" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_skips_factory_managers():
+    """Factory-kind managers are never listed as sessions."""
+    from deephaven_mcp.resource_manager import CorePlusSessionFactoryManager
+
+    mock_registry = AsyncMock()
+    mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
+    mock_registry.get_all.return_value = RegistrySnapshot.simple(
+        items={"enterprise:prod:factory": mock_factory},
+    )
+    ctx = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_registry}
+    )
+    result = await sessions_list(ctx)
+    assert result["success"] is True
+    assert result["sessions"] == []
