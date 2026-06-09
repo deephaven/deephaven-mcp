@@ -125,6 +125,7 @@ def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
 
 import deephaven_mcp.mcp_systems_server._tools.pq as _pq_module
 from deephaven_mcp import config
+from deephaven_mcp._exceptions import InternalError
 
 # Capture real protobuf class at collection time — before any session-scoped fixture
 # patches sys.modules["deephaven_enterprise.proto"] with a mock module.
@@ -151,6 +152,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_worker_protocol,
     _parse_pq_id,
     _pq_state_category,
+    _setup_batch_pq_operation,
     _validate_and_parse_pq_ids,
     _validate_max_concurrent,
     pq_create,
@@ -2381,6 +2383,24 @@ def test_validate_and_parse_pq_ids_rejects_mixed_systems():
     assert system_name is None
     assert error is not None
     assert "same" in error.lower()
+
+
+@pytest.mark.asyncio
+async def test_setup_batch_pq_operation_raises_on_none_system_name_without_error():
+    """``_setup_batch_pq_operation`` raises ``InternalError`` when the parser
+    returns ``system_name=None`` with no parse error — a broken invariant."""
+    with patch.object(
+        _pq_module,
+        "_validate_and_parse_pq_ids",
+        return_value=([("system:12345", 12345)], None, None),
+    ):
+        with pytest.raises(InternalError, match="Internal invariant violated"):
+            await _setup_batch_pq_operation(
+                MagicMock(),
+                "system:12345",
+                "pq_delete",
+                max_concurrent=1,
+            )
 
 
 # Note: ``test_parse_pq_id_*`` variants live further down in this module;

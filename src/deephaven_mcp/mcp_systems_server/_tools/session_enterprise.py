@@ -60,9 +60,7 @@ async def _collect_one_enterprise_system_status(
     )
     is_alive = await factory_manager.is_alive()
 
-    if (
-        multi_config.enterprise is None or system not in multi_config.enterprise.systems
-    ):  # pragma: no cover - defensive; get_enterprise_registry would have raised first
+    if multi_config.enterprise is None or system not in multi_config.enterprise.systems:
         raise InvalidSessionNameError(
             f"Enterprise system {system!r} is not configured."
         )
@@ -508,7 +506,7 @@ async def session_enterprise_create(
         )
 
         # Get enterprise system configuration from the lifespan-loaded multi-config.
-        if (  # pragma: no cover - defensive; get_enterprise_registry would have raised first
+        if (
             multi_config.enterprise is None
             or system_name not in multi_config.enterprise.systems
         ):

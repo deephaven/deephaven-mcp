@@ -328,7 +328,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             InternalError: If the registry has not been initialized.
         """
         self._check_initialized()
-        if self._factory_manager is None:  # pragma: no cover - defensive
+        if self._factory_manager is None:
             raise InternalError(
                 f"{self.__class__.__name__} factory manager is not available; "
                 "initialize() did not run to completion."

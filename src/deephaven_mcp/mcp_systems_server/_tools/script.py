@@ -92,22 +92,18 @@ async def session_script_run(
         _LOGGER.debug(
             f"[mcp_systems_server:session_script_run] Validating script parameters for session '{session_id}'"
         )
-        if script is None and script_path is None:
-            _LOGGER.warning(
-                "[mcp_systems_server:session_script_run] No script or script_path provided. Returning error."
-            )
-            result["error"] = "Must provide either script or script_path."
-            result["isError"] = True
-            return result
-
         if script is None:
+            if script_path is None:
+                _LOGGER.warning(
+                    "[mcp_systems_server:session_script_run] No script or script_path provided. Returning error."
+                )
+                result["error"] = "Must provide either script or script_path."
+                result["isError"] = True
+                return result
+
             _LOGGER.info(
                 f"[mcp_systems_server:session_script_run] Reading script from file: {script_path!r}"
             )
-            if script_path is None:
-                raise RuntimeError(
-                    "Internal error: script_path is None after prior guard"
-                )  # pragma: no cover
             _LOGGER.debug(
                 f"[mcp_systems_server:session_script_run] Opening script file '{script_path}' for reading"
             )

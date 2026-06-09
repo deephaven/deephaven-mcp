@@ -15,10 +15,11 @@ from conftest import (
 )
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
 from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _check_session_id_available,
     _check_session_limit,
+    _collect_one_enterprise_system_status,
     _generate_session_name_if_none,
     _resolve_session_parameters,
     enterprise_systems_status,
@@ -38,6 +39,50 @@ from deephaven_mcp.resource_manager import (
 )
 
 _TEST_SYSTEM_NAME = "system"
+
+_SE_MODULE = "deephaven_mcp.mcp_systems_server._tools.session_enterprise"
+
+
+@pytest.mark.asyncio
+async def test_collect_one_enterprise_system_status_raises_when_system_missing_from_config():
+    """``_collect_one_enterprise_system_status`` raises when the registry
+    resolves a system that the loaded multi-config does not contain — a
+    registry/config inconsistency that bypasses ``get_enterprise_registry``."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = "prod"
+    mock_registry.get_all = AsyncMock(return_value=MagicMock())
+    mock_registry.factory_manager.liveness_status = AsyncMock(
+        return_value=(MagicMock(), None)
+    )
+    mock_registry.factory_manager.is_alive = AsyncMock(return_value=True)
+
+    multi_config = SimpleNamespace(enterprise=None)
+
+    with (
+        patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry),
+        patch(f"{_SE_MODULE}.get_multi_config", return_value=multi_config),
+    ):
+        with pytest.raises(InvalidSessionNameError, match="not configured"):
+            await _collect_one_enterprise_system_status(MagicMock(), "prod", False)
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_create_system_missing_from_config_returns_error():
+    """``session_enterprise_create`` returns an error response when the
+    registry resolves a system absent from the loaded multi-config — a
+    registry/config inconsistency that bypasses ``get_enterprise_registry``."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    multi_config = SimpleNamespace(enterprise=None)
+
+    with (
+        patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry),
+        patch(f"{_SE_MODULE}.get_multi_config", return_value=multi_config),
+    ):
+        result = await session_enterprise_create(MagicMock(), "prod", None)
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not configured" in result["error"]
 
 
 @pytest.mark.asyncio
