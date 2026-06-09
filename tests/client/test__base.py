@@ -350,6 +350,11 @@ def test_import_without_enterprise_available():
             original_modules[module_name] = sys.modules[module_name]
             del sys.modules[module_name]
 
+    # Save the canonical _base module so the reload below can be undone. Other
+    # already-imported modules hold references to this exact object; leaving the
+    # reloaded copy in sys.modules would diverge them from later importers.
+    original_base = sys.modules.get("deephaven_mcp.client._base")
+
     try:
         # Force ImportError by making the import fail
         def mock_import(name, *args, **kwargs):
@@ -378,6 +383,16 @@ def test_import_without_enterprise_available():
         # Restore original sys.modules state
         for module_name, module in original_modules.items():
             sys.modules[module_name] = module
+        # Restore the canonical _base module object (the reload above replaced it).
+        # Both the sys.modules entry and the parent package attribute must be
+        # restored: pytest's monkeypatch resolves dotted targets by getattr-walking
+        # from the top package, so a stale ``deephaven_mcp.client._base`` attribute
+        # would send fixture patches to the wrong module object.
+        if original_base is not None:
+            sys.modules["deephaven_mcp.client._base"] = original_base
+            import deephaven_mcp.client
+
+            deephaven_mcp.client._base = original_base
 
 
 def test_client_object_wrapper_none_coverage():
