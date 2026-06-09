@@ -12,15 +12,16 @@ from deephaven_mcp import _taxonomy
 from deephaven_mcp.mcp_systems_server.config import (
     _community,
     _enterprise,
-    _multi,
     _server,
+    _tree,
 )
 
 _EXPECTED_PUBLIC_NAMES = {
-    # Manager + top-level model
-    "MultiSystemConfigManager",
-    "MultiSystemConfig",
+    # Loader + top-level model
+    "ConfigTreeLoader",
+    "ConfigTree",
     # Per-section umbrella models
+    "DaemonConfig",
     "ServerConfig",
     "CommunityConfig",
     "CommunitySettings",
@@ -49,9 +50,10 @@ def test_all_names_in_all_are_resolvable_attributes() -> None:
 
 
 def test_reexports_are_same_objects_as_internal_definitions() -> None:
-    assert config_pkg.MultiSystemConfigManager is _multi.MultiSystemConfigManager
-    assert config_pkg.MultiSystemConfig is _multi.MultiSystemConfig
+    assert config_pkg.ConfigTreeLoader is _tree.ConfigTreeLoader
+    assert config_pkg.ConfigTree is _tree.ConfigTree
     assert config_pkg.ServerConfig is _server.ServerConfig
+    assert config_pkg.DaemonConfig is _server.DaemonConfig
     assert config_pkg.CommunityConfig is _community.CommunityConfig
     assert config_pkg.CommunitySettings is _community.CommunitySettings
     assert config_pkg.EnterpriseConfig is _enterprise.EnterpriseConfig

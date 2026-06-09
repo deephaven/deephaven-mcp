@@ -159,6 +159,17 @@ class TestExceptionModule:
             "RegistryItemNotFoundError",
             # Configuration exceptions
             "ConfigurationError",
+            # File-lock exceptions
+            "FileLockTimeoutError",
+            # Daemon registry exceptions
+            "DaemonRegistryError",
+            "RegistryCorruptError",
+            # CLI daemon lifecycle exceptions
+            "DaemonClientError",
+            "DaemonStartupTimeoutError",
+            "SpawnError",
+            # CLI MCP client exceptions
+            "McpClientError",
         }
         # Check that the exported set exactly matches the expected exceptions
         assert (

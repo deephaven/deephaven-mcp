@@ -1,0 +1,22 @@
+{
+  // Per-directory markdownlint config for .agents/skills/ (the skill
+  // catalog README and all SKILL.md files). markdownlint-cli2 reads this
+  // automatically for files in this tree.
+  //
+  // A per-directory config REPLACES the root .markdownlint-cli2.jsonc
+  // rule set rather than merging with it, so we re-inherit the repo-wide
+  // rules explicitly via "extends" (single-sourced in
+  // .markdownlint-base.jsonc) and then relax the one rule that conflicts
+  // with skill conventions.
+  //
+  // MD041 (first line should be a top-level heading) is disabled because
+  // skill bodies deliberately lead with a prose callout after the YAML
+  // frontmatter (e.g. "**When to use this...**") rather than an H1.
+  // General hygiene rules stay on.
+  //
+  // If/when a .windsurf/ tree needs the same treatment, give it its own
+  // .windsurf/.markdownlint.jsonc with the same two lines. If the relaxed
+  // set ever grows beyond MD041, extract it into a shared file then.
+  "extends": "../../.markdownlint-base.jsonc",
+  "MD041": false
+}

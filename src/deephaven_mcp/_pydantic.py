@@ -40,15 +40,20 @@ Contents:
 
 *Logging*
 
+- :func:`dump_redacted` - dump a Pydantic model with secrets
+  replaced by :data:`~deephaven_mcp._redaction.REDACTED` (the
+  canonical way to obtain a JSON-safe view of any project schema
+  for logging, structured output, or diagnostics).
 - :func:`log_redacted` - log a Pydantic model at INFO with secrets
-  redacted (uses ``model_dump(context={"redact": True})`` under the
-  hood).
+  redacted (thin wrapper around :func:`dump_redacted` that adds an
+  INFO log line with a caller-supplied label).
 """
 
 from __future__ import annotations
 
 __all__ = [
     "as_configuration_error",
+    "dump_redacted",
     "format_validation_error",
     "log_redacted",
     "reconcile_filename_stem",
@@ -241,16 +246,64 @@ def format_validation_error(context: str, exc: ValidationError) -> str:
     return f"{context}: " + "; ".join(parts)
 
 
+def dump_redacted(model: BaseModel, **kwargs: Any) -> dict[str, Any]:
+    """Dump a Pydantic model to a JSON-safe dict with secrets redacted.
+
+    Centralizes the project's redaction protocol: every secret-bearing
+    schema inherits from :class:`RedactableSchema`, which honors the
+    ``{"redact": True}`` context flag by replacing each
+    :class:`pydantic.SecretStr` field with the project's
+    :data:`~deephaven_mcp._redaction.REDACTED` sentinel. This helper
+    pins both required call-site invariants (``mode="json"`` and
+    ``context={"redact": True}``) so callers cannot forget either —
+    forgetting ``mode="json"`` leaks raw :class:`SecretStr` instances;
+    forgetting the redact context emits Pydantic's default
+    ``"**********"`` mask instead of the project sentinel.
+
+    Other :meth:`~pydantic.BaseModel.model_dump` keyword arguments
+    (``exclude_none``, ``exclude``, ``by_alias``, etc.) pass through
+    via ``**kwargs``. Passing ``mode`` or ``context`` explicitly is
+    rejected with :class:`TypeError` — those invariants are the entire
+    reason this wrapper exists.
+
+    Args:
+        model (BaseModel): The validated Pydantic model to dump.
+            Should inherit from :class:`RedactableSchema` so the
+            ``redact`` context flag is honored; plain
+            :class:`StrictSchema` subclasses dump their non-secret
+            fields verbatim.
+        **kwargs (Any): Additional keyword arguments forwarded to
+            :meth:`pydantic.BaseModel.model_dump`. ``mode`` and
+            ``context`` are reserved.
+
+    Returns:
+        dict[str, Any]: The redacted JSON-safe representation of
+            ``model``. Suitable for JSON serialization, logging, or
+            further structured-output formatting.
+
+    Raises:
+        TypeError: When the caller passes a reserved keyword
+            (``mode`` or ``context``).
+    """
+    for reserved in ("mode", "context"):
+        if reserved in kwargs:
+            raise TypeError(
+                f"dump_redacted: keyword {reserved!r} is reserved; "
+                "the helper pins it so the redaction protocol cannot "
+                "be accidentally bypassed."
+            )
+    return model.model_dump(mode="json", context={"redact": True}, **kwargs)
+
+
 def log_redacted(model: BaseModel, *, label: str, logger: logging.Logger) -> None:
     """Log a Pydantic model at INFO with secrets redacted.
 
-    Dumps the model with ``mode="json"`` and ``context={"redact": True}``
-    so any field typed as :class:`pydantic.SecretStr` is replaced with
-    the project's :data:`~deephaven_mcp._redaction.REDACTED` sentinel
-    (subclasses of :class:`RedactableSchema`); non-secret fields are
-    emitted verbatim. Falls back to ``repr(model)`` and a WARNING when
-    :func:`json5.dumps` raises :class:`TypeError` or :class:`ValueError`
-    on the dumped dict.
+    Thin wrapper around :func:`dump_redacted`: dumps the model with
+    the project's redaction protocol applied, formats the result as
+    pretty-printed JSON5, and emits two INFO log records (a header
+    line carrying ``label`` and the body). Falls back to
+    ``repr(model)`` and a WARNING when :func:`json5.dumps` raises
+    :class:`TypeError` or :class:`ValueError` on the dumped dict.
 
     Args:
         model (BaseModel): The validated Pydantic model to log. Should
@@ -265,7 +318,7 @@ def log_redacted(model: BaseModel, *, label: str, logger: logging.Logger) -> Non
     """
     logger.info(f"[{label}] Configuration summary:")
     try:
-        redacted = model.model_dump(mode="json", context={"redact": True})
+        redacted = dump_redacted(model)
         formatted = json5.dumps(redacted, indent=2, sort_keys=True)
         logger.info(f"[{label}] Loaded configuration:\n{formatted}")
     except (TypeError, ValueError) as e:

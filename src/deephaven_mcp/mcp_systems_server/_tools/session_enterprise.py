@@ -15,6 +15,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
+from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import CorePlusQueryConfig, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
@@ -65,9 +66,7 @@ async def _collect_one_enterprise_system_status(
         raise InvalidSessionNameError(
             f"Enterprise system {system!r} is not configured."
         )
-    redacted_config = multi_config.enterprise.systems[system].model_dump(
-        mode="json", context={"redact": True}
-    )
+    redacted_config = dump_redacted(multi_config.enterprise.systems[system])
 
     system_info: dict[str, object] = {
         "name": session_registry.system_name,

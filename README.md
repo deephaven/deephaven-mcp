@@ -157,7 +157,7 @@ To stop the server: `pkill -f dh-mcp-systems-server`
       "command": "dh-mcp-systems-server",
       "args": ["--transport", "stdio"],
       "env": {
-        "DH_MCP_CONFIG_DIR": "/full/path/to/your/config"
+        "DH_MCP_DATA_DIR": "/full/path/to/your/dh-mcp-data"
       }
     },
     "deephaven-docs": {
@@ -312,7 +312,7 @@ To stop the server: `pkill -f dh-mcp-systems-server`
       "command": "dh-mcp-systems-server",
       "args": ["--transport", "stdio"],
       "env": {
-        "DH_MCP_CONFIG_DIR": "/full/path/to/your/config"
+        "DH_MCP_DATA_DIR": "/full/path/to/your/dh-mcp-data"
       }
     },
     "deephaven-docs": {
@@ -385,6 +385,16 @@ After upgrading, restart your AI tool for changes to take effect.
 ---
 
 ## Deephaven MCP Components
+
+### Local CLI (`dh-mcp`)
+
+A thin local client for the systems server. The `dh-mcp` console
+script auto-spawns a per-user background daemon on first use,
+discovers it via a `daemon.json` registry under the runtime
+directory, and dispatches MCP tool calls over loopback HTTP with a
+random PSK. Useful for shell scripting, tool exploration, and
+local debugging without managing a server lifecycle yourself. See
+[`docs/CLI.md`](docs/CLI.md) for the full reference.
 
 ### Systems Server (`dh-mcp-systems-server`)
 
@@ -598,8 +608,9 @@ When using a venv, use the full path to executables (e.g., `.venv/bin/dh-mcp-sys
 ## Configuration
 
 `dh-mcp-systems-server` reads a directory tree of small JSON / JSON5
-files (resolved as `--config-dir`, then `$DH_MCP_CONFIG_DIR`, then the
-platform default `~/.deephaven/ai/config/` on POSIX or
+files. Resolution order: `--config-dir` flag, then
+`$DH_MCP_DATA_DIR/config/`, then the platform default user-data
+root's `config/` subdirectory (`~/.deephaven/ai/config/` on POSIX or
 `%APPDATA%/Deephaven/ai/config/` on Windows). The Quick Start
 sections above show minimal Community and Enterprise examples; this
 section orients you to the rest of the tree.
@@ -690,7 +701,7 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
       "command": "dh-mcp-systems-server",
       "args": ["--transport", "stdio"],
       "env": {
-        "DH_MCP_CONFIG_DIR": "/full/path/to/your/config"
+        "DH_MCP_DATA_DIR": "/full/path/to/your/dh-mcp-data"
       }
     },
     "deephaven-docs": {
@@ -833,7 +844,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 |-------|----------------------|----------|
 | `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
 | `Connection failed` | MCP server logs | Check internet connection and server URLs |
-| `Config directory not found` / permissions audit failure | MCP server startup | Verify the directory passed via `--config-dir` (or `DH_MCP_CONFIG_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX). |
+| `Config directory not found` / permissions audit failure | MCP server startup | Verify the directory passed via `--config-dir` (or derived from `DH_MCP_DATA_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX). |
 | `Permission denied` | Command execution | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path |
 | `Python version error` | uv tool install | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...` |
 | `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
@@ -859,7 +870,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Verify files exist at the specified paths
 
 - **Environment Variable Issues:**
-  - `DH_MCP_CONFIG_DIR` must point to a valid configuration *directory* (or be unset, in which case the platform default is used)
+  - `DH_MCP_DATA_DIR` must point to a valid user-data root *directory* (under which `config/` and `runtime/` live), or be unset to use the platform default
   - Environment variables in `env` block must use correct names
   - Sensitive values should use environment variables, not hardcoded strings
 
@@ -868,7 +879,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 - **LLM Tool Can't Connect / Server Not Found:**
   - Verify the MCP server is running and listening on the expected port (HTTP transport only)
   - Verify the URL in your MCP client config matches the server's host and port
-  - Ensure `DH_MCP_CONFIG_DIR` or `--config-dir` points to a valid configuration directory (or unset both to use the platform default)
+  - Ensure `DH_MCP_DATA_DIR` or `--config-dir` points to a valid configuration source (or unset both to use the platform default)
   - For HTTP transport, ensure your client sends the `X-Deephaven-PSK` header with the value declared in `server.json`
   - Ensure any [Deephaven Community Core](https://deephaven.io/community/) sessions you intend to use are running and network-accessible
   - Check for typos in server URLs or config paths
@@ -939,7 +950,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Check that the MCP server process has read permissions for every file under the configuration directory
 
 - **Session ID Format Issues:**
-  - Use the correct format: `{type}:{source}:{session_name}`
+  - Use the correct format: `{type}:{system}:{session_name}`
   - Examples: `community:community:my_session`, `enterprise:prod:analytics`
   - PQ ids use the simpler form `<system>:<serial>` (e.g. `prod:42`) and route to the right enterprise system automatically
   - Avoid special characters or spaces in session names

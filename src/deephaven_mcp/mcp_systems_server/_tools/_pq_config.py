@@ -6,7 +6,7 @@ defaults applied by the PQ tools in
 loaded from ``enterprise/settings.json``'s ``pq_tools`` block at
 startup (PQ tools are enterprise-only) and published into the
 lifespan context as part of the validated
-:class:`~deephaven_mcp.mcp_systems_server.config.MultiSystemConfig`.
+:class:`~deephaven_mcp.mcp_systems_server.config.ConfigTree`.
 PQ tool functions read it via
 :func:`deephaven_mcp.mcp_systems_server._tools.shared.get_enterprise_settings`
 (``.pq_tools``) at call time and pass it down to private helpers.

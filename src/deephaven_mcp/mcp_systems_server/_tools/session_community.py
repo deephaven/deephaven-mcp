@@ -278,7 +278,7 @@ def _resolve_community_session_parameters(
         docker_cpu_limit (float | None): Docker CPU limit (docker only), or None for no limit
         docker_volumes (list[str] | None): Docker volume mounts (docker only), or None to use default
         python_venv_path (str | None): Python venv path (python only), or None to use default
-        defaults (dict): Configuration defaults from ``community/settings.json`` (under ``$DH_MCP_CONFIG_DIR``)
+        defaults (dict): Configuration defaults from ``community/settings.json`` (in your configuration directory)
 
     Returns:
         tuple[dict[str, Any], dict | None]: Two-element tuple:
@@ -733,7 +733,9 @@ def _log_auto_generated_credentials(
     _LOGGER.warning(
         "   To retrieve credentials via MCP tool, enable credential_retrieval_enabled"
     )
-    _LOGGER.warning("   in your community/settings.json under $DH_MCP_CONFIG_DIR.")
+    _LOGGER.warning(
+        "   in your community/settings.json in your configuration directory."
+    )
     _LOGGER.warning("=" * 70)
 
 
@@ -997,10 +999,10 @@ async def session_community_create(
             f"(method: {resolved_launch_method}, language: {resolved_programming_language}, auth: {resolved_auth_type})"
         )
 
-        # Get instance tracker from context for orphan tracking
-        instance_tracker: InstanceTracker = context.request_context.lifespan_context[
-            "instance_tracker"
-        ]
+        # Get instance tracker from context for orphan tracking.
+        instance_tracker: InstanceTracker = (
+            context.request_context.lifespan_context.instance_tracker
+        )
 
         # Launch session and wait for readiness
         launched_session, port, launch_error = await _launch_process_and_wait_for_ready(
@@ -1289,9 +1291,9 @@ async def session_community_delete(
             f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{session_id}'"
         )
 
-        instance_tracker: InstanceTracker = context.request_context.lifespan_context[
-            "instance_tracker"
-        ]
+        instance_tracker: InstanceTracker = (
+            context.request_context.lifespan_context.instance_tracker
+        )
         await _delete_session_resources(
             session_id,
             session_name,
@@ -1383,7 +1385,7 @@ async def session_community_credentials(
     when the user explicitly needs browser access.
 
     IMPORTANT: This tool is DISABLED by default for security. To enable, add to your
-    ``community/settings.json`` (under ``$DH_MCP_CONFIG_DIR``):
+    ``community/settings.json`` (in your configuration directory):
 
     {
       "security": {
@@ -1516,7 +1518,7 @@ async def session_community_credentials(
                 f"[mcp_systems_server:session_community_credentials] DENIED: Credential retrieval disabled (mode='none') for session_id '{session_id}'"
             )
             return error_response(
-                "Credential retrieval is disabled (mode='none'). To enable, set security.credential_retrieval_mode in community/settings.json (under $DH_MCP_CONFIG_DIR):\n\n"
+                "Credential retrieval is disabled (mode='none'). To enable, set security.credential_retrieval_mode in community/settings.json (in your configuration directory):\n\n"
                 "Available modes:\n"
                 '  - "none": Disable all credential retrieval (secure default)\n'
                 '  - "dynamic_only": Allow only auto-generated session credentials\n'
@@ -1555,7 +1557,7 @@ async def session_community_credentials(
             return error_response(
                 f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
                 f"Session '{session_id}' is a static (config-based) session. "
-                f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in community/settings.json (under $DH_MCP_CONFIG_DIR)."
+                f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in community/settings.json (in your configuration directory)."
             )
         elif credential_retrieval_mode == "static_only" and is_dynamic:
             _LOGGER.warning(
@@ -1564,7 +1566,7 @@ async def session_community_credentials(
             return error_response(
                 f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
                 f"Session '{session_id}' is a dynamic (on-demand) session. "
-                f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in community/settings.json (under $DH_MCP_CONFIG_DIR)."
+                f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in community/settings.json (in your configuration directory)."
             )
 
         # Credential retrieval is allowed - proceed

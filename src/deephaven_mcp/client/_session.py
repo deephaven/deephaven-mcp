@@ -89,6 +89,7 @@ from deephaven_mcp._exceptions import (
     SessionCreationError,
     SessionError,
 )
+from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.auth.credentials import (
     AnonymousCredentials,
     Credentials,
@@ -1243,7 +1244,7 @@ class CoreSession(BaseSession[Session]):
             "client_cert_chain": client_cert_chain_bytes,
             "client_private_key": client_private_key_bytes,
         }
-        creds_redacted = credentials.model_dump(mode="json", context={"redact": True})
+        creds_redacted = dump_redacted(credentials)
         _LOGGER.info(
             f"[CoreSession:from_credentials] Creating Community (Core) Session: "
             f"host={host}, port={port}, tls={tls!r}, "
@@ -1314,7 +1315,7 @@ class CoreSession(BaseSession[Session]):
             SessionCreationError: For any other session-construction
                 failure.
         """
-        log_cfg = cfg.model_dump(mode="json", context={"redact": True})
+        log_cfg = dump_redacted(cfg)
         _LOGGER.info(
             f"[CoreSession:from_session_config] Community session configuration: {log_cfg}"
         )

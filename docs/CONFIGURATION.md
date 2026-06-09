@@ -30,8 +30,8 @@ file). The default location is:
 - POSIX: `~/.deephaven/ai/config/`
 - Windows: `%APPDATA%/Deephaven/ai/config/`
 
-Override with the `DH_MCP_CONFIG_DIR` environment variable or the
-`--config-dir` CLI flag. **`DH_MCP_CONFIG_DIR` is the only
+Override with the `DH_MCP_DATA_DIR` environment variable or the
+`--config-dir` CLI flag. **`DH_MCP_DATA_DIR` is the only
 environment variable the systems server itself reads at startup**
 (plus `PYTHONLOGLEVEL` for log verbosity). Every other knob lives
 inside the JSON files (and the [templating engine](#templating)
@@ -45,7 +45,7 @@ its own (small) set of environment variables documented in
 Layout:
 
 ```text
-$DH_MCP_CONFIG_DIR/
+$DH_MCP_DATA_DIR/config/
   server.json                       # optional; HTTP transport + PSK
   community/
     settings.json                   # optional; per-system defaults
@@ -176,6 +176,23 @@ pq_tools` (see [below](#pq_tools)).
 
 Use `${env:...}` to pull any field's value from an environment
 variable without committing it to disk.
+
+### `server.json`: `daemon` block
+
+Optional sub-block consulted only when the systems server runs in
+daemon mode (`--daemon`, as spawned by the `dh-mcp` CLI). Ignored
+under stdio and the foreground HTTP transport. All fields are
+optional with schema-level defaults.
+
+| Field                   | Type        | Default                   | Description                                                                                                                                                                                 |
+| ----------------------- | ----------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `idle_shutdown_seconds` | int (>= 0)  | `3600`                    | Seconds of MCP inactivity after which the daemon gracefully exits. `0` disables auto-shutdown (the daemon runs until killed). Activity is any successful, PSK-authenticated MCP request; failed PSK checks do not reset the timer. |
+| `process_name`          | str         | `"dh-mcp-systems-server"` | Expected process-name token the CLI's liveness check matches against the recorded PID (or command line on Linux/macOS); a mismatch marks the registry entry stale and discards it.          |
+
+The `dh-mcp` CLI commands that manage this daemon's lifecycle
+(`daemon start` / `stop` / `status` / `restart` / `reset` / `logs`)
+are documented in [`docs/CLI.md`](CLI.md) — that link is for the CLI
+command reference, not for these field definitions.
 
 ## `community/settings.json`
 

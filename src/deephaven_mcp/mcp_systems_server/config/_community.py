@@ -8,7 +8,7 @@ Contains:
   :class:`CommunitySessionCreationDefaults`) - the Pydantic schema
   for ``community/settings.json``.
 - :class:`CommunityConfig` - the umbrella that
-  :class:`~deephaven_mcp.mcp_systems_server.config.MultiSystemConfigManager`
+  :class:`~deephaven_mcp.mcp_systems_server.config.ConfigTreeLoader`
   produces after loading ``community/settings.json`` and every
   ``community/sessions/<name>.json`` file.
 - :func:`load_community` - the section loader the manager invokes.
@@ -48,11 +48,10 @@ from deephaven_mcp._pydantic import (
 )
 from deephaven_mcp.auth.credentials import CredentialsUnion
 from deephaven_mcp.client._timeouts import CommunityClientTimeouts
+from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
 from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
 from deephaven_mcp.sessions import CommunitySessionConfig
-
-from ._loaders import load_named_json, load_named_json_with_stem
 
 _LOGGER = logging.getLogger(__name__)
 

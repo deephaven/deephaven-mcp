@@ -9,12 +9,23 @@ Perform a comprehensive review of the specified Python file as it currently exis
 
 1. **Design**: Is the code well-structured and consistent with the project? Apply the `_python-coding-practices` and `_mcp-module-organization` skills as relevant.
 2. **Correctness**: Does the code do what it claims? Look for logic errors, incorrect assumptions, and edge cases.
-3. **Simplification and DRY**: Can the code be simplified? Is logic duplicated that could be shared? Flag unnecessary abstraction or over-engineering.
-4. **Code smells**: Long functions, deep nesting, magic numbers, overly complex conditions.
-5. **Security**: Check for credential mishandling, session isolation issues, injection risks, and information disclosure. Ensure no default or fallback session IDs are used.
+3. **Simplification and DRY**: Can the code be simplified? Flag duplicated logic that should be shared, unnecessary abstraction, and over-engineering.
+4. **Code smells**: Flag anything that makes a senior engineer pause and ask *"why is it like that?"* — long functions, deep nesting, magic numbers, complex conditions, oddly-shaped APIs (boolean-mode flags, stringly-typed parameters where a `Literal` or `Enum` belongs, long parameter lists), strange call syntax, dead or commented-out code, mixed abstraction levels within one function, mutable default arguments, broad `except` clauses, side effects in property getters or `__init__`, argument mutation, speculative generality, primitive obsession, feature envy, re-implementations of stdlib or library functionality, misleading names, inconsistent return types, sentinel returns where an exception belongs — *or anything else that just looks off.* This list is illustrative, not exhaustive; trust your judgement. Apply the general style rules in `_python-coding-practices`.
+5. **Security**: Check for credential mishandling, session isolation issues, injection risks, and information disclosure — or anything else security-relevant. This list is illustrative, not exhaustive; trust your judgement. Flag any default or fallback session IDs — session IDs arrive as explicit tool parameters and are validated by `parse_session_id` (see `_mcp-module-organization`), which raises rather than substituting a default.
 6. **Type safety**: Flag any `Any` type hints, `hasattr`, or `getattr` usage without justification (per `_python-coding-practices`).
-7. **Docstrings**: Apply the `pydocs-improve` skill to all functions and classes in the file. For any Pydantic schemas (`StrictSchema` / `RedactableSchema` subclasses), verify every field carries a PEP 257 trailing docstring — the project enforces this with `tests/test__pydantic_field_docs.py`; flag any reliance on `Attributes:` blocks as a documentation bug.
-8. **Imports**: Remove unused imports. The `run-precommit` skill (ruff) will catch any that remain.
-9. **Logging**: Apply the `_logging-standards` skill to review logging coverage and consistency.
-10. **Test coverage**: Is the file adequately covered by its corresponding test file?
-11. Do not remove TODOs without a very good reason.
+7. **Closed-set dispatch exhaustiveness**: For every dispatch on a `Literal`, `Enum`, or tuple of accepted values, verify a `match` + `typing.assert_never(value)` exhaustive form is used (or per-member metadata via `__new__` for enums). Flag any silent `if/elif/elif` fall-through default branch on a closed set. See `_python-coding-practices` rule #18.
+8. **Suppression audit**: Search the file for `# pragma: no cover`, `# type: ignore`, `# noqa`, `# mypy: ignore-errors`. For each occurrence, determine whether a design move would eliminate the need (factor a helper, narrow with `cast`, rewrite the API). Flag any suppression without an inline justification comment. Bare `# type: ignore` (no bracketed error code) is always a bug. See `_python-coding-practices` rule #19.
+9. **Docstrings**: Apply the `pydocs-improve` skill to all functions and classes in the file. For any Pydantic schemas (`StrictSchema` / `RedactableSchema` subclasses), verify every field carries a PEP 257 trailing docstring — the project enforces this with `tests/test__pydantic_field_docs.py`; flag any reliance on `Attributes:` blocks as a documentation bug.
+   - **CLI help surface.** For files under `cli/_commands/` or `cli/_help.py`, the *surfaced* strings — command `help=` (via `build_help`), every `click.option(help=...)`, and group docstrings used as help — are governed by `_cli-help-standards`, not pydocs. Apply `cli-help-improve` to that surface: verify the section contract, single-sourced `OutputSpec`, and plain-text (no-RST) rule. Internal docstrings on the same file still go through `pydocs-improve`.
+10. **Imports**: Flag any unused imports. (`run-precommit` removes them via ruff; the reviewer flags them for awareness, does not edit.)
+11. **Logging**: Apply the `_logging-standards` skill to review logging coverage and consistency.
+12. **Test coverage**: Verify the file is covered by its corresponding test file at the project's 100% per-source-file target (see `AGENTS.md` and `tests-improve`). Flag any uncovered branch.
+    - **`__init__.py` files count.** Every `__init__.py` — including ones that only define `__all__` (even an empty `__all__`) or re-export from a sibling module — has its own dedicated `test_init.py`. The package surface is part of the project's API contract; an untested `__init__.py` is a silent-refactor hazard.
+    - **What the `test_init.py` must pin**:
+        - The exact set of names in `__all__`.
+        - That every name in `__all__` resolves on the package (`hasattr(pkg, name)`).
+        - That each re-export is the same object as the internal definition (`pkg.X is _module.X`).
+        - That no `_`-prefixed names leak into the public surface.
+    - **Canonical implementations**: `tests/mcp_systems_server/config/test_init.py`, `tests/auth/middleware/test_init.py`, `tests/cli/config/test_init.py`.
+
+Do not remove TODOs without a very good reason.

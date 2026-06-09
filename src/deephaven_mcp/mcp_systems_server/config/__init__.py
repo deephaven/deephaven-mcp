@@ -9,9 +9,9 @@ session factories.
 
 Public API:
 
-- :class:`MultiSystemConfigManager` — coroutine-safe loader for the
-  per-file configuration tree (server, community, enterprise).
-- :class:`MultiSystemConfig` and the per-section umbrella models
+- :class:`ConfigTreeLoader` — coroutine-safe loader for the
+  per-file configuration tree (server, cli, community, enterprise).
+- :class:`ConfigTree` and the per-section umbrella models
   (:class:`ServerConfig`, :class:`CommunityConfig`,
   :class:`EnterpriseConfig`) plus their nested settings schemas
   (:class:`CommunitySettings`, :class:`EnterpriseSettings`,
@@ -44,10 +44,11 @@ Validation and redaction are handled directly by the models:
 """
 
 __all__ = [
-    # Manager + top-level model
-    "MultiSystemConfigManager",
-    "MultiSystemConfig",
+    # Loader + top-level model
+    "ConfigTreeLoader",
+    "ConfigTree",
     # Per-section umbrella models
+    "DaemonConfig",
     "ServerConfig",
     "CommunityConfig",
     "CommunitySettings",
@@ -77,5 +78,5 @@ from ._community import (
     CommunityTimeouts,
 )
 from ._enterprise import EnterpriseConfig, EnterpriseSettings, EnterpriseTimeouts
-from ._multi import MultiSystemConfig, MultiSystemConfigManager
-from ._server import ServerConfig
+from ._server import DaemonConfig, ServerConfig
+from ._tree import ConfigTree, ConfigTreeLoader

@@ -8,6 +8,7 @@ description: Verify Python docstrings are factually accurate — descriptions, A
 For the specified file or function, verify that all docstrings are factually accurate. Fix any inaccuracies directly.
 
 **Docstrings** — check:
+
 - Description matches what the function actually does
 - `Args` section matches actual parameter names, types, and behavior
 - `Returns` section matches what the function actually returns
@@ -18,6 +19,7 @@ For the specified file or function, verify that all docstrings are factually acc
 `RedactableSchema` subclass, check the field's trailing PEP 257
 docstring (the triple-quoted string immediately below the
 assignment) for **accuracy only**:
+
 - The description matches the field's current type, constraints
   (`gt=0`, `ge=0`, etc.), and behavior
 - Mentioned default values still match the actual default

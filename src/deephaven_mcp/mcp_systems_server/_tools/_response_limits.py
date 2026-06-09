@@ -8,7 +8,7 @@ The model is loaded from each section's ``settings.json`` block at
 startup (community and enterprise carry independent copies so the two
 deployments can tune the guard separately) and published into the
 lifespan context as part of the validated
-:class:`~deephaven_mcp.mcp_systems_server.config.MultiSystemConfig`.
+:class:`~deephaven_mcp.mcp_systems_server.config.ConfigTree`.
 Tool functions read the appropriate copy via
 :func:`deephaven_mcp.mcp_systems_server._tools.shared.get_response_limits`
 at call time and pass it down to the size-check helper.

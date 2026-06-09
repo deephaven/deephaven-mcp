@@ -10,7 +10,11 @@ from pydantic import SecretStr, ValidationError
 
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp._redaction import REDACTED
-from deephaven_mcp.mcp_systems_server.config._server import ServerConfig, load_server
+from deephaven_mcp.mcp_systems_server.config._server import (
+    DaemonConfig,
+    ServerConfig,
+    load_server,
+)
 
 # ---------------------------------------------------------------------------
 # ServerConfig — construction / validation
@@ -118,6 +122,58 @@ def test_server_config_reveal_dump_resolves_secret() -> None:
 def test_server_config_repr_masks_psk() -> None:
     cfg = ServerConfig.model_validate({"psk": "topsecret"})
     assert "topsecret" not in repr(cfg)
+
+
+# ---------------------------------------------------------------------------
+# DaemonConfig
+# ---------------------------------------------------------------------------
+
+
+def test_daemon_config_defaults() -> None:
+    cfg = DaemonConfig.model_validate({})
+    assert cfg.idle_shutdown_seconds == 3600
+    assert cfg.process_name == "dh-mcp-systems-server"
+
+
+def test_daemon_config_accepts_zero_idle_shutdown() -> None:
+    """``idle_shutdown_seconds=0`` disables auto-shutdown and is permitted."""
+    cfg = DaemonConfig.model_validate({"idle_shutdown_seconds": 0})
+    assert cfg.idle_shutdown_seconds == 0
+
+
+def test_daemon_config_rejects_negative_idle_shutdown() -> None:
+    with pytest.raises(ValidationError, match="idle_shutdown_seconds"):
+        DaemonConfig.model_validate({"idle_shutdown_seconds": -1})
+
+
+def test_daemon_config_rejects_unknown_field() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        DaemonConfig.model_validate({"bogus": 1})
+
+
+def test_daemon_config_is_frozen() -> None:
+    cfg = DaemonConfig.model_validate({})
+    with pytest.raises(ValidationError):
+        cfg.idle_shutdown_seconds = 1  # type: ignore[misc]
+
+
+def test_server_config_default_daemon_block() -> None:
+    cfg = ServerConfig.model_validate({})
+    assert cfg.daemon.idle_shutdown_seconds == 3600
+    assert cfg.daemon.process_name == "dh-mcp-systems-server"
+
+
+def test_server_config_accepts_full_daemon_block() -> None:
+    cfg = ServerConfig.model_validate(
+        {
+            "daemon": {
+                "idle_shutdown_seconds": 60,
+                "process_name": "custom-daemon",
+            }
+        }
+    )
+    assert cfg.daemon.idle_shutdown_seconds == 60
+    assert cfg.daemon.process_name == "custom-daemon"
 
 
 # ---------------------------------------------------------------------------

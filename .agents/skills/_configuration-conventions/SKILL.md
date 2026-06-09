@@ -1,6 +1,7 @@
 ---
 name: _configuration-conventions
 description: How Deephaven MCP servers consume runtime configuration — JSON5 + Pydantic v2 + templating, schema defaults, no ad-hoc env reads — invoke before adding a new tunable, refactoring a config model, or wiring an environment variable into the code
+user-invocable: false
 ---
 
 # Configuration Conventions
@@ -12,13 +13,13 @@ a config model, or wiring an environment variable into the code.
 Authoritative end-user reference: `docs/CONFIGURATION.md`. This
 skill is the *internal-to-the-codebase* counterpart and explains
 **how** to extend the configuration safely. The only env var the
-server itself reads is `DH_MCP_CONFIG_DIR` (consumed by
+server itself reads is `DH_MCP_DATA_DIR` (consumed by
 `deephaven_mcp.config.resolve_config_dir`); every
 other tunable lives in the JSON tree.
 
 ## Architecture in one sentence
 
-Configuration lives in **JSON5 files** under `DH_MCP_CONFIG_DIR`,
+Configuration lives in **JSON5 files** under `DH_MCP_DATA_DIR`,
 is shaped by **Pydantic v2 models** (which double as the wire-
 format schema and the runtime types), and pulls in env-vars or
 file contents through a **templating engine** that runs *before*
@@ -30,7 +31,7 @@ Pydantic validation.
 
 Every tunable lives in one of the JSON files described in
 `docs/CONFIGURATION.md`. The only exception is the
-`DH_MCP_CONFIG_DIR` env var itself, which tells the server *where*
+`DH_MCP_DATA_DIR` env var itself, which tells the server *where*
 to find the JSON tree.
 
 Do **not** add ad-hoc `os.environ[...]` reads inside tool code,
@@ -138,8 +139,8 @@ When defining a new secret field:
 Configuration is read **once** at server startup. The historical
 `mcp_reload` tool was removed. If you change a JSON file you
 restart the server. Add tests that exercise the loader path
-(`tests/mcp_systems_server/config/test__multi.py`) rather than
-mutating live `MultiSystemConfig` instances; the model is frozen.
+(`tests/mcp_systems_server/config/test__tree.py`) rather than
+mutating live `ConfigTree` instances; the model is frozen.
 
 ### 5. Colocate config models with their consumers
 
@@ -150,9 +151,11 @@ Working examples in this codebase:
 - **`PqToolsConfig`** lives in
   `deephaven_mcp.mcp_systems_server._tools._pq_config` (next to the
   PQ tools that read it), even though it is referenced by
-  `mcp_systems_server.config._server.ServerConfig.pq_tools`.
-- **`MultiSystemConfig`** lives in
-  `deephaven_mcp.mcp_systems_server.config._multi` and is consumed
+  `mcp_systems_server.config._enterprise.EnterpriseSettings.pq_tools`.
+- **`ConfigTree`** (the canonical aggregator that mirrors the
+  on-disk layout `server.json` / `cli.json` / `community/` /
+  `enterprise/` one-for-one) lives in
+  `deephaven_mcp.mcp_systems_server.config._tree` and is consumed
   directly by `deephaven_mcp.resource_manager._registry_multi`.
   The composite registry stays with the other registries; the
   config stays with its loader.
@@ -201,7 +204,7 @@ overridden = MyModel.model_validate(
 ```
 
 If a test wants predictable timers, it constructs the
-`MultiSystemConfig` (or its relevant sub-model) with the values it
+`ConfigTree` (or its relevant sub-model) with the values it
 actually wants — not a parallel scalar that side-steps the
 schema. If you find yourself writing a helper that maps
 `Optional[float]` kwargs onto a Pydantic field with conditional
@@ -212,7 +215,7 @@ and the kwargs together.
 idle_timeout: float | None, sweep_interval: float | None)`` —
 two scalar kwargs that overrode an
 ``EvictionTimeouts`` block already present on the
-``MultiSystemConfig`` argument, with a 12-line
+``ConfigTree`` argument, with a 12-line
 ``_resolve_eviction_timeouts`` helper that reconstructed the
 model field-by-field. Both were deleted; tests now build the
 ``EvictionTimeouts`` they want into the config they pass in.)
@@ -229,105 +232,15 @@ model field-by-field. Both were deleted; tests now build the
 The systems-server schemas and per-section loaders live in
 `deephaven_mcp.mcp_systems_server.config` — each per-section module
 (`_server`, `_community`, `_enterprise`) owns its umbrella schema
-and a matching `load_<section>` function; `_multi` aggregates them
-through `MultiSystemConfigManager`. The general-purpose
+and a matching `load_<section>` function; `_tree` aggregates them
+through `ConfigTreeLoader` (whose loader produces a `ConfigTree`).
+The general-purpose
 file-loading + templating primitives that those loaders sit on top
 of live in `deephaven_mcp.config` (`_file_loader`, `_templating`,
 `_config_dir`, `_dir_permissions`).
 
-## Adding a new tunable — checklist
+## Extending configuration
 
-1. **Decide where it lives.** Per-session? Use the relevant
-   session-config model. Project-wide for community? Add to
-   `CommunitySettings` (or its `session_creation.defaults`). Server
-   transport? Use `ServerConfig`.
-2. **Add the field.** Annotate it (`Annotated[..., Field(gt=0)]`
-   etc.) and set the default *at the field*. Document it with a
-   PEP 257 trailing docstring on the field declaration (see rule 2b
-   above) — not in an `Attributes:` block on the class docstring.
-   The `tests/test__pydantic_field_docs.py` regression test will
-   fail the build if you forget.
-3. **Wire the consumer** to read the field by attribute access
-   from the validated model. Do *not* re-introduce dict-based
-   `.get()` lookups against `model_dump(...)`.
-4. **Update the four artifacts that move together.** Every config
-   schema change must touch all of these in lockstep, or operators
-   will see drift between the model, the docs, the examples, and
-   the test coverage:
-   - The Pydantic model (field + trailing docstring).
-   - `docs/CONFIGURATION.md` — table row, default value, any
-     cross-references in surrounding prose.
-   - `config-samples/ai/config/` — the corresponding example file when
-     the field is operator-facing.
-   - Tests under `tests/mcp_systems_server/config/` (loader path)
-     and `tests/sessions/` (per-session schema path) covering
-     both the typed access path (model-validate a dict, read the
-     attribute) and the loader path when templating is involved
-     (write a temp file, call the loader, assert the resolved
-     value). Tests for the shared file-loading and templating
-     primitives live under `tests/config/`.
-
-## Five anti-patterns to avoid
-
-### A. The field name is forever
-
-Once a field ships in a release, renaming it is a breaking change
-for every operator's `community/settings.json`, `enterprise/`
-file, or `server.json`. Decide on the right name *before* merge
-— shipping under a placeholder name and renaming later costs more
-than a careful review pass.
-
-### B. Prefer structural fixes to cross-field validators
-
-When two fields are coupled (e.g. "these four fields apply only
-when `launch_method=='docker'`"), the *structural* fix — group
-the coupled fields under a nested model or a discriminated union
-— is better than reaching for `model_validator(mode='after')`.
-Grouping makes the coupling visible in the wire format; a
-validator hides it behind a runtime check. Use cross-field
-validators only when the natural grouping is not nesting (e.g.
-`port > 0 if transport == 'http'`).
-
-### C. Do not use `0` as a sentinel for "unbounded" or "disabled"
-
-Operators reading a field set to `0` will reasonably guess that
-it means "do nothing" / "reject everything" — not "no limit". Use
-`None` (with `Field(gt=0)`) for the unbounded/disabled sentinel,
-so the schema enforces the distinction:
-
-```python
-# Wrong — 0 silently means "unbounded"
-max_concurrent_sessions: Annotated[int, Field(ge=0)] = 5
-
-# Right — None means "unbounded", 0 is rejected
-max_concurrent_sessions: Annotated[int | None, Field(default=5, gt=0)] = 5
-```
-
-### D. Single source of truth: derive, don't re-declare
-
-If field A is fully derivable from field B, derive it at the
-consumer boundary; do not expose both as independent JSON knobs.
-Independent knobs that *must* agree will eventually disagree
-(operator typo, copy-paste from a different system, etc.) and
-the error surfaces as a runtime auth failure or worse, not as a
-config validation error. The escape hatch for genuinely-distinct
-values is a discriminated credentials/credentials-like union,
-not two parallel fields.
-
-### E. Don't expose internal sentinels as JSON knobs
-
-If the field's docstring says some variant of *"operators should
-leave this at the default"*, that is a sign the field belongs
-in code, not in the JSON wire format. Either remove the field
-(hardcode at the call site) or rewrite the docstring to describe
-a real use case for changing it.
-
-## When you think you need an env var directly
-
-Almost never. `DH_MCP_CONFIG_DIR` is the only legitimate case
-today (read by
-`deephaven_mcp.config.resolve_config_dir`). Before
-adding another, ask: can the operator put this value in a JSON
-file and use `${env:NAME}` to pull the env-var contents into it?
-Usually yes — and that path keeps the schema, validation,
-defaults, and redaction all in one place.
+The add-a-tunable checklist, the design anti-patterns to avoid, and
+when (almost never) a direct env var is justified, are in
+[extending.md](extending.md).

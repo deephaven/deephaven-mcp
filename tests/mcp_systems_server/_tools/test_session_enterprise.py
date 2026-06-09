@@ -490,7 +490,7 @@ async def test_enterprise_systems_status_config_error():
     # Replace the system config entry with a Mock whose ``model_dump``
     # raises (``EnterpriseSystemConfig`` is frozen, so we cannot mutate
     # the validated instance in place).
-    multi_config = context.request_context.lifespan_context["multi_config"]
+    multi_config = context.request_context.lifespan_context.multi_config
     boom = MagicMock()
     boom.model_dump = MagicMock(side_effect=Exception("Config error"))
     multi_config.enterprise.systems[_TEST_SYSTEM_NAME] = boom

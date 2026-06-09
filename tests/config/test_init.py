@@ -10,13 +10,22 @@ from __future__ import annotations
 
 import deephaven_mcp.config as config_pkg
 from deephaven_mcp import _exceptions as _exceptions_pkg
-from deephaven_mcp.config import _config_dir, _dir_permissions
+from deephaven_mcp._platform import dir_permissions as _platform_dir_permissions
+from deephaven_mcp.config import (
+    _config_dir,
+    _data_root,
+    _dir_permissions,
+    _runtime_dir,
+)
 
 _EXPECTED_PUBLIC_NAMES = {
-    "CONFIG_DIR_ENV_VAR",
+    "DATA_DIR_ENV_VAR",
     "ConfigurationError",
-    "default_config_dir",
+    "daemon_dir",
+    "harden_private_dir",
     "resolve_config_dir",
+    "resolve_data_root",
+    "resolve_runtime_dir",
     "verify_config_directory_permissions",
 }
 
@@ -34,13 +43,18 @@ def test_all_names_in_all_are_resolvable_attributes() -> None:
 
 def test_reexports_are_same_objects_as_internal_definitions() -> None:
     """Package symbols must be the same objects as their submodule sources."""
-    assert config_pkg.CONFIG_DIR_ENV_VAR is _config_dir.CONFIG_DIR_ENV_VAR
-    assert config_pkg.default_config_dir is _config_dir.default_config_dir
+    assert config_pkg.DATA_DIR_ENV_VAR is _data_root.DATA_DIR_ENV_VAR
+    assert config_pkg.resolve_data_root is _data_root.resolve_data_root
     assert config_pkg.resolve_config_dir is _config_dir.resolve_config_dir
+    assert config_pkg.resolve_runtime_dir is _runtime_dir.resolve_runtime_dir
+    assert config_pkg.daemon_dir is _runtime_dir.daemon_dir
     assert (
         config_pkg.verify_config_directory_permissions
         is _dir_permissions.verify_config_directory_permissions
     )
+    # ``harden_private_dir`` is defined in the OS-abstraction package and
+    # re-exported here; the config module no longer defines it.
+    assert config_pkg.harden_private_dir is _platform_dir_permissions.harden_private_dir
     assert config_pkg.ConfigurationError is _exceptions_pkg.ConfigurationError
 
 
@@ -67,8 +81,8 @@ def test_systems_server_schemas_are_not_reexported_here() -> None:
         "EnterpriseConfig",
         "EnterpriseSettings",
         "EnterpriseTimeouts",
-        "MultiSystemConfig",
-        "MultiSystemConfigManager",
+        "ConfigTree",
+        "ConfigTreeLoader",
         "ServerConfig",
         "SessionOrigin",
         "SystemRef",

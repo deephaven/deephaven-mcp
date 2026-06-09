@@ -43,8 +43,8 @@ from deephaven_mcp.mcp_systems_server._lifespan import LifespanContext
 from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
 from deephaven_mcp.mcp_systems_server.config import (
     CommunitySettings,
+    ConfigTree,
     EnterpriseSettings,
-    MultiSystemConfig,
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
@@ -157,7 +157,7 @@ def get_lifespan_context(context: Context) -> LifespanContext:
         context (Context): The MCP context object.
 
     Returns:
-        LifespanContext: The dictionary yielded by
+        LifespanContext: The frozen dataclass yielded by
             :func:`deephaven_mcp.mcp_systems_server._lifespan.make_lifespan`.
     """
     return context.request_context.lifespan_context  # type: ignore[no-any-return]
@@ -176,21 +176,21 @@ def get_registry(context: Context) -> MultiSystemRegistry:
             during startup with credentials read from the configuration
             tree.
     """
-    return get_lifespan_context(context)["registry"]
+    return get_lifespan_context(context).registry
 
 
-def get_multi_config(context: Context) -> MultiSystemConfig:
+def get_multi_config(context: Context) -> ConfigTree:
     """Return the validated multi-system configuration loaded at startup.
 
     Args:
         context (Context): The MCP context object.
 
     Returns:
-        MultiSystemConfig: The same dataclass returned by
-            :meth:`MultiSystemConfigManager.get_config` during the
+        ConfigTree: The same dataclass returned by
+            :meth:`ConfigTreeLoader.get_config` during the
             lifespan startup.
     """
-    return get_lifespan_context(context)["multi_config"]
+    return get_lifespan_context(context).multi_config
 
 
 def get_enterprise_settings(context: Context) -> EnterpriseSettings:

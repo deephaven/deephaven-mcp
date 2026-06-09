@@ -5,7 +5,7 @@ Contains:
 - :class:`EnterpriseSettings` - the Pydantic schema for
   ``enterprise/settings.json``.
 - :class:`EnterpriseConfig` - the umbrella that
-  :class:`~deephaven_mcp.mcp_systems_server.config.MultiSystemConfigManager`
+  :class:`~deephaven_mcp.mcp_systems_server.config.ConfigTreeLoader`
   produces after loading ``enterprise/settings.json`` and every
   ``enterprise/systems/<name>.json`` file.
 - :func:`load_enterprise` - the section loader the manager invokes.
@@ -36,12 +36,11 @@ from pydantic import Field
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp._pydantic import StrictSchema
 from deephaven_mcp.client._timeouts import EnterpriseClientTimeouts
+from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
 from deephaven_mcp.mcp_systems_server._tools._pq_config import PqToolsConfig
 from deephaven_mcp.mcp_systems_server._tools._response_limits import ResponseLimits
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
 from deephaven_mcp.sessions import EnterpriseSystemConfig
-
-from ._loaders import load_named_json, load_named_json_with_stem
 
 _LOGGER = logging.getLogger(__name__)
 
