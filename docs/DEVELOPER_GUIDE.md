@@ -359,7 +359,7 @@ Where:
 - `source`: For community sessions, always the literal `"community"` (the umbrella system name; the static-vs-dynamic distinction lives on the manager's `origin` field, not in the id). For enterprise sessions, the server's configured `system_name` (e.g. `"prod"`, `"staging"`).
 - `session_name`: The specific session name within that source
 
-For enterprise sessions, `source` equals the server's configured `system_name`, Embedding it in the session ID lets the one multiplexed server host multiple enterprise systems without ID collisions; a tool call validates that the `system_name` component names a configured system and errors clearly otherwise.
+For enterprise sessions, `source` equals the server's configured `system_name`. Embedding it in the session ID lets the multiplexed server host multiple enterprise systems without ID collisions; tool calls validate the `system_name` component and error clearly otherwise.
 
 **Examples**:
 
