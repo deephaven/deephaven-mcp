@@ -16,6 +16,7 @@ policy, see the root [`SECURITY.md`](../SECURITY.md).
 - [Transport security](#transport-security)
 - [Secret handling](#secret-handling)
 - [Rotation](#rotation)
+- [Docs server](#docs-server)
 - [Further reading](#further-reading)
 
 ## Am I in scope for this guide?
@@ -31,6 +32,10 @@ machine** to talk to a running `dh-mcp-systems-server` over HTTP
 deployment, etc.). The HTTP transport requires explicit decisions
 about authentication and a fronting TLS layer; the rest of this
 page walks through those decisions.
+
+If instead you deploy `dh-mcp-docs-server` (the public
+documentation Q&A service), skip to [Docs server](#docs-server) —
+it has a deliberately different, unauthenticated posture.
 
 ## Trust model
 
@@ -214,6 +219,34 @@ do **not** accept a `tls` block — the upstream Enterprise
 - **Outbound credential rotation:** update the `${env:NAME}` source
   or the `${file:PATH}` target and **restart the server**. In-memory
   credentials are not re-resolved at runtime.
+
+## Docs server
+
+Everything above describes `dh-mcp-systems-server`. The second
+binary, `dh-mcp-docs-server`, has a deliberately different posture:
+it is an **intentionally public, unauthenticated** documentation
+Q&A service.
+
+- **No PSK gate, by design.** The docs server exposes a single
+  read-only tool (`docs_chat`) that forwards questions to an
+  upstream LLM documentation API. It carries no inbound secrets and
+  hosts no Deephaven session, so there is no PSK middleware. The
+  shipped container image (`ops/docker/mcp-docs/Dockerfile`) binds
+  `0.0.0.0` on purpose so it can run behind a public ingress
+  (e.g. Cloud Run).
+- **Abuse control belongs to the fronting deployment.** Because
+  `docs_chat` consumes a metered upstream API key
+  (`INKEEP_API_KEY`), rate limiting and request shaping are the
+  responsibility of the deployment in front of the server (ingress,
+  API gateway, or load balancer). The server does not rate-limit
+  itself.
+- **The only secret is outbound.** `INKEEP_API_KEY` is read from the
+  environment and used solely for the upstream call; it is never
+  returned to clients. Keep it in the deployment's secret store, not
+  in an image layer.
+
+If you run the docs server only on loopback for local development,
+none of this applies — treat it like any other local process.
 
 ## Further reading
 
