@@ -56,6 +56,7 @@ test = [
     "pytest-asyncio>=1.3.0",   # Async test support
     "pytest-cov>=7.1.0",       # Code coverage reporting
     "pytest-timeout>=2.1.0",   # Test timeout support for integration tests
+    "httpx2>=2.3.0",           # Required by starlette.testclient >=1.2 (replaces httpx)
     "deephaven-server>=0.39",  # Deephaven server for integration tests
     "pytz",                    # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
     # Stress testing dependencies
