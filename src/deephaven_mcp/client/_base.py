@@ -18,10 +18,10 @@ The wrapping pattern implemented here enables several key benefits:
 Classes:
     ClientObjectWrapper: Generic base class for wrapping client objects with enhanced interfaces
 
-Attributes:
-    is_enterprise_available (bool): Flag indicating if enterprise features are available
-                                   in the current environment. This is determined by attempting
-                                   to import the deephaven_enterprise package.
+Functions:
+    is_enterprise_available() -> bool: Whether enterprise features are available in the
+                                       current environment, determined by attempting to
+                                       import the deephaven_enterprise package.
 """
 
 import logging
@@ -30,37 +30,29 @@ from deephaven_mcp._exceptions import InternalError
 
 _LOGGER = logging.getLogger(__name__)
 
-# Check for enterprise features
-is_enterprise_available = False
+# Check for enterprise features. This is evaluated once, at import time. It is kept
+# private and exposed only through is_enterprise_available() so call sites read the
+# live value through one function rather than snapshotting a module-level bool (a
+# snapshot import would capture whatever value happened to be set at import time).
+_ENTERPRISE_AVAILABLE = False
 try:
     # The following imports are required for enterprise features
     import deephaven_enterprise  # noqa: F401
 
-    # # TODO: Workaround: Explicitly import all enterprise proto modules to ensure correct namespace setup -- see https://deephaven.atlassian.net/browse/DH-19813
-    # # The following imports are required to ensure that the proto modules are loaded
-    # import deephaven_enterprise.proto.acl_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.acl_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.auth_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.auth_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.auth_service_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.auth_service_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.common_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.common_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.controller_common_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.controller_common_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.controller_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.controller_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.controller_service_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.controller_service_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.persistent_query_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.persistent_query_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.table_definition_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.table_definition_pb2_grpc  # noqa: F401
-
-    is_enterprise_available = True
+    _ENTERPRISE_AVAILABLE = True
     _LOGGER.debug("Enterprise features available")
 except ImportError:
     _LOGGER.debug("Enterprise features not available")
+
+
+def is_enterprise_available() -> bool:
+    """Return whether Deephaven Enterprise (Core+) client features are available.
+
+    Returns:
+        bool: True if the ``deephaven_enterprise`` package was importable when this
+            module was first imported; False otherwise.
+    """
+    return _ENTERPRISE_AVAILABLE
 
 
 class ClientObjectWrapper[T]:
@@ -136,8 +128,8 @@ class ClientObjectWrapper[T]:
             is_enterprise: Specifies whether the wrapped object requires enterprise features.
                           Must be True for enterprise objects and False for non-enterprise objects.
                           When True, availability of enterprise features will be verified using
-                          the module-level is_enterprise_available flag. This helps prevent
-                          runtime errors by ensuring required features are available at initialization.
+                          is_enterprise_available(). This helps prevent runtime errors by
+                          ensuring required features are available at initialization.
 
         Raises:
             ValueError: If the wrapped object is None. A non-None wrapped object is essential
@@ -153,7 +145,7 @@ class ClientObjectWrapper[T]:
 
         self._wrapped = wrapped
 
-        if is_enterprise and not is_enterprise_available:
+        if is_enterprise and not is_enterprise_available():
             _LOGGER.error(
                 "[ClientObjectWrapper] Constructor called with enterprise=True when enterprise features are not available. "
                 "Please report this issue."

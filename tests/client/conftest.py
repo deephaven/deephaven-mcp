@@ -29,4 +29,4 @@ def _enterprise_available(monkeypatch):
     """
     import deephaven_mcp.client._base as base
 
-    monkeypatch.setattr(base, "is_enterprise_available", True)
+    monkeypatch.setattr(base, "is_enterprise_available", lambda: True)

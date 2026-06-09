@@ -91,7 +91,7 @@ def base_module():
 def test_enterprise_available_flag_with_mock():
     """Test the is_enterprise_available flag in the actual module when enterprise is available."""
     module, mock_logger = get_base_module(enterprise_available=True)
-    assert module.is_enterprise_available is True
+    assert module.is_enterprise_available() is True
     mock_logger.debug.assert_called_with("Enterprise features available")
 
 
@@ -154,7 +154,7 @@ except ImportError:
 def test_enterprise_unavailable_flag_direct():
     """Test the direct import error branch in the actual module."""
     module, mock_logger = get_base_module(enterprise_available=False)
-    assert module.is_enterprise_available is False
+    assert module.is_enterprise_available() is False
     mock_logger.debug.assert_called_with("Enterprise features not available")
 
 
@@ -167,7 +167,7 @@ def test_client_object_wrapper_init_with_valid_object(base_module):
     mock_logger = MagicMock()
     with patch.object(base_module, "_LOGGER", mock_logger):
         # Force is_enterprise_available to False for testing
-        with patch.object(base_module, "is_enterprise_available", False):
+        with patch.object(base_module, "is_enterprise_available", lambda: False):
             mock_obj = MagicMock()
             wrapper = ClientObjectWrapper(mock_obj, is_enterprise=False)
 
@@ -202,7 +202,7 @@ def test_client_object_wrapper_enterprise_not_available(base_module):
     mock_logger = MagicMock()
     with patch.object(base_module, "_LOGGER", mock_logger):
         # Force is_enterprise_available to False
-        with patch.object(base_module, "is_enterprise_available", False):
+        with patch.object(base_module, "is_enterprise_available", lambda: False):
             mock_obj = MagicMock()
             # Test with enterprise=True should raise InternalError
             with pytest.raises(
@@ -217,7 +217,7 @@ def test_client_object_wrapper_enterprise_available(base_module):
     ClientObjectWrapper = base_module.ClientObjectWrapper
 
     # Set up mocks and patches
-    with patch.object(base_module, "is_enterprise_available", True):
+    with patch.object(base_module, "is_enterprise_available", lambda: True):
         mock_obj = MagicMock()
         # This should succeed when enterprise features are available
         wrapper = ClientObjectWrapper(mock_obj, is_enterprise=True)
@@ -374,7 +374,7 @@ def test_import_without_enterprise_available():
             import deephaven_mcp.client._base as base_module
 
             # Verify that enterprise is not available
-            assert base_module.is_enterprise_available is False
+            assert base_module.is_enterprise_available() is False
 
         finally:
             __builtins__["__import__"] = original_import
@@ -410,7 +410,7 @@ def test_client_object_wrapper_none_coverage():
     import deephaven_mcp.client._base as base_mod
 
     # Test the None path in constructor (should raise ValueError)
-    with patch.object(base_mod, "is_enterprise_available", True):
+    with patch.object(base_mod, "is_enterprise_available", lambda: True):
         with pytest.raises(ValueError, match="Cannot wrap None"):
             base_mod.ClientObjectWrapper(None, is_enterprise=False)
 
@@ -423,7 +423,7 @@ def test_client_object_wrapper_enterprise_assertion_ci_robust():
     mock_obj = MagicMock()
 
     # Patch is_enterprise_available to False at module level
-    with patch.object(base_mod, "is_enterprise_available", False):
+    with patch.object(base_mod, "is_enterprise_available", lambda: False):
         # This should raise InternalError from line 161
         with pytest.raises(exc.InternalError) as excinfo:
             base_mod.ClientObjectWrapper(mock_obj, is_enterprise=True)

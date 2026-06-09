@@ -135,7 +135,7 @@ class MissingEnterprisePackageError(InternalError):
 
     Examples:
         ```python
-        if not is_enterprise_available:
+        if not is_enterprise_available():
             raise MissingEnterprisePackageError()
         ```
     """

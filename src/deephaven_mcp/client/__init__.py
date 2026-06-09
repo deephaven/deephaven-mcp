@@ -29,7 +29,7 @@ Exported Classes and Attributes:
     PQ_STATES (dict[str, str])    -- Mapping of PQ state name to lifecycle category
     BaseSession                   -- Base async session wrapper
     CorePlusSessionFactory        -- Factory for creating enterprise sessions
-    is_enterprise_available (bool) -- True if enterprise features are available
+    is_enterprise_available()     -- Returns True if enterprise features are available
 
 Note:
     All logging is performed in the respective submodules/classes; this file does not log directly.
