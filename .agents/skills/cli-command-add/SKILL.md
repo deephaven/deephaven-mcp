@@ -15,11 +15,11 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
    The runtime is fully validated by the time your body runs: read `runtime.config.cli` for output mode and timeouts, `runtime.config.server` / `.community` / `.enterprise` for the systems sections, and `runtime.daemon_dir` for the registry handle. There is no upgrade gate — eager validation in `_main`'s root callback means a malformed config has already produced a `config_invalid` exit before dispatch reaches your verb. See `docs/CLI.md` *Configuration loading* and `AGENTS.md` *CLI* for the rationale.
 
-4. **Errors.** Raise `CliError(message, code=ErrorCode.X, exit_code=2)` from `cli/_errors.py`. If no existing `ErrorCode` fits, add a new enum value with a single-line docstring describing what triggers it.
+4. **Errors.** Raise `CliError(message, code=ErrorCode.X)` from `cli/_errors.py` (`CliError.__init__` takes only `message` and the keyword-only `code` — the exit code is carried by the `ErrorCode` member via `code.exit_code`, not passed in). If no existing `ErrorCode` fits, add a new enum value with a single-line docstring describing what triggers it.
 
 5. **Output.** `click.echo(format_output(payload, output=runtime.config.cli.output.format))`. The `format_output` function (`cli/_format.py`) handles `human` / `json` / `yaml` consistently. Do not branch on the output mode in the command body. Note: `output.format` is a nested field — `CliConfig` groups domain-specific knobs under `output.*` / `daemon.*` / `request.*`. Canonical implementation: `config/schema/_cli.py` (`CliConfig`, `OutputConfig`).
 
-6. **Tests.** Add cases to `tests/cli/test__commands_<noun>.py` (one test file per source file under `_commands/`). Use `click.testing.CliRunner` with `load_runtime` patched to return a test `Runtime`. Cover:
+6. **Tests.** Add cases to `tests/cli/_commands/test_<noun>.py` (one test file per source file under `_commands/`). Use `click.testing.CliRunner` with `load_runtime` patched to return a test `Runtime`. Cover:
    - Happy path in each output mode (`human`, `json`, `yaml`).
    - Every error path — each one should produce a `CliError` with the expected `error_code` (parse the JSON output and assert).
    - Any new option / argument validation.

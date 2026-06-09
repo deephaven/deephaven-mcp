@@ -1154,3 +1154,26 @@ def test_publish_treats_corrupt_existing_entry_as_stale(tmp_path: Path) -> None:
     new_entry = dd.read_entry()
     assert new_entry is not None
     assert new_entry.port == 22000
+
+
+def test_publish_clears_start_marker(tmp_path: Path) -> None:
+    """A successful publish clears the ``daemon.starting`` marker.
+
+    The spawning CLI writes the marker before spawning the daemon;
+    publish clears it so a peer CLI sees the live entry rather than
+    deferring to an in-progress spawn that already completed.
+    """
+    dd = DaemonDirectory(tmp_path / "daemon")
+    dd.path.mkdir(parents=True, exist_ok=True)
+    with dd.locked() as reg:
+        reg.write_start_marker(datetime.now(UTC))
+        assert reg.read_start_marker() is not None
+
+    plan = _daemon_publish_plan(dd)
+    http_module._publish_daemon_registry(plan, dd, "python")
+
+    with dd.locked() as reg:
+        assert reg.read_start_marker() is None
+    new_entry = dd.read_entry()
+    assert new_entry is not None
+    assert new_entry.port == 22000

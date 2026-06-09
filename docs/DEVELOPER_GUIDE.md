@@ -961,7 +961,8 @@ Community session and Enterprise system. Choose your transport:
 | `--transport {stdio,http}` | Transport to expose. `stdio` carries no authentication and is intended for AI clients launching the server as a subprocess. `http` serves streamable-HTTP gated by `server.json`'s PSK. | `stdio` |
 | `--host` | HTTP transport bind address. Must be a loopback host (`127.0.0.1`, `::1`, or `localhost`). Ignored under `stdio`. | `127.0.0.1` |
 | `--port` | HTTP transport TCP port (overrides `server.json`'s `port` field). Ignored under `stdio`. | `8000` |
-| `--config-dir` | Override for the configuration directory (overrides `DH_MCP_DATA_DIR`). | platform default |
+| `--config-dir` | Override for the `config` subdirectory only. Bypasses `DH_MCP_DATA_DIR` for the config subdir; the env var still applies to the runtime subdir unless `--runtime-dir` also overrides it. | `$DH_MCP_DATA_DIR/config` or platform default |
+| `--runtime-dir` | Override for the `runtime` subdirectory (daemon registry, lock, and log). Bypasses `DH_MCP_DATA_DIR` for the runtime subdir; the env var still applies to the config subdir unless `--config-dir` also overrides it. Only meaningful under `--daemon`. | `$DH_MCP_DATA_DIR/runtime` or platform default |
 | `-h, --help` | Show help message | - |
 
 > **Note:** Non-loopback `--host` values are rejected at startup — the
@@ -3045,7 +3046,6 @@ deephaven-mcp/
 │       ├── _monkeypatch.py     # Runtime patches
 │       ├── _redaction.py       # Sensitive-value redaction utilities
 │       ├── _version.py         # Version information
-│       ├── io.py               # I/O utilities
 │       ├── openai.py           # OpenAI client integration
 │       └── queries.py          # Query management
 ├── tests/                    # Unit and integration tests
@@ -3136,7 +3136,6 @@ deephaven-mcp/
 
 - **`openai.py`**: OpenAI client integration with async support and rate limiting
 - **`queries.py`**: Query management and execution framework
-- **`io.py`**: I/O utilities for file operations and data handling
 - **`_env.py`**: Typed environment-variable helpers (`env_str`, `env_int`, `env_float`, `env_bool`, `env_required`). The systems server itself reads only `DH_MCP_DATA_DIR` and `PYTHONLOGLEVEL` from the environment; the helpers are used by the docs server and by utility scripts.
 - **`_exceptions.py`**: Custom exception classes for MCP-specific errors
 - **`_health.py`**: Single source of truth for the `/health` probe path

@@ -207,6 +207,48 @@ def test_tool_show_unknown_name(tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
+def test_tool_show_unknown_internal_name_suggests_internal(tmp_path: Path) -> None:
+    # A ``_``-prefixed unknown name asks for internal tools by name, so the
+    # suggestion list switches to include ``_``-prefixed tools.
+    rt = make_runtime(tmp_path)
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.__aexit__.return_value = None
+    fake.list_tools.return_value = [
+        Tool(name="public", description="x", inputSchema={"type": "object"}),
+        Tool(name="_private", description="hidden", inputSchema={"type": "object"}),
+    ]
+    with (
+        patch.object(
+            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+        ),
+        patch.object(tool_mod, "McpClient", return_value=fake),
+    ):
+        result = _invoke(["tool", "show", "_missing"], rt)
+    assert result.exit_code == 2
+    assert "Available:" in result.output
+    assert "_private" in result.output
+    assert "public" in result.output
+
+
+def test_tool_show_unknown_name_no_tools_omits_suggestion(tmp_path: Path) -> None:
+    # With no tools registered the suggestion suffix is omitted entirely.
+    rt = make_runtime(tmp_path)
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.__aexit__.return_value = None
+    fake.list_tools.return_value = []
+    with (
+        patch.object(
+            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+        ),
+        patch.object(tool_mod, "McpClient", return_value=fake),
+    ):
+        result = _invoke(["tool", "show", "missing"], rt)
+    assert result.exit_code == 2
+    assert "Available:" not in result.output
+
+
 def test_tool_show_daemon_failure(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(

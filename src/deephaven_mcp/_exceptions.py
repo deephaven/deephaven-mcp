@@ -62,6 +62,7 @@ __all__ = [
     "FileLockTimeoutError",
     # Daemon registry exceptions
     "DaemonRegistryError",
+    "DaemonAlreadyPublishedError",
     "RegistryCorruptError",
     # CLI daemon lifecycle exceptions
     "DaemonClientError",

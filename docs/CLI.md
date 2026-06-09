@@ -260,11 +260,12 @@ dh-mcp tool call sessions_list --arg type=community
 
 ### `dh-mcp introspect`
 
-Emits the full command tree as a JSON manifest: every command,
+Emits the full command tree as a manifest: every command,
 every option (with envvar / choices / defaults), every error code.
 AI agents should prefer this over scraping `--help`. The manifest
-always emits JSON regardless of the active output mode so
-`dh-mcp introspect | jq .` works without `-o`.
+defaults to JSON (so `dh-mcp introspect | jq .` works without `-o`)
+but honors the root `-o/--output` flag and `DH_MCP_OUTPUT` (`json`,
+`yaml`, or `human`).
 
 ## Top-level flags
 
@@ -309,7 +310,7 @@ registry programmatically via `dh-mcp introspect` (look under
 | `error_code`                  | Meaning                                                            |
 |-------------------------------|--------------------------------------------------------------------|
 | `daemon_startup_timeout`      | Daemon was spawned but did not publish a registry entry in time.   |
-| `daemon_not_running`          | No daemon is registered and `--no-auto-start` was specified.       |
+| `daemon_not_running`          | No running daemon was found: either none is registered and `--no-auto-start` was specified, or a command that needs the daemon's files (e.g. `daemon logs`) found none yet. |
 | `daemon_client_error`         | A client-side daemon-management failure (signal denied, etc.).     |
 | `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon reset`. |
 | `daemon_registry_live`        | `dh-mcp daemon reset` refused to quarantine `daemon.json` because a live daemon is still registered; run `dh-mcp daemon stop` first. |

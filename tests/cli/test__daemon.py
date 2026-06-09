@@ -372,6 +372,31 @@ async def test_stop_escalates_to_sigkill(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_treats_recycled_on_sigkill_as_success(tmp_path: Path) -> None:
+    """SIGKILL returning RECYCLED means the daemon exited on its own -> success.
+
+    SIGTERM is DELIVERED, the process stays alive through the wait so
+    SIGKILL fires, and by then the PID has been recycled. A non-DENIED
+    SIGKILL outcome is the desired post-condition: delete and return True.
+    """
+    runtime = _build_runtime(tmp_path)
+    with runtime.daemon_dir.locked() as reg:
+        reg.write(_make_entry())
+    ctx = _build_ctx(runtime)
+
+    with (
+        patch.object(DaemonRegistryEntry, "is_live", return_value=True),
+        _patch_send_signal_safely(
+            [dl.SignalOutcome.DELIVERED, dl.SignalOutcome.RECYCLED]
+        ),
+        patch.object(dl.ProcessIdentity, "is_alive", return_value=True),
+    ):
+        result = await stop_daemon(ctx.directory, kill_after_seconds=0)
+    assert result is True
+    assert runtime.daemon_dir.read_entry() is None
+
+
+@pytest.mark.asyncio
 async def test_stop_skips_sigkill_when_process_exits_after_loop(tmp_path: Path) -> None:
     """Post-loop liveness check catches a daemon that exited just before the deadline."""
     runtime = _build_runtime(tmp_path)

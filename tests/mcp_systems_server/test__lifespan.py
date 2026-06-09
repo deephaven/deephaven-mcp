@@ -292,6 +292,49 @@ async def test_make_lifespan_failure_during_startup_still_cleans_up():
 
 
 @pytest.mark.asyncio
+async def test_make_lifespan_pool_start_failure_still_cleans_up():
+    """If EvictorPool.start raises, the tracker and registry are still torn down.
+
+    The ``pool.stop`` teardown callback is pushed only *after*
+    ``await pool.start()`` succeeds, so a start failure leaves stop
+    unregistered — but the tracker-unregister and registry-close
+    callbacks (registered earlier) must still run via the
+    :class:`AsyncExitStack`.
+    """
+    multi_config = _make_multi_config()
+    multi_config.list_systems = MagicMock(return_value=[])
+
+    registry = _build_registry_mock(community=False, enterprise=[])
+
+    tracker = MagicMock(instance_id="i", unregister=AsyncMock())
+
+    evictor_pool = MagicMock()
+    evictor_pool.start = AsyncMock(side_effect=RuntimeError("pool-boom"))
+    evictor_pool.stop = AsyncMock()
+
+    patches = _patch_subsystems(
+        multi_config=multi_config,
+        registry=registry,
+        instance_tracker=tracker,
+        evictor_pool=evictor_pool,
+    )
+    for p in patches:
+        p.start()
+    try:
+        with pytest.raises(RuntimeError, match="pool-boom"):
+            async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
+                pass
+
+        evictor_pool.start.assert_awaited_once()
+        evictor_pool.stop.assert_not_called()
+        registry.close.assert_awaited_once()
+        tracker.unregister.assert_awaited_once()
+    finally:
+        for p in patches:
+            p.stop()
+
+
+@pytest.mark.asyncio
 async def test_make_lifespan_swallows_shutdown_errors(caplog):
     """Errors during shutdown are logged, never re-raised."""
     multi_config = _make_multi_config(community_idle=10, community_sweep=2)

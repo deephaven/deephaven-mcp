@@ -44,7 +44,7 @@ Conventions:
 | `review-changes` | Deep review of a changeset across all file types. |
 | `review-python-file` | Comprehensive single-file Python review (design, correctness, security, types, pydocs, logging, tests). |
 | `pydocs-accuracy` | Surgical Python docstring correctness fixes — no restructuring. |
-| `pydocs-improve` | Full Python docstring overhaul: accuracy + restructure + missing-section enforcement. **Canonical source for the MCP tool "Terminology Note" and "Format Accuracy for AI Agents" wording.** |
+| `pydocs-improve` | Full Python docstring overhaul: accuracy + restructure + missing-section enforcement. The canonical MCP tool "Terminology Note" and "Format Accuracy for AI Agents" wording lives in [`pydocs-improve/mcp-tool-sections.md`](pydocs-improve/mcp-tool-sections.md). |
 | `docs-accuracy` | Surgical Markdown documentation accuracy fixes against the source code. |
 | `docs-improve` | Full Markdown documentation overhaul: accuracy + organization + missing content + link fixes. |
 | `cli-help-accuracy` | Surgical correctness fixes to CLI help — documented flags, arguments, error codes, exit codes, and output fields verified against the handler across `--help`, the introspect manifest, and `docs/CLI.md`. Wraps `_cli-help-standards`. |

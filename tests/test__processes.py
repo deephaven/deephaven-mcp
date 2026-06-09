@@ -138,6 +138,15 @@ def test_is_alive_false_when_create_time_read_fails() -> None:
         assert identity.is_alive() is False
 
 
+def test_is_alive_false_when_create_time_denied_mid_flight() -> None:
+    """``Process()`` succeeds but ``create_time()`` is denied mid-flight."""
+    fake_proc = MagicMock()
+    fake_proc.create_time.side_effect = psutil.AccessDenied(pid=42)
+    identity = ProcessIdentity(pid=42, create_time_ns=1)
+    with patch.object(proc_mod.psutil, "Process", return_value=fake_proc):
+        assert identity.is_alive() is False
+
+
 # ---------------------------------------------------------------------------
 # send_signal_safely
 # ---------------------------------------------------------------------------

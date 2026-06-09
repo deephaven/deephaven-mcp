@@ -127,6 +127,31 @@ async def test_pool_empty_when_no_children():
 
 
 @pytest.mark.asyncio
+async def test_pool_skips_community_when_config_absent_but_registry_present():
+    """A community child without matching config yields no community evictor.
+
+    ``_eviction_targets`` requires *both* the registry child and the
+    config section to be present; a registry/config mismatch is
+    silently skipped rather than building an evictor with no timers.
+    """
+    mc = _make_multi_config()  # mc.community is None
+    community_child = AsyncMock()
+    registry = _make_registry(community=community_child)
+    started: list[object] = []
+
+    def _factory(child, timeouts):
+        started.append(child)
+        ev = AsyncMock()
+        ev.start = AsyncMock()
+        return ev
+
+    with patch.object(evictors_module, "Evictor", side_effect=_factory):
+        async with _running_pool(registry, mc) as pool:
+            assert pool.evictors == []
+    assert started == []
+
+
+@pytest.mark.asyncio
 async def test_pool_uses_per_section_timers():
     """Each child receives an Evictor parameterised by its umbrella settings."""
     mc = _make_multi_config(

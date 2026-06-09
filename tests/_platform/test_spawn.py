@@ -30,6 +30,9 @@ def test_spawn_detached_invokes_subprocess(tmp_path: Path) -> None:
     assert args[0] == argv
     assert kwargs.get("cwd") == tmp_path
     assert kwargs.get("start_new_session") is True
+    # Security properties: no terminal inheritance, no fd leakage.
+    assert kwargs.get("stdin") is spawn_mod.subprocess.DEVNULL
+    assert kwargs.get("close_fds") is True
 
 
 def test_spawn_detached_uses_windows_creationflags(tmp_path: Path) -> None:

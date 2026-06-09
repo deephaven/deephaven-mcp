@@ -52,7 +52,11 @@ class ErrorCode(StrEnum):
     )
     DAEMON_NOT_RUNNING = (
         "daemon_not_running",
-        "No daemon is registered and --no-auto-start was specified.",
+        (
+            "No running daemon was found: either none is registered and "
+            "--no-auto-start was specified, or a command that needs the "
+            "daemon's files (e.g. 'daemon logs') found none yet."
+        ),
     )
     DAEMON_CLIENT_ERROR = (
         "daemon_client_error",

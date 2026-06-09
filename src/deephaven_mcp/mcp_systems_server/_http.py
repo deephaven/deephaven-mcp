@@ -267,20 +267,19 @@ class _BindSpec:
     publishes the kernel-chosen port to ``daemon.json`` and reads it
     off the plan rather than the live socket, so the publish path is
     a single field access.
-
-    Attributes:
-        host (str | None): Bind address for direct mode; ``None``
-            when ``sock`` is set.
-        port (int): Bound or to-be-bound TCP port. In handoff mode
-            this is ``sock.getsockname()[1]`` captured at planner
-            time (before uvicorn starts).
-        sock (socket.socket | None): A pre-bound IPv4 stream socket
-            for handoff mode; ``None`` for direct mode.
     """
 
     host: str | None
+    """Bind address for direct mode; ``None`` when ``sock`` is set."""
+
     port: int
+    """Bound or to-be-bound TCP port. In handoff mode this is
+    ``sock.getsockname()[1]`` captured at planner time (before uvicorn
+    starts)."""
+
     sock: socket.socket | None
+    """A pre-bound IPv4 stream socket for handoff mode; ``None`` for
+    direct mode."""
 
     def __post_init__(self) -> None:
         """Validate the discriminated-union invariant.
@@ -349,34 +348,34 @@ class _HttpRun:
     - ``daemon_handle is None``: registry publishing is off (which
       also implies ``daemon_process_name is None`` — the planners
       pair them).
-
-    Attributes:
-        multi_config (ConfigTree): Threaded into
-            ``build_fastmcp`` for the lifespan and reused for
-            the registry entry's ``config_dir``.
-        server_name (str): FastMCP server name advertised in MCP
-            handshakes. Sourced from ``ServerConfig.server_name``.
-        psk (str): Non-empty PSK installed on the
-            :class:`PSKMiddleware`.
-        bind (_BindSpec): Resolved uvicorn bind (direct or handoff).
-        idle_seconds (int): Idle window. ``0`` disables the watcher
-            and the activity middleware.
-        daemon_handle (DaemonDirectory | None): Hardened daemon
-            directory handle for registry publish/delete; ``None``
-            when this run does not publish a registry.
-        daemon_process_name (str | None): Process name written into
-            ``daemon.json`` for liveness checks. Always set
-            alongside ``daemon_handle``; always ``None`` when
-            ``daemon_handle`` is.
     """
 
     multi_config: ConfigTree
+    """Threaded into ``build_fastmcp`` for the lifespan and reused for
+    the registry entry's ``config_dir``."""
+
     server_name: str
+    """FastMCP server name advertised in MCP handshakes. Sourced from
+    ``ServerConfig.server_name``."""
+
     psk: str
+    """Non-empty PSK installed on the :class:`PSKMiddleware`."""
+
     bind: _BindSpec
+    """Resolved uvicorn bind (direct or handoff)."""
+
     idle_seconds: int
+    """Idle window. ``0`` disables the watcher and the activity
+    middleware."""
+
     daemon_handle: DaemonDirectory | None
+    """Hardened daemon directory handle for registry publish/delete;
+    ``None`` when this run does not publish a registry."""
+
     daemon_process_name: str | None
+    """Process name written into ``daemon.json`` for liveness checks.
+    Always set alongside ``daemon_handle``; always ``None`` when
+    ``daemon_handle`` is."""
 
     def __post_init__(self) -> None:
         """Validate paired-field invariants.

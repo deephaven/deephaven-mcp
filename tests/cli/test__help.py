@@ -246,6 +246,19 @@ def test_build_help_renders_output_text() -> None:
     assert "JSON array" not in text
 
 
+def test_build_help_object_with_no_fields_suppresses_lead() -> None:
+    """An ``object`` spec with no fields renders the note but no field lead.
+
+    The ``lead and spec.fields`` guard means the "JSON object with
+    fields:" line is emitted only when there are fields to list.
+    """
+    spec = OutputSpec("object", (), note="opaque object")
+    text = build_help(summary="S", output=spec, environment=(), exit_codes=())
+    assert "\b\nOutput:" in text
+    assert "opaque object" in text
+    assert "JSON object with fields:" not in text
+
+
 def test_exit_codes_and_error_codes_share_alignment() -> None:
     """Exit codes render through the same aligned two-column block as error codes."""
     text = build_help(

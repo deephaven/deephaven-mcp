@@ -17,6 +17,7 @@ Override with the `DH_MCP_DATA_DIR` environment variable or the
 ```text
 config_dir/
 ├── server.json                      # PSK (HTTP transport only)
+├── cli.json                         # optional; dh-mcp CLI defaults (see docs/CLI.md)
 ├── community/
 │   ├── settings.json                # optional
 │   └── sessions/

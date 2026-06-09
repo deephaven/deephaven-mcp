@@ -47,6 +47,7 @@ Layout:
 ```text
 $DH_MCP_DATA_DIR/config/
   server.json                       # optional; HTTP transport + PSK
+  cli.json                          # optional; dh-mcp CLI defaults (see docs/CLI.md)
   community/
     settings.json                   # optional; per-system defaults
     sessions/

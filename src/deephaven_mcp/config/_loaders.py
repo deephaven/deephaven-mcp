@@ -59,7 +59,7 @@ async def load_named_json[M: BaseModel](
     audit-trail log line.
 
     Args:
-        model_cls (type[_M]): Pydantic v2 model class to validate
+        model_cls (type[M]): Pydantic v2 model class to validate
             against.
         path (Path): Full path to the configuration file. Must exist
             and be readable; absence is the caller's responsibility
@@ -77,7 +77,7 @@ async def load_named_json[M: BaseModel](
             audit-trail line.
 
     Returns:
-        _M: The validated model instance.
+        M: The validated model instance.
 
     Raises:
         ConfigurationError: When the file cannot be loaded, parsed,
@@ -111,7 +111,7 @@ async def load_named_json_with_stem[M: BaseModel](
     schema's filename-vs-name validator catches the mismatch).
 
     Args:
-        model_cls (type[_M]): Pydantic v2 model class to validate
+        model_cls (type[M]): Pydantic v2 model class to validate
             against.
         path (Path): Full path to the per-name JSON file. The
             filename stem becomes the model's ``name``.
@@ -126,7 +126,7 @@ async def load_named_json_with_stem[M: BaseModel](
             audit-trail line.
 
     Returns:
-        _M: The validated model instance with ``name`` set to the
+        M: The validated model instance with ``name`` set to the
             file's stem (unless the file's JSON overrode it).
 
     Raises:

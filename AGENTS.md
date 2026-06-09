@@ -43,7 +43,7 @@ For the standards on writing, reviewing, and curating skills:
 ## CLI
 
 - **Binary**: `dh-mcp` — a thin local client. Distinct from the server binaries `dh-mcp-systems-server` and `dh-mcp-docs-server`.
-- **Framework**: `click` (>=8.4). All command callbacks are async, wrapped with `@run_async` from `deephaven_mcp.cli._async` (Pattern B async-to-sync adapter). `argparse` is not used in this CLI; do not introduce it.
+- **Framework**: `click` (>=8.4); command callbacks are async (Pattern B async-to-sync adapter). Apply `_python-coding-practices` rule 15 (`@run_async` from `cli/_async.py`, no `argparse`, `CliError` discipline) and the `cli-command-add` skill before adding or editing a command.
 - **Structure**: noun-verb groups under `src/deephaven_mcp/cli/_commands/`. Top-level nouns: `daemon`, `tool`, `config`. Meta command: `introspect`.
 - **Output modes**: `-o human|json|yaml` (default `human`; envvar `DH_MCP_OUTPUT`). Errors are structured (`{error, error_code, exit_code, command}`) in `json` / `yaml` modes; stable `error_code` strings live in `cli/_errors.py`.
 - **Exit codes**: `0` success, `2` user-facing failure, `3` tool returned `isError=True`.
@@ -54,7 +54,7 @@ For the standards on writing, reviewing, and curating skills:
 
 ## Python version
 
-The supported Python floor is authoritative in `pyproject.toml` under `requires-python`. Check it (`grep requires-python pyproject.toml`) before using version-gated syntax (PEP 695 generics, `tomllib`, `typing.override`, `StrEnum`, etc.). Do not duplicate the version number elsewhere.
+Apply `_python-coding-practices` rule 16 before using version-gated syntax (PEP 695 generics, `tomllib`, `typing.override`, `StrEnum`, etc.). The floor is authoritative in `pyproject.toml` (`requires-python`) — never duplicate the version number elsewhere.
 
 ## Python Code
 

@@ -92,6 +92,27 @@ def test_activity_middleware_timer_property_returns_input() -> None:
     assert mw.timer is timer
 
 
+@pytest.mark.asyncio
+async def test_activity_middleware_does_not_bump_timer_on_exception() -> None:
+    """An upstream exception leaves the idle timer untouched.
+
+    ``dispatch`` bumps the timer only *after* ``call_next`` returns a
+    response; when ``call_next`` raises, the touch is never reached and
+    the exception propagates unchanged.
+    """
+    timer = IdleTimer(60)
+    timer._last_activity = time.monotonic() - 30  # noqa: SLF001
+    before = timer.last_activity
+    mw = ActivityMiddleware(app=lambda *_: None, timer=timer)  # type: ignore[arg-type]
+
+    async def boom(_request: object) -> object:
+        raise RuntimeError("downstream-boom")
+
+    with pytest.raises(RuntimeError, match="downstream-boom"):
+        await mw.dispatch(object(), boom)  # type: ignore[arg-type]
+    assert timer.last_activity == before
+
+
 # ---------------------------------------------------------------------------
 # idle_watcher
 # ---------------------------------------------------------------------------
