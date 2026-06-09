@@ -700,7 +700,7 @@ async def _setup_batch_pq_operation(
             {"success": False, "error": parse_error, "isError": True},
         )
     # parse_error is None implies system_name is set
-    if system_name is None:  # pragma: no cover - defensive
+    if system_name is None:
         raise InternalError(
             "Internal invariant violated: _validate_and_parse_pq_ids returned "
             "system_name=None without an error."

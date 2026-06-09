@@ -1,0 +1,17 @@
+{
+  "output": {
+    "format": "human"
+  },
+  "daemon": {
+    "auto_start": true,
+    "timeouts": {
+      "startup_deadline_seconds": 30,
+      "kill_after_seconds": 10
+    }
+  },
+  "request": {
+    "timeouts": {
+      "default_seconds": 60
+    }
+  }
+}

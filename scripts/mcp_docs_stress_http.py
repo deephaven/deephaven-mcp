@@ -20,8 +20,8 @@ Arguments:
     --requests-per-conn   Number of requests per connection (default: 100)
     --url                 Target streamable-HTTP endpoint URL
     --max-errors          Maximum number of errors before stopping the test (default: 5)
-    --rps                 Requests per second limit per connection (default: 0, no limit)
-    --max-response-time   Maximum allowed response time in seconds (default: 1)
+    --rps                 Requests per second limit, shared across all connections (default: 10000; 0 disables the limit)
+    --max-response-time   Maximum allowed response time in seconds (default: 1; 0 disables the check)
 
 Output:
     - Logs warnings and errors for slow responses, bad status codes, or exceptions.
@@ -77,13 +77,13 @@ parser.add_argument(
     "--rps",
     type=float,
     default=10000,
-    help="Requests per second limit per connection (default: 0, no limit)",
+    help="Requests per second limit, shared across all connections (default: 10000; 0 disables the limit).",
 )
 parser.add_argument(
     "--max-response-time",
     type=float,
     default=1,
-    help="Maximum allowed response time in seconds (default: 0, no check)",
+    help="Maximum allowed response time in seconds (default: 1; 0 disables the check).",
 )
 args = parser.parse_args()
 

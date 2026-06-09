@@ -30,6 +30,7 @@ from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands.config import config as config_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
 from deephaven_mcp.cli._commands.introspect import introspect as introspect_command
+from deephaven_mcp.cli._commands.session import session as session_group
 from deephaven_mcp.cli._commands.tool import tool as tool_group
 from deephaven_mcp.cli._errors import CliError, ErrorCode, render_error
 from deephaven_mcp.cli._format import OUTPUT_MODES, OutputMode
@@ -267,6 +268,7 @@ async def cli(
 # Register noun groups + meta commands on the root.
 cli.add_command(daemon_group)
 cli.add_command(tool_group)
+cli.add_command(session_group)
 cli.add_command(config_group)
 cli.add_command(introspect_command)
 

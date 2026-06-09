@@ -430,6 +430,16 @@ def test_factory_manager_returns_factory():
     assert fm is registry._factory_manager
 
 
+def test_factory_manager_initialized_but_unset_raises():
+    """factory_manager raises InternalError when the registry is marked
+    initialized but ``_factory_manager`` was never assigned."""
+    registry = _make_initialized_registry()
+    registry._factory_manager = None
+
+    with pytest.raises(InternalError, match="did not run to completion"):
+        _ = registry.factory_manager
+
+
 # ---------------------------------------------------------------------------
 # 5. _load_items / initialize
 # ---------------------------------------------------------------------------

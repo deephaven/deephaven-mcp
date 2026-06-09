@@ -251,6 +251,32 @@ dh-mcp tool show sessions_list
 dh-mcp tool call sessions_list --arg type=community
 ```
 
+### `dh-mcp session`
+
+| Verb                   | Purpose                                                                                       |
+|------------------------|-----------------------------------------------------------------------------------------------|
+| `credentials <id>`     | Prints one Community session's browser-login credentials (`auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). |
+
+`dh-mcp session credentials` is an ergonomic wrapper over the
+`session_community_credentials` MCP tool. Unlike `dh-mcp daemon`,
+which redacts secrets, its output contains a **plaintext auth token
+by design** so you can open the session in a browser. Retrieval is
+gated by `security.credential_retrieval_mode` in
+`community/settings.json`, which defaults to `none`; when retrieval
+is disabled — or the session is missing or not a Community session —
+the command exits `3` with the tool's explanation. Returns:
+
+- `0` — success.
+- `2` — client-side failure (connection, timeout, daemon, ...).
+- `3` — the credentials tool reported an error (`tool_returned_error`).
+
+Examples:
+
+```bash
+dh-mcp session credentials community:community:my-session
+dh-mcp -o json session credentials community:community:my-session
+```
+
 ### `dh-mcp config`
 
 | Verb        | Purpose                                                                                       |
