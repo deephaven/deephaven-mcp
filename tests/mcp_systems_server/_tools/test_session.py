@@ -1708,9 +1708,7 @@ async def test_sessions_list_rejects_invalid_type():
     """An unrecognized ``type`` value yields a structured error response."""
     mock_registry = AsyncMock()
     mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
-    ctx = MockContext(
-        {"config_manager": MagicMock(), "registry": mock_registry}
-    )
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
     result = await sessions_list(ctx, type="bogus")
     assert result["success"] is False
     assert result["isError"] is True
@@ -1722,9 +1720,7 @@ async def test_sessions_list_rejects_invalid_origin():
     """An unrecognized ``origin`` value yields a structured error response."""
     mock_registry = AsyncMock()
     mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
-    ctx = MockContext(
-        {"config_manager": MagicMock(), "registry": mock_registry}
-    )
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
     result = await sessions_list(ctx, origin="bogus")
     assert result["success"] is False
     assert result["isError"] is True
@@ -1736,9 +1732,7 @@ async def test_sessions_list_rejects_origin_with_enterprise_type():
     """``origin`` is community-only; combining it with enterprise errors."""
     mock_registry = AsyncMock()
     mock_registry.get_all.return_value = RegistrySnapshot.simple(items={})
-    ctx = MockContext(
-        {"config_manager": MagicMock(), "registry": mock_registry}
-    )
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
     result = await sessions_list(ctx, type="enterprise", origin="static")
     assert result["success"] is False
     assert result["isError"] is True
@@ -1778,9 +1772,7 @@ async def test_sessions_list_skips_factory_managers():
     mock_registry.get_all.return_value = RegistrySnapshot.simple(
         items={"enterprise:prod:factory": mock_factory},
     )
-    ctx = MockContext(
-        {"config_manager": MagicMock(), "registry": mock_registry}
-    )
+    ctx = MockContext({"config_manager": MagicMock(), "registry": mock_registry})
     result = await sessions_list(ctx)
     assert result["success"] is True
     assert result["sessions"] == []
