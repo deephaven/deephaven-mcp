@@ -41,6 +41,26 @@ from deephaven_mcp._exceptions import (
 )
 
 
+@pytest.fixture(scope="session")
+def pq_config_mod():
+    from deephaven_mcp.client import _pq_config
+
+    return _pq_config
+
+
+def _make_config_mock():
+    """Build a MagicMock PQ config protobuf usable by the field appliers.
+
+    ``typeSpecificFieldsJson`` is a real empty string so ``_set_termination_delay``
+    can ``json.loads`` it; ``scheduling`` is a MagicMock that records ``del x[:]``
+    (``__delitem__``) and ``extend`` calls.
+    """
+    config = MagicMock()
+    config.typeSpecificFieldsJson = ""
+    config.scheduling = MagicMock()
+    return config
+
+
 @pytest.fixture
 def dummy_controller_client():
     client = MagicMock()
@@ -431,7 +451,7 @@ async def test_add_query_timeout(coreplus_controller_client, dummy_controller_cl
 async def test_make_pq_config_success(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
-    dummy_controller_client.make_pq_config.return_value = "config"
+    dummy_controller_client.make_temporary_config.return_value = _make_config_mock()
     # Patch CorePlusQueryConfig to a dummy class for test
     with patch.object(
         controller_client_mod, "CorePlusQueryConfig", autospec=True
@@ -463,15 +483,27 @@ async def test_make_pq_config_mutually_exclusive_scripts(coreplus_controller_cli
 
 @pytest.mark.asyncio
 async def test_make_pq_config_with_all_parameters(
-    coreplus_controller_client, dummy_controller_client, controller_client_mod
+    coreplus_controller_client,
+    dummy_controller_client,
+    controller_client_mod,
+    pq_config_mod,
 ):
-    """Test that all config parameters are applied correctly with script_body."""
-    mock_config = MagicMock()
+    """Test that all config parameters are applied correctly with script_body.
+
+    An explicit ``schedule`` is mutually exclusive with ``auto_delete_timeout``, so it
+    replaces the scheduling block wholesale and the auto-delete path is a no-op. The
+    simple fields are written under their protobuf names (``classPathAdditions``,
+    ``timeoutNanos``, ``pythonControl``), and ``restart_users`` routes through the enum
+    converter (``RestartUsersEnum`` is patched since the Core+ wheel is absent in CI).
+    """
+    mock_config = _make_config_mock()
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
-    with patch.object(
-        controller_client_mod, "CorePlusQueryConfig", autospec=True
-    ) as mock_cfg:
+    with (
+        patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True),
+        patch.object(pq_config_mod, "RestartUsersEnum") as mock_restart_enum,
+    ):
+        mock_restart_enum.Value.return_value = 1
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
@@ -487,21 +519,23 @@ async def test_make_pq_config_with_all_parameters(
             python_virtual_environment="my-venv",
         )
 
-        # Verify all parameters were applied to config
+        # Verify all parameters were applied to config under their protobuf names.
         assert mock_config.scriptLanguage == "Python"
         assert mock_config.scriptCode == "print('hello')"
         assert mock_config.configurationType == "RunAndDone"
         assert mock_config.enabled == False
-        assert mock_config.restartUsers == "RU_ADMIN"
-        mock_config.extraClassPath.extend.assert_called_once_with(
+        # restart_users is converted via the enum (RU_ADMIN -> 1), not stored as a string.
+        mock_restart_enum.Value.assert_called_once_with("RU_ADMIN")
+        assert mock_config.restartUsers == 1
+        mock_config.classPathAdditions.extend.assert_called_once_with(
             ["/opt/libs/custom.jar"]
         )
         mock_config.scheduling.extend.assert_called_once_with(
             ["SchedulerType=Daily", "StartTime=08:00:00"]
         )
-        assert mock_config.initTimeoutNanos == 5000000000
+        assert mock_config.timeoutNanos == 5000000000
         assert mock_config.jvmProfile == "large-memory"
-        assert mock_config.pythonVirtualEnvironment == "my-venv"
+        assert mock_config.pythonControl == "my-venv"
 
 
 @pytest.mark.asyncio
@@ -509,7 +543,7 @@ async def test_make_pq_config_with_script_path(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
     """Test that script_path parameter is applied correctly."""
-    mock_config = MagicMock()
+    mock_config = _make_config_mock()
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
     with patch.object(
@@ -532,7 +566,7 @@ async def test_make_pq_config_none_defaults_preserve_config(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
     """Test that None parameters don't override make_temporary_config defaults."""
-    mock_config = MagicMock()
+    mock_config = _make_config_mock()
     # Set up some default values that make_temporary_config would have set
     mock_config.scriptLanguage = "Groovy"
     mock_config.configurationType = "InteractiveConsole"
@@ -558,10 +592,62 @@ async def test_make_pq_config_none_defaults_preserve_config(
 
 @pytest.mark.asyncio
 async def test_make_pq_config_auto_delete_timeout_passed_to_make_temporary_config(
-    coreplus_controller_client, dummy_controller_client, controller_client_mod
+    coreplus_controller_client,
+    dummy_controller_client,
+    controller_client_mod,
+    pq_config_mod,
 ):
-    """Test that auto_delete_timeout is passed to make_temporary_config."""
-    mock_config = MagicMock()
+    """make_temporary_config always receives None for the auto-delete arg.
+
+    Construction of the temporary scheduler now lives in ``_apply_pq_config_fields``,
+    so make_pq_config passes ``None`` as the 7th positional arg and installs the
+    temporary scheduler itself (via the patched ``GenerateScheduling``).
+    """
+    mock_config = _make_config_mock()
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+    temp_scheduler = ["SchedulerType=Temporary", "AutoDelete=true"]
+
+    with (
+        patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True),
+        patch.object(pq_config_mod, "GenerateScheduling") as mock_gen_scheduling,
+    ):
+        mock_gen_scheduling.generate_temporary_scheduler.return_value = temp_scheduler
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            auto_delete_timeout=300,  # 5 minutes
+        )
+
+        # make_temporary_config always gets None as the 7th positional arg now.
+        dummy_controller_client.make_temporary_config.assert_called_once()
+        call_args = dummy_controller_client.make_temporary_config.call_args
+        assert call_args[0][6] is None
+
+        # The temporary scheduler from GenerateScheduling replaces the scheduling block,
+        # and TerminationDelay is set to 300s (in ms).
+        mock_config.scheduling.__delitem__.assert_called_once_with(slice(None))
+        mock_config.scheduling.extend.assert_called_once_with(temp_scheduler)
+        import json as _json
+
+        assert _json.loads(mock_config.typeSpecificFieldsJson)["TerminationDelay"] == {
+            "type": "long",
+            "value": "300000",
+        }
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_auto_delete_timeout_zero_normalized_to_none(
+    coreplus_controller_client,
+    dummy_controller_client,
+    controller_client_mod,
+    pq_config_mod,
+):
+    """Test that auto_delete_timeout=0 keeps make_temporary_config's auto-delete arg None.
+
+    make_temporary_config always gets None now; the permanent (continuous) scheduler is
+    installed by ``_apply_pq_config_fields`` for ``auto_delete_timeout=0``.
+    """
+    mock_config = _make_config_mock()
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
     with patch.object(
@@ -570,14 +656,61 @@ async def test_make_pq_config_auto_delete_timeout_passed_to_make_temporary_confi
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
-            auto_delete_timeout=300,  # 5 minutes
+            auto_delete_timeout=0,  # 0 means permanent, same as None
         )
 
-        # Verify auto_delete_timeout was passed to make_temporary_config
+        # make_temporary_config always gets None as the 7th positional arg.
         dummy_controller_client.make_temporary_config.assert_called_once()
         call_args = dummy_controller_client.make_temporary_config.call_args
-        # auto_delete_timeout is the 7th positional arg (after name, heap, server, extra_jvm_args, extra_env_vars, engine)
-        assert call_args[0][6] == 300
+        assert call_args[0][6] is None
+
+        # Permanent: continuous scheduling installed, no TerminationDelay.
+        mock_config.scheduling.__delitem__.assert_called_once_with(slice(None))
+        mock_config.scheduling.extend.assert_called_once_with(
+            pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
+        )
+        assert mock_config.typeSpecificFieldsJson == ""
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_owner_applied_when_supplied(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that owner is applied to config when supplied to make_pq_config."""
+    mock_config = _make_config_mock()
+    mock_config.owner = "authenticated-user"  # Default from make_temporary_config
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            owner="service-account",
+        )
+
+        assert mock_config.owner == "service-account"
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_owner_untouched_when_omitted(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Test that owner is left as the make_temporary_config default when not supplied."""
+    mock_config = _make_config_mock()
+    mock_config.owner = "authenticated-user"  # Default from make_temporary_config
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(
+        controller_client_mod, "CorePlusQueryConfig", autospec=True
+    ) as mock_cfg:
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+        )
+
+        assert mock_config.owner == "authenticated-user"
 
 
 @pytest.mark.asyncio
@@ -585,7 +718,7 @@ async def test_make_pq_config_enabled_true_is_applied(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
     """Test that enabled=True is explicitly applied to config."""
-    mock_config = MagicMock()
+    mock_config = _make_config_mock()
     mock_config.enabled = False  # Default from make_temporary_config
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
@@ -604,12 +737,14 @@ async def test_make_pq_config_enabled_true_is_applied(
 
 @pytest.mark.asyncio
 async def test_make_pq_config_permanent_query_clears_scheduling(
-    coreplus_controller_client, dummy_controller_client, controller_client_mod
+    coreplus_controller_client,
+    dummy_controller_client,
+    controller_client_mod,
+    pq_config_mod,
 ):
-    """Test that permanent queries (auto_delete_timeout=None) clear temporary scheduling."""
-    mock_config = MagicMock()
-    mock_scheduling = MagicMock()
-    mock_config.scheduling = mock_scheduling
+    """Test that permanent queries (auto_delete_timeout=None) install continuous scheduling."""
+    mock_config = _make_config_mock()
+    mock_scheduling = mock_config.scheduling
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
     with patch.object(
@@ -621,40 +756,55 @@ async def test_make_pq_config_permanent_query_clears_scheduling(
             auto_delete_timeout=None,  # Permanent query
         )
 
-        # Verify make_temporary_config was called with a default timeout (600)
+        # Regression test for #165: permanent queries must pass auto_delete_timeout=None
+        # to make_temporary_config so no TerminationDelay / TemporaryAutoDelete is set;
+        # a non-None placeholder would survive the scheduling replacement and cause the
+        # controller to auto-delete the "permanent" query.
         dummy_controller_client.make_temporary_config.assert_called_once()
         call_args = dummy_controller_client.make_temporary_config.call_args
-        # auto_delete_timeout is the 7th positional arg
-        assert call_args[0][6] == 600  # Default timeout used for creation
+        # auto_delete_timeout is the 7th positional arg, always None now.
+        assert call_args[0][6] is None
 
-        # Verify scheduling was cleared and set to continuous for permanent query
+        # Scheduling cleared and replaced wholesale with the continuous (permanent) block.
         mock_scheduling.__delitem__.assert_called_once_with(slice(None))
-        # Verify all continuous scheduling parameters were appended
-        append_calls = [call[0][0] for call in mock_scheduling.append.call_args_list]
+        mock_scheduling.extend.assert_called_once_with(
+            pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
+        )
+        extended = mock_scheduling.extend.call_args[0][0]
         assert (
             "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"
-            in append_calls
+            in extended
         )
-        assert "StartTime=00:00:00" in append_calls
-        assert "DailyRestart=false" in append_calls
-        assert "SchedulingDisabled=false" in append_calls
+        assert "StartTime=00:00:00" in extended
+        assert "DailyRestart=false" in extended
+        assert "SchedulingDisabled=false" in extended
+        # Permanent → no TerminationDelay.
+        assert mock_config.typeSpecificFieldsJson == ""
 
 
 @pytest.mark.asyncio
 async def test_make_pq_config_temporary_schedule_none_no_default_installed(
-    coreplus_controller_client, dummy_controller_client, controller_client_mod
+    coreplus_controller_client,
+    dummy_controller_client,
+    controller_client_mod,
+    pq_config_mod,
 ):
-    """Temporary PQ (auto_delete_timeout set) with schedule=None: no default override.
+    """Temporary PQ (auto_delete_timeout set) with schedule=None: install temp scheduler.
 
-    The scheduling installed by ``make_temporary_config`` must be preserved — the
-    method must not clear it or append a continuous scheduler.
+    With no explicit schedule, ``auto_delete_timeout`` drives the scheduler: the temporary
+    scheduler from ``GenerateScheduling`` replaces the scheduling block and TerminationDelay
+    is set.
     """
-    mock_config = MagicMock()
-    mock_scheduling = MagicMock()
-    mock_config.scheduling = mock_scheduling
+    mock_config = _make_config_mock()
+    mock_scheduling = mock_config.scheduling
     dummy_controller_client.make_temporary_config.return_value = mock_config
+    temp_scheduler = ["SchedulerType=Temporary"]
 
-    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+    with (
+        patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True),
+        patch.object(pq_config_mod, "GenerateScheduling") as mock_gen_scheduling,
+    ):
+        mock_gen_scheduling.generate_temporary_scheduler.return_value = temp_scheduler
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
@@ -662,24 +812,26 @@ async def test_make_pq_config_temporary_schedule_none_no_default_installed(
             schedule=None,
         )
 
-        # Scheduling must not be cleared and must not be extended.
-        mock_scheduling.__delitem__.assert_not_called()
-        mock_scheduling.extend.assert_not_called()
-        mock_scheduling.append.assert_not_called()
+        # Temporary scheduler installed wholesale; TerminationDelay set.
+        mock_scheduling.__delitem__.assert_called_once_with(slice(None))
+        mock_scheduling.extend.assert_called_once_with(temp_scheduler)
+        mock_gen_scheduling.generate_temporary_scheduler.assert_called_once()
+        import json as _json
+
+        assert "TerminationDelay" in _json.loads(mock_config.typeSpecificFieldsJson)
 
 
 @pytest.mark.asyncio
 async def test_make_pq_config_permanent_schedule_empty_clears_without_default(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
-    """Permanent PQ with schedule=[]: scheduling must be empty (no default installed).
+    """Permanent PQ with schedule=[]: scheduling cleared, no continuous default installed.
 
-    schedule=[] is an explicit "no scheduling" signal and must override the default
-    continuous scheduler that would otherwise be installed for a permanent PQ.
+    An explicit ``schedule`` (even empty) is mutually exclusive with auto_delete_timeout,
+    so the auto-delete path is a no-op and the list applier clears the block to empty.
     """
-    mock_config = MagicMock()
-    mock_scheduling = MagicMock()
-    mock_config.scheduling = mock_scheduling
+    mock_config = _make_config_mock()
+    mock_scheduling = mock_config.scheduling
     dummy_controller_client.make_temporary_config.return_value = mock_config
 
     with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
@@ -690,35 +842,30 @@ async def test_make_pq_config_permanent_schedule_empty_clears_without_default(
             schedule=[],  # Explicit "no scheduling"
         )
 
-        # Scheduling was cleared exactly once (for the override).
+        # The list applier cleared the block and extended it with the empty list;
+        # the continuous-default path did not run (no continuous entries).
         mock_scheduling.__delitem__.assert_called_once_with(slice(None))
-        # No default continuous entries were appended.
-        mock_scheduling.append.assert_not_called()
-        # extend([]) is not called because the body skips it for empty override.
-        mock_scheduling.extend.assert_not_called()
+        mock_scheduling.extend.assert_called_once_with([])
+        # No TerminationDelay (auto-delete path was a no-op).
+        assert mock_config.typeSpecificFieldsJson == ""
 
 
 @pytest.mark.asyncio
 async def test_make_pq_config_temporary_schedule_empty_clears(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
-    """Temporary PQ with schedule=[]: existing temp scheduling must be cleared."""
-    mock_config = MagicMock()
-    mock_scheduling = MagicMock()
-    mock_config.scheduling = mock_scheduling
-    dummy_controller_client.make_temporary_config.return_value = mock_config
+    """Temporary PQ with schedule=[]: auto_delete_timeout and schedule are mutually exclusive.
 
-    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+    Supplying both a positive auto_delete_timeout and any explicit schedule (including the
+    empty list) is rejected up front, because auto_delete_timeout installs its own scheduler.
+    """
+    with pytest.raises(ValueError, match="mutually exclusive"):
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
             auto_delete_timeout=300,  # Temporary
-            schedule=[],  # Explicit clear
+            schedule=[],  # Explicit clear — mutually exclusive with auto_delete_timeout
         )
-
-        mock_scheduling.__delitem__.assert_called_once_with(slice(None))
-        mock_scheduling.append.assert_not_called()
-        mock_scheduling.extend.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -760,25 +907,19 @@ async def test_make_pq_config_permanent_schedule_explicit_replaces_default(
 async def test_make_pq_config_temporary_schedule_explicit_replaces_temp(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):
-    """Temporary PQ with a non-empty schedule: caller's list replaces temp scheduling."""
-    mock_config = MagicMock()
-    mock_scheduling = MagicMock()
-    mock_config.scheduling = mock_scheduling
-    dummy_controller_client.make_temporary_config.return_value = mock_config
+    """Temporary PQ with a non-empty schedule: auto_delete_timeout and schedule conflict.
 
+    Supplying both is rejected up front; auto_delete_timeout installs its own scheduler.
+    """
     caller_schedule = ["SchedulerType=Daily", "StartTime=08:00:00"]
 
-    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+    with pytest.raises(ValueError, match="mutually exclusive"):
         await coreplus_controller_client.make_pq_config(
             name="test-pq",
             heap_size_gb=8.0,
             auto_delete_timeout=300,  # Temporary
             schedule=caller_schedule,
         )
-
-        mock_scheduling.__delitem__.assert_called_once_with(slice(None))
-        mock_scheduling.extend.assert_called_once_with(caller_schedule)
-        mock_scheduling.append.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1406,3 +1547,122 @@ async def test_stop_and_wait_passes_zero_when_not_waiting(
 ):
     await coreplus_controller_client.stop_and_wait(42, wait=False)
     dummy_controller_client.stop_and_wait.assert_called_once_with(42, 0)
+
+
+# ===========================================================================
+# update_pq_config tests
+# ===========================================================================
+
+
+def _update_config_wrapper():
+    """A CorePlusQueryConfig-like wrapper whose .pb is a field-applier-ready mock."""
+    wrapper = MagicMock()
+    wrapper.pb = _make_config_mock()
+    return wrapper
+
+
+def test_update_pq_config_all_none_returns_false(coreplus_controller_client):
+    wrapper = _update_config_wrapper()
+    assert coreplus_controller_client.update_pq_config(wrapper) is False
+
+
+def test_update_pq_config_sets_owner(coreplus_controller_client):
+    wrapper = _update_config_wrapper()
+    assert coreplus_controller_client.update_pq_config(wrapper, owner="svc") is True
+    assert wrapper.pb.owner == "svc"
+
+
+def test_update_pq_config_auto_delete_zero_continuous(
+    coreplus_controller_client, pq_config_mod
+):
+    wrapper = _update_config_wrapper()
+    wrapper.pb.typeSpecificFieldsJson = (
+        '{"TerminationDelay": {"type": "long", "value": "1"}}'
+    )
+    assert (
+        coreplus_controller_client.update_pq_config(wrapper, auto_delete_timeout=0)
+        is True
+    )
+    wrapper.pb.scheduling.__delitem__.assert_called_once_with(slice(None))
+    wrapper.pb.scheduling.extend.assert_called_once_with(
+        pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
+    )
+    assert wrapper.pb.typeSpecificFieldsJson == ""
+
+
+def test_update_pq_config_auto_delete_positive_temporary(
+    coreplus_controller_client, pq_config_mod
+):
+    import json
+
+    wrapper = _update_config_wrapper()
+    temp_scheduler = ["SchedulerType=Temporary"]
+    with patch.object(pq_config_mod, "GenerateScheduling") as mock_gen:
+        mock_gen.generate_temporary_scheduler.return_value = temp_scheduler
+        assert (
+            coreplus_controller_client.update_pq_config(
+                wrapper, auto_delete_timeout=120
+            )
+            is True
+        )
+    wrapper.pb.scheduling.extend.assert_called_once_with(temp_scheduler)
+    assert json.loads(wrapper.pb.typeSpecificFieldsJson)["TerminationDelay"] == {
+        "type": "long",
+        "value": "120000",
+    }
+
+
+def test_update_pq_config_reject_auto_delete_and_schedule(coreplus_controller_client):
+    wrapper = _update_config_wrapper()
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        coreplus_controller_client.update_pq_config(
+            wrapper, auto_delete_timeout=60, schedule=["s"]
+        )
+
+
+def test_update_pq_config_reject_script_body_and_path(coreplus_controller_client):
+    wrapper = _update_config_wrapper()
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        coreplus_controller_client.update_pq_config(
+            wrapper, script_body="code", script_path="path"
+        )
+
+
+def test_update_pq_config_restart_users_enum_conversion(
+    coreplus_controller_client, pq_config_mod
+):
+    wrapper = _update_config_wrapper()
+    with patch.object(pq_config_mod, "RestartUsersEnum") as mock_enum:
+        mock_enum.Value.return_value = 3
+        assert (
+            coreplus_controller_client.update_pq_config(
+                wrapper, restart_users="RU_ADMIN"
+            )
+            is True
+        )
+    assert wrapper.pb.restartUsers == 3
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_restart_users_enum_conversion(
+    coreplus_controller_client,
+    dummy_controller_client,
+    controller_client_mod,
+    pq_config_mod,
+):
+    """Regression: restart_users routes through the enum converter, not raw assignment."""
+    mock_config = _make_config_mock()
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with (
+        patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True),
+        patch.object(pq_config_mod, "RestartUsersEnum") as mock_enum,
+    ):
+        mock_enum.Value.return_value = 1
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            restart_users="RU_ADMIN",
+        )
+        mock_enum.Value.assert_called_once_with("RU_ADMIN")
+        assert mock_config.restartUsers == 1

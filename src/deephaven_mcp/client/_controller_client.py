@@ -53,6 +53,7 @@ from deephaven_mcp._exceptions import (
 )
 
 from ._base import ClientObjectWrapper
+from ._pq_config import apply_pq_config_fields, validate_pq_config_args
 from ._protobuf import (
     CorePlusQueryConfig,
     CorePlusQueryInfo,
@@ -61,23 +62,6 @@ from ._protobuf import (
 from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
-
-
-# Default scheduling entries applied by ``CorePlusControllerClient.make_pq_config`` to
-# a *permanent* PQ (``auto_delete_timeout=None``) when the caller passes
-# ``schedule=None``. Produces a continuous scheduler that auto-starts the PQ after
-# the controller accepts it. See ``make_pq_config`` for the full three-way semantics.
-_DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING: tuple[str, ...] = (
-    "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
-    "StartTime=00:00:00",
-    "TimeZone=America/New_York",
-    "DailyRestart=false",
-    "StopTimeDisabled=true",
-    "RestartErrorCount=0",
-    "RestartErrorDelay=0",
-    "RestartWhenRunning=Yes",
-    "SchedulingDisabled=false",
-)
 
 
 class CorePlusControllerClient(
@@ -144,7 +128,7 @@ class CorePlusControllerClient(
 
     def __init__(
         self,
-        controller_client: "deephaven_enterprise.client.controller.ControllerClient",  # noqa: F821
+        controller_client: "deephaven_enterprise.client.controller.ControllerClient",
         timeouts: EnterpriseClientTimeouts,
     ):
         """Initialize the CorePlusControllerClient with a ControllerClient instance.
@@ -766,74 +750,11 @@ class CorePlusControllerClient(
             )
             raise QueryError(f"Failed to create query: {e}") from e
 
-    def _apply_pq_config_parameters(  # noqa: C901
-        self,
-        config: Any,
-        programming_language: str | None,
-        script_body: str | None,
-        script_path: str | None,
-        configuration_type: str | None,
-        enabled: bool | None,
-        restart_users: str | None,
-        extra_class_path: list[str] | None,
-        schedule: list[str] | None,
-        init_timeout_nanos: int | None,
-        jvm_profile: str | None,
-        python_virtual_environment: str | None,
-    ) -> None:
-        """Apply caller-supplied configuration parameters to a protobuf config in place.
-
-        Every field except ``schedule`` follows a "None means skip" rule, so the
-        existing default is preserved when the caller does not supply a value.
-        See the ``schedule`` entry below for its three-way semantics.
-
-        Args:
-            config (Any): The protobuf config object to modify
-            programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
-            script_body (str | None): Inline script code, or None if not specified
-            script_path (str | None): Path to script file in Git repository, or None if not specified
-            configuration_type (str | None): Query type ("Script", "RunAndDone", etc.), or None to use default
-            enabled (bool | None): Whether query is enabled, or None to use default
-            restart_users (str | None): Restart permission setting, or None to use controller default
-            extra_class_path (list[str] | None): Additional classpath entries, or None if not specified
-            schedule (list[str] | None): Scheduling entries. ``None`` leaves the
-                existing scheduling untouched; ``[]`` clears it; a non-empty list
-                replaces it wholesale.
-            init_timeout_nanos (int | None): Initialization timeout in nanoseconds, or None to use default
-            jvm_profile (str | None): Named JVM profile, or None if not specified
-            python_virtual_environment (str | None): Named Python venv, or None if not specified
-        """
-        if programming_language is not None:
-            config.scriptLanguage = programming_language
-        if script_body is not None:
-            config.scriptCode = script_body
-        if script_path is not None:
-            config.scriptPath = script_path
-        if configuration_type is not None:
-            config.configurationType = configuration_type
-        if enabled is not None:
-            config.enabled = enabled
-        if restart_users is not None:
-            config.restartUsers = restart_users
-        if extra_class_path:
-            config.extraClassPath.extend(extra_class_path)
-        # schedule has three-way semantics: None leaves config.scheduling
-        # untouched; [] clears it; [...] replaces it wholesale.
-        if schedule is not None:
-            del config.scheduling[:]
-            if schedule:
-                config.scheduling.extend(schedule)
-        if init_timeout_nanos is not None:
-            config.initTimeoutNanos = init_timeout_nanos
-        if jvm_profile is not None:
-            config.jvmProfile = jvm_profile
-        if python_virtual_environment is not None:
-            config.pythonVirtualEnvironment = python_virtual_environment
-
     async def make_pq_config(
         self,
         name: str,
         heap_size_gb: float | int,
+        *,
         script_body: str | None = None,
         script_path: str | None = None,
         programming_language: str | None = None,
@@ -852,6 +773,7 @@ class CorePlusControllerClient(
         admin_groups: list[str] | None = None,
         viewer_groups: list[str] | None = None,
         restart_users: str | None = None,
+        owner: str | None = None,
     ) -> CorePlusQueryConfig:
         """Create a persistent query configuration.
 
@@ -859,23 +781,21 @@ class CorePlusControllerClient(
         scheduling, resource settings, and access controls. The configuration is not persisted
         until passed to add_query().
 
-        Scheduler semantics (three-way, based on ``schedule``):
-            - ``schedule=None`` (default): install the default scheduler and make no
-              further changes.
-                - For a *permanent* PQ (``auto_delete_timeout=None``) the default is a
-                  continuous scheduler with ``SchedulingDisabled=false`` and
-                  ``RestartWhenRunning=Yes``; the controller will begin acquiring a worker
-                  immediately after ``add_query()`` (assuming ``enabled`` is ``True``,
-                  which is the controller default).
-                - For a *temporary* PQ (``auto_delete_timeout`` is a positive integer)
-                  the default is whatever ``make_temporary_config`` installs.
-            - ``schedule=[]``: the caller is explicitly requesting no scheduling. The
-              scheduling list is cleared before the config is returned; the server is
-              responsible for accepting or rejecting a PQ with no scheduling entries.
-            - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces**
-              the scheduling block wholesale. No default keys are merged in; the caller
-              is responsible for including ``SchedulerType`` and any other required
-              entries.
+        Scheduler semantics:
+            ``auto_delete_timeout`` and ``schedule`` are mutually exclusive (a ValueError is
+            raised if both are supplied), because ``auto_delete_timeout`` installs its own
+            scheduler:
+            - No ``schedule`` and ``auto_delete_timeout`` is ``None`` or ``0``: a continuous
+              (permanent) scheduler with ``SchedulingDisabled=false`` and
+              ``RestartWhenRunning=Yes``; the controller begins acquiring a worker immediately
+              after ``add_query()`` (assuming ``enabled`` is ``True``).
+            - No ``schedule`` and ``auto_delete_timeout`` is a positive integer: a temporary
+              scheduler that auto-deletes the PQ after that many seconds of inactivity.
+            - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces** the
+              scheduling block wholesale; the caller includes ``SchedulerType`` and any other
+              required entries.
+            - ``schedule=[]``: the scheduling list is cleared; the server decides whether to
+              accept a PQ with no scheduling entries.
 
         Args:
             name (str): The name of the persistent query. This is used for identification.
@@ -897,18 +817,23 @@ class CorePlusControllerClient(
             python_virtual_environment (str | None): Named Python virtual environment for Core+ workers.
             extra_environment_vars (list[str] | None): A list of extra environment variables for the worker.
             init_timeout_nanos (int | None): Initialization timeout in nanoseconds.
-            auto_delete_timeout (int | None): The timeout in seconds for auto-deletion of the query
-                after it becomes idle. None (default) creates a permanent query.
+            auto_delete_timeout (int | None): Seconds of inactivity before the controller
+                auto-deletes the query. None (default) and 0 both create a permanent query
+                (auto-delete disabled); a positive value creates a temporary query that is
+                deleted after that many seconds of inactivity.
             admin_groups (list[str] | None): A list of user groups that will have admin access to the query.
             viewer_groups (list[str] | None): A list of user groups that will have viewer access to the query.
             restart_users (str | None): Who can restart the query. Values: "RU_ADMIN", "RU_ADMIN_AND_VIEWERS",
                 "RU_VIEWERS_WHEN_DOWN". Defaults to controller setting.
+            owner (str | None): The user to set as the query owner. None (default) leaves the
+                owner as the authenticated user set by make_temporary_config.
 
         Returns:
             CorePlusQueryConfig: The configuration object for the persistent query.
 
         Raises:
-            ValueError: If invalid parameters are provided.
+            ValueError: If invalid parameters are provided (script_body/script_path or
+                auto_delete_timeout/schedule supplied together).
             DeephavenConnectionError: If not authenticated or unable to communicate with the controller.
             QueryError: If configuration creation fails for any other reason.
         """
@@ -920,23 +845,17 @@ class CorePlusControllerClient(
             f"script_body={'<set>' if script_body else None}, script_path={script_path!r}, "
             f"schedule={schedule}, jvm_profile={jvm_profile!r}, "
             f"python_virtual_environment={python_virtual_environment!r}, "
-            f"admin_groups={admin_groups}, viewer_groups={viewer_groups}, restart_users={restart_users!r}"
+            f"admin_groups={admin_groups}, viewer_groups={viewer_groups}, restart_users={restart_users!r}, "
+            f"owner={owner!r}"
         )
 
-        # Validate mutually exclusive parameters
-        if script_body is not None and script_path is not None:
-            raise ValueError(
-                "script_body and script_path are mutually exclusive - specify only one"
-            )
+        validate_pq_config_args(auto_delete_timeout, schedule, script_body, script_path)
 
         try:
-            # Step 1: call make_temporary_config to produce a baseline config.
-            # For permanent queries (auto_delete_timeout=None) we must still pass a
-            # placeholder timeout because the server rejects temporary scheduling
-            # that lacks a valid timeout; we overwrite the scheduling below.
-            is_permanent = auto_delete_timeout is None
-            effective_timeout = 600 if is_permanent else auto_delete_timeout
-
+            # Baseline config from the vendor: serial, version, defaults, and the
+            # natively-supported fields (name, heap, server, engine, groups, jvm args,
+            # env vars). Pass auto_delete_timeout=None so no stray TerminationDelay or
+            # temporary scheduling leaks in; the shared applier installs the scheduler.
             config = await asyncio.to_thread(
                 self.wrapped.make_temporary_config,
                 name,
@@ -945,46 +864,43 @@ class CorePlusControllerClient(
                 extra_jvm_args,
                 extra_environment_vars,
                 engine,
-                effective_timeout,
+                None,
                 admin_groups,
                 viewer_groups,
             )
 
-            # Step 2: install the default scheduler for permanent queries when the
-            # caller did not supply a schedule. Replaces the temporary scheduling
-            # that make_temporary_config installs with a continuous scheduler that
-            # causes the PQ to auto-start once the controller accepts it. This step
-            # lives here (not in _apply_pq_config_parameters) because it needs the
-            # ``is_permanent`` context which is local to this method.
-            # Note: protobuf RepeatedScalarContainer has no clear(); use slice del.
-            if is_permanent and schedule is None:
-                del config.scheduling[:]
-                for entry in _DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING:
-                    config.scheduling.append(entry)
-                _LOGGER.debug(
-                    f"[CorePlusControllerClient:make_pq_config] "
-                    f"Installed default continuous scheduler for permanent query '{name}'"
-                )
-
-            # Step 3: apply all caller-supplied parameters (including any
-            # caller-supplied scheduling override) through the single helper.
-            # Scheduling is applied with three-way semantics inside the helper:
-            #   schedule=None      -> no override (default from step 2 stays)
-            #   schedule=[]        -> explicit "no scheduling"; clear the block
-            #   schedule=[...]     -> replace wholesale with the caller's list
-            self._apply_pq_config_parameters(
+            # With no explicit schedule, auto_delete_timeout dictates the scheduler;
+            # None and 0 both mean permanent (continuous). An explicit schedule is
+            # mutually exclusive with auto_delete_timeout (validated above), so when
+            # one is given the other is None.
+            effective_auto_delete = (
+                auto_delete_timeout
+                if schedule is not None
+                else (auto_delete_timeout or 0)
+            )
+            apply_pq_config_fields(
                 config,
-                programming_language,
-                script_body,
-                script_path,
-                configuration_type,
-                enabled,
-                restart_users,
-                extra_class_path,
-                schedule,
-                init_timeout_nanos,
-                jvm_profile,
-                python_virtual_environment,
+                pq_name=None,
+                heap_size_gb=None,
+                programming_language=programming_language,
+                script_body=script_body,
+                script_path=script_path,
+                configuration_type=configuration_type,
+                enabled=enabled,
+                schedule=schedule,
+                server=None,
+                engine=None,
+                jvm_profile=jvm_profile,
+                extra_jvm_args=None,
+                extra_class_path=extra_class_path,
+                python_virtual_environment=python_virtual_environment,
+                extra_environment_vars=None,
+                init_timeout_nanos=init_timeout_nanos,
+                auto_delete_timeout=effective_auto_delete,
+                admin_groups=None,
+                viewer_groups=None,
+                restart_users=restart_users,
+                owner=owner,
             )
 
             _LOGGER.debug(
@@ -996,6 +912,107 @@ class CorePlusControllerClient(
                 f"[CorePlusControllerClient:make_pq_config] Failed to create config for '{name}': {e}"
             )
             raise
+
+    def update_pq_config(
+        self,
+        config: CorePlusQueryConfig,
+        *,
+        pq_name: str | None = None,
+        heap_size_gb: float | int | None = None,
+        script_body: str | None = None,
+        script_path: str | None = None,
+        programming_language: str | None = None,
+        configuration_type: str | None = None,
+        enabled: bool | None = None,
+        schedule: list[str] | None = None,
+        server: str | None = None,
+        engine: str | None = None,
+        jvm_profile: str | None = None,
+        extra_jvm_args: list[str] | None = None,
+        extra_class_path: list[str] | None = None,
+        python_virtual_environment: str | None = None,
+        extra_environment_vars: list[str] | None = None,
+        init_timeout_nanos: int | None = None,
+        auto_delete_timeout: int | None = None,
+        admin_groups: list[str] | None = None,
+        viewer_groups: list[str] | None = None,
+        restart_users: str | None = None,
+        owner: str | None = None,
+    ) -> bool:
+        """Apply changes to an existing persistent query configuration in place.
+
+        The modify-side counterpart to ``make_pq_config``: both shape a
+        ``PersistentQueryConfigMessage`` through the same field-applier, so the same
+        argument values produce the same config. Every field follows a "None means skip"
+        rule, so only the supplied fields change. This mutates ``config`` in place and does
+        not persist it; pass the result to ``modify_query``.
+
+        ``auto_delete_timeout`` installs its own scheduler and is mutually exclusive with
+        ``schedule`` (a ValueError is raised if both are supplied): ``0`` installs the
+        continuous (permanent) scheduler and clears the auto-delete grace period; a positive
+        integer installs the temporary scheduler and sets the grace period to that many
+        seconds; ``None`` leaves scheduling and auto-delete untouched.
+
+        Args:
+            config (CorePlusQueryConfig): The existing configuration to modify in place.
+            pq_name (str | None): New PQ name.
+            heap_size_gb (float | int | None): New heap size in GB.
+            script_body (str | None): New inline script code (mutually exclusive with script_path).
+            script_path (str | None): New Git script path (mutually exclusive with script_body).
+            programming_language (str | None): "Python" or "Groovy", case-insensitive.
+            configuration_type (str | None): Query type ("Script", "RunAndDone", etc.).
+            enabled (bool | None): Whether the query is enabled.
+            schedule (list[str] | None): Scheduling entries; replaces existing wholesale.
+            server (str | None): Target server name.
+            engine (str | None): Worker kind/engine type.
+            jvm_profile (str | None): Named JVM profile.
+            extra_jvm_args (list[str] | None): JVM arguments; replaces existing.
+            extra_class_path (list[str] | None): Classpath entries; replaces existing.
+            python_virtual_environment (str | None): Python venv control.
+            extra_environment_vars (list[str] | None): Env vars; replaces existing.
+            init_timeout_nanos (int | None): Initialization timeout in nanoseconds.
+            auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion.
+                None leaves it unchanged; 0 makes the query permanent; a positive integer
+                makes it temporary, auto-deleted after that many seconds.
+            admin_groups (list[str] | None): Admin groups; replaces existing.
+            viewer_groups (list[str] | None): Viewer groups; replaces existing.
+            restart_users (str | None): Restart-permission enum name (e.g., "RU_ADMIN").
+            owner (str | None): New query owner.
+
+        Returns:
+            bool: True if any field changed, False if every parameter was None.
+
+        Raises:
+            ValueError: If script_body/script_path or auto_delete_timeout/schedule are
+                supplied together, or if a parameter value is invalid.
+            MissingEnterprisePackageError: If a temporary scheduler or enum conversion is
+                requested but the enterprise package is unavailable.
+        """
+        validate_pq_config_args(auto_delete_timeout, schedule, script_body, script_path)
+        return apply_pq_config_fields(
+            config.pb,
+            pq_name=pq_name,
+            heap_size_gb=heap_size_gb,
+            programming_language=programming_language,
+            script_body=script_body,
+            script_path=script_path,
+            configuration_type=configuration_type,
+            enabled=enabled,
+            schedule=schedule,
+            server=server,
+            engine=engine,
+            jvm_profile=jvm_profile,
+            extra_jvm_args=extra_jvm_args,
+            extra_class_path=extra_class_path,
+            python_virtual_environment=python_virtual_environment,
+            extra_environment_vars=extra_environment_vars,
+            init_timeout_nanos=init_timeout_nanos,
+            auto_delete_timeout=auto_delete_timeout,
+            admin_groups=admin_groups,
+            viewer_groups=viewer_groups,
+            restart_users=restart_users,
+            owner=owner,
+        )
 
     # ===========================================================================
     # Query Lifecycle Management
@@ -1111,17 +1128,16 @@ class CorePlusControllerClient(
                        controller errors.
 
         Example:
-            # Get current query info and modify it
+            # Get current query info and apply changes via update_pq_config (the
+            # partial-update helper; "None means skip" for every field).
             query_info = await controller.get(serial)
             config = query_info.config
+            controller.update_pq_config(config, heap_size_gb=16.0)
 
-            # Update heap size in the protobuf
-            config.pb.heapSizeGb = 16.0
-
-            # Modify without restarting (changes saved for next restart)
+            # Persist without restarting (changes saved for next restart)
             await controller.modify_query(config, restart=False)
 
-            # Or modify and restart immediately
+            # Or persist and restart immediately to apply runtime changes
             await controller.modify_query(config, restart=True)
         """
         timeout_seconds = self._timeouts.pq_management_timeout_seconds

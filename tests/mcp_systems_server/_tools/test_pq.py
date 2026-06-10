@@ -4,7 +4,6 @@ Tests for deephaven_mcp.mcp_systems_server._tools.pq.
 
 import asyncio
 import warnings
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -137,17 +136,14 @@ except Exception:
     _PQConfigMessage = None
 from deephaven_mcp.config.schema import PqToolsConfig
 from deephaven_mcp.mcp_systems_server._tools.pq import (
-    _apply_pq_config_list_fields,
-    _apply_pq_config_modifications,
     _format_column_definition,
     _format_connection_details,
     _format_exception_details,
     _format_exported_object_info,
     _format_named_string_list,
     _format_pq_config,
-    _format_pq_replicas,
-    _format_pq_spares,
     _format_pq_state,
+    _format_pq_states,
     _format_table_definition,
     _format_worker_protocol,
     _parse_pq_id,
@@ -1586,181 +1582,57 @@ def test_format_pq_state_with_empty_connection_details():
     }
 
 
-def test_format_pq_replicas_empty():
-    """Test _format_pq_replicas returns empty list for empty input."""
-    result = _format_pq_replicas([])
-    assert result == []
+def _make_mock_state(status_name: str, replica_slot: int) -> MagicMock:
+    """Build a MagicMock CorePlusQueryState with the 25 fields _format_pq_state reads."""
+    mock_state = MagicMock()
+    mock_state.pb.serial = 12345
+    mock_state.pb.version = 1
+    mock_state.status.name = status_name
+    mock_state.pb.initializationStartNanos = 0
+    mock_state.pb.initializationCompleteNanos = 0
+    mock_state.pb.lastUpdateNanos = 0
+    mock_state.pb.dispatcherHost = ""
+    mock_state.pb.tableGroups = []
+    mock_state.pb.scopeTypes = []
+    mock_state.pb.connectionDetails = None
+    mock_state.pb.exceptionDetails = None
+    mock_state.pb.typeSpecificStateJson = ""
+    mock_state.pb.lastAuthenticatedUser = ""
+    mock_state.pb.lastEffectiveUser = ""
+    mock_state.pb.scriptLoaderStateJson = ""
+    mock_state.pb.hasProgress = False
+    mock_state.pb.progressValue = 0
+    mock_state.pb.progressMessage = ""
+    mock_state.pb.engineVersion = ""
+    mock_state.pb.dispatcherPort = 0
+    mock_state.pb.shouldStopNanos = 0
+    mock_state.pb.numFailures = 0
+    mock_state.pb.lastFailureTimeNanos = 0
+    mock_state.pb.replicaSlot = replica_slot
+    mock_state.pb.statusDetails = ""
+    return mock_state
 
 
-def test_format_pq_replicas_with_data():
-    """Test _format_pq_replicas formats replica states correctly."""
-    mock_replica1 = MagicMock()
-    mock_replica1.pb.serial = 12345
-    mock_replica1.pb.version = 1
+def test_format_pq_states_empty():
+    """_format_pq_states returns an empty list for empty input."""
+    assert _format_pq_states([]) == []
 
-    # Set up status using wrapper's status.name property
-    mock_replica1.status.name = "RUNNING"
-    mock_replica1.pb.initializationStartNanos = 1734467100000000000
-    mock_replica1.pb.initializationCompleteNanos = 1734467150000000000
-    mock_replica1.pb.lastUpdateNanos = 1734467200000000000
-    mock_replica1.pb.dispatcherHost = "dispatcher.example.com"
-    mock_replica1.pb.tableGroups = []
-    mock_replica1.pb.scopeTypes = []
-    mock_replica1.pb.connectionDetails = None
-    mock_replica1.pb.exceptionDetails = None
-    mock_replica1.pb.typeSpecificStateJson = ""
-    mock_replica1.pb.lastAuthenticatedUser = ""
-    mock_replica1.pb.lastEffectiveUser = ""
-    mock_replica1.pb.scriptLoaderStateJson = ""
-    mock_replica1.pb.hasProgress = False
-    mock_replica1.pb.progressValue = 0
-    mock_replica1.pb.progressMessage = ""
-    mock_replica1.pb.engineVersion = ""
-    mock_replica1.pb.dispatcherPort = 8080
-    mock_replica1.pb.shouldStopNanos = 0
-    mock_replica1.pb.numFailures = 0
-    mock_replica1.pb.lastFailureTimeNanos = 0
-    mock_replica1.pb.replicaSlot = 1
-    mock_replica1.pb.statusDetails = ""
 
-    result = _format_pq_replicas([mock_replica1])
+def test_format_pq_states_with_data():
+    """_format_pq_states formats each state (25 fields) into a dict."""
+    result = _format_pq_states([_make_mock_state("RUNNING", 1)])
 
     assert len(result) == 1
     assert result[0]["serial"] == 12345
-    assert result[0]["replica_slot"] == 1
     assert result[0]["status"] == "RUNNING"
+    assert result[0]["replica_slot"] == 1
 
 
-def test_format_pq_replicas_filters_none():
-    """Test _format_pq_replicas filters out None entries."""
-    mock_replica = MagicMock()
-    mock_replica.pb.serial = 12345
-    mock_replica.pb.version = 1
-
-    # Set up status using wrapper's status.name property
-    mock_replica.status.name = "RUNNING"
-    mock_replica.pb.initializationStartNanos = 0
-    mock_replica.pb.initializationCompleteNanos = 0
-    mock_replica.pb.lastUpdateNanos = 0
-    mock_replica.pb.dispatcherHost = ""
-    mock_replica.pb.tableGroups = []
-    mock_replica.pb.scopeTypes = []
-    mock_replica.pb.connectionDetails = None
-    mock_replica.pb.exceptionDetails = None
-    mock_replica.pb.typeSpecificStateJson = ""
-    mock_replica.pb.lastAuthenticatedUser = ""
-    mock_replica.pb.lastEffectiveUser = ""
-    mock_replica.pb.scriptLoaderStateJson = ""
-    mock_replica.pb.hasProgress = False
-    mock_replica.pb.progressValue = 0
-    mock_replica.pb.progressMessage = ""
-    mock_replica.pb.engineVersion = ""
-    mock_replica.pb.dispatcherPort = 0
-    mock_replica.pb.shouldStopNanos = 0
-    mock_replica.pb.numFailures = 0
-    mock_replica.pb.lastFailureTimeNanos = 0
-    mock_replica.pb.replicaSlot = 0
-    mock_replica.pb.statusDetails = ""
-    mock_replica.pb.killTime = 0
-    mock_replica.pb.assignedWorkerGroupId = 0
-    mock_replica.pb.configId = ""
-
-    result = _format_pq_replicas([mock_replica, None])
+def test_format_pq_states_filters_none():
+    """_format_pq_states drops None entries from the input."""
+    result = _format_pq_states([_make_mock_state("INITIALIZING", 2), None])
     assert len(result) == 1
-
-
-def test_format_pq_spares_empty():
-    """Test _format_pq_spares returns empty list for empty input."""
-    result = _format_pq_spares([])
-    assert result == []
-
-
-def test_format_pq_spares_with_data():
-    """Test _format_pq_spares formats spare states correctly."""
-    mock_spare = MagicMock()
-    mock_spare.pb.serial = 12345
-    mock_spare.pb.version = 1
-
-    # Set up status using wrapper's status.name property
-    mock_spare.status.name = "INITIALIZING"
-    mock_spare.pb.initializationStartNanos = 1734467150000000000
-    mock_spare.pb.initializationCompleteNanos = 1734467200000000000
-    mock_spare.pb.lastUpdateNanos = 1734467250000000000
-    mock_spare.pb.dispatcherHost = "dispatcher.example.com"
-    mock_spare.pb.tableGroups = []
-    mock_spare.pb.scopeTypes = []
-    mock_spare.pb.connectionDetails = None
-    mock_spare.pb.exceptionDetails = None
-    mock_spare.pb.typeSpecificStateJson = ""
-    mock_spare.pb.lastAuthenticatedUser = ""
-    mock_spare.pb.lastEffectiveUser = ""
-    mock_spare.pb.scriptLoaderStateJson = ""
-    mock_spare.pb.hasProgress = False
-    mock_spare.pb.progressValue = 0
-    mock_spare.pb.progressMessage = ""
-    mock_spare.pb.engineVersion = ""
-    mock_spare.pb.dispatcherPort = 8080
-    mock_spare.pb.shouldStopNanos = 0
-    mock_spare.pb.numFailures = 0
-    mock_spare.pb.lastFailureTimeNanos = 0
-    mock_spare.pb.replicaSlot = 2
-    mock_spare.pb.statusDetails = ""
-
-    result = _format_pq_spares([mock_spare])
-
-    assert len(result) == 1
-    assert result[0]["serial"] == 12345
     assert result[0]["status"] == "INITIALIZING"
-    assert result[0]["replica_slot"] == 2
-
-
-def test_format_pq_spares_filters_none():
-    """Test _format_pq_spares filters out None entries."""
-    mock_spare = MagicMock()
-    mock_spare.pb.serial = 12345
-    mock_spare.pb.version = 1
-
-    # Set up status using wrapper's status.name property
-    mock_spare.status.name = "INITIALIZING"
-    mock_spare.pb.initializationStartNanos = 0
-    mock_spare.pb.initializationCompleteNanos = 0
-    mock_spare.pb.lastUpdateNanos = 0
-    mock_spare.pb.dispatcherHost = ""
-    mock_spare.pb.tableGroups = []
-    mock_spare.pb.scopeTypes = []
-    mock_spare.pb.connectionDetails = None
-    mock_spare.pb.exceptionDetails = None
-    mock_spare.pb.typeSpecificStateJson = ""
-    mock_spare.pb.lastAuthenticatedUser = ""
-    mock_spare.pb.lastEffectiveUser = ""
-    mock_spare.pb.scriptLoaderStateJson = ""
-    mock_spare.pb.hasProgress = False
-    mock_spare.pb.progressValue = 0
-    mock_spare.pb.progressMessage = ""
-    mock_spare.pb.engineVersion = ""
-    mock_spare.pb.dispatcherPort = 0
-    mock_spare.pb.shouldStopNanos = 0
-    mock_spare.pb.numFailures = 0
-    mock_spare.pb.lastFailureTimeNanos = 0
-    mock_spare.pb.replicaSlot = 0
-    mock_spare.pb.statusDetails = ""
-    mock_spare.pb.flightSessionId = ""
-    mock_spare.pb.sessionToken = ""
-    mock_spare.pb.tokenExpirationTime = 0
-    mock_spare.pb.queryInfoJson = ""
-    mock_spare.pb.tempQueryId = 0
-    mock_spare.pb.totalMemoryMB = 0
-    mock_spare.pb.grpcAddress = ""
-    mock_spare.pb.flightAddress = ""
-    mock_spare.pb.httpPort = 0
-    mock_spare.pb.lastActivityTime = 0
-    mock_spare.pb.assignedDispatcherId = 0
-    mock_spare.pb.killTime = 0
-    mock_spare.pb.assignedWorkerGroupId = 0
-    mock_spare.pb.configId = ""
-
-    result = _format_pq_spares([None, mock_spare])
-    assert len(result) == 1
 
 
 @pytest.mark.asyncio
@@ -2223,6 +2095,44 @@ async def test_pq_create_success():
 
 
 @pytest.mark.asyncio
+async def test_pq_create_forwards_owner():
+    """Test pq_create forwards the owner parameter to make_pq_config."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    mock_config = MagicMock()
+    mock_config.pb = MagicMock()
+    mock_controller.make_pq_config = AsyncMock(return_value=mock_config)
+    mock_controller.add_query = AsyncMock(return_value=12345)
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="new-pq",
+        heap_size_gb=8.0,
+        owner="service-account",
+    )
+
+    assert result["success"] is True
+    mock_controller.make_pq_config.assert_called_once()
+    assert mock_controller.make_pq_config.call_args.kwargs["owner"] == "service-account"
+
+
+@pytest.mark.asyncio
 async def test_pq_create_success_groovy():
     """Test successful PQ creation with Groovy programming language."""
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
@@ -2277,6 +2187,13 @@ async def test_pq_create_invalid_language():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    # pq_create now passes programming_language raw to make_pq_config, which normalizes
+    # and validates it; an invalid value raises ValueError.
+    mock_controller.make_pq_config = AsyncMock(
+        side_effect=ValueError(
+            "Invalid programming_language: 'JavaScript'. Must be 'Python' or 'Groovy' (case-insensitive)."
+        )
+    )
 
     context = MockContext(
         {
@@ -2740,6 +2657,7 @@ async def test_pq_modify_success():
 
     # Mock controller methods - map() returns dict of {serial: pq_info}
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
     mock_controller.modify_query = AsyncMock()
 
     context = MockContext(
@@ -2767,15 +2685,18 @@ async def test_pq_modify_success():
     assert "warning" in result
     assert "pq_restart" in result["warning"]
 
-    # Verify modify_query was called with the existing config (now modified) and restart=False
+    # Verify pq_modify delegated to update_pq_config with the existing config and
+    # the heap_size_gb keyword, and that modify_query was called with the same config.
+    mock_controller.update_pq_config.assert_called_once()
+    update_args = mock_controller.update_pq_config.call_args
+    assert update_args[0][0] == current_pq_info.config
+    assert update_args.kwargs["heap_size_gb"] == 16.0
     mock_controller.modify_query.assert_called_once()
     call_args = mock_controller.modify_query.call_args
     assert (
         call_args[0][0] == current_pq_info.config
     )  # First positional arg is the config
     assert call_args[1]["restart"] is False
-    # Verify heap was actually modified in the existing config
-    assert current_pq_info.config.pb.heapSizeGb == 16.0
 
 
 @pytest.mark.asyncio
@@ -2796,6 +2717,7 @@ async def test_pq_modify_with_restart():
     current_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
 
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
     mock_controller.modify_query = AsyncMock()
 
     context = MockContext(
@@ -2804,6 +2726,10 @@ async def test_pq_modify_with_restart():
             "registry": mock_session_registry,
         }
     )
+
+    # pq_modify reports the name from config.pb.name; set it so the response reflects
+    # the rename that update_pq_config (mocked here) would have applied.
+    current_pq_info.config.pb.name = "analytics_renamed"
 
     result = await pq_modify(
         context,
@@ -2819,12 +2745,15 @@ async def test_pq_modify_with_restart():
     assert result["restarted"] is True
     assert "restarted" in result["message"]
 
-    # Verify modify_query was called with existing config and restart=True
+    # Verify pq_modify delegated to update_pq_config with the pq_name keyword, and
+    # that modify_query was called with the same config and restart=True.
+    mock_controller.update_pq_config.assert_called_once()
+    update_args = mock_controller.update_pq_config.call_args
+    assert update_args[0][0] == current_pq_info.config
+    assert update_args.kwargs["pq_name"] == "analytics_renamed"
     call_args = mock_controller.modify_query.call_args
     assert call_args[0][0] == current_pq_info.config  # Existing config was passed
     assert call_args[1]["restart"] is True
-    # Verify name was actually modified in the existing config
-    assert current_pq_info.config.pb.name == "analytics_renamed"
     # pq_name is not runtime-affecting, so no warning even on a running PQ
     assert "warning" not in result
 
@@ -2992,6 +2921,7 @@ async def test_pq_modify_script_path():
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
     mock_controller.modify_query = AsyncMock()
 
     context = MockContext(
@@ -3010,137 +2940,11 @@ async def test_pq_modify_script_path():
 
     # Verify success
     assert result["success"] is True
-    # Verify script_path was set and script_body cleared
-    assert current_pq_info.config.pb.scriptPath == "/path/to/script.py"
-    assert current_pq_info.config.pb.scriptCode == ""
-
-
-@pytest.mark.skipif(
-    _PQConfigMessage is None, reason="deephaven_enterprise not available"
-)
-def test_apply_pq_config_modifications_script_body_oneof():
-    """Verify script_body/script_path oneof semantics using real protobuf objects.
-
-    scriptCode and scriptPath are in a protobuf 'oneof scriptData' group: setting one
-    must clear the other. This test uses a real PersistentQueryConfigMessage (not MagicMock)
-    to confirm the fix for Bug 2, where explicit '= ""' assignments were re-activating
-    the wrong oneof field and silently nullifying the intended value.
-    """
-    nones = [None] * 16  # remaining args: programming_language through restart_users
-
-    # Case 1: setting script_body should preserve scriptCode, clear scriptPath
-    pb = _PQConfigMessage()
-    pb.scriptPath = "/old/path.py"
-    _apply_pq_config_modifications(pb, None, None, "t = 42", None, *nones)
-    assert pb.scriptCode == "t = 42", "scriptCode should be set to the provided value"
-    assert pb.scriptPath == "", "scriptPath should be cleared by the oneof"
-    assert pb.WhichOneof("scriptData") == "scriptCode"
-
-    # Case 2: setting script_path should preserve scriptPath, clear scriptCode
-    pb2 = _PQConfigMessage()
-    pb2.scriptCode = "t = None"
-    _apply_pq_config_modifications(pb2, None, None, None, "/new/path.py", *nones)
-    assert (
-        pb2.scriptPath == "/new/path.py"
-    ), "scriptPath should be set to the provided value"
-    assert pb2.scriptCode == "", "scriptCode should be cleared by the oneof"
-    assert pb2.WhichOneof("scriptData") == "scriptPath"
-
-
-@pytest.mark.skipif(
-    _PQConfigMessage is None, reason="deephaven_enterprise not available"
-)
-def test_apply_pq_config_list_fields_schedule_none_preserves_existing():
-    """schedule=None must leave the existing scheduling field untouched."""
-    pb = _PQConfigMessage()
-    pb.scheduling.extend(
-        [
-            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
-            "TimeZone=America/New_York",
-            "SchedulingDisabled=false",
-        ]
-    )
-    existing = list(pb.scheduling)
-
-    has_changes = _apply_pq_config_list_fields(
-        pb,
-        schedule=None,
-        extra_jvm_args=None,
-        extra_class_path=None,
-        extra_environment_vars=None,
-        admin_groups=None,
-        viewer_groups=None,
-    )
-
-    assert has_changes is False
-    assert list(pb.scheduling) == existing
-
-
-@pytest.mark.skipif(
-    _PQConfigMessage is None, reason="deephaven_enterprise not available"
-)
-def test_apply_pq_config_list_fields_schedule_empty_clears():
-    """schedule=[] must clear the existing scheduling field entirely."""
-    pb = _PQConfigMessage()
-    pb.scheduling.extend(
-        [
-            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
-            "SchedulingDisabled=false",
-        ]
-    )
-
-    has_changes = _apply_pq_config_list_fields(
-        pb,
-        schedule=[],
-        extra_jvm_args=None,
-        extra_class_path=None,
-        extra_environment_vars=None,
-        admin_groups=None,
-        viewer_groups=None,
-    )
-
-    assert has_changes is True
-    assert list(pb.scheduling) == []
-
-
-@pytest.mark.skipif(
-    _PQConfigMessage is None, reason="deephaven_enterprise not available"
-)
-def test_apply_pq_config_list_fields_schedule_explicit_replaces_wholesale():
-    """schedule=[...] must replace the existing scheduling block wholesale.
-
-    No existing entries may survive; the caller's list is authoritative.
-    """
-    pb = _PQConfigMessage()
-    pb.scheduling.extend(
-        [
-            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous",
-            "StartTime=00:00:00",
-            "TimeZone=America/New_York",
-            "SchedulingDisabled=false",
-            "RestartWhenRunning=Yes",
-        ]
-    )
-    caller_schedule = [
-        "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
-        "StartTime=09:00:00",
-        "StopTime=17:00:00",
-        "SchedulingDisabled=true",
-    ]
-
-    has_changes = _apply_pq_config_list_fields(
-        pb,
-        schedule=caller_schedule,
-        extra_jvm_args=None,
-        extra_class_path=None,
-        extra_environment_vars=None,
-        admin_groups=None,
-        viewer_groups=None,
-    )
-
-    assert has_changes is True
-    # Exactly the caller's list; no leftover entries from the previous scheduling.
-    assert list(pb.scheduling) == caller_schedule
+    # Verify pq_modify forwarded script_path (and a None script_body) to update_pq_config
+    mock_controller.update_pq_config.assert_called_once()
+    update_kwargs = mock_controller.update_pq_config.call_args.kwargs
+    assert update_kwargs["script_path"] == "/path/to/script.py"
+    assert update_kwargs["script_body"] is None
 
 
 @pytest.mark.asyncio
@@ -3274,6 +3078,10 @@ async def test_pq_modify_invalid_language():
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    # update_pq_config validates programming_language; an invalid value raises ValueError.
+    mock_controller.update_pq_config.side_effect = ValueError(
+        "Invalid programming_language: 'JavaScript'. Must be 'Python' or 'Groovy' (case-insensitive)."
+    )
 
     context = MockContext(
         {
@@ -3310,6 +3118,8 @@ async def test_pq_modify_no_changes():
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    # No parameters supplied → update_pq_config reports no changes.
+    mock_controller.update_pq_config.return_value = False
 
     context = MockContext(
         {
@@ -3334,20 +3144,13 @@ async def test_pq_modify_no_changes():
 
 
 @pytest.mark.asyncio
-@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
-async def test_pq_modify_all_parameters(mock_restart_enum):
-    """Test pq_modify with all parameters to achieve full coverage.
+async def test_pq_modify_all_parameters():
+    """Test pq_modify forwards every parameter to update_pq_config.
 
-    The test passes ``restart_users="RU_ADMIN"``, which routes through
-    :func:`_convert_restart_users_to_enum`. That helper raises
-    :class:`MissingEnterprisePackageError` when ``RestartUsersEnum`` is
-    ``None`` (the default in environments without the Core+ wheel), so
-    we mock it here to keep this test independent of installation state
-    and of any other test that patches ``RestartUsersEnum`` to ``None``.
+    Construction and mutation of the protobuf now live in the client layer's
+    ``update_pq_config``; pq_modify is thin orchestration. This test verifies the
+    full keyword fan-out to the delegated call.
     """
-    # ``RU_ADMIN`` should resolve to the numeric enum value the
-    # assertions below expect (``1``).
-    mock_restart_enum.Value.return_value = 1
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
@@ -3362,7 +3165,11 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "old_name", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
     mock_controller.modify_query = AsyncMock()
+
+    # pq_modify reports config.pb.name; reflect the rename update_pq_config would apply.
+    current_pq_info.config.pb.name = "new_name"
 
     context = MockContext(
         {
@@ -3380,7 +3187,6 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
         programming_language="Python",
         configuration_type="Script",
         enabled=False,
-        schedule=["0 0 * * *"],
         server="server1",
         engine="DeephavenCommunity",
         jvm_profile="default",
@@ -3400,28 +3206,28 @@ async def test_pq_modify_all_parameters(mock_restart_enum):
     assert result["success"] is True
     assert result["name"] == "new_name"
 
-    # Verify all fields were modified
-    config_pb = current_pq_info.config.pb
-    assert config_pb.name == "new_name"
-    assert config_pb.scriptCode == "print('test')"
-    assert config_pb.scriptPath == ""
-    assert config_pb.scriptLanguage == "Python"
-    assert config_pb.configurationType == "Script"
-    assert config_pb.enabled is False
-    assert list(config_pb.scheduling) == ["0 0 * * *"]
-    assert config_pb.serverName == "server1"
-    assert config_pb.workerKind == "DeephavenCommunity"
-    assert config_pb.jvmProfile == "default"
-    assert list(config_pb.extraJvmArguments) == ["-Xmx4g"]
-    assert list(config_pb.classPathAdditions) == ["/path/to/lib.jar"]
-    assert config_pb.pythonControl == "/path/to/venv"
-    assert list(config_pb.extraEnvironmentVariables) == ["VAR1=value1"]
-    assert config_pb.timeoutNanos == 60000000000
-    assert config_pb.expirationTimeNanos == 3600000000000  # 3600 seconds * 1e9
-    assert list(config_pb.adminGroups) == ["admins"]
-    assert list(config_pb.viewerGroups) == ["viewers"]
-    # restart_users should be converted to numeric enum value (1 = RU_ADMIN)
-    assert config_pb.restartUsers == 1
+    # Verify every parameter was forwarded to update_pq_config.
+    mock_controller.update_pq_config.assert_called_once()
+    update_call = mock_controller.update_pq_config.call_args
+    assert update_call[0][0] == current_pq_info.config
+    kwargs = update_call.kwargs
+    assert kwargs["pq_name"] == "new_name"
+    assert kwargs["script_body"] == "print('test')"
+    assert kwargs["programming_language"] == "Python"
+    assert kwargs["configuration_type"] == "Script"
+    assert kwargs["enabled"] is False
+    assert kwargs["server"] == "server1"
+    assert kwargs["engine"] == "DeephavenCommunity"
+    assert kwargs["jvm_profile"] == "default"
+    assert kwargs["extra_jvm_args"] == ["-Xmx4g"]
+    assert kwargs["extra_class_path"] == ["/path/to/lib.jar"]
+    assert kwargs["python_virtual_environment"] == "/path/to/venv"
+    assert kwargs["extra_environment_vars"] == ["VAR1=value1"]
+    assert kwargs["init_timeout_nanos"] == 60000000000
+    assert kwargs["auto_delete_timeout"] == 3600
+    assert kwargs["admin_groups"] == ["admins"]
+    assert kwargs["viewer_groups"] == ["viewers"]
+    assert kwargs["restart_users"] == "RU_ADMIN"
     mock_controller.modify_query.assert_called_once()
 
 
@@ -3439,12 +3245,10 @@ async def test_pq_modify_clear_auto_delete_timeout():
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
 
-    # Mock current PQ info with existing timeout
+    # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    current_pq_info.config.pb.expirationTimeNanos = (
-        3600000000000  # Currently has 1 hour timeout
-    )
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
     mock_controller.modify_query = AsyncMock()
 
     context = MockContext(
@@ -3454,7 +3258,7 @@ async def test_pq_modify_clear_auto_delete_timeout():
         }
     )
 
-    # Call with auto_delete_timeout=0 to clear expiration (make permanent)
+    # Call with auto_delete_timeout=0 to clear the timeout (make permanent)
     result = await pq_modify(
         context,
         pq_id="system:12345",
@@ -3466,18 +3270,63 @@ async def test_pq_modify_clear_auto_delete_timeout():
     assert result["success"] is True
     assert result["message"] == "PQ 'analytics' modified successfully"
 
-    # Verify modify_query was called
+    # Verify modify_query was called and auto_delete_timeout=0 was forwarded
     mock_controller.modify_query.assert_called_once()
-
-    # Verify expirationTimeNanos was set to 0 (permanent)
-    config_pb = current_pq_info.config.pb
-    assert config_pb.expirationTimeNanos == 0
+    mock_controller.update_pq_config.assert_called_once()
+    assert mock_controller.update_pq_config.call_args.kwargs["auto_delete_timeout"] == 0
 
 
 @pytest.mark.asyncio
-@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum", None)
+async def test_pq_modify_set_owner():
+    """Test pq_modify sets config_pb.owner when owner is supplied."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
+    current_pq_info.config.pb.owner = "authenticated-user"
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        pq_id="system:12345",
+        owner="service-account",
+        restart=False,
+    )
+
+    assert result["success"] is True
+    mock_controller.modify_query.assert_called_once()
+    mock_controller.update_pq_config.assert_called_once()
+    assert (
+        mock_controller.update_pq_config.call_args.kwargs["owner"] == "service-account"
+    )
+
+
+@pytest.mark.asyncio
 async def test_pq_modify_restart_users_enum_not_available():
-    """Test pq_modify when RestartUsersEnum is None (enterprise package not installed)."""
+    """Test pq_modify surfaces MissingEnterprisePackageError from update_pq_config.
+
+    The restart_users enum conversion now lives in the client layer; when the Core+
+    package is absent, update_pq_config raises MissingEnterprisePackageError, which
+    pq_modify reports as an error response.
+    """
+    from deephaven_mcp._exceptions import MissingEnterprisePackageError
+
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
@@ -3492,6 +3341,7 @@ async def test_pq_modify_restart_users_enum_not_available():
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.side_effect = MissingEnterprisePackageError()
 
     context = MockContext(
         {
@@ -3512,18 +3362,12 @@ async def test_pq_modify_restart_users_enum_not_available():
 
 
 @pytest.mark.asyncio
-@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
-async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
-    """Test pq_modify with invalid restart_users value to cover ValueError path."""
-    # Mock RestartUsersEnum.Value() to raise ValueError for invalid value
-    mock_restart_enum.Value.side_effect = ValueError("unknown enum value")
-    mock_restart_enum.keys.return_value = [
-        "RU_ADMIN",
-        "RU_ADMIN_AND_VIEWERS",
-        "RU_VIEWERS_WHEN_DOWN",
-        "RU_UNSPECIFIED",
-    ]
+async def test_pq_modify_invalid_restart_users_value():
+    """Test pq_modify surfaces a ValueError from update_pq_config for a bad restart_users.
 
+    The enum conversion now lives in update_pq_config; an unknown name raises ValueError,
+    which pq_modify reports as an error response.
+    """
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
@@ -3538,6 +3382,9 @@ async def test_pq_modify_invalid_restart_users_value(mock_restart_enum):
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.side_effect = ValueError(
+        "Invalid restart_users: 'INVALID_VALUE'. Must be one of: RU_ADMIN"
+    )
 
     context = MockContext(
         {
@@ -4916,6 +4763,81 @@ async def test_pq_create_script_body_and_path_mutually_exclusive():
     assert result["success"] is False
     assert "mutually exclusive" in result["error"]
     assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_pq_create_auto_delete_and_schedule_mutually_exclusive():
+    """pq_create rejects both auto_delete_timeout and schedule, before calling make_pq_config."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+    mock_controller.make_pq_config = AsyncMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="test-pq",
+        heap_size_gb=8.0,
+        auto_delete_timeout=60,
+        schedule=[
+            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"
+        ],
+    )
+
+    assert result["success"] is False
+    assert "mutually exclusive" in result["error"]
+    assert result["isError"] is True
+    # Early validation must short-circuit before delegating to the controller.
+    mock_controller.make_pq_config.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_auto_delete_and_schedule_mutually_exclusive():
+    """pq_modify rejects both auto_delete_timeout and schedule, before calling update_pq_config."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        pq_id="system:12345",
+        auto_delete_timeout=60,
+        schedule=[
+            "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"
+        ],
+    )
+
+    assert result["success"] is False
+    assert "mutually exclusive" in result["error"]
+    assert result["isError"] is True
+    # Early validation must short-circuit before delegating to the controller.
+    mock_controller.update_pq_config.assert_not_called()
 
 
 # Note: The legacy ``MCP_TIMEOUT_WARNING_THRESHOLD`` /

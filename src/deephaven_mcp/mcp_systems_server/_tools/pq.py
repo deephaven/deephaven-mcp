@@ -24,7 +24,6 @@ from pydantic import Field
 from deephaven_mcp._exceptions import (
     InternalError,
     InvalidSessionNameError,
-    MissingEnterprisePackageError,
 )
 from deephaven_mcp.client import (
     PQ_STATES,
@@ -60,7 +59,6 @@ if TYPE_CHECKING:
     )
     from deephaven_enterprise.proto.persistent_query_pb2 import (
         ExportedObjectTypeEnum,
-        PersistentQueryConfigMessage,
         ProcessorConnectionDetailsMessage,
         RestartUsersEnum,
         WorkerProtocolMessage,
@@ -569,74 +567,23 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
     return result
 
 
-def _format_pq_replicas(replicas: list[CorePlusQueryState]) -> list[dict[str, object]]:
-    """Format list of replica PersistentQueryStateMessage objects.
+def _format_pq_states(states: list[CorePlusQueryState]) -> list[dict[str, object]]:
+    """Format a list of PersistentQueryStateMessage objects, dropping None entries.
 
-    Applies _format_pq_state to each replica in the list, filtering out None entries.
-    Replicas are additional running instances of a persistent query for high availability.
+    Used for a PQ's replicas (additional running instances for high availability) and its
+    spares (pre-initialized workers ready to take over if the primary fails); both are lists
+    of states formatted identically.
 
     Args:
-        replicas (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for replica states
+        states (list[CorePlusQueryState]): CorePlusQueryState wrappers to format. None
+            entries are tolerated and dropped from the result.
 
     Returns:
-        list[dict[str, object]]: List of formatted replica state dictionaries (25 fields each),
-            or empty list if no replicas provided
+        list[dict[str, object]]: Formatted state dictionaries (25 fields each) with None
+            entries removed; empty list if no states are provided.
     """
-    if not replicas:
-        return []
-
-    formatted = [
-        _format_pq_state(replica) for replica in replicas if replica is not None
-    ]
+    formatted = [_format_pq_state(state) for state in states]
     return [f for f in formatted if f is not None]
-
-
-def _format_pq_spares(spares: list[CorePlusQueryState]) -> list[dict[str, object]]:
-    """Format list of spare PersistentQueryStateMessage objects.
-
-    Applies _format_pq_state to each spare in the list, filtering out None entries.
-    Spares are pre-initialized worker instances ready to take over if the primary fails.
-
-    Args:
-        spares (list[CorePlusQueryState]): List of CorePlusQueryState wrappers for spare states
-
-    Returns:
-        list[dict[str, object]]: List of formatted spare state dictionaries (25 fields each),
-            or empty list if no spares provided
-    """
-    if not spares:
-        return []
-
-    formatted = [_format_pq_state(spare) for spare in spares if spare is not None]
-    return [f for f in formatted if f is not None]
-
-
-def _normalize_programming_language(language: str) -> str:
-    """Normalize and validate a programming language string for PQ configuration.
-
-    Accepts case-insensitive input and returns the canonical capitalized form
-    expected by the Deephaven Enterprise controller API.
-
-    Args:
-        language (str): Programming language string, case-insensitive
-            (e.g., "python", "Python", "PYTHON", "groovy", "Groovy")
-
-    Returns:
-        str: Canonical form accepted by the controller: "Python" or "Groovy"
-
-    Raises:
-        ValueError: If language is not a case-insensitive match for "Python" or "Groovy"
-    """
-    lang_lower = language.lower()
-    if lang_lower == "python":
-        return "Python"
-    elif lang_lower == "groovy":
-        return "Groovy"
-    else:
-        raise ValueError(
-            f"Invalid programming_language: '{language}'. "
-            "Must be 'Python' or 'Groovy' (case-insensitive)."
-        )
 
 
 async def _setup_batch_pq_operation(
@@ -785,54 +732,6 @@ def _validate_and_parse_pq_ids(
         for pid, serial in zip(pq_ids, serials, strict=True)
     ]
     return (parsed_pqs, system_name, None)
-
-
-def _convert_restart_users_to_enum(
-    restart_users_str: str,
-) -> "RestartUsersEnum.ValueType":
-    """Convert restart_users string to protobuf enum value.
-
-    Args:
-        restart_users_str (str): Restart users enum name (e.g., "RU_ADMIN")
-
-    Returns:
-        RestartUsersEnum.ValueType: Typed protobuf enum value suitable for direct
-            assignment to ``PersistentQueryConfigMessage.restartUsers``. The return
-            type is the protobuf-generated ``NewType('ValueType', int)``, which
-            matches the field's declared stub type so no cast is required at the
-            assignment site.
-
-    Raises:
-        MissingEnterprisePackageError: If RestartUsersEnum is not available (enterprise package not installed)
-        ValueError: If restart_users_str is not a valid enum value
-    """
-    if RestartUsersEnum is None:
-        raise MissingEnterprisePackageError()
-
-    # Convert string name to typed enum value using protobuf enum.
-    #
-    # ``EnumTypeWrapper.Value()`` is declared as untyped in the runtime
-    # ``google.protobuf`` package (no shipped ``.pyi``), so its return is
-    # ``Any``. The deephaven-coreplus-client mypy-protobuf-generated stubs
-    # *do* declare the upstream wrapper as ``_EnumTypeWrapper[ValueType]``,
-    # but resolving that type chain in mypy requires installing
-    # ``types-protobuf``, which in turn fails 100+ pre-existing wrapper
-    # accesses (the broader narrowing fix is out of scope for this change).
-    # The single ``cast`` here pins the type at the exact point upstream
-    # information is lost; the helper's return annotation then propagates
-    # the precise protobuf type to all callers, so no cast or
-    # ``# type: ignore`` is needed at the assignment site.
-    try:
-        return cast(
-            "RestartUsersEnum.ValueType", RestartUsersEnum.Value(restart_users_str)
-        )
-    except ValueError:
-        # Get all valid enum names from protobuf enum using .keys() method
-        valid_values = list(RestartUsersEnum.keys())
-        raise ValueError(
-            f"Invalid restart_users: '{restart_users_str}'. "
-            f"Must be one of: {', '.join(sorted(valid_values))}"
-        ) from None
 
 
 def _pq_state_category(state_name: str) -> str:
@@ -1396,8 +1295,8 @@ async def pq_details(
             "state": state_name,
             "config": _format_pq_config(pq_info.config),
             "state_details": _format_pq_state(pq_info.state),
-            "replicas": _format_pq_replicas(pq_info.replicas),
-            "spares": _format_pq_spares(pq_info.spares),
+            "replicas": _format_pq_states(pq_info.replicas),
+            "spares": _format_pq_states(pq_info.spares),
         }
 
         # Add session_id if running (session_id uses name, not serial)
@@ -1445,25 +1344,27 @@ async def pq_create(
     admin_groups: list[str] | None = None,
     viewer_groups: list[str] | None = None,
     restart_users: str | None = None,
+    owner: str | None = None,
 ) -> dict:
     """MCP Tool: Create a new persistent query on an enterprise system.
 
     Creates a PQ configuration and adds it to the controller.
 
-    Scheduler semantics (three-way, based on ``schedule``):
-        - ``schedule=None`` (default): install the default scheduler and make no further
-          changes. For a *permanent* PQ (``auto_delete_timeout=None``) the default is a
-          continuous scheduler with ``SchedulingDisabled=false`` and
-          ``RestartWhenRunning=Yes``, which causes the controller to begin acquiring a
-          worker immediately after creation (``ACQUIRING_WORKER`` → ``RUNNING``
-          with no explicit ``pq_start`` call). For a *temporary* PQ the default is
-          whatever the controller's temporary scheduling installs.
-        - ``schedule=[]``: the caller is explicitly requesting no scheduling. The
-          scheduling list is cleared; the server decides whether to accept or reject a
-          PQ with no scheduling entries.
+    Scheduler semantics (``auto_delete_timeout`` and ``schedule`` are mutually exclusive —
+    supplying both returns an error, because ``auto_delete_timeout`` installs its own scheduler):
+        - No ``schedule`` and ``auto_delete_timeout`` is ``None`` (default) or ``0``: a
+          continuous (permanent) scheduler with ``SchedulingDisabled=false`` and
+          ``RestartWhenRunning=Yes``, which causes the controller to begin acquiring a worker
+          immediately after creation (``ACQUIRING_WORKER`` → ``RUNNING`` with no explicit
+          ``pq_start`` call).
+        - No ``schedule`` and ``auto_delete_timeout`` is a positive integer: a temporary
+          scheduler that auto-deletes the PQ after that many seconds of inactivity.
         - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces** the
           scheduling block wholesale. No default keys are merged in — the caller is
           responsible for including ``SchedulerType`` and any other required entries.
+        - ``schedule=[]``: the caller is explicitly requesting no scheduling. The
+          scheduling list is cleared; the server decides whether to accept or reject a
+          PQ with no scheduling entries.
 
     Creating a quiescent PQ (created but not auto-starting):
         Two supported recipes, each with different semantics:
@@ -1496,7 +1397,13 @@ async def pq_create(
       state transition.
     - Returns pq_id and serial number for use with other PQ management tools
     - programming_language is case-insensitive: "Python"/"python" or "Groovy"/"groovy"
-    - auto_delete_timeout=None (default) creates a permanent PQ; set to seconds for auto-deletion
+    - auto_delete_timeout=None (default) or 0 creates a permanent PQ; a positive value creates a
+      temporary PQ deleted after that many seconds of inactivity
+    - auto_delete_timeout installs its own scheduler, so it is mutually exclusive with schedule;
+      supplying both returns an error
+    - owner=None (default) makes the PQ owned by the authenticated user; set it to assign a
+      different owner (e.g. a service account). Setting another user as owner may require
+      server-side permission and is rejected by the controller if you lack it.
     - Specify code via script_body (inline) OR script_path (Git) - specifying both causes error
     - Omit both script_body and script_path to create empty interactive session
     - configuration_type="RunAndDone" for batch jobs that execute once and stop
@@ -1565,10 +1472,11 @@ async def pq_create(
         python_virtual_environment (str | None): Named Python venv for Core+ workers
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...]
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
-        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None (default) = permanent
+        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None (default) and 0 = permanent; positive = temporary
         admin_groups (list[str] | None): Groups with admin access
         viewer_groups (list[str] | None): Groups with viewer access
         restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
+        owner (str | None): User to set as the PQ owner. None (default) leaves the owner as the authenticated user.
 
     Returns:
         dict: Success response. The ``"state"`` field is a fixed placeholder
@@ -1600,11 +1508,18 @@ async def pq_create(
     system_name = "<unknown>"
 
     try:
-        # Early validation: script_body and script_path are mutually exclusive
+        # Early validation: mutually exclusive arguments.
         if script_body is not None and script_path is not None:
             result["error"] = (
                 "script_body and script_path are mutually exclusive. "
                 "Specify one or the other, not both."
+            )
+            result["isError"] = True
+            return result
+        if auto_delete_timeout is not None and schedule is not None:
+            result["error"] = (
+                "auto_delete_timeout and schedule are mutually exclusive. "
+                "auto_delete_timeout installs its own scheduler."
             )
             result["isError"] = True
             return result
@@ -1623,16 +1538,13 @@ async def pq_create(
         # Get controller client
         controller = factory.controller_client
 
-        # Normalize and validate programming language
-        normalized_lang = _normalize_programming_language(programming_language)
-
-        # Create PQ configuration
+        # Create PQ configuration (the client normalizes programming_language)
         pq_config = await controller.make_pq_config(
             name=pq_name,
             heap_size_gb=heap_size_gb,
             script_body=script_body,
             script_path=script_path,
-            programming_language=normalized_lang,
+            programming_language=programming_language,
             configuration_type=configuration_type,
             enabled=enabled,
             schedule=schedule,
@@ -1648,6 +1560,7 @@ async def pq_create(
             admin_groups=admin_groups,
             viewer_groups=viewer_groups,
             restart_users=restart_users,
+            owner=owner,
         )
 
         # Add the PQ to controller
@@ -1922,256 +1835,6 @@ async def pq_delete(
     return result
 
 
-def _apply_pq_config_simple_fields(
-    config_pb: "PersistentQueryConfigMessage",
-    pq_name: str | None,
-    heap_size_gb: float | int | None,
-    configuration_type: str | None,
-    enabled: bool | None,
-    server: str | None,
-    engine: str | None,
-    jvm_profile: str | None,
-    python_virtual_environment: str | None,
-    init_timeout_nanos: int | None,
-) -> bool:
-    """Apply simple (scalar) field updates to PersistentQueryConfigMessage protobuf.
-
-    Updates only the fields that are not None. This helper consolidates the boilerplate
-    for applying individual field modifications, called by
-    :func:`_apply_pq_config_modifications` which is used by ``pq_modify``.
-
-    Args:
-        config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
-        pq_name (str | None): New PQ name → protobuf field: config_pb.name
-        heap_size_gb (float | int | None): Worker heap size in GB → protobuf field: config_pb.heapSizeGb
-        configuration_type (str | None): Config type (e.g., "Script", "RunAndDone") → protobuf field: config_pb.configurationType
-        enabled (bool | None): Whether PQ is enabled → protobuf field: config_pb.enabled
-        server (str | None): Target server name → protobuf field: config_pb.serverName
-        engine (str | None): Worker kind/engine type → protobuf field: config_pb.workerKind
-        jvm_profile (str | None): JVM profile name → protobuf field: config_pb.jvmProfile
-        python_virtual_environment (str | None): Python venv control → protobuf field: config_pb.pythonControl
-        init_timeout_nanos (int | None): Initialization timeout in nanoseconds → protobuf field: config_pb.timeoutNanos
-
-    Returns:
-        bool: True if any changes were made, False if all parameters were None
-
-    Note:
-        This function modifies config_pb in-place. Only non-None parameters trigger updates.
-        See _apply_pq_config_list_fields for list-based field updates (script_code, env_vars, etc.).
-    """
-    has_changes = False
-    if pq_name is not None:
-        config_pb.name = pq_name
-        has_changes = True
-    if heap_size_gb is not None:
-        config_pb.heapSizeGb = heap_size_gb
-        has_changes = True
-    if configuration_type is not None:
-        config_pb.configurationType = configuration_type
-        has_changes = True
-    if enabled is not None:
-        config_pb.enabled = enabled
-        has_changes = True
-    if server is not None:
-        config_pb.serverName = server
-        has_changes = True
-    if engine is not None:
-        config_pb.workerKind = engine
-        has_changes = True
-    if jvm_profile is not None:
-        config_pb.jvmProfile = jvm_profile
-        has_changes = True
-    if python_virtual_environment is not None:
-        config_pb.pythonControl = python_virtual_environment
-        has_changes = True
-    if init_timeout_nanos is not None:
-        config_pb.timeoutNanos = init_timeout_nanos
-        has_changes = True
-    return has_changes
-
-
-def _apply_pq_config_list_fields(
-    config_pb: "PersistentQueryConfigMessage",
-    schedule: list[str] | None,
-    extra_jvm_args: list[str] | None,
-    extra_class_path: list[str] | None,
-    extra_environment_vars: list[str] | None,
-    admin_groups: list[str] | None,
-    viewer_groups: list[str] | None,
-) -> bool:
-    """Apply list (repeated) field updates to PersistentQueryConfigMessage protobuf.
-
-    Updates only the fields that are not None using a del/extend pattern to fully replace
-    existing list contents. This helper consolidates the boilerplate for applying list
-    modifications, called by :func:`_apply_pq_config_modifications` which is used by
-    ``pq_modify``.
-
-    Args:
-        config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
-        schedule (list[str] | None): PQ scheduling entries as ``Key=Value`` strings
-            targeting an Iris scheduler class (e.g., ``SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily``,
-            ``StartTime=08:00:00``). These are not cron expressions. Maps to protobuf
-            field ``config_pb.scheduling``.
-        extra_jvm_args (list[str] | None): Additional JVM arguments → protobuf field: config_pb.extraJvmArguments
-        extra_class_path (list[str] | None): Additional classpath entries → protobuf field: config_pb.classPathAdditions
-        extra_environment_vars (list[str] | None): Additional env vars (KEY=VALUE format) → protobuf field: config_pb.extraEnvironmentVariables
-        admin_groups (list[str] | None): Admin group names → protobuf field: config_pb.adminGroups
-        viewer_groups (list[str] | None): Viewer group names → protobuf field: config_pb.viewerGroups
-
-    Returns:
-        bool: True if any changes were made, False if all parameters were None
-
-    Note:
-        Each field is handled with ``del config_pb.field[:]`` followed by
-        ``config_pb.field.extend(new_list)`` so the existing contents are fully
-        replaced rather than appended to. An empty list therefore clears the field.
-    """
-    has_changes = False
-    if schedule is not None:
-        del config_pb.scheduling[:]
-        config_pb.scheduling.extend(schedule)
-        has_changes = True
-    if extra_jvm_args is not None:
-        del config_pb.extraJvmArguments[:]
-        config_pb.extraJvmArguments.extend(extra_jvm_args)
-        has_changes = True
-    if extra_class_path is not None:
-        del config_pb.classPathAdditions[:]
-        config_pb.classPathAdditions.extend(extra_class_path)
-        has_changes = True
-    if extra_environment_vars is not None:
-        del config_pb.extraEnvironmentVariables[:]
-        config_pb.extraEnvironmentVariables.extend(extra_environment_vars)
-        has_changes = True
-    if admin_groups is not None:
-        del config_pb.adminGroups[:]
-        config_pb.adminGroups.extend(admin_groups)
-        has_changes = True
-    if viewer_groups is not None:
-        del config_pb.viewerGroups[:]
-        config_pb.viewerGroups.extend(viewer_groups)
-        has_changes = True
-    return has_changes
-
-
-def _apply_pq_config_modifications(
-    config_pb: "PersistentQueryConfigMessage",
-    pq_name: str | None,
-    heap_size_gb: float | int | None,
-    script_body: str | None,
-    script_path: str | None,
-    programming_language: str | None,
-    configuration_type: str | None,
-    enabled: bool | None,
-    schedule: list[str] | None,
-    server: str | None,
-    engine: str | None,
-    jvm_profile: str | None,
-    extra_jvm_args: list[str] | None,
-    extra_class_path: list[str] | None,
-    python_virtual_environment: str | None,
-    extra_environment_vars: list[str] | None,
-    init_timeout_nanos: int | None,
-    auto_delete_timeout: int | None,
-    admin_groups: list[str] | None,
-    viewer_groups: list[str] | None,
-    restart_users: str | None,
-) -> bool:
-    """Apply configuration modifications to a PQ protobuf config.
-
-    Modifies the provided config_pb in-place based on the provided parameters.
-    Only non-None parameters are applied.
-
-    Args:
-        config_pb (PersistentQueryConfigMessage): Protobuf config object to modify in-place
-        pq_name (str | None): New PQ name
-        heap_size_gb (float | int | None): New heap size in GB
-        script_body (str | None): New inline script code. Caller must ensure this and
-            script_path are not both non-None.
-        script_path (str | None): New Git script path. Caller must ensure this and
-            script_body are not both non-None.
-        programming_language (str | None): New programming language (case-insensitive
-            "Python" or "Groovy")
-        configuration_type (str | None): New configuration type ("Script" or "RunAndDone")
-        enabled (bool | None): New enabled status
-        schedule (list[str] | None): New schedule list (replaces existing)
-        server (str | None): New server name
-        engine (str | None): New engine/worker kind
-        jvm_profile (str | None): New JVM profile
-        extra_jvm_args (list[str] | None): New extra JVM arguments list (replaces existing)
-        extra_class_path (list[str] | None): New extra classpath list (replaces existing)
-        python_virtual_environment (str | None): New Python venv
-        extra_environment_vars (list[str] | None): New environment variables list
-            (replaces existing)
-        init_timeout_nanos (int | None): New init timeout in nanoseconds
-        auto_delete_timeout (int | None): New auto-delete timeout in seconds
-            (converted to nanoseconds internally; 0 = no expiration)
-        admin_groups (list[str] | None): New admin groups list (replaces existing)
-        viewer_groups (list[str] | None): New viewer groups list (replaces existing)
-        restart_users (str | None): New restart users setting
-
-    Returns:
-        bool: True if any changes were made, False if all parameters were None
-    """
-    has_changes = False
-
-    # Handle programming language with normalization
-    if programming_language is not None:
-        normalized_lang = _normalize_programming_language(programming_language)
-        config_pb.scriptLanguage = normalized_lang
-        has_changes = True
-
-    # Handle script_body and script_path (protobuf oneof scriptData clears the other automatically)
-    if script_body is not None:
-        config_pb.scriptCode = script_body
-        has_changes = True
-    if script_path is not None:
-        config_pb.scriptPath = script_path
-        has_changes = True
-
-    # Handle auto_delete_timeout: convert seconds to nanoseconds
-    if auto_delete_timeout is not None:
-        config_pb.expirationTimeNanos = auto_delete_timeout * 1_000_000_000
-        has_changes = True
-
-    # Handle restart_users: convert string to typed protobuf enum value.
-    # ``_convert_restart_users_to_enum`` returns ``RestartUsersEnum.ValueType``,
-    # which matches the stub-declared type of ``restartUsers`` exactly, so no
-    # cast or suppression is required.
-    if restart_users is not None:
-        config_pb.restartUsers = _convert_restart_users_to_enum(restart_users)
-        has_changes = True
-
-    # Apply simple field updates
-    if _apply_pq_config_simple_fields(
-        config_pb,
-        pq_name,
-        heap_size_gb,
-        configuration_type,
-        enabled,
-        server,
-        engine,
-        jvm_profile,
-        python_virtual_environment,
-        init_timeout_nanos,
-    ):
-        has_changes = True
-
-    # Apply list field updates
-    if _apply_pq_config_list_fields(
-        config_pb,
-        schedule,
-        extra_jvm_args,
-        extra_class_path,
-        extra_environment_vars,
-        admin_groups,
-        viewer_groups,
-    ):
-        has_changes = True
-
-    return has_changes
-
-
 async def pq_modify(
     context: Context,
     pq_id: str,
@@ -2196,6 +1859,7 @@ async def pq_modify(
     admin_groups: list[str] | None = None,
     viewer_groups: list[str] | None = None,
     restart_users: str | None = None,
+    owner: str | None = None,
 ) -> dict:
     """MCP Tool: Modify an existing persistent query configuration.
 
@@ -2203,7 +1867,14 @@ async def pq_modify(
     Only specified (non-None) parameters are updated - all others remain unchanged.
     Changes can be applied to PQs in any state (RUNNING, STOPPED, etc.).
 
-    Scheduler semantics (three-way, based on ``schedule``):
+    Scheduler semantics (``auto_delete_timeout`` and ``schedule`` are mutually exclusive —
+    supplying both returns an error, because ``auto_delete_timeout`` installs its own scheduler;
+    use ``auto_delete_timeout`` to switch a PQ between permanent and temporary, or ``schedule``
+    for a custom scheduler):
+        - ``auto_delete_timeout=0``: installs the continuous (permanent) scheduler and clears
+          the auto-delete grace period. ``auto_delete_timeout=<positive>``: installs the
+          temporary scheduler with that idle timeout. ``auto_delete_timeout=None`` (default):
+          leaves scheduling and auto-delete untouched.
         - ``schedule=None`` (default): the existing scheduling on the PQ is preserved
           unchanged.
         - ``schedule=[]``: the caller is explicitly clearing the scheduling. The PQ's
@@ -2275,10 +1946,11 @@ async def pq_modify(
         python_virtual_environment (str | None): Named Python venv for Core+ workers
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] (replaces current)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
-        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (no expiration), positive integer = timeout in seconds
+        auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (auto-delete disabled), positive integer = timeout in seconds
         admin_groups (list[str] | None): Groups with admin access (replaces current)
         viewer_groups (list[str] | None): Groups with viewer access (replaces current)
         restart_users (str | None): Who can restart - "RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN"
+        owner (str | None): New query owner. None = no change. Reassigning ownership may require server-side permission.
 
     Returns:
         dict: Success response. The ``"warning"`` field is only present when the PQ is
@@ -2311,11 +1983,18 @@ async def pq_modify(
     system_name = "<unknown>"
 
     try:
-        # Early validation: script_body and script_path are mutually exclusive
+        # Early validation: mutually exclusive arguments.
         if script_body is not None and script_path is not None:
             result["error"] = (
                 "script_body and script_path are mutually exclusive. "
                 "Specify one or the other, not both."
+            )
+            result["isError"] = True
+            return result
+        if auto_delete_timeout is not None and schedule is not None:
+            result["error"] = (
+                "auto_delete_timeout and schedule are mutually exclusive. "
+                "auto_delete_timeout installs its own scheduler."
             )
             result["isError"] = True
             return result
@@ -2361,31 +2040,31 @@ async def pq_modify(
         # Get current PQ info and config
         pq_info = pq_map[serial]
         config = pq_info.config
-        config_pb = config.pb
 
-        # Apply configuration modifications using helper function
-        has_changes = _apply_pq_config_modifications(
-            config_pb,
-            pq_name,
-            heap_size_gb,
-            script_body,
-            script_path,
-            programming_language,
-            configuration_type,
-            enabled,
-            schedule,
-            server,
-            engine,
-            jvm_profile,
-            extra_jvm_args,
-            extra_class_path,
-            python_virtual_environment,
-            extra_environment_vars,
-            init_timeout_nanos,
-            auto_delete_timeout,
-            admin_groups,
-            viewer_groups,
-            restart_users,
+        # Apply configuration modifications via the shared client-layer applier.
+        has_changes = controller.update_pq_config(
+            config,
+            pq_name=pq_name,
+            heap_size_gb=heap_size_gb,
+            script_body=script_body,
+            script_path=script_path,
+            programming_language=programming_language,
+            configuration_type=configuration_type,
+            enabled=enabled,
+            schedule=schedule,
+            server=server,
+            engine=engine,
+            jvm_profile=jvm_profile,
+            extra_jvm_args=extra_jvm_args,
+            extra_class_path=extra_class_path,
+            python_virtual_environment=python_virtual_environment,
+            extra_environment_vars=extra_environment_vars,
+            init_timeout_nanos=init_timeout_nanos,
+            auto_delete_timeout=auto_delete_timeout,
+            admin_groups=admin_groups,
+            viewer_groups=viewer_groups,
+            restart_users=restart_users,
+            owner=owner,
         )
 
         # Only modify if changes were made
