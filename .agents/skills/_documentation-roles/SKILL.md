@@ -19,6 +19,7 @@ Every top-level markdown file in this repository has a single, intentional role.
 | `docs/UV.md` | developer new to `uv` | Generic `uv` crash course. | Project-specific commands, project env vars, project tests, project install lines. |
 | `docs/CLI.md` | operator + AI agent using the local `dh-mcp` CLI | Full `dh-mcp` reference: command surface (noun-verb tree), global flags, env-var bindings, exit codes, `error_code` registry, output modes (`human` / `json` / `yaml`), examples, shell completion, `dh-mcp introspect` agent self-discovery. | Server-side configuration (lives in `CONFIGURATION.md`); developer/contributor mechanics (lives in `DEVELOPER_GUIDE.md`); environment variables consumed by the server processes (those live in `ENV.md`; CLI-specific env vars stay here). |
 | `docs/DEVELOPER_GUIDE.md` | contributor | Everything a developer working *on* the project needs. Catch-all. | Per-tool reference (parameters, returns, examples) — see [Tool reference is owned by code](#tool-reference-is-owned-by-code). |
+| `docs/design/*.md` | contributor / architect | Design rationale for a subsystem — the *why* behind a structural decision (trade-offs weighed, chosen approach, invariants). One file per subsystem; e.g. `docs/design/CLI_TOOL_WRAPPING.md`. | Per-command / per-API reference (lives in `docs/CLI.md` or the code); step-by-step contributor workflow (lives in `DEVELOPER_GUIDE.md`). |
 | `AGENTS.md` | AI agent | Agent process rules. Not human documentation; **no TOC**. | Anything intended for humans. |
 
 ## Tool reference is owned by code

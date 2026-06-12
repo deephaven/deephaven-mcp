@@ -17,11 +17,10 @@ from typing import Any
 
 import click
 
-from deephaven_mcp.cli._errors import ErrorCode
+from deephaven_mcp.cli._errors import ErrorCode, ExitCode
 from deephaven_mcp.cli._format import OutputMode, format_output
 from deephaven_mcp.cli._help import (
-    DEFAULT_ENVIRONMENT_LINES,
-    DEFAULT_EXIT_CODE_LINES,
+    COMMON_ENV_VARS,
     HelpfulCommand,
     OutputField,
     OutputSpec,
@@ -121,6 +120,39 @@ def _describe_param(param: click.Parameter) -> dict[str, Any]:
     return info
 
 
+def _describe_wraps(cmd: click.Command) -> dict[str, Any] | None:
+    """Return the wrapped-MCP-tool binding for a command, or ``None``.
+
+    Reads the wrapper metadata set on
+    :class:`~deephaven_mcp.cli._help.HelpfulCommand`. Returns ``None``
+    for any command that is not a :class:`HelpfulCommand` or that wraps
+    no MCP tool (groups and non-wrapping verbs such as ``daemon`` and
+    ``config``), so the manifest only carries the binding where it is
+    meaningful. The schema-drift test and ``review-changes`` consume
+    this so they need not import Python.
+
+    Args:
+        cmd (click.Command): The command to inspect.
+
+    Returns:
+        dict[str, Any] | None: ``{tools, intentionally_unsupported,
+            router_params, client_only_params}`` (``tools`` is the union
+            of ``wraps_tool`` and ``wraps_tools``, sorted) when the
+            command wraps at least one tool; ``None`` otherwise.
+    """
+    if not isinstance(cmd, HelpfulCommand):
+        return None
+    tools = sorted({*cmd.wraps_tools, *([cmd.wraps_tool] if cmd.wraps_tool else [])})
+    if not tools:
+        return None
+    return {
+        "tools": tools,
+        "intentionally_unsupported": sorted(cmd.intentionally_unsupported),
+        "router_params": sorted(cmd.router_params),
+        "client_only_params": sorted(cmd.client_only_params),
+    }
+
+
 def _describe_subcommands(cmd: click.Command) -> dict[str, dict[str, Any]]:
     """Return ``{name: description}`` for a group; ``{}`` for a leaf command.
 
@@ -154,6 +186,9 @@ def _describe_command(cmd: click.Command) -> dict[str, Any]:
       (set on :class:`~deephaven_mcp.cli._help.HelpfulCommand`).
       Always present; ``None`` for groups and commands that declare
       no spec.
+    - ``wraps`` (dict | None): Wrapped-MCP-tool binding produced by
+      :func:`_describe_wraps`. Always present; ``None`` for commands
+      that wrap no MCP tool.
     """
     return {
         "name": cmd.name,
@@ -162,6 +197,7 @@ def _describe_command(cmd: click.Command) -> dict[str, Any]:
         "params": [_describe_param(p) for p in cmd.params],
         "subcommands": _describe_subcommands(cmd),
         "output": _describe_output(getattr(cmd, "output_spec", None)),
+        "wraps": _describe_wraps(cmd),
     }
 
 
@@ -182,11 +218,11 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
     - ``global_options`` (list[dict]): Root-level options
       (``-o``, ``--timeout``, etc.) as produced by
       :func:`_describe_param`.
-    - ``commands`` (dict[str, dict]): Top-level command tree
-      (``daemon``, ``tool``, ``config``, ``introspect``); each
-      entry follows :func:`_describe_command`'s shape and recurses
-      through any subcommand groups. Always present; empty when
-      ``root`` is a plain :class:`click.Command`.
+    - ``commands`` (dict[str, dict]): Top-level command tree, one
+      entry per registered noun group and meta command; each entry
+      follows :func:`_describe_command`'s shape and recurses through
+      any subcommand groups. Always present; empty when ``root`` is a
+      plain :class:`click.Command`.
     - ``default_environment`` (list[dict]): Project-wide
       environment variables (name + help) honored by every verb.
     - ``default_exit_codes`` (list[dict]): Project-wide exit-code
@@ -218,10 +254,10 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
         "global_options": [_describe_param(p) for p in root.params],
         "commands": _describe_subcommands(root),
         "default_environment": [
-            {"name": name, "help": help_} for name, help_ in DEFAULT_ENVIRONMENT_LINES
+            {"name": e.name, "help": e.help} for e in COMMON_ENV_VARS
         ],
         "default_exit_codes": [
-            {"code": code, "help": help_} for code, help_ in DEFAULT_EXIT_CODE_LINES
+            {"code": ec.value, "help": ec.help_text} for ec in ExitCode
         ],
         "error_codes": [
             {"code": ec.value, "help": ec.help_text}
@@ -276,7 +312,7 @@ _OUTPUT_INTROSPECT = OutputSpec(
             "$ dh-mcp introspect | jq '.commands.tool.subcommands.call.output'",
             "$ dh-mcp introspect | jq '.error_codes'",
         ),
-        exit_codes=((0, "success"), (2, "user-facing failure")),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         see_also=("dh-mcp --help",),
     ),
 )

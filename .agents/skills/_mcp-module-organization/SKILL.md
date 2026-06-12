@@ -54,7 +54,7 @@ Common shared utilities (import only what you need):
 ```python
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     error_response,                   # Build a standard error response dict
-    format_initialization_status,     # Format registry initialization phase/errors
+    format_partial_result,            # Flag an incomplete (partial-discovery) result
     get_lifespan_context,             # Get the LifespanContext from MCP context
     get_registry,                     # Get the MultiSystemRegistry from context
     get_multi_config,                 # Get the merged ConfigTree from context

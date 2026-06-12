@@ -5,9 +5,12 @@ from __future__ import annotations
 import pytest
 
 from deephaven_mcp.cli import _help
+from deephaven_mcp.cli._errors import ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
-    DEFAULT_ENVIRONMENT_LINES,
-    DEFAULT_EXIT_CODE_LINES,
+    COMMON_ENV_VARS,
+    HelpEntry,
+    HelpfulCommand,
+    HelpfulGroup,
     OutputField,
     OutputSpec,
     build_help,
@@ -34,16 +37,16 @@ def test_build_help_default_sections() -> None:
     text = build_help(summary="Do.")
     assert "Environment:" in text
     assert "Exit codes:" in text
-    for name, _ in DEFAULT_ENVIRONMENT_LINES:
-        assert name in text
-    for code, _ in DEFAULT_EXIT_CODE_LINES:
+    for entry in COMMON_ENV_VARS:
+        assert entry.name in text
+    for code in (0, 2, 3):
         assert f"{code}" in text
 
 
 def test_build_help_custom_environment() -> None:
     text = build_help(
         summary="Do.",
-        environment=(("FOO", "do foo"),),
+        environment=(HelpEntry("FOO", "do foo"),),
         exit_codes=(),
     )
     assert "FOO" in text
@@ -58,10 +61,10 @@ def test_build_help_custom_exit_codes() -> None:
     text = build_help(
         summary="Do.",
         environment=(),
-        exit_codes=((42, "the answer"),),
+        exit_codes=(ExitCode.TOOL_ERROR,),
     )
-    assert "42" in text
-    assert "the answer" in text
+    assert f"{ExitCode.TOOL_ERROR.value}" in text
+    assert ExitCode.TOOL_ERROR.help_text in text
 
 
 def test_build_help_with_description() -> None:
@@ -80,8 +83,8 @@ def test_build_help_section_order_is_stable() -> None:
         summary="SUM",
         description="DESC",
         examples=("$ ex",),
-        environment=(("ENV_VAR", "an env var"),),
-        exit_codes=((99, "boom"),),
+        environment=(HelpEntry("ENV_VAR", "an env var"),),
+        exit_codes=(ExitCode.TOOL_ERROR,),
     )
     # Locate the index of each section marker in the rendered text.
     indices = {
@@ -129,7 +132,7 @@ def test_build_help_environment_column_alignment() -> None:
     """Environment table aligns names to the widest name in the block."""
     text = build_help(
         summary="SUM",
-        environment=(("SHORT", "s"), ("MUCH_LONGER_NAME", "l")),
+        environment=(HelpEntry("SHORT", "s"), HelpEntry("MUCH_LONGER_NAME", "l")),
         exit_codes=(),
     )
     # The shorter name is padded so the help columns line up; the
@@ -148,8 +151,8 @@ def test_build_help_marks_preformatted_sections_no_wrap() -> None:
     text = build_help(
         summary="SUM",
         examples=("$ ex",),
-        environment=(("ENV", "e"),),
-        exit_codes=((7, "x"),),
+        environment=(HelpEntry("ENV", "e"),),
+        exit_codes=(ExitCode.SUCCESS,),
     )
     assert "\b\nExamples:" in text
     assert "\b\nEnvironment:" in text
@@ -163,17 +166,17 @@ def test_build_help_emits_plain_text_not_rst() -> None:
     in the introspect manifest, so reStructuredText backticks would
     leak as literal noise.
     """
-    for name, help_ in DEFAULT_ENVIRONMENT_LINES:
-        assert "``" not in name
-        assert "``" not in help_
-    for _code, help_ in DEFAULT_EXIT_CODE_LINES:
-        assert "``" not in help_
+    for entry in COMMON_ENV_VARS:
+        assert "``" not in entry.name
+        assert "``" not in entry.help
+    for ec in ExitCode:
+        assert "``" not in ec.help_text
 
 
 def test_build_help_renders_arguments() -> None:
     text = build_help(
         summary="S",
-        arguments=(("NAME", "the tool name"),),
+        arguments=(HelpEntry("NAME", "the tool name"),),
         environment=(),
         exit_codes=(),
     )
@@ -195,13 +198,14 @@ def test_build_help_renders_see_also() -> None:
 def test_build_help_renders_error_codes() -> None:
     text = build_help(
         summary="S",
-        error_codes=(("tool_not_found", "unknown tool"),),
+        error_codes=(ErrorCode.TOOL_NOT_FOUND,),
         environment=(),
         exit_codes=(),
     )
     assert "\b\nError codes:" in text
-    assert "tool_not_found" in text
-    assert "unknown tool" in text
+    # Rendered straight from the enum, so the help text is single-sourced.
+    assert ErrorCode.TOOL_NOT_FOUND.value in text
+    assert ErrorCode.TOOL_NOT_FOUND.help_text in text
 
 
 def test_build_help_renders_output_object() -> None:
@@ -261,14 +265,23 @@ def test_build_help_object_with_no_fields_suppresses_lead() -> None:
 
 def test_exit_codes_and_error_codes_share_alignment() -> None:
     """Exit codes render through the same aligned two-column block as error codes."""
+    xc = ExitCode.SUCCESS
+    ec = ErrorCode.TOOL_NOT_FOUND
     text = build_help(
         summary="S",
-        exit_codes=((0, "ok"),),
-        error_codes=(("x", "bad"),),
+        exit_codes=(xc,),
+        error_codes=(ec,),
         environment=(),
     )
-    assert "Exit codes:\n  0  ok" in text
-    assert "Error codes:\n  x  bad" in text
+    assert f"Exit codes:\n  {xc.value}  {xc.help_text}" in text
+    assert f"Error codes:\n  {ec.value}  {ec.help_text}" in text
+
+
+def test_build_help_default_exit_codes_render_every_exitcode() -> None:
+    """With no exit_codes, the section renders every ExitCode from the enum."""
+    text = build_help(summary="S", environment=())
+    for ec in ExitCode:
+        assert f"  {ec.value}  {ec.help_text}" in text
 
 
 def test_build_help_full_section_order() -> None:
@@ -276,13 +289,13 @@ def test_build_help_full_section_order() -> None:
     text = build_help(
         summary="SUM",
         description="DESC",
-        arguments=(("NAME", "arg"),),
+        arguments=(HelpEntry("NAME", "arg"),),
         output=OutputSpec("object", (OutputField("f", "string", "field"),)),
         examples=("$ ex",),
         see_also=("dh-mcp x",),
-        environment=(("ENV", "env"),),
-        exit_codes=((9, "boom"),),
-        error_codes=(("err", "an error"),),
+        environment=(HelpEntry("ENV", "env"),),
+        exit_codes=(ExitCode.TOOL_ERROR,),
+        error_codes=(ErrorCode.TOOL_NOT_FOUND,),
     )
     order = [
         text.index("SUM"),
@@ -296,3 +309,52 @@ def test_build_help_full_section_order() -> None:
         text.index("Error codes:"),
     ]
     assert order == sorted(order)
+
+
+# ---------------------------------------------------------------------------
+# HelpfulCommand / HelpfulGroup — the output-spec + wrapper-binding metadata
+# ---------------------------------------------------------------------------
+
+
+def test_helpful_command_defaults_are_empty() -> None:
+    """A bare command carries no output spec and no wrapper binding."""
+    cmd = HelpfulCommand("c")
+    assert cmd.output_spec is None
+    assert cmd.wraps_tool is None
+    assert cmd.wraps_tools == ()
+    assert cmd.intentionally_unsupported == frozenset()
+    assert cmd.router_params == frozenset()
+    assert cmd.client_only_params == frozenset()
+
+
+def test_helpful_command_stores_output_spec_and_wrapper_binding() -> None:
+    """Every metadata field is stored verbatim for ``introspect`` to read."""
+    spec = OutputSpec("object", (OutputField("f", "string", "field"),))
+    cmd = HelpfulCommand(
+        "c",
+        output_spec=spec,
+        wraps_tool="t",
+        wraps_tools=("a", "b"),
+        intentionally_unsupported=frozenset({"x"}),
+        router_params=frozenset({"system"}),
+        client_only_params=frozenset({"print_only"}),
+    )
+    assert cmd.output_spec is spec
+    assert cmd.wraps_tool == "t"
+    assert cmd.wraps_tools == ("a", "b")
+    assert cmd.intentionally_unsupported == frozenset({"x"})
+    assert cmd.router_params == frozenset({"system"})
+    assert cmd.client_only_params == frozenset({"print_only"})
+
+
+def test_helpful_group_leaves_default_to_helpful_command() -> None:
+    """A ``HelpfulGroup``'s verbs are ``HelpfulCommand`` so they carry metadata."""
+    assert HelpfulGroup.command_class is HelpfulCommand
+    group = HelpfulGroup("g")
+
+    @group.command("v", wraps_tool="some_tool")
+    def _verb() -> None: ...
+
+    leaf = group.commands["v"]
+    assert isinstance(leaf, HelpfulCommand)
+    assert leaf.wraps_tool == "some_tool"

@@ -3,13 +3,18 @@ name: cli-command-add
 description: Add a new command to the dh-mcp CLI — wraps the click + Pattern B + structured-error + introspect conventions; prevents the most common bugs (calling asyncio.run inline, printing errors to stderr, forgetting to update docs/CLI.md)
 ---
 
-Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` + `CliError` discipline), the `_documentation-roles` skill (`docs/CLI.md` is the single source of truth for the CLI surface), and the `_cli-help-standards` skill (the help-content contract every command's `--help` and the introspect manifest must satisfy).
+Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` + `CliError` discipline), the `_documentation-roles` skill (`docs/CLI.md` is the single source of truth for the CLI surface), and the `_cli-help-standards` skill (the help-content contract every command's `--help` and the introspect manifest must satisfy). **If the command wraps an MCP tool** (any verb under `session`/`system`/`table`/`script`/`catalog`/`pq`), also apply the `_cli-tool-wrapping` skill — it owns the shared `_wrapping` helpers, the four wrapper categories, the type-scoping rule, and the `wraps_tool` drift contract (step 2's wrapper note has the binding details).
 
 ## Steps
 
-1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools), `config` (inspect / validate the configuration tree). Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
+1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools), `session`/`system` (runtime MCP-tool wrappers), `config` (inspect / validate the configuration tree). Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
 
 2. **Add the click command.** Copy the decorator stack from the model verb `tool_call` in `cli/_commands/tool.py`: `@<group>.command(name, output_spec=SPEC, help=build_help(...))` → click options/arguments → `@click.pass_obj` (or `@click.pass_context`) → `@run_async` → `async def`. Compose the help with `build_help(...)` from `cli/_help.py` per the `_cli-help-standards` §2 section contract, and define the output shape once as an `OutputSpec` constant passed to both `output_spec=` and `build_help(output=...)` (§4).
+
+   **If the command wraps an MCP tool**, apply `_cli-tool-wrapping` and:
+   - Build the body from the `_wrapping` helpers (`acquire` → `call_tool` → `tool_payload` → `require_success`) instead of hand-rolling the daemon/MCP dance.
+   - Declare the binding on the command (`wraps_tool=` / `wraps_tools=`, plus `intentionally_unsupported=` / `router_params=` as needed) so `tests/cli/test_tool_wrapper_drift.py` can verify it.
+   - Name each flag/argument exactly as its tool parameter, then run `uv run --extra test pytest tests/cli/test_tool_wrapper_drift.py -q`.
 
 3. **Body: do the work.** Use the `Runtime` on `ctx.obj` for config / runtime-dir / output mode / timeouts. For commands that talk to the daemon, use `get_or_start_daemon(runtime)` and `McpClient` from `cli/_daemon.py` and `cli/_mcp_client.py`.
 

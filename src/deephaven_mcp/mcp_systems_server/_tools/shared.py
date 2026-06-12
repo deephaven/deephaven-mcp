@@ -12,7 +12,7 @@ Provides common helpers used across the MCP tool modules:
   :func:`get_enterprise_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
   :func:`build_table_data_response`, :func:`format_meta_table_result`.
-- Initialization-status formatting: :func:`format_initialization_status`.
+- Partial-result formatting: :func:`format_partial_result`.
 - JSON redaction: :func:`redact_json_sensitive_fields`.
 
 This module is internal — none of its functions are MCP tools.
@@ -62,8 +62,8 @@ __all__ = [
     "check_response_size",
     "check_session_limit",
     "error_response",
-    "format_initialization_status",
     "format_meta_table_result",
+    "format_partial_result",
     "get_community_registry",
     "get_community_settings",
     "get_enterprise_registry",
@@ -100,49 +100,52 @@ def error_response(msg: str) -> dict[str, object]:
     return {"success": False, "error": msg, "isError": True}
 
 
-def format_initialization_status(
+def format_partial_result(
     phase: InitializationPhase,
     init_errors: dict[str, str],
 ) -> dict[str, object] | None:
-    """Format initialization phase + errors into a response-ready dict.
+    """Describe an incomplete result for a discovery-spanning tool.
 
-    Pure formatting function — does not query any registry. Callers are
-    responsible for obtaining ``phase`` and ``init_errors`` from the
-    same atomic snapshot (e.g. via :meth:`MultiSystemRegistry.get_all`).
+    Tools whose result spans enterprise systems (``sessions_list``,
+    ``enterprise_systems_status``) attach the returned block to their
+    ``success=True`` payload when the result may be missing data. Pure
+    formatting — callers obtain ``phase`` and ``init_errors`` from the same
+    atomic snapshot (e.g. via :meth:`MultiSystemRegistry.get_all`).
 
     Args:
-        phase (InitializationPhase): Current initialization phase.
-        init_errors (dict[str, str]): Dict mapping factory names to
-            error descriptions.
+        phase (InitializationPhase): Current enterprise-discovery phase.
+        init_errors (dict[str, str]): Factory name → error description.
 
     Returns:
-        dict[str, object] | None: A dict with ``status`` (str, always)
-            and ``errors`` (dict[str, str], only when present), or
-            ``None`` if initialization completed cleanly.
+        dict[str, object] | None: ``None`` when the result is complete (``phase``
+            is ``COMPLETED`` with no errors). Otherwise a ``partial_result``
+            block: ``phase`` (the machine-readable :class:`InitializationPhase`
+            value, e.g. ``"loading"``), ``detail`` (a human-readable message),
+            and ``errors`` (factory name → message, only when present).
     """
-    init_info: dict[str, object] = {}
+    if phase == InitializationPhase.COMPLETED and not init_errors:
+        return None
     if phase == InitializationPhase.FAILED:
-        init_info["status"] = (
+        detail = (
             "Enterprise session discovery failed critically (e.g. cancelled "
             "during shutdown). The registry may have partial or no data."
         )
     elif phase in (InitializationPhase.NOT_STARTED, InitializationPhase.PARTIAL):
-        init_info["status"] = (
+        detail = (
             "Enterprise session discovery has not yet started. Some sessions "
             "or systems may not yet be visible."
         )
     elif phase == InitializationPhase.LOADING:
-        init_info["status"] = (
+        detail = (
             "Enterprise session discovery is actively running. Some sessions "
             "or systems may not yet be visible."
         )
-    elif init_errors:
-        init_info["status"] = (
-            "Some enterprise systems had connection issues during discovery."
-        )
+    else:  # COMPLETED with errors
+        detail = "Some enterprise systems had connection issues during discovery."
+    block: dict[str, object] = {"phase": phase.value, "detail": detail}
     if init_errors:
-        init_info["errors"] = init_errors
-    return init_info or None
+        block["errors"] = init_errors
+    return block
 
 
 # ---------------------------------------------------------------------------

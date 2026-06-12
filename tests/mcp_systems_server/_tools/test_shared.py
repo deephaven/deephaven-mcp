@@ -8,7 +8,7 @@ Covers the helpers used by every tool:
 - Session retrieval (``get_session_from_context``, ``get_enterprise_session``).
 - Response shapers / size guards (``error_response``, ``check_response_size``,
   ``format_meta_table_result``, ``build_table_data_response``).
-- ``format_initialization_status``, ``redact_json_sensitive_fields``.
+- ``format_partial_result``, ``redact_json_sensitive_fields``.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def _ctx(*, registry: object = None, multi_config: object = None) -> MockContext
 
 
 # ---------------------------------------------------------------------------
-# error_response / format_initialization_status
+# error_response / format_partial_result
 # ---------------------------------------------------------------------------
 
 
@@ -65,36 +65,40 @@ def test_error_response_shape():
     }
 
 
-def test_format_initialization_status_completed_no_errors():
-    assert (
-        shared.format_initialization_status(InitializationPhase.COMPLETED, {}) is None
-    )
+def test_format_partial_result_completed_no_errors_is_none():
+    assert shared.format_partial_result(InitializationPhase.COMPLETED, {}) is None
 
 
-def test_format_initialization_status_loading_phase_emits_status():
-    info = shared.format_initialization_status(InitializationPhase.LOADING, {})
+def test_format_partial_result_loading_phase():
+    info = shared.format_partial_result(InitializationPhase.LOADING, {})
     assert info is not None
-    assert "actively running" in info["status"].lower()
+    assert info["phase"] == "loading"
+    assert "actively running" in info["detail"].lower()
+    assert "errors" not in info
 
 
-def test_format_initialization_status_partial_phase_emits_status():
-    info = shared.format_initialization_status(InitializationPhase.PARTIAL, {})
+def test_format_partial_result_partial_phase():
+    info = shared.format_partial_result(InitializationPhase.PARTIAL, {})
     assert info is not None
-    assert "not yet" in info["status"].lower()
+    assert info["phase"] == "partial"
+    assert "not yet" in info["detail"].lower()
 
 
-def test_format_initialization_status_failed_phase_emits_status():
-    info = shared.format_initialization_status(InitializationPhase.FAILED, {})
+def test_format_partial_result_failed_phase():
+    info = shared.format_partial_result(InitializationPhase.FAILED, {})
     assert info is not None
-    assert "failed" in info["status"].lower()
+    assert info["phase"] == "failed"
+    assert "failed" in info["detail"].lower()
 
 
-def test_format_initialization_status_includes_errors():
-    info = shared.format_initialization_status(
+def test_format_partial_result_completed_with_errors():
+    info = shared.format_partial_result(
         InitializationPhase.COMPLETED, {"sys-a": "boom"}
     )
     assert info is not None
+    assert info["phase"] == "completed"
     assert info["errors"] == {"sys-a": "boom"}
+    assert "connection issues" in info["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

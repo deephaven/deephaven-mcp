@@ -7,7 +7,26 @@ import json
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
-from deephaven_mcp.cli._format import _format_tool_list, format_output
+from deephaven_mcp.cli._format import (
+    OUTPUT_ENV_VAR,
+    OUTPUT_MODES,
+    _format_tool_list,
+    format_output,
+)
+
+
+def test_output_env_var_is_the_public_contract_name() -> None:
+    """Pin the env-var name agents and users rely on to select the output mode.
+
+    This is the external wire contract (``DH_MCP_OUTPUT``); changing it is a
+    breaking change, so it is asserted directly rather than left to behavior.
+    """
+    assert OUTPUT_ENV_VAR == "DH_MCP_OUTPUT"
+
+
+def test_output_modes_are_the_three_supported_values() -> None:
+    """The runtime mode tuple matches the documented choices."""
+    assert OUTPUT_MODES == ("human", "json", "yaml")
 
 
 def _tool(name: str, desc: str | None = None) -> Tool:
@@ -124,6 +143,54 @@ def test_human_format_dict() -> None:
     assert "n: 1" in out
 
 
+def test_human_format_list_of_dicts_renders_aligned_table() -> None:
+    rows = [
+        {"Namespace": "Mkt", "Table": "Trades"},
+        {"Namespace": "Mkt", "Table": "Quotes"},
+    ]
+    out = format_output(rows, output="human")
+    lines = out.splitlines()
+    assert lines[0].split() == ["Namespace", "Table"]
+    assert "Trades" in lines[1]
+    # Columns align: the second column starts at the same offset on the
+    # header and the data row.
+    assert lines[1].index("Trades") == lines[0].index("Table")
+
+
+def test_human_format_list_of_dicts_handles_ragged_rows() -> None:
+    """A key missing from some rows renders an empty cell, not a crash."""
+    rows = [{"a": 1, "b": 2}, {"a": 3}]
+    out = format_output(rows, output="human")
+    lines = out.splitlines()
+    assert lines[0].split() == ["a", "b"]
+    assert lines[2].startswith("3")
+
+
+def test_human_format_dict_renders_data_block_as_table() -> None:
+    """The tabular tool envelope: metadata as key:value, ``data`` as a table."""
+    payload = {
+        "row_count": 2,
+        "is_complete": True,
+        "data": [{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+    }
+    out = format_output(payload, output="human")
+    lines = out.splitlines()
+    assert "row_count: 2" in out
+    assert "is_complete: True" in out
+    assert "data:" in out
+    # The data block is a rendered table, not a Python repr.
+    assert "[{" not in out
+    assert "x" in out and "y" in out
+    # The nested table is indented two spaces under the ``data:`` key.
+    data_idx = lines.index("data:")
+    assert lines[data_idx + 1].startswith("  ")
+    assert lines[data_idx + 1].lstrip().startswith("x")
+
+
+def test_human_format_list_of_scalars_newline_joined() -> None:
+    assert format_output(["trades", "quotes"], output="human") == "trades\nquotes"
+
+
 def test_human_format_string() -> None:
     assert format_output("hello", output="human") == "hello"
 
@@ -165,19 +232,23 @@ def test_yaml_format_no_trailing_newline() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_format_tool_list_empty() -> None:
-    assert _format_tool_list([]) == "(no tools registered)"
+def test_human_format_empty_list_uses_default_message() -> None:
+    """An empty list renders the generic placeholder, not ``"[]"`` or a repr."""
+    assert format_output([], output="human") == "(none)"
 
 
-def test_human_format_routes_empty_tool_list_to_format_tool_list() -> None:
-    """A typed-empty Tool list under human format renders the canonical message.
+def test_human_format_empty_list_uses_custom_empty_message() -> None:
+    """A caller supplies its own empty-list wording (e.g. ``tool list``).
 
-    Regression for S2-3: previously ``format_output([], output="human")``
-    fell through to ``repr`` and emitted ``"[]"``. The ``tool list``
-    subcommand always returns ``list[Tool]`` (filtered), so an empty
-    result must route to :func:`_format_tool_list`.
+    Regression for the shape-guess bug: an empty list of *anything* (rows,
+    systems, sessions) used to render ``"(no tools registered)"`` because
+    ``all()`` over ``[]`` is vacuously ``True``. The wording is now the
+    caller's choice via ``empty_message``.
     """
-    assert format_output([], output="human") == "(no tools registered)"
+    assert (
+        format_output([], output="human", empty_message="(no tools registered)")
+        == "(no tools registered)"
+    )
 
 
 def test_format_tool_list_aligns_names() -> None:

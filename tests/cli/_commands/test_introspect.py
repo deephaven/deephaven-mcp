@@ -247,3 +247,96 @@ def test_build_manifest_falls_back_to_unknown_version() -> None:
     ):
         manifest = build_manifest(cli)
     assert manifest["version"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _describe_wraps — the MCP-tool binding emitted for wrapper commands
+# ---------------------------------------------------------------------------
+
+
+def test_describe_wraps_none_for_group() -> None:
+    """A group is not a HelpfulCommand, so it carries no wraps binding."""
+    from deephaven_mcp.cli._commands.introspect import _describe_wraps
+
+    assert _describe_wraps(click.Group("g")) is None
+
+
+def test_describe_wraps_none_for_plain_command() -> None:
+    """A non-HelpfulCommand has no wrapper metadata."""
+    from deephaven_mcp.cli._commands.introspect import _describe_wraps
+
+    assert _describe_wraps(click.Command("c")) is None
+
+
+def test_describe_wraps_none_when_helpful_command_wraps_nothing() -> None:
+    """A HelpfulCommand that fronts no tool (daemon/config verb) maps to None."""
+    from deephaven_mcp.cli._commands.introspect import _describe_wraps
+    from deephaven_mcp.cli._help import HelpfulCommand
+
+    assert _describe_wraps(HelpfulCommand("c")) is None
+
+
+def test_describe_wraps_single_tool_has_empty_exemptions() -> None:
+    from deephaven_mcp.cli._commands.introspect import _describe_wraps
+    from deephaven_mcp.cli._help import HelpfulCommand
+
+    assert _describe_wraps(HelpfulCommand("c", wraps_tool="list_systems")) == {
+        "tools": ["list_systems"],
+        "intentionally_unsupported": [],
+        "router_params": [],
+        "client_only_params": [],
+    }
+
+
+def test_describe_wraps_merges_tools_and_sorts_every_field() -> None:
+    """``tools`` is the sorted union of ``wraps_tool`` + ``wraps_tools``."""
+    from deephaven_mcp.cli._commands.introspect import _describe_wraps
+    from deephaven_mcp.cli._help import HelpfulCommand
+
+    cmd = HelpfulCommand(
+        "c",
+        wraps_tool="z_tool",
+        wraps_tools=("b_tool", "a_tool"),
+        intentionally_unsupported=frozenset({"foo", "bar"}),
+        router_params=frozenset({"system"}),
+        client_only_params=frozenset({"print_only"}),
+    )
+    assert _describe_wraps(cmd) == {
+        "tools": ["a_tool", "b_tool", "z_tool"],
+        "intentionally_unsupported": ["bar", "foo"],
+        "router_params": ["system"],
+        "client_only_params": ["print_only"],
+    }
+
+
+def test_manifest_emits_wraps_for_passthrough_wrapper() -> None:
+    """A wrapper verb carries its tool binding in the manifest."""
+    manifest = build_manifest(cli)
+    wraps = manifest["commands"]["system"]["subcommands"]["list"]["wraps"]
+    assert wraps["tools"] == ["list_systems"]
+    assert wraps["router_params"] == []
+    assert wraps["client_only_params"] == []
+
+
+def test_manifest_wraps_is_none_for_non_wrapper_and_group() -> None:
+    """``wraps`` is always present, and ``None`` where no tool is wrapped."""
+    manifest = build_manifest(cli)
+    # A daemon verb wraps no MCP tool.
+    assert manifest["commands"]["daemon"]["subcommands"]["start"]["wraps"] is None
+    # A group itself wraps nothing.
+    assert manifest["commands"]["session"]["wraps"] is None
+
+
+def test_manifest_emits_router_and_client_params_for_session() -> None:
+    """The system-router and client-side-composite bindings round-trip."""
+    manifest = build_manifest(cli)
+    create = manifest["commands"]["session"]["subcommands"]["create"]["wraps"]
+    assert set(create["tools"]) == {
+        "session_community_create",
+        "session_enterprise_create",
+    }
+    assert create["router_params"] == ["system"]
+
+    open_ = manifest["commands"]["session"]["subcommands"]["open"]["wraps"]
+    assert open_["tools"] == ["session_community_credentials"]
+    assert open_["client_only_params"] == ["print_only"]

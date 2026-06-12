@@ -10,8 +10,12 @@ These tests:
 - Drive the ``dh-mcp`` CLI as a real subprocess, exercising the
   full daemon lifecycle: ``start`` → ``status`` → ``tool list`` →
   ``tool show`` → ``tool call`` → ``restart`` → ``logs`` → ``stop``,
-  plus the error/exit-code paths and the config / introspect verbs
-  that need no worker.
+  the runtime tool-wrapper verbs against the live worker (``session
+  list`` / ``show`` / ``credentials`` / ``url`` / ``open``, ``system
+  list`` / ``status``, ``table list`` / ``schema`` / ``data``, ``script
+  run`` / ``pip-list``), plus the error/exit-code paths (``config_invalid``,
+  ``daemon_not_running``, ``tool_returned_error``) and the config /
+  introspect verbs that need no worker.
 
 They are marked ``@pytest.mark.integration`` and skipped by the
 default ``uv run pytest`` run. Invoke with::
@@ -133,6 +137,44 @@ def _seed_config_dir(
     for sub in (cfg_dir, cfg_dir / "community", sessions_dir):
         os.chmod(sub, 0o700)
     os.chmod(session_path, 0o600)
+
+
+def _write_community_settings(cfg_dir: Path, *, credential_retrieval_mode: str) -> None:
+    """Write ``community/settings.json`` enabling credential retrieval.
+
+    The default config gates credential retrieval off (``mode='none'``),
+    so the e2e test that exercises ``session credentials`` / ``url`` /
+    ``open`` against the static session must turn it on here.
+    """
+    settings = {"security": {"credential_retrieval_mode": credential_retrieval_mode}}
+    community_dir = cfg_dir / "community"
+    community_dir.mkdir(parents=True, exist_ok=True)
+    settings_path = community_dir / "settings.json"
+    settings_path.write_text(json.dumps(settings))
+    os.chmod(community_dir, 0o700)
+    os.chmod(settings_path, 0o600)
+
+
+def _write_session_startup_timeout(
+    cfg_dir: Path, *, startup_timeout_seconds: int
+) -> None:
+    """Raise ``session_creation.defaults.startup_timeout_seconds``.
+
+    A daemon-launched Python worker can take longer than the 60s default to
+    become ready (cold imports), so the create/delete round-trip test bumps
+    the startup budget to match the worker fixture's tolerance.
+    """
+    settings = {
+        "session_creation": {
+            "defaults": {"startup_timeout_seconds": startup_timeout_seconds}
+        }
+    }
+    community_dir = cfg_dir / "community"
+    community_dir.mkdir(parents=True, exist_ok=True)
+    settings_path = community_dir / "settings.json"
+    settings_path.write_text(json.dumps(settings))
+    os.chmod(community_dir, 0o700)
+    os.chmod(settings_path, 0o600)
 
 
 def _run_cli(
@@ -466,6 +508,43 @@ def test_config_validate_and_show(tmp_path: Path) -> None:
     shutil.which("dh-mcp") is None,
     reason="dh-mcp entry point not on PATH",
 )
+def test_config_invalid_exits_2(tmp_path: Path) -> None:
+    """A malformed config tree fails fast with ``config_invalid`` (exit 2).
+
+    The eager load in ``_main``'s root callback parses the whole config tree
+    before any subcommand body runs, so a syntactically broken session file
+    exits 2 with ``config_invalid`` even for a worker-free verb like
+    ``config validate``.
+    """
+    cfg_dir = tmp_path / "cfg"
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir()
+    os.chmod(runtime_dir, 0o700)
+    sessions_dir = cfg_dir / "community" / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    session_path = sessions_dir / "demo.json"
+    session_path.write_text("{ this is not valid json")
+    for sub in (cfg_dir, cfg_dir / "community", sessions_dir):
+        os.chmod(sub, 0o700)
+    os.chmod(session_path, 0o600)
+
+    result = _run_cli(
+        ["config", "validate"],
+        config_dir=cfg_dir,
+        runtime_dir=runtime_dir,
+        root_flags=["-q"],
+    )
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    error = _structured_error(result.stderr)
+    assert error["error_code"] == "config_invalid"
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(
+    shutil.which("dh-mcp") is None,
+    reason="dh-mcp entry point not on PATH",
+)
 def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
     """``introspect`` emits the command manifest without touching config.
 
@@ -482,7 +561,21 @@ def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
     manifest = json.loads(result.stdout)
     assert "commands" in manifest
     assert "error_codes" in manifest
-    assert {"daemon", "tool", "config"} <= set(manifest["commands"])
+    assert {
+        "daemon",
+        "tool",
+        "config",
+        "session",
+        "system",
+        "table",
+        "script",
+        "catalog",
+        "pq",
+    } <= set(manifest["commands"])
+    # Wrapper commands carry their tool binding for the drift tooling.
+    assert manifest["commands"]["system"]["subcommands"]["list"]["wraps"]["tools"] == [
+        "list_systems"
+    ]
 
 
 @pytest.mark.integration
@@ -514,3 +607,200 @@ def test_daemon_reset_quarantines_corrupt_registry(tmp_path: Path) -> None:
     # The well-known path is freed; the corrupt bytes survive under the
     # timestamped sibling for postmortem.
     assert not registry_path.exists()
+
+
+_DEMO_ID = "community:community:demo"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.timeout(360)
+@pytest.mark.skipif(
+    not _is_deephaven_server_importable(),
+    reason="deephaven-server not installed",
+)
+@pytest.mark.skipif(
+    shutil.which("dh-mcp") is None,
+    reason="dh-mcp entry point not on PATH",
+)
+async def test_session_wrapper_verbs_e2e(
+    tmp_path: Path, community_worker_port: int, community_worker: str
+) -> None:
+    """Exercise the read/credential wrapper verbs against the static session.
+
+    Covers ``session list`` / ``show`` / ``credentials`` / ``url`` /
+    ``open --print``, ``system list``, ``table list`` / ``schema``, and
+    ``script run`` / ``pip-list`` end-to-end against the live worker. The
+    seeded ``demo`` session is static, so credential retrieval is enabled
+    with ``credential_retrieval_mode='all'``. Dynamic ``create`` /
+    ``delete`` are covered separately (they launch their own worker).
+    """
+    cfg_dir = tmp_path / "cfg"
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir()
+    os.chmod(runtime_dir, 0o700)
+    _seed_config_dir(
+        cfg_dir, worker_port=community_worker_port, auth_token=community_worker
+    )
+    _write_community_settings(cfg_dir, credential_retrieval_mode="all")
+
+    def run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return _run_cli(args, config_dir=cfg_dir, runtime_dir=runtime_dir)
+
+    try:
+        assert run(["daemon", "start"]).returncode == 0
+
+        # system list → the community umbrella is always present.
+        result = run(["system", "list"])
+        assert result.returncode == 0, result.stderr
+        systems = json.loads(result.stdout)
+        assert {"name": "community", "type": "community"} in systems
+
+        # system status → Enterprise-only health; all-community reports none.
+        result = run(["system", "status"])
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["systems"] == []
+
+        # session list → the seeded static session is discoverable.
+        result = run(["session", "list"])
+        assert result.returncode == 0, result.stderr
+        ids = {s["session_id"] for s in json.loads(result.stdout)}
+        assert _DEMO_ID in ids
+
+        # session show → detail object for the static session.
+        result = run(["session", "show", _DEMO_ID])
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["session_id"] == _DEMO_ID
+
+        # table list → empty array on a fresh worker (success, not error).
+        result = run(["table", "list", _DEMO_ID])
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == []
+
+        # script run → create a table with one column in the worker.
+        result = run(
+            [
+                "script",
+                "run",
+                _DEMO_ID,
+                "--script",
+                'from deephaven import empty_table\nt = empty_table(5).update(["X = i"])',
+            ]
+        )
+        assert result.returncode == 0, result.stderr
+
+        # table list again → the created table is now present.
+        result = run(["table", "list", _DEMO_ID])
+        assert result.returncode == 0, result.stderr
+        assert "t" in json.loads(result.stdout)
+
+        # table schema → column definitions for the new table (column X present).
+        result = run(["table", "schema", _DEMO_ID, "t"])
+        assert result.returncode == 0, result.stderr
+        assert "X" in result.stdout
+
+        # table data → real row-fetch round-trip: 5 rows of X = 0..4.
+        result = run(["table", "data", _DEMO_ID, "t"])
+        assert result.returncode == 0, result.stderr
+        data = json.loads(result.stdout)
+        assert data["table_name"] == "t"
+        assert data["row_count"] == 5
+
+        # script pip-list → packages available in the worker.
+        result = run(["script", "pip-list", _DEMO_ID])
+        assert result.returncode == 0, result.stderr
+        assert isinstance(json.loads(result.stdout), list)
+
+        # session credentials → plaintext token (gate enabled above).
+        result = run(["session", "credentials", _DEMO_ID])
+        assert result.returncode == 0, result.stderr
+        creds = json.loads(result.stdout)
+        assert creds["auth_token"] == community_worker
+        assert "connection_url_with_auth" in creds
+
+        # session url → just the authenticated URL.
+        result = run(["session", "url", _DEMO_ID])
+        assert result.returncode == 0, result.stderr
+        assert community_worker in result.stdout
+
+        # session open --print → prints the URL without launching a browser.
+        result = run(["session", "open", _DEMO_ID, "--print"])
+        assert result.returncode == 0, result.stderr
+        opened = json.loads(result.stdout)
+        assert opened["launched"] is False
+        assert community_worker in opened["opened"]
+    finally:
+        run(["daemon", "stop"])
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(420)
+@pytest.mark.skipif(
+    not _is_deephaven_server_importable(),
+    reason="deephaven-server not installed",
+)
+@pytest.mark.skipif(
+    shutil.which("dh-mcp") is None,
+    reason="dh-mcp entry point not on PATH",
+)
+def test_session_create_delete_roundtrip_e2e(tmp_path: Path) -> None:
+    """``session create`` then a *separate* ``session delete`` round-trips.
+
+    The CLI drives a long-lived daemon, so a dynamically-created community
+    worker persists in the daemon's registry across CLI invocations: a later
+    ``delete`` from a different connection finds and reaps it. This exercises
+    the daemon-launched-worker path end to end — the daemon, not the test,
+    launches the worker.
+    """
+    cfg_dir = tmp_path / "cfg"
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir()
+    os.chmod(runtime_dir, 0o700)
+    _seed_anonymous_config(cfg_dir)
+    _write_session_startup_timeout(cfg_dir, startup_timeout_seconds=240)
+
+    name = "itest-dynamic"
+    sid = f"community:community:{name}"
+
+    def run(
+        args: list[str], *, timeout: int = 60, root_flags: list[str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return _run_cli(
+            args,
+            config_dir=cfg_dir,
+            runtime_dir=runtime_dir,
+            timeout=timeout,
+            root_flags=root_flags,
+        )
+
+    try:
+        assert run(["daemon", "start"]).returncode == 0
+
+        # create → the daemon launches a fresh Python worker (slow); a long
+        # request timeout keeps the MCP call open until the worker is ready.
+        result = run(
+            ["session", "create", name, "--launch-method", "python"],
+            timeout=320,
+            root_flags=["--timeout", "300"],
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["session_id"] == sid
+
+        # list → a *separate* invocation sees the persisted dynamic session.
+        result = run(["session", "list"])
+        assert result.returncode == 0, result.stderr
+        assert sid in {s["session_id"] for s in json.loads(result.stdout)}
+
+        # delete → a *separate* invocation finds and reaps the worker.
+        result = run(["session", "delete", sid])
+        assert result.returncode == 0, result.stderr
+
+        # list again → the dynamic session is gone.
+        result = run(["session", "list"])
+        assert result.returncode == 0, result.stderr
+        assert sid not in {s["session_id"] for s in json.loads(result.stdout)}
+    finally:
+        # Best-effort reap if an assertion failed after create, then stop the
+        # daemon (graceful SIGTERM closes the registry and any live worker).
+        run(["session", "delete", sid])
+        run(["daemon", "stop"])

@@ -11,8 +11,8 @@ import pytest
 from click.testing import CliRunner
 
 from deephaven_mcp.cli import _main
+from deephaven_mcp.cli._commands import _acquire as acquire_mod
 from deephaven_mcp.cli._commands import daemon as daemon_mod
-from deephaven_mcp.cli._commands import shared as shared_mod
 from deephaven_mcp.cli._daemon import (
     DaemonClientError,
     DaemonStartupTimeoutError,
@@ -43,7 +43,7 @@ def _invoke(args: list[str], runtime: Runtime):
 def test_start_prints_handle(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+        acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
     ):
         result = _invoke(["daemon", "start"], rt)
     assert result.exit_code == 0
@@ -53,7 +53,7 @@ def test_start_prints_handle(tmp_path: Path) -> None:
 def test_start_handles_timeout(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonStartupTimeoutError("timeout")),
     ):
@@ -64,7 +64,7 @@ def test_start_handles_timeout(tmp_path: Path) -> None:
 def test_start_handles_client_error(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonClientError("nope")),
     ):
@@ -225,7 +225,7 @@ def test_restart_stops_then_starts(tmp_path: Path) -> None:
     with (
         patch.object(daemon_mod, "stop_daemon", AsyncMock(return_value=True)) as stop,
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=handle)
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=handle)
         ) as start,
     ):
         result = _invoke(["-o", "json", "daemon", "restart"], rt)
@@ -251,7 +251,7 @@ def test_restart_propagates_start_timeout(tmp_path: Path) -> None:
     with (
         patch.object(daemon_mod, "stop_daemon", AsyncMock(return_value=False)),
         patch.object(
-            shared_mod,
+            acquire_mod,
             "get_or_start_daemon",
             AsyncMock(side_effect=DaemonStartupTimeoutError("slow")),
         ),
@@ -265,7 +265,7 @@ def test_restart_propagates_start_client_error(tmp_path: Path) -> None:
     with (
         patch.object(daemon_mod, "stop_daemon", AsyncMock(return_value=False)),
         patch.object(
-            shared_mod,
+            acquire_mod,
             "get_or_start_daemon",
             AsyncMock(side_effect=DaemonClientError("nope")),
         ),
@@ -321,7 +321,7 @@ def test_start_corrupt_registry_returns_2(tmp_path: Path) -> None:
     """
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=RegistryCorruptError("malformed")),
     ):
@@ -351,7 +351,7 @@ def test_restart_corrupt_on_start_returns_2(tmp_path: Path) -> None:
     with (
         patch.object(daemon_mod, "stop_daemon", AsyncMock(return_value=False)),
         patch.object(
-            shared_mod,
+            acquire_mod,
             "get_or_start_daemon",
             AsyncMock(side_effect=RegistryCorruptError("malformed")),
         ),

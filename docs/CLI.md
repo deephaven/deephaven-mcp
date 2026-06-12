@@ -22,6 +22,24 @@ After installation `dh-mcp` is on `$PATH`. Verify with:
 dh-mcp --help
 ```
 
+## Shell completion
+
+`dh-mcp` supports tab completion for commands, subcommands, and options via
+`click`'s built-in mechanism — no extra package or command. Enable it for the
+current shell by evaluating the generated script, or add the line to your shell
+startup file to make it permanent:
+
+```bash
+# bash (requires bash >= 4.4); add to ~/.bashrc
+eval "$(_DH_MCP_COMPLETE=bash_source dh-mcp)"
+
+# zsh; add to ~/.zshrc
+eval "$(_DH_MCP_COMPLETE=zsh_source dh-mcp)"
+
+# fish; add to ~/.config/fish/completions/dh-mcp.fish
+_DH_MCP_COMPLETE=fish_source dh-mcp | source
+```
+
 ## Quick start
 
 ```bash
@@ -227,7 +245,7 @@ verb honors the top-level `-o/--output` flag.
 | `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir. |
 | `restart`  | `stop` then `start` in one shot; reports the new handle.                                      |
 | `reset`    | Quarantines a corrupt `daemon.json` (renames it to `daemon.json.corrupt-<UTC>`) so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
-| `logs`     | Tails `daemon.log`. `-n N` controls the initial tail; `-f` follows the file (Ctrl-C to exit). |
+| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit). |
 
 ### `dh-mcp tool`
 
@@ -253,28 +271,153 @@ dh-mcp tool call sessions_list --arg type=community
 
 ### `dh-mcp session`
 
-| Verb                   | Purpose                                                                                       |
-|------------------------|-----------------------------------------------------------------------------------------------|
-| `credentials <id>`     | Prints one Community session's browser-login credentials (`auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). |
+Sessions are addressed by a fully qualified id `type:system:name`
+(`type` is `community` or `enterprise`). Verbs that take an id route to
+the right backend by the id's prefix; `create` chooses the backend from
+`--system`. Type is never a subgroup.
 
-`dh-mcp session credentials` is an ergonomic wrapper over the
-`session_community_credentials` MCP tool. Unlike `dh-mcp daemon`,
-which redacts secrets, its output contains a **plaintext auth token
-by design** so you can open the session in a browser. Retrieval is
-gated by `security.credential_retrieval_mode` in
-`community/settings.json`, which defaults to `none`; when retrieval
-is disabled — or the session is missing or not a Community session —
-the command exits `3` with the tool's explanation. Returns:
+| Verb                          | Purpose                                                                                       |
+|-------------------------------|-----------------------------------------------------------------------------------------------|
+| `list`                        | Lists sessions (both types) as a JSON array. Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic`. Wraps `sessions_list`. |
+| `show <id>`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
+| `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
+| `delete <id>`                 | Deletes a session, routing by the id prefix. Wraps `session_community_delete` / `session_enterprise_delete`. |
+| `credentials <id>`            | Prints a Community session's browser-login credentials (`auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
+| `url <id>`                    | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly. |
+| `open <id>`                   | Opens the authenticated URL in the default browser; `--print` prints it instead (headless-safe). |
 
-- `0` — success.
-- `2` — client-side failure (connection, timeout, daemon, ...).
-- `3` — the credentials tool reported an error (`tool_returned_error`).
+`create` options are split by type and mutually exclusive: Community
+takes `--launch-method`, `--auth-token`, `--docker-image`,
+`--docker-memory-limit-gb`, `--docker-cpu-limit`, `--docker-volume`
+(repeatable), `--python-venv-path`; Enterprise takes `--server`,
+`--engine`, `--auto-delete-timeout`, `--admin-group`/`--viewer-group`
+(repeatable), `--session-arg KEY=VALUE` (repeatable, JSON values).
+Shared: `--language` (`Python`/`Groovy`), `--heap-size-gb`, `--jvm-arg`
+(repeatable), `--env KEY=VALUE` (repeatable). Supplying a wrong-type option
+exits `2` (`option_not_applicable`).
+
+`credentials`, `url`, and `open` are Community-only and share the
+`session_community_credentials` tool, whose output contains a
+**plaintext auth token by design**. Retrieval is gated by
+`security.credential_retrieval_mode` in `community/settings.json`
+(default `none`); when disabled — or the session is missing or not a
+Community session — they exit `3`. All session verbs exit `0` on
+success, `2` on client-side/daemon failure, and `3` when the wrapped
+tool reports an error.
 
 Examples:
 
 ```bash
-dh-mcp session credentials community:community:my-session
-dh-mcp -o json session credentials community:community:my-session
+dh-mcp session list --type community
+dh-mcp session create dev --launch-method python --env LOG_LEVEL=DEBUG
+dh-mcp session create rpt --system prod --engine DeephavenEnterprise
+dh-mcp session delete community:community:dev
+dh-mcp session open community:community:dev --print
+```
+
+### `dh-mcp system`
+
+A *system* is the source dimension of every fully qualified session id
+(`type:system:name`): the single Community umbrella (named `community`)
+plus every configured Enterprise (Core+) system.
+
+| Verb       | Purpose                                                                                       |
+|------------|-----------------------------------------------------------------------------------------------|
+| `list`     | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
+| `status`   | Reports Enterprise (Core+) system health (`liveness_status`, `is_alive`, redacted `config`). Wraps `enterprise_systems_status`. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. Exits `3` if the tool reports failure. |
+
+Examples:
+
+```bash
+dh-mcp system list
+dh-mcp -o json system list | jq '.[].name'
+dh-mcp system status --system prod --connect
+```
+
+### `dh-mcp table`
+
+Inspects tables in a session. All verbs take a fully qualified
+`SESSION_ID`.
+
+| Verb                          | Purpose                                                                                       |
+|-------------------------------|-----------------------------------------------------------------------------------------------|
+| `list <id>`                   | Emits the session's table names as a JSON array. Wraps `session_tables_list`. |
+| `schema <id> [TABLE...]`      | Column definitions for the named tables (all tables when none named). Wraps `session_tables_schema`. |
+| `data <id> <table>`           | Row data: `--max-rows N`, `--head/--tail` (default head). Wraps `session_table_data`. |
+
+```bash
+dh-mcp table list community:community:dev
+dh-mcp table data community:community:dev trades --max-rows 50 --tail
+```
+
+### `dh-mcp script`
+
+Runs code and inspects the package environment in a session.
+
+| Verb                          | Purpose                                                                                       |
+|-------------------------------|-----------------------------------------------------------------------------------------------|
+| `run <id>`                    | Executes a script via `--script TEXT` or `--script-path PATH` (supply one). Wraps `session_script_run`. |
+| `pip-list <id>`               | Lists installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
+
+```bash
+dh-mcp script run community:community:dev --script 'print(1)'
+dh-mcp script pip-list community:community:dev
+```
+
+### `dh-mcp catalog`
+
+**Enterprise (Core+) only.** Queries an enterprise session's catalog
+(database); `SESSION_ID` must name an enterprise session.
+
+| Verb                                  | Purpose                                                                               |
+|---------------------------------------|---------------------------------------------------------------------------------------|
+| `tables <id>`                         | Catalog table metadata. `--max-rows`, `--filter` (repeatable). Wraps `catalog_tables_list`. |
+| `namespaces <id>`                     | Catalog namespaces. Same options as `tables`. Wraps `catalog_namespaces_list`. |
+| `schema <id> [TABLE...]`              | Catalog table schemas. `--namespace`, `--filter` (repeatable), `--max-tables`. Wraps `catalog_tables_schema`. |
+| `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
+
+```bash
+dh-mcp catalog tables enterprise:prod:rpt
+dh-mcp catalog sample enterprise:prod:rpt Market Trades --max-rows 20
+```
+
+### `dh-mcp pq`
+
+**Enterprise (Core+) only.** Manages Persistent Queries, addressed by
+serial id (`pq name-to-id` resolves a name within a system).
+
+| Verb                                  | Purpose                                                                               |
+|---------------------------------------|---------------------------------------------------------------------------------------|
+| `list <system>`                       | Lists PQs configured on a system. Wraps `pq_list`. |
+| `details <id>`                        | Configuration + status for one PQ. Wraps `pq_details`. |
+| `name-to-id <system> <name>`          | Resolves a PQ name to its serial id. Wraps `pq_name_to_id`. |
+| `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
+| `modify <id>`                         | Updates only the fields passed; everything else is left unchanged. `--restart` restarts the PQ after applying the change. Wraps `pq_modify`. |
+| `delete <id>...`                      | Deletes one or more PQs. `--max-concurrent N`. Wraps `pq_delete`. |
+| `start <id>...`                       | Starts one or more PQs. `--wait/--no-wait`, `--max-concurrent`. Wraps `pq_start`. |
+| `stop <id>...`                        | Stops one or more PQs. Same options as `start`. Wraps `pq_stop`. |
+| `restart <id>...`                     | Restarts one or more PQs. Same options as `start`. Wraps `pq_restart`. |
+
+`create` and `modify` share a large optional config flag set; only the flags you
+pass take effect (on `modify`, everything else is left unchanged). `create`
+additionally requires `--system` and `--heap-size-gb` and accepts
+`--enabled/--disabled` (default enabled); `modify` takes `PQ_ID` and accepts
+`--pq-name`, `--heap-size-gb`, `--enabled/--disabled`, and `--restart`. The
+shared flags are: `--script-body`/`--script-path`, `--language`
+(`Python`/`Groovy`), `--configuration-type` (`Script`/`RunAndDone`), `--schedule`
+(repeatable), `--server`, `--engine`, `--jvm-profile`, `--jvm-arg` (repeatable),
+`--class-path` (repeatable), `--python-venv`, `--env` (repeatable),
+`--init-timeout-nanos`, `--auto-delete-timeout`, `--admin-group`/`--viewer-group`
+(repeatable), `--restart-users`, and `--owner`. Run `dh-mcp pq create --help`
+(or `modify`) for the full per-flag detail.
+
+`delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
+exit `0` means the batch ran, not that every id succeeded — check the
+`summary` and per-item `results` in the payload for failures.
+
+```bash
+dh-mcp pq create nightly --system prod --heap-size-gb 4 --script-path /pq/n.py
+dh-mcp pq restart 1234567890 --no-wait
 ```
 
 ### `dh-mcp config`
@@ -307,6 +450,26 @@ but honors the root `-o/--output` flag and `DH_MCP_OUTPUT` (`json`,
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
 | `--version`         |                      | Print the package version and exit.                                                  |
 
+## Output modes
+
+Every verb honors `-o/--output`, selecting how its result is rendered. The mode
+is resolved per invocation: `-o/--output` flag → `DH_MCP_OUTPUT` → `cli.json`'s
+`output.format` (default `human`).
+
+- `human` (default) — terminal-friendly. Row/tabular data and `tool list` render
+  as aligned, header-topped tables (sized to the terminal width, falling back to
+  80 columns when output is not a TTY); objects render as `key: value` lines;
+  plain lists render one item per line; an empty list renders as `(none)`.
+- `json` — a single document via `json.dumps(..., indent=2, sort_keys=True)`:
+  indented and key-sorted, so output is stable and diff-/`jq`-friendly.
+- `yaml` — block style with sorted keys (`yaml.safe_dump`), for `yq` or
+  human-readable structured output.
+
+Errors and warnings always go to **stderr**, leaving stdout clean for piping. In
+`human` mode an error prints as a single line `<command>: <message>`; in `json` /
+`yaml` mode it prints as the structured payload described under
+[Structured errors](#structured-errors-for-ai-agents).
+
 ## Exit codes
 
 | Code  | Meaning                                                                  |
@@ -314,6 +477,18 @@ but honors the root `-o/--output` flag and `DH_MCP_OUTPUT` (`json`,
 | `0`   | Success.                                                                 |
 | `2`   | User-facing failure (CLI argument error, daemon-spawn timeout, etc.).    |
 | `3`   | The invoked MCP tool returned `isError=true`.                            |
+
+For **batch / vector verbs** (e.g. `pq delete`, `pq start` / `stop` /
+`restart` given multiple ids) exit `0` means the operation *executed*, not
+that every item succeeded — these are best-effort. Read the payload's
+`summary` (`succeeded` / `failed`) and per-item `results` for individual
+outcomes; exit `3` is reserved for a tool that did not execute at all
+(`isError=true`).
+
+Some verbs also emit **non-fatal warnings on stderr** while returning their
+result on stdout — e.g. `session list` warns about enterprise systems that
+failed discovery, yet still lists the sessions it found. Warnings go to
+stderr so `-o json` / `-o yaml` stdout stays clean for piping.
 
 ## Structured errors (for AI agents)
 
@@ -343,7 +518,9 @@ registry programmatically via `dh-mcp introspect` (look under
 | `mcp_request_failed`          | The MCP transport reported an error (connect, timeout, parse).     |
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
-| `arg_parse_error`             | A `--arg key=value` token was malformed.                           |
+| `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
+| `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
+| `browser_launch_failed`       | `dh-mcp session open` could not launch a browser; the URL is included in the error message to open manually. |
 | `config_invalid`              | The configuration tree failed validation.                          |
 | `internal_error`              | An unexpected internal failure not attributable to a specific subsystem. |
 

@@ -403,7 +403,7 @@ async def test_enterprise_systems_status_success():
     assert system["is_alive"] is True
 
     # COMPLETED with no errors should not include initialization info
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
     # Verify liveness_status was called with attempt_to_connect=True
     mock_factory_manager.liveness_status.assert_called_once_with(ensure_item=True)
@@ -450,7 +450,7 @@ async def test_enterprise_systems_status_no_systems():
     assert result["systems"][0]["liveness_status"] == "OFFLINE"
     assert result["systems"][0]["is_alive"] is False
     # COMPLETED with no errors should not include initialization info
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -499,7 +499,7 @@ async def test_enterprise_systems_status_all_status_types():
         assert system["liveness_status"] == status.name
         assert system["liveness_detail"] == detail
         assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
-        assert "initialization" not in result
+        assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -658,7 +658,7 @@ async def test_enterprise_systems_status_no_enterprise_registry():
     assert result["systems"][0]["liveness_status"] == "OFFLINE"
     assert result["systems"][0]["is_alive"] is False
     # COMPLETED with no errors should not include initialization info
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -700,8 +700,8 @@ async def test_enterprise_systems_status_factory_snapshot_unexpected_phase():
     assert result["success"] is True
     assert len(result["systems"]) == 1
     assert result["systems"][0]["name"] == "system"
-    assert "initialization" in result
-    assert "actively running" in result["initialization"]["status"]
+    assert "partial_result" in result
+    assert "actively running" in result["partial_result"]["detail"]
 
 
 @pytest.mark.asyncio
@@ -745,9 +745,9 @@ async def test_enterprise_systems_status_factory_snapshot_with_errors():
     assert result["success"] is True
     assert len(result["systems"]) == 1
     assert result["systems"][0]["name"] == "system"
-    assert "initialization" in result
-    assert "errors" in result["initialization"]
-    assert "factory_reg" in result["initialization"]["errors"]
+    assert "partial_result" in result
+    assert "errors" in result["partial_result"]
+    assert "factory_reg" in result["partial_result"]["errors"]
 
 
 # =============================================================================
@@ -789,8 +789,8 @@ async def test_enterprise_systems_status_discovery_in_progress():
     result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
-    assert "initialization" in result
-    assert "actively running" in result["initialization"]["status"]
+    assert "partial_result" in result
+    assert "actively running" in result["partial_result"]["detail"]
 
 
 @pytest.mark.asyncio
@@ -827,10 +827,10 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
     result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
-    assert "initialization" in result
-    assert "actively running" in result["initialization"]["status"]
-    assert "errors" in result["initialization"]
-    assert "factory1" in result["initialization"]["errors"]
+    assert "partial_result" in result
+    assert "actively running" in result["partial_result"]["detail"]
+    assert "errors" in result["partial_result"]
+    assert "factory1" in result["partial_result"]["errors"]
 
 
 @pytest.mark.asyncio
@@ -867,10 +867,10 @@ async def test_enterprise_systems_status_completed_with_errors():
     result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
-    assert "initialization" in result
-    assert "errors" in result["initialization"]
-    assert "factory1" in result["initialization"]["errors"]
-    assert "connection issues" in result["initialization"]["status"]
+    assert "partial_result" in result
+    assert "errors" in result["partial_result"]
+    assert "factory1" in result["partial_result"]["errors"]
+    assert "connection issues" in result["partial_result"]["detail"]
 
 
 @pytest.mark.asyncio
@@ -903,7 +903,7 @@ async def test_enterprise_systems_status_completed_no_errors():
     result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -2524,8 +2524,8 @@ async def test_enterprise_systems_status_aggregates_when_system_none():
     assert result["success"] is True
     assert {s["name"] for s in result["systems"]} == {"prod", "staging"}
     # Aggregated calls namespace error keys with the originating system.
-    assert "initialization" in result
-    assert "staging:factory" in result["initialization"]["errors"]
+    assert "partial_result" in result
+    assert "staging:factory" in result["partial_result"]["errors"]
 
 
 @pytest.mark.asyncio
@@ -2581,8 +2581,8 @@ async def test_enterprise_systems_status_aggregation_failed_outranks_loading():
     result = await enterprise_systems_status(context)
 
     assert result["success"] is True
-    assert "initialization" in result
+    assert "partial_result" in result
     # FAILED outranks LOADING so the merged status surfaces the failure
     # message rather than the in-progress "actively running" message.
-    assert "failed critically" in result["initialization"]["status"]
-    assert "prod:factory" in result["initialization"]["errors"]
+    assert "failed critically" in result["partial_result"]["detail"]
+    assert "prod:factory" in result["partial_result"]["errors"]

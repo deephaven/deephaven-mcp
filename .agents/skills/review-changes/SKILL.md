@@ -27,6 +27,7 @@ If no changeset is specified, default to uncommitted changes.
    |---|---|
    | `.py` | `review-python-file` |
    | CLI help-bearing files (`cli/_commands/*.py`, `cli/_help.py`, `cli/_errors.py`) | `review-python-file` **plus** `cli-help-accuracy` (the surfaced help, error-code registry, and output schema must match the code and `docs/CLI.md`) |
+   | MCP tool signatures (`mcp_systems_server/_tools/*.py`) **or** tool-wrapping CLI commands (`cli/_commands/*.py` setting `wraps_tool`/`wraps_tools`) | `review-python-file` **plus** run `uv run --extra test pytest tests/cli/test_tool_wrapper_drift.py -q` and apply `_cli-tool-wrapping` — a changed tool signature must be reflected in its wrapper's flags / `intentionally_unsupported`, and vice versa |
    | `.md`, `.rst` | `docs-accuracy` |
    | Pydantic config (`config/schema/*.py`, `config/tree.py`), `*.json5` examples under `config-samples/ai/config/`, `docs/CONFIGURATION.md` | `_configuration-conventions` |
    | `.agents/skills/**/SKILL.md`, `AGENTS.md` | `skill-review` |
