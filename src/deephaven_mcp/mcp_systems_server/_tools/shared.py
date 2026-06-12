@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import NamedTuple
+from typing import NamedTuple, assert_never
 
 import pyarrow
 from mcp.server.fastmcp import Context
@@ -125,23 +125,26 @@ def format_partial_result(
     """
     if phase == InitializationPhase.COMPLETED and not init_errors:
         return None
-    if phase == InitializationPhase.FAILED:
-        detail = (
-            "Enterprise session discovery failed critically (e.g. cancelled "
-            "during shutdown). The registry may have partial or no data."
-        )
-    elif phase in (InitializationPhase.NOT_STARTED, InitializationPhase.PARTIAL):
-        detail = (
-            "Enterprise session discovery has not yet started. Some sessions "
-            "or systems may not yet be visible."
-        )
-    elif phase == InitializationPhase.LOADING:
-        detail = (
-            "Enterprise session discovery is actively running. Some sessions "
-            "or systems may not yet be visible."
-        )
-    else:  # COMPLETED with errors
-        detail = "Some enterprise systems had connection issues during discovery."
+    match phase:
+        case InitializationPhase.FAILED:
+            detail = (
+                "Enterprise session discovery failed critically (e.g. cancelled "
+                "during shutdown). The registry may have partial or no data."
+            )
+        case InitializationPhase.NOT_STARTED | InitializationPhase.PARTIAL:
+            detail = (
+                "Enterprise session discovery has not yet started. Some sessions "
+                "or systems may not yet be visible."
+            )
+        case InitializationPhase.LOADING:
+            detail = (
+                "Enterprise session discovery is actively running. Some sessions "
+                "or systems may not yet be visible."
+            )
+        case InitializationPhase.COMPLETED:
+            detail = "Some enterprise systems had connection issues during discovery."
+        case _ as unexpected:
+            assert_never(unexpected)
     block: dict[str, object] = {"phase": phase.value, "detail": detail}
     if init_errors:
         block["errors"] = init_errors

@@ -78,7 +78,7 @@ This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH with n
 
 > **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
 
-**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy` — it bridges a stdio-only client to HTTP MCP servers such as the hosted docs server:
+**For stdio-only AI tools** (e.g. Claude Desktop), also install [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) — it bridges a stdio-only client to HTTP MCP servers such as the hosted docs server:
 
 ```bash
 uv tool install --python-preference managed mcp-proxy
@@ -222,7 +222,7 @@ This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH. Use `
 
 > **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
 
-**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy` — it bridges a stdio-only client to HTTP MCP servers such as the hosted docs server:
+**For stdio-only AI tools** (e.g. Claude Desktop), also install [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) — it bridges a stdio-only client to HTTP MCP servers such as the hosted docs server:
 
 ```bash
 uv tool install --python-preference managed mcp-proxy

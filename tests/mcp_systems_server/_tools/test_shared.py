@@ -101,6 +101,17 @@ def test_format_partial_result_completed_with_errors():
     assert "connection issues" in info["detail"].lower()
 
 
+def test_format_partial_result_unknown_phase_hits_assert_never():
+    """An out-of-band phase hits the ``assert_never`` safety net.
+
+    ``InitializationPhase`` makes the ``case _`` branch statically
+    unreachable; passing a non-member value with the type checker silenced
+    proves the runtime ``assert_never`` branch is covered.
+    """
+    with pytest.raises(AssertionError):
+        shared.format_partial_result("bogus", {})  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # Lifespan-context accessors
 # ---------------------------------------------------------------------------

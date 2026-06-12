@@ -7,6 +7,17 @@ and diagnostics, and the schema-drift contract. Per-command reference
 (flags, output fields, examples) lives in [`docs/CLI.md`](../CLI.md), not
 here.
 
+## Table of Contents
+
+- [Why a wrapper layer exists](#why-a-wrapper-layer-exists)
+- [Three planes](#three-planes)
+- [Four authentication concepts, not one](#four-authentication-concepts-not-one)
+- [Type scoping: never a subgroup](#type-scoping-never-a-subgroup)
+- [Wrapper categories](#wrapper-categories)
+- [Output shaping and diagnostics](#output-shaping-and-diagnostics)
+- [The drift contract](#the-drift-contract)
+- [Command catalog](#command-catalog)
+
 ## Why a wrapper layer exists
 
 `dh-mcp tool call <name> --arg key=value` can already invoke any MCP
@@ -88,7 +99,8 @@ destroys the cross-type `session list`.
 
 Every wrapper is one of four shapes. The `_cli-tool-wrapping` skill
 maps each to a code template; all four route through the shared flow in
-`cli/_commands/_wrapping.py`. `call_for_payload` runs the fetch half
+[`cli/_commands/_wrapping.py`](../../src/deephaven_mcp/cli/_commands/_wrapping.py).
+`call_for_payload` runs the fetch half
 (`acquire` → `call_tool` → `tool_payload` → `require_success`) and feeds
 one of two top-level helpers, both of which render via `echo_payload`:
 `call_and_echo` (emit the tool's whole success payload) or
@@ -171,7 +183,7 @@ Two mechanisms keep them honest.
 The binding is emitted in the `introspect` manifest (`wraps`) so
 `review-changes` and other tooling can read it without importing Python.
 
-**Automated guard.** `tests/cli/test_tool_wrapper_drift.py` builds every
+**Automated guard.** [`tests/cli/test_tool_wrapper_drift.py`](../../tests/cli/test_tool_wrapper_drift.py) builds every
 tool's JSON schema in-process (registering the `_tools` modules on a
 throwaway `FastMCP`), walks the live click tree for wrapper bindings,
 and asserts per wrapper:

@@ -1,9 +1,35 @@
 # `dh-mcp` CLI
 
 The `dh-mcp` command-line tool is a thin local client for the
-multiplexed Deephaven MCP systems server. It manages a per-user
-background daemon, lists registered MCP tools, and dispatches tool
-calls — without requiring you to run the server yourself.
+multiplexed [Deephaven](https://deephaven.io) MCP systems server. It
+manages a per-user background daemon, lists registered MCP tools, and
+dispatches tool calls — without requiring you to run the server yourself.
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Shell completion](#shell-completion)
+- [Quick start](#quick-start)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Runtime directory](#runtime-directory)
+- [Command tree](#command-tree)
+  - [`dh-mcp daemon`](#dh-mcp-daemon)
+  - [`dh-mcp tool`](#dh-mcp-tool)
+  - [`dh-mcp session`](#dh-mcp-session)
+  - [`dh-mcp system`](#dh-mcp-system)
+  - [`dh-mcp table`](#dh-mcp-table)
+  - [`dh-mcp script`](#dh-mcp-script)
+  - [`dh-mcp catalog`](#dh-mcp-catalog)
+  - [`dh-mcp pq`](#dh-mcp-pq)
+  - [`dh-mcp config`](#dh-mcp-config)
+  - [`dh-mcp introspect`](#dh-mcp-introspect)
+- [Top-level flags](#top-level-flags)
+- [Output modes](#output-modes)
+- [Exit codes](#exit-codes)
+- [Structured errors (for AI agents)](#structured-errors-for-ai-agents)
+- [Troubleshooting](#troubleshooting)
+- [Security model](#security-model)
 
 ## Installation
 
@@ -442,7 +468,7 @@ but honors the root `-o/--output` flag and `DH_MCP_OUTPUT` (`json`,
 |---------------------|----------------------|--------------------------------------------------------------------------------------|
 | `--config-dir PATH` |                      | Override the configuration directory. No per-subdir env var; use `DH_MCP_DATA_DIR` to move both `config/` and `runtime/` together. |
 | `--runtime-dir PATH`|                      | Override the runtime directory (where `daemon.json` lives). No per-subdir env var.   |
-|                     | `DH_MCP_DATA_DIR`    | Override the **user-data root**; ``config/`` and ``runtime/`` resolve under it. |
+|                     | `DH_MCP_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
 | `-o`, `--output`    | `DH_MCP_OUTPUT`      | One of `human`, `json`, `yaml`. Overrides `cli.json`'s `output.format`.              |
 | `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds`.      |
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
