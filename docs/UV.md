@@ -4,21 +4,19 @@
 
 ## Table of Contents
 
-- [Using `uv`](#using-uv)
-  - [Table of Contents](#table-of-contents)
-  - [Why use `uv`?](#why-use-uv)
-  - [Installing `uv`](#installing-uv)
-  - [Virtual environments](#virtual-environments)
-  - [Installing dependencies](#installing-dependencies)
-  - [Synchronizing dependencies](#synchronizing-dependencies)
-  - [Running commands](#running-commands)
-  - [Code quality and testing](#code-quality-and-testing)
-  - [Lock files](#lock-files)
-  - [Upgrading dependencies](#upgrading-dependencies)
-  - [`uv tool install`](#uv-tool-install)
-  - [`.env` files](#env-files)
-  - [Common pitfalls](#common-pitfalls)
-  - [Further reading](#further-reading)
+- [Why use `uv`?](#why-use-uv)
+- [Installing `uv`](#installing-uv)
+- [Virtual environments](#virtual-environments)
+- [Installing dependencies](#installing-dependencies)
+- [Synchronizing dependencies](#synchronizing-dependencies)
+- [Running commands](#running-commands)
+- [Code quality and testing](#code-quality-and-testing)
+- [Lock files](#lock-files)
+- [Upgrading dependencies](#upgrading-dependencies)
+- [`uv tool install`](#uv-tool-install)
+- [`.env` files](#env-files)
+- [Common pitfalls](#common-pitfalls)
+- [Further reading](#further-reading)
 
 ## Why use `uv`?
 
