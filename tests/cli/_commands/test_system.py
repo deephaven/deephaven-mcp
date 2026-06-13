@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import json
+import webbrowser
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent
 
+from deephaven_mcp.cli import _browser as browser_mod
 from deephaven_mcp.cli import _main
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
+from deephaven_mcp.config.schema import CliConfig, ServerConfig
+from deephaven_mcp.config.schema._enterprise import EnterpriseConfig, EnterpriseSettings
+from deephaven_mcp.config.tree import ConfigTree
+from deephaven_mcp.sessions._enterprise import EnterpriseSystemConfig
 
 from .._helpers import fake_load_runtime, make_entry, make_runtime
 
@@ -32,10 +38,10 @@ _STATUS_PAYLOAD = {
 }
 
 
-def _invoke(args: list[str], runtime: Runtime):
+def _invoke(args: list[str], runtime: Runtime, *, standalone_mode: bool = True):
     runner = CliRunner()
     with patch.object(_main, "load_runtime", fake_load_runtime(runtime)):
-        return runner.invoke(cli, args)
+        return runner.invoke(cli, args, standalone_mode=standalone_mode)
 
 
 def _result(payload: dict) -> CallToolResult:
@@ -146,3 +152,129 @@ def test_status_tool_failure_exits_3(tmp_path: Path) -> None:
         result = _invoke(["system", "status"], rt)
     assert result.exit_code == 3
     assert "no enterprise" in result.output
+
+
+# ---------------------------------------------------------------------------
+# url / open
+# ---------------------------------------------------------------------------
+
+_CONNECTION_URL = "https://dhe.example.com:8123/iris/connection.json"
+_WEB_CONSOLE_URL = "https://dhe.example.com:8123/iriside"
+
+
+def _enterprise_system(
+    *, name: str = "prod", connection_json_url: str = _CONNECTION_URL
+) -> EnterpriseSystemConfig:
+    return EnterpriseSystemConfig.model_validate(
+        {
+            "name": name,
+            "system_name": name,
+            "connection_json_url": connection_json_url,
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": "alice",
+                    "password": "shh",
+                }
+            },
+        }
+    )
+
+
+def _enterprise_runtime(
+    tmp_path: Path,
+    systems: dict[str, EnterpriseSystemConfig] | None,
+) -> Runtime:
+    """Build a Runtime whose config carries the given enterprise systems."""
+    enterprise = (
+        None
+        if systems is None
+        else EnterpriseConfig(settings=EnterpriseSettings(), systems=systems)
+    )
+    config = ConfigTree(
+        config_dir=tmp_path / "cfg",
+        cli=CliConfig(),
+        server=ServerConfig(),
+        enterprise=enterprise,
+    )
+    return make_runtime(tmp_path, config=config)
+
+
+def test_url_prints_web_console(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    result = _invoke(["system", "url", "prod"], rt)
+    assert result.exit_code == 0
+    assert result.output.strip() == _WEB_CONSOLE_URL
+
+
+def test_url_unknown_system_exits_2(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    result = _invoke(["system", "url", "bogus"], rt, standalone_mode=False)
+    assert result.exception.code.value == "system_not_found"
+    assert result.exception.exit_code == 2
+    assert "system list" in str(result.exception)
+
+
+def test_url_community_name_points_to_session_url(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    result = _invoke(["system", "url", "community"], rt, standalone_mode=False)
+    assert result.exception.code.value == "system_not_found"
+    assert "session url" in str(result.exception)
+
+
+def test_url_no_enterprise_config_exits_2(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, None)
+    result = _invoke(["system", "url", "prod"], rt, standalone_mode=False)
+    assert result.exception.code.value == "system_not_found"
+
+
+def test_url_malformed_connection_url_exits_2(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(
+        tmp_path,
+        {"prod": _enterprise_system(connection_json_url="not-a-url")},
+    )
+    result = _invoke(["system", "url", "prod"], rt, standalone_mode=False)
+    assert result.exception.code.value == "config_invalid"
+    assert result.exception.exit_code == 2
+
+
+def test_open_launches_browser(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    with patch.object(browser_mod.webbrowser, "open", return_value=True) as wb:
+        result = _invoke(["-o", "json", "system", "open", "prod"], rt)
+    assert result.exit_code == 0
+    wb.assert_called_once_with(_WEB_CONSOLE_URL)
+    assert json.loads(result.output) == {"opened": _WEB_CONSOLE_URL, "launched": True}
+
+
+def test_open_print_only_does_not_launch(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    with patch.object(browser_mod.webbrowser, "open", return_value=True) as wb:
+        result = _invoke(["-o", "json", "system", "open", "prod", "--print"], rt)
+    assert result.exit_code == 0
+    wb.assert_not_called()
+    assert json.loads(result.output) == {"opened": _WEB_CONSOLE_URL, "launched": False}
+
+
+def test_open_no_browser_found_exits_2(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    with patch.object(browser_mod.webbrowser, "open", return_value=False):
+        result = _invoke(["system", "open", "prod"], rt, standalone_mode=False)
+    assert result.exception.code.value == "browser_launch_failed"
+    assert "manually" in str(result.exception)
+
+
+def test_open_browser_error_exits_2(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    with patch.object(
+        browser_mod.webbrowser, "open", side_effect=webbrowser.Error("nope")
+    ):
+        result = _invoke(["system", "open", "prod"], rt, standalone_mode=False)
+    assert result.exception.code.value == "browser_launch_failed"
+    assert "Could not launch" in str(result.exception)
+
+
+def test_open_unknown_system_exits_2(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    result = _invoke(["system", "open", "bogus"], rt, standalone_mode=False)
+    assert result.exception.code.value == "system_not_found"

@@ -158,6 +158,10 @@ class ErrorCode(StrEnum):
             "in the error message so it can be opened manually."
         ),
     )
+    SYSTEM_NOT_FOUND = (
+        "system_not_found",
+        "The named Enterprise system is not configured (run 'dh-mcp system list').",
+    )
     CONFIG_INVALID = (
         "config_invalid",
         "The configuration tree failed validation.",

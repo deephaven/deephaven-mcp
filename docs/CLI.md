@@ -347,10 +347,22 @@ A *system* is the source dimension of every fully qualified session id
 (`type:system:name`): the single Community umbrella (named `community`)
 plus every configured Enterprise (Core+) system.
 
-| Verb       | Purpose                                                                                       |
-|------------|-----------------------------------------------------------------------------------------------|
-| `list`     | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
-| `status`   | Reports Enterprise (Core+) system health (`liveness_status`, `is_alive`, redacted `config`). Wraps `enterprise_systems_status`. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. Exits `3` if the tool reports failure. |
+| Verb         | Purpose                                                                                       |
+|--------------|-----------------------------------------------------------------------------------------------|
+| `list`       | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
+| `status`     | Reports Enterprise (Core+) system health (`liveness_status`, `is_alive`, redacted `config`). Wraps `enterprise_systems_status`. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. Exits `3` if the tool reports failure. |
+| `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
+| `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
+
+`url` and `open` are Enterprise-only and computed locally from
+configuration — they do **not** contact the daemon. The URL is the
+system's `connection_json_url` origin with the `/iriside` path (e.g.
+`https://dhe.example.com:8123/iriside`). Unlike `session url`, the URL is
+**unauthenticated**: you log in interactively in the browser (Deephaven
+Enterprise has no token-in-URL). They exit `2` (`system_not_found`) when
+no Enterprise system has that name — including `community`, which has no
+web console — and `open` exits `2` (`browser_launch_failed`, with the URL
+in the message) when no browser can be launched.
 
 Examples:
 
@@ -358,6 +370,8 @@ Examples:
 dh-mcp system list
 dh-mcp -o json system list | jq '.[].name'
 dh-mcp system status --system prod --connect
+dh-mcp system url prod
+dh-mcp system open prod --print
 ```
 
 ### `dh-mcp table`
@@ -581,7 +595,8 @@ registry programmatically via `dh-mcp introspect` (look under
 | `missing_argument`            | A required positional argument or option was not provided.         |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
-| `browser_launch_failed`       | `dh-mcp session open` could not launch a browser; the URL is included in the error message to open manually. |
+| `browser_launch_failed`       | `dh-mcp session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
+| `system_not_found`            | `dh-mcp system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
 | `config_invalid`              | The configuration tree failed validation.                          |
 | `internal_error`              | An unexpected internal failure not attributable to a specific subsystem. |
 

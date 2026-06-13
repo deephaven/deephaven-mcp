@@ -1,28 +1,38 @@
 """``dh-mcp system`` noun group: inspect the configured Deephaven systems.
 
-Verbs: ``list``, ``status``.
+Verbs: ``list``, ``status``, ``url``, ``open``.
 """
 
 from __future__ import annotations
 
 __all__ = ["system"]
 
+from urllib.parse import urlsplit, urlunsplit
+
 import click
 
+from deephaven_mcp._taxonomy import SystemType
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._browser import launch_browser
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
+    echo_payload,
     wrapper_error_codes,
 )
-from deephaven_mcp.cli._errors import ExitCode
+from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
+    HelpEntry,
     HelpfulGroup,
     OutputField,
     OutputSpec,
     build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
+from deephaven_mcp.sessions._enterprise import EnterpriseSystemConfig
+
+_WEB_CONSOLE_PATH = "/iriside"
+"""Path of the Deephaven Enterprise web console under a system's origin."""
 
 
 @click.group(cls=HelpfulGroup)
@@ -31,10 +41,12 @@ def system() -> None:
 
     A 'system' is the source dimension of every fully qualified session
     id ('type:system:name'): the single Community umbrella (named
-    'community') plus every configured Enterprise (Core+) system. These
-    commands connect to the daemon (auto-starting it unless
-    --no-auto-start is set) and speak MCP: 'list' enumerates the
-    configured systems; 'status' reports Enterprise system health.
+    'community') plus every configured Enterprise (Core+) system.
+    'list' and 'status' speak MCP to the daemon (auto-starting it
+    unless --no-auto-start is set): 'list' enumerates the configured
+    systems; 'status' reports Enterprise system health. 'url' and
+    'open' are computed locally from configuration and never contact
+    the daemon: they surface an Enterprise system's web console.
     """
 
 
@@ -168,3 +180,177 @@ async def system_status(
         retry_command="dh-mcp system status",
         arguments=arguments,
     )
+
+
+# ---------------------------------------------------------------------------
+# url / open helpers
+# ---------------------------------------------------------------------------
+
+
+def _enterprise_system(runtime: Runtime, name: str) -> EnterpriseSystemConfig:
+    """Look up a configured Enterprise system by name.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        name (str): The system name to resolve.
+
+    Returns:
+        EnterpriseSystemConfig: The matching system declaration.
+
+    Raises:
+        CliError: When no Enterprise system named ``name`` is configured
+            (exit 2, ``system_not_found``). The Community umbrella
+            ('community') is reported with a pointer to ``session url``.
+    """
+    enterprise = runtime.config.enterprise
+    systems = enterprise.systems if enterprise is not None else {}
+    system_config = systems.get(name)
+    if system_config is not None:
+        return system_config
+    if name == SystemType.COMMUNITY.value:
+        raise CliError(
+            "'community' is the local Community umbrella, not an Enterprise "
+            "system, and has no web console. Use 'dh-mcp session url ID' for a "
+            "Community session.",
+            code=ErrorCode.SYSTEM_NOT_FOUND,
+        )
+    raise CliError(
+        f"No Enterprise system named '{name}' is configured. "
+        f"Run 'dh-mcp system list' to see the configured systems.",
+        code=ErrorCode.SYSTEM_NOT_FOUND,
+    )
+
+
+def _web_console_url(connection_json_url: str) -> str:
+    """Derive an Enterprise web console URL from a ``connection.json`` URL.
+
+    Args:
+        connection_json_url (str): The system's ``connection_json_url``
+            (e.g. ``https://dhe.example.com:8123/iris/connection.json``).
+
+    Returns:
+        str: The web console URL — the origin of ``connection_json_url``
+            with the ``/iriside`` path (e.g.
+            ``https://dhe.example.com:8123/iriside``).
+
+    Raises:
+        CliError: When ``connection_json_url`` has no scheme or host (exit
+            2, ``config_invalid``).
+    """
+    parts = urlsplit(connection_json_url)
+    if not parts.scheme or not parts.netloc:
+        raise CliError(
+            f"The system's connection_json_url is not an absolute URL: "
+            f"{connection_json_url!r}.",
+            code=ErrorCode.CONFIG_INVALID,
+        )
+    return urlunsplit((parts.scheme, parts.netloc, _WEB_CONSOLE_PATH, "", ""))
+
+
+# ---------------------------------------------------------------------------
+# url
+# ---------------------------------------------------------------------------
+
+_OUTPUT_URL = OutputSpec("text", note="The Enterprise web console URL, one line.")
+
+
+@system.command(
+    "url",
+    output_spec=_OUTPUT_URL,
+    help=build_help(
+        summary="Print an Enterprise system's web console URL.",
+        description=(
+            "Prints the Deephaven Enterprise (Core+) web console URL for a "
+            "configured system, derived from its connection_json_url (the "
+            "origin plus the /iriside path). Always prints the bare URL "
+            "regardless of -o (so piping works); -o only affects the "
+            "structured error on failure. The URL is UNAUTHENTICATED: you log "
+            "in interactively in the browser (unlike 'session url', which "
+            "embeds a Community auth token). Computed from configuration only "
+            "— this does not contact the daemon."
+        ),
+        arguments=(
+            HelpEntry("NAME", "Enterprise system name. Run 'dh-mcp system list'."),
+        ),
+        output=_OUTPUT_URL,
+        examples=(
+            "$ dh-mcp system url prod",
+            '$ open "$(dh-mcp system url prod)"',
+        ),
+        see_also=("dh-mcp system open NAME", "dh-mcp system list"),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(ErrorCode.SYSTEM_NOT_FOUND, ErrorCode.CONFIG_INVALID),
+    ),
+)
+@click.argument("name")
+@click.pass_obj
+@run_async
+async def system_url(runtime: Runtime, name: str) -> None:
+    """Print an Enterprise system's web console URL."""
+    system_config = _enterprise_system(runtime, name)
+    url = _web_console_url(system_config.connection_json_url)
+    click.echo(url)
+
+
+# ---------------------------------------------------------------------------
+# open
+# ---------------------------------------------------------------------------
+
+_OUTPUT_OPEN = OutputSpec(
+    "object",
+    (
+        OutputField("opened", "string", "The URL that was launched (or would be)."),
+        OutputField("launched", "boolean", "True if a browser was launched."),
+    ),
+)
+
+
+@system.command(
+    "open",
+    output_spec=_OUTPUT_OPEN,
+    help=build_help(
+        summary="Open an Enterprise system's web console in the browser.",
+        description=(
+            "Derives the Deephaven Enterprise (Core+) web console URL for a "
+            "configured system (its connection_json_url origin plus /iriside) "
+            "and launches your default browser. Pass --print to print the URL "
+            "instead of launching (use this in headless / CI environments). "
+            "The web console is UNAUTHENTICATED: you log in interactively in "
+            "the browser. Computed from configuration only — this does not "
+            "contact the daemon. If the browser cannot be launched, exits 2 "
+            "(browser_launch_failed) with the URL in the message so you can "
+            "open it manually."
+        ),
+        arguments=(
+            HelpEntry("NAME", "Enterprise system name. Run 'dh-mcp system list'."),
+        ),
+        output=_OUTPUT_OPEN,
+        examples=(
+            "$ dh-mcp system open prod",
+            "$ dh-mcp system open prod --print",
+        ),
+        see_also=("dh-mcp system url NAME", "dh-mcp system list"),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(
+            ErrorCode.SYSTEM_NOT_FOUND,
+            ErrorCode.CONFIG_INVALID,
+            ErrorCode.BROWSER_LAUNCH_FAILED,
+        ),
+    ),
+)
+@click.argument("name")
+@click.option(
+    "--print",
+    "print_only",
+    is_flag=True,
+    default=False,
+    help="Print the URL instead of launching a browser (headless-safe).",
+)
+@click.pass_obj
+@run_async
+async def system_open(runtime: Runtime, name: str, print_only: bool) -> None:
+    """Open an Enterprise system's web console in the default web browser."""
+    system_config = _enterprise_system(runtime, name)
+    url = _web_console_url(system_config.connection_json_url)
+    launched = False if print_only else launch_browser(url)
+    echo_payload(runtime, {"opened": url, "launched": launched})
