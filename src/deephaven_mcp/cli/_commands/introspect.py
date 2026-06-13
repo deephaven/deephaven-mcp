@@ -319,11 +319,12 @@ _OUTPUT_INTROSPECT = OutputSpec(
         ),
     ),
     note=(
-        "Always JSON unless -o overrides; sorted for stable diffs. With a "
-        "PATH argument, emits just that command's node — byte-identical to "
-        "the object found at .commands.<path...> in the unscoped manifest, "
-        "so the top-level manifest keys (version, error_codes, etc.) are "
-        "absent."
+        "Always JSON unless -o overrides; sorted for stable diffs. The "
+        "fields above are what you get without a PATH (the whole CLI). "
+        "Add a PATH (e.g. 'daemon start') and you instead get only that "
+        "one command — its name, help, short_help, params, subcommands, "
+        "output, and wraps — so the project-wide fields above (version, "
+        "error_codes, etc.) are not included."
     ),
 )
 

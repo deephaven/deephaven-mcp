@@ -479,6 +479,21 @@ The scoped node is byte-identical to the object found at
 `dh-mcp introspect | jq '.commands.daemon.subcommands.start'`. A path
 that does not resolve exits `2` with `command_not_found`.
 
+The two ways of running this command return different information, so do
+not expect the same fields in both:
+
+- **Without a command name** (`dh-mcp introspect`), you get the whole
+  CLI: the package `version`, the full list of `commands`, the
+  project-wide `error_codes`, and the other top-level fields.
+- **With a command name** (`dh-mcp introspect daemon start`), you get
+  only that one command's details: its `name`, help text, options and
+  arguments (`params`), any `subcommands`, its `output` shape, and which
+  MCP tool it `wraps` — and nothing else.
+
+So the project-wide fields like `version` and `error_codes` appear only
+when you run it without a command name. They are not included when you
+ask about a single command.
+
 ## Top-level flags
 
 | Flag                | Envvar               | Purpose                                                                              |
