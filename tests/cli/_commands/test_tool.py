@@ -11,9 +11,8 @@ from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent, Tool
 
 from deephaven_mcp.cli import _main
-from deephaven_mcp.cli._commands import shared as shared_mod
+from deephaven_mcp.cli._commands import _acquire as acquire_mod
 from deephaven_mcp.cli._commands import tool as tool_mod
-from deephaven_mcp.cli._commands.tool import _parse_arg_pair
 from deephaven_mcp.cli._daemon import (
     DaemonClientError,
     DaemonStartupTimeoutError,
@@ -32,31 +31,8 @@ def _invoke(args: list[str], runtime: Runtime):
         return runner.invoke(cli, args)
 
 
-# ---------------------------------------------------------------------------
-# parse_arg_pair
-# ---------------------------------------------------------------------------
-
-
-def test_parse_arg_pair_string_value() -> None:
-    assert _parse_arg_pair("k=hello") == ("k", "hello")
-
-
-def test_parse_arg_pair_json_int() -> None:
-    assert _parse_arg_pair("k=42") == ("k", 42)
-
-
-def test_parse_arg_pair_json_object() -> None:
-    assert _parse_arg_pair('k={"x":1}') == ("k", {"x": 1})
-
-
-def test_parse_arg_pair_missing_eq_raises() -> None:
-    with pytest.raises(ValueError, match="key=value"):
-        _parse_arg_pair("nokey")
-
-
-def test_parse_arg_pair_empty_key_raises() -> None:
-    with pytest.raises(ValueError, match="empty key"):
-        _parse_arg_pair("=oops")
+# ``--arg`` key=value parsing is provided by ``_wrapping.parse_key_value``
+# and tested in ``tests/cli/_commands/test__wrapping.py``.
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +51,7 @@ def test_tool_list_hides_private_by_default(tmp_path: Path) -> None:
     ]
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -83,6 +59,24 @@ def test_tool_list_hides_private_by_default(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "public" in result.output
     assert "_private" not in result.output
+
+
+def test_tool_list_empty_shows_registered_message(tmp_path: Path) -> None:
+    """An empty catalog keeps the tool-list-specific wording via empty_message."""
+    rt = make_runtime(tmp_path)
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.__aexit__.return_value = None
+    fake.list_tools.return_value = []
+    with (
+        patch.object(
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+        ),
+        patch.object(tool_mod, "McpClient", return_value=fake),
+    ):
+        result = _invoke(["tool", "list"], rt)
+    assert result.exit_code == 0
+    assert result.output.strip() == "(no tools registered)"
 
 
 def test_tool_list_all_includes_private(tmp_path: Path) -> None:
@@ -95,7 +89,7 @@ def test_tool_list_all_includes_private(tmp_path: Path) -> None:
     ]
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -107,7 +101,7 @@ def test_tool_list_all_includes_private(tmp_path: Path) -> None:
 def test_tool_list_daemon_failure(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonClientError("nope")),
     ):
@@ -118,7 +112,7 @@ def test_tool_list_daemon_failure(tmp_path: Path) -> None:
 def test_tool_list_startup_timeout(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonStartupTimeoutError("slow")),
     ):
@@ -132,7 +126,7 @@ def test_tool_list_mcp_failure(tmp_path: Path) -> None:
     fake.__aenter__.side_effect = McpClientError("boom")
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -155,7 +149,7 @@ def test_tool_show_returns_metadata_in_json(tmp_path: Path) -> None:
     ]
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -179,7 +173,7 @@ def test_tool_show_human_output(tmp_path: Path) -> None:
     ]
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -199,7 +193,7 @@ def test_tool_show_unknown_name(tmp_path: Path) -> None:
     ]
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -220,7 +214,7 @@ def test_tool_show_unknown_internal_name_suggests_internal(tmp_path: Path) -> No
     ]
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -240,7 +234,7 @@ def test_tool_show_unknown_name_no_tools_omits_suggestion(tmp_path: Path) -> Non
     fake.list_tools.return_value = []
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -252,7 +246,7 @@ def test_tool_show_unknown_name_no_tools_omits_suggestion(tmp_path: Path) -> Non
 def test_tool_show_daemon_failure(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonClientError("nope")),
     ):
@@ -263,7 +257,7 @@ def test_tool_show_daemon_failure(tmp_path: Path) -> None:
 def test_tool_show_startup_timeout(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonStartupTimeoutError("slow")),
     ):
@@ -277,7 +271,7 @@ def test_tool_show_mcp_failure(tmp_path: Path) -> None:
     fake.__aenter__.side_effect = McpClientError("boom")
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -300,7 +294,7 @@ def test_tool_call_success(tmp_path: Path) -> None:
     )
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -322,7 +316,7 @@ def test_tool_call_returns_3_on_tool_error(tmp_path: Path) -> None:
     )
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -339,7 +333,7 @@ def test_tool_call_bad_arg(tmp_path: Path) -> None:
 def test_tool_call_daemon_failure(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonClientError("nope")),
     ):
@@ -350,7 +344,7 @@ def test_tool_call_daemon_failure(tmp_path: Path) -> None:
 def test_tool_call_startup_timeout(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonStartupTimeoutError("slow")),
     ):
@@ -364,7 +358,7 @@ def test_tool_call_mcp_failure(tmp_path: Path) -> None:
     fake.__aenter__.side_effect = McpClientError("boom")
     with (
         patch.object(
-            shared_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
         patch.object(tool_mod, "McpClient", return_value=fake),
     ):
@@ -388,7 +382,7 @@ def test_tool_list_registry_corrupt(tmp_path: Path) -> None:
     """
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=RegistryCorruptError("bad json")),
     ):

@@ -949,7 +949,7 @@ async def test_sessions_list_success():
     assert "available" not in session2  # Should not check availability
 
     # COMPLETED with no errors should not include initialization info
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -1072,7 +1072,7 @@ async def test_sessions_list_with_unknown_type():
     assert result["sessions"][0]["session_id"] == "session"
     assert "error" in result["sessions"][0]
     # COMPLETED with no errors should not include initialization info
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -1111,7 +1111,7 @@ async def test_sessions_list_with_processing_error():
     assert "error" in result["sessions"][0]
     assert result["sessions"][0]["session_id"] == "session"
     # COMPLETED with no errors should not include initialization info
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -1484,8 +1484,8 @@ async def test_sessions_list_discovery_in_progress():
     result = await sessions_list(context)
 
     assert result["success"] is True
-    assert "initialization" in result
-    assert "actively running" in result["initialization"]["status"]
+    assert "partial_result" in result
+    assert "actively running" in result["partial_result"]["detail"]
 
 
 @pytest.mark.asyncio
@@ -1511,10 +1511,10 @@ async def test_sessions_list_discovery_in_progress_with_errors():
     result = await sessions_list(context)
 
     assert result["success"] is True
-    assert "initialization" in result
-    assert "actively running" in result["initialization"]["status"]
-    assert "errors" in result["initialization"]
-    assert "factory1" in result["initialization"]["errors"]
+    assert "partial_result" in result
+    assert "actively running" in result["partial_result"]["detail"]
+    assert "errors" in result["partial_result"]
+    assert "factory1" in result["partial_result"]["errors"]
 
 
 @pytest.mark.asyncio
@@ -1540,10 +1540,10 @@ async def test_sessions_list_completed_with_errors():
     result = await sessions_list(context)
 
     assert result["success"] is True
-    assert "initialization" in result
-    assert "errors" in result["initialization"]
-    assert "factory1" in result["initialization"]["errors"]
-    assert "connection issues" in result["initialization"]["status"]
+    assert "partial_result" in result
+    assert "errors" in result["partial_result"]
+    assert "factory1" in result["partial_result"]["errors"]
+    assert "connection issues" in result["partial_result"]["detail"]
 
 
 @pytest.mark.asyncio
@@ -1567,7 +1567,7 @@ async def test_sessions_list_completed_no_errors():
     result = await sessions_list(context)
 
     assert result["success"] is True
-    assert "initialization" not in result
+    assert "partial_result" not in result
 
 
 @pytest.mark.asyncio
@@ -1601,9 +1601,9 @@ async def test_sessions_list_shows_errors_even_with_sessions():
 
     assert result["success"] is True
     # init_errors are set once during discovery and not cleared, so always shown
-    assert "initialization" in result
-    assert "errors" in result["initialization"]
-    assert "factory1" in result["initialization"]["errors"]
+    assert "partial_result" in result
+    assert "errors" in result["partial_result"]
+    assert "factory1" in result["partial_result"]["errors"]
 
 
 def test_register_tools_registers_session_tools():

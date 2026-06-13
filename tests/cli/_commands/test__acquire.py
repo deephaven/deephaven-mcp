@@ -1,4 +1,4 @@
-"""Tests for ``deephaven_mcp.cli._commands.shared``."""
+"""Tests for ``deephaven_mcp.cli._commands._acquire``."""
 
 from __future__ import annotations
 
@@ -7,8 +7,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from deephaven_mcp.cli._commands import shared as shared_mod
-from deephaven_mcp.cli._commands.shared import acquire_daemon, registry_corrupt_message
+from deephaven_mcp.cli._commands import _acquire as acquire_mod
+from deephaven_mcp.cli._commands._acquire import (
+    acquire_daemon,
+    registry_corrupt_message,
+)
 from deephaven_mcp.cli._daemon import DaemonClientError, DaemonStartupTimeoutError
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.daemon_registry import RegistryCorruptError
@@ -43,7 +46,9 @@ def test_registry_corrupt_message_contents() -> None:
 async def test_acquire_daemon_returns_entry(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     entry = make_entry()
-    with patch.object(shared_mod, "get_or_start_daemon", AsyncMock(return_value=entry)):
+    with patch.object(
+        acquire_mod, "get_or_start_daemon", AsyncMock(return_value=entry)
+    ):
         result = await acquire_daemon(
             rt,
             auto_start=True,
@@ -57,7 +62,7 @@ async def test_acquire_daemon_returns_entry(tmp_path: Path) -> None:
 async def test_acquire_daemon_maps_startup_timeout(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonStartupTimeoutError("slow")),
     ):
@@ -75,7 +80,7 @@ async def test_acquire_daemon_maps_startup_timeout(tmp_path: Path) -> None:
 async def test_acquire_daemon_client_error_uses_provided_code(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=DaemonClientError("nope")),
     ):
@@ -99,7 +104,7 @@ async def test_acquire_daemon_registry_corrupt_delegates(tmp_path: Path) -> None
         return CliError("recovery", code=ErrorCode.DAEMON_REGISTRY_CORRUPT)
 
     with patch.object(
-        shared_mod,
+        acquire_mod,
         "get_or_start_daemon",
         AsyncMock(side_effect=RegistryCorruptError("malformed")),
     ):

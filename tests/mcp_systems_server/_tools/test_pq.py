@@ -5027,3 +5027,24 @@ def test_pq_id_docstring_format_never_uses_legacy_three_segment_prefix():
         "'enterprise:<system>:<serial>' shape; use '<system_name>:<serial>'. "
         "Offending lines:\n" + "\n".join(offenders)
     )
+
+
+@pytest.mark.asyncio
+async def test_pq_delete_no_enterprise_returns_clean_error():
+    """On a deployment with no Enterprise system, pq_delete surfaces a clean
+    structured error rather than an uncaught/internal error.
+
+    Tools register unconditionally, so the ``max_concurrent`` default
+    resolution (``get_enterprise_settings``) can run with no Enterprise
+    configured; it raises ``EnterpriseNotConfiguredError``, which the tool's
+    handler converts to ``success=False``.
+    """
+    multi_config = MagicMock()
+    multi_config.enterprise = None
+    context = MockContext({"multi_config": multi_config, "registry": MagicMock()})
+
+    result = await pq_delete(context, pq_id=["prod:12345"])
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Enterprise" in result["error"]

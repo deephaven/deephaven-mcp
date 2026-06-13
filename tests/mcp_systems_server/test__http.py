@@ -6,7 +6,8 @@ Covers the streamable-HTTP transport machinery split out from
 - ``_is_loopback_host``: classification of literal IPs, hostname
   resolution, and unresolvable inputs.
 - ``_resolve_psk_or_exit``: success, missing PSK, error remediations.
-- ``_BindSpec`` / ``_HttpRun``: discriminated-union invariants.
+- ``_BindSpec``: discriminated-union invariant.
+- ``_HttpRun`` / ``_DaemonPublish``: plan shape and optional daemon publish.
 - ``_plan_default`` / ``_plan_daemon``: policy resolution
   into runnable plans.
 - ``_publish_daemon_registry`` / ``_unpublish_daemon_registry`` /
@@ -40,7 +41,6 @@ from deephaven_mcp.daemon_registry import (
     LockedRegistry,
 )
 from deephaven_mcp.mcp_systems_server import _http as http_module
-from deephaven_mcp.mcp_systems_server import server as server_module
 from deephaven_mcp.mcp_systems_server._http import (
     _is_loopback_host,
     _resolve_psk_or_exit,
@@ -50,6 +50,7 @@ from deephaven_mcp.mcp_systems_server._idle import (
     IdleTimer,
     IdleWatcher,
 )
+from deephaven_mcp.mcp_systems_server._lifespan import ProcessResources
 
 
 def _multi_config_with(
@@ -281,34 +282,37 @@ def test_bind_spec_invariant_rejects_mixed_state(host, sock_factory, label):
 # ---------------------------------------------------------------------------
 
 
-def test_http_run_invariant_rejects_unpaired_daemon_handle():
-    """``daemon_handle`` set without ``daemon_process_name`` is a planner bug."""
+def test_http_run_daemon_bundles_handle_and_process_name():
+    """``_DaemonPublish`` carries the handle and process name as a pair."""
     bind = http_module._BindSpec(host="127.0.0.1", port=8000, sock=None)
-    with pytest.raises(ValueError, match="daemon_handle and daemon_process_name"):
-        http_module._HttpRun(
-            multi_config=MagicMock(),
-            server_name="srv",
-            psk="x" * 32,
-            bind=bind,
-            idle_seconds=0,
-            daemon_handle=MagicMock(),
-            daemon_process_name=None,
-        )
+    handle = MagicMock()
+    plan = http_module._HttpRun(
+        multi_config=MagicMock(),
+        server_name="srv",
+        psk="x" * 32,
+        bind=bind,
+        idle_seconds=0,
+        daemon=http_module._DaemonPublish(
+            handle=handle, process_name="dh-mcp-systems-server"
+        ),
+    )
+    assert plan.daemon is not None
+    assert plan.daemon.handle is handle
+    assert plan.daemon.process_name == "dh-mcp-systems-server"
 
 
-def test_http_run_invariant_rejects_unpaired_process_name():
-    """``daemon_process_name`` set without ``daemon_handle`` is a planner bug."""
+def test_http_run_default_has_no_daemon():
+    """A default-mode plan carries ``daemon=None`` (no registry publishing)."""
     bind = http_module._BindSpec(host="127.0.0.1", port=8000, sock=None)
-    with pytest.raises(ValueError, match="daemon_handle and daemon_process_name"):
-        http_module._HttpRun(
-            multi_config=MagicMock(),
-            server_name="srv",
-            psk="x" * 32,
-            bind=bind,
-            idle_seconds=0,
-            daemon_handle=None,
-            daemon_process_name="dh-mcp-systems-server",
-        )
+    plan = http_module._HttpRun(
+        multi_config=MagicMock(),
+        server_name="srv",
+        psk="x" * 32,
+        bind=bind,
+        idle_seconds=0,
+        daemon=None,
+    )
+    assert plan.daemon is None
 
 
 # ---------------------------------------------------------------------------
@@ -335,8 +339,7 @@ def test_plan_default_resolves_cli_overrides(tmp_path):
     assert plan.bind.sock is None
     assert plan.psk == "from-cli"
     assert plan.idle_seconds == 0
-    assert plan.daemon_handle is None
-    assert plan.daemon_process_name is None
+    assert plan.daemon is None
     assert plan.server_name == server_cfg.server_name
     assert plan.multi_config is multi
 
@@ -469,8 +472,8 @@ def test_plan_daemon_hardens_runtime_dir(tmp_path):
             multi, server_cfg, runtime_dir_override=tmp_path, cli_psk=None
         )
     try:
-        assert plan.daemon_handle is not None
-        assert captured["path"] == plan.daemon_handle.path
+        assert plan.daemon is not None
+        assert captured["path"] == plan.daemon.handle.path
     finally:
         plan.bind.close_unhanded()
 
@@ -486,7 +489,8 @@ def test_plan_daemon_threads_idle_seconds_from_daemon_cfg(tmp_path):
     )
     try:
         assert plan.idle_seconds == 1234
-        assert plan.daemon_process_name == server_cfg.daemon.process_name
+        assert plan.daemon is not None
+        assert plan.daemon.process_name == server_cfg.daemon.process_name
     finally:
         plan.bind.close_unhanded()
 
@@ -518,8 +522,7 @@ def _operator_plan(*, psk: str = "secret", port: int = 9999) -> "http_module._Ht
         psk=psk,
         bind=http_module._BindSpec(host="127.0.0.1", port=port, sock=None),
         idle_seconds=0,
-        daemon_handle=None,
-        daemon_process_name=None,
+        daemon=None,
     )
 
 
@@ -534,7 +537,6 @@ def test_run_http_appends_psk_middleware_and_starts_uvicorn():
     fake_uvicorn_server = MagicMock()
 
     with (
-        patch.object(server_module, "_build_fastmcp", return_value=fake_server),
         patch.object(
             http_module.uvicorn, "Config", return_value=fake_config
         ) as mock_config_cls,
@@ -543,7 +545,9 @@ def test_run_http_appends_psk_middleware_and_starts_uvicorn():
         ) as mock_server_cls,
     ):
         http_module._run_http(
-            _operator_plan(psk="secret", port=9999), server_module._build_fastmcp
+            _operator_plan(psk="secret", port=9999),
+            fake_server,
+            ProcessResources(),
         )
 
     from deephaven_mcp._health import HEALTH_PATH
@@ -574,11 +578,10 @@ def test_run_http_inserts_psk_middleware_at_index_zero():
     fake_server.streamable_http_app = MagicMock(return_value=fake_app)
 
     with (
-        patch.object(server_module, "_build_fastmcp", return_value=fake_server),
         patch.object(http_module.uvicorn, "Config", return_value=object()),
         patch.object(http_module.uvicorn, "Server", return_value=MagicMock()),
     ):
-        http_module._run_http(_operator_plan(), server_module._build_fastmcp)
+        http_module._run_http(_operator_plan(), fake_server, ProcessResources())
 
     from deephaven_mcp.auth.middleware import PSKMiddleware
 
@@ -587,7 +590,7 @@ def test_run_http_inserts_psk_middleware_at_index_zero():
     assert fake_app.user_middleware[1] is sentinel_pre
 
 
-def test_run_http_no_registry_when_daemon_handle_none():
+def test_run_http_no_registry_when_daemon_none():
     """Operator-style plan never calls registry write/delete."""
     fake_app = MagicMock()
     fake_app.user_middleware = []
@@ -595,13 +598,12 @@ def test_run_http_no_registry_when_daemon_handle_none():
     fake_fastmcp.streamable_http_app.return_value = fake_app
 
     with (
-        patch.object(server_module, "_build_fastmcp", return_value=fake_fastmcp),
         patch.object(http_module.uvicorn, "Config", return_value=MagicMock()),
         patch.object(http_module.uvicorn, "Server", return_value=MagicMock()),
         patch.object(LockedRegistry, "write") as mock_write,
         patch.object(LockedRegistry, "delete") as mock_delete,
     ):
-        http_module._run_http(_operator_plan(), server_module._build_fastmcp)
+        http_module._run_http(_operator_plan(), fake_fastmcp, ProcessResources())
 
     mock_write.assert_not_called()
     mock_delete.assert_not_called()
@@ -647,22 +649,30 @@ def test_run_http_writes_registry_then_deletes_on_exit(tmp_path):
     fake_uvicorn_server = MagicMock()
     captured_kwargs: dict[str, object] = {}
 
-    def capture_build(*_args, **kwargs):
+    # The idle watcher is threaded into ``_install_process_lifespan`` (which
+    # wraps the app lifespan). Wrap the real installer to capture its kwargs;
+    # ``_build_http_app`` runs real so its middleware insertion (asserted
+    # below) still happens.
+    real_install = http_module._install_process_lifespan
+
+    def capture_install(*args, **kwargs):
         captured_kwargs.update(kwargs)
-        return fake_fastmcp
+        return real_install(*args, **kwargs)
 
     with (
-        patch.object(server_module, "_build_fastmcp", side_effect=capture_build),
+        patch.object(
+            http_module, "_install_process_lifespan", side_effect=capture_install
+        ),
         patch.object(http_module.uvicorn, "Config", return_value=MagicMock()),
         patch.object(http_module.uvicorn, "Server", return_value=fake_uvicorn_server),
     ):
-        http_module._run_http(plan, server_module._build_fastmcp)
+        http_module._run_http(plan, fake_fastmcp, ProcessResources())
 
     fake_uvicorn_server.run.assert_called_once_with()
     # Two middlewares: PSK gate first, then activity tracker.
     assert fake_app.user_middleware[0].cls is PSKMiddleware
     assert fake_app.user_middleware[1].cls is ActivityMiddleware
-    # Lifespan was handed an unstarted IdleWatcher.
+    # The process-scoped lifespan was handed an unstarted IdleWatcher.
     idle = captured_kwargs["idle"]
     assert isinstance(idle, IdleWatcher)
     assert isinstance(idle.timer, IdleTimer)
@@ -689,16 +699,20 @@ def test_run_http_disables_idle_when_seconds_zero(tmp_path):
     fake_fastmcp.streamable_http_app.return_value = fake_app
     captured_kwargs: dict[str, object] = {}
 
-    def capture_build(*_args, **kwargs):
+    real_install = http_module._install_process_lifespan
+
+    def capture_install(*args, **kwargs):
         captured_kwargs.update(kwargs)
-        return fake_fastmcp
+        return real_install(*args, **kwargs)
 
     with (
-        patch.object(server_module, "_build_fastmcp", side_effect=capture_build),
+        patch.object(
+            http_module, "_install_process_lifespan", side_effect=capture_install
+        ),
         patch.object(http_module.uvicorn, "Config", return_value=MagicMock()),
         patch.object(http_module.uvicorn, "Server", return_value=MagicMock()),
     ):
-        http_module._run_http(plan, server_module._build_fastmcp)
+        http_module._run_http(plan, fake_fastmcp, ProcessResources())
 
     assert captured_kwargs["idle"] is None
     # Activity middleware is also skipped when supervision is off.
@@ -723,26 +737,25 @@ def test_run_http_deletes_registry_even_on_uvicorn_error(tmp_path):
     fake_uvicorn_server.run.side_effect = RuntimeError("boom")
 
     with (
-        patch.object(server_module, "_build_fastmcp", return_value=fake_fastmcp),
         patch.object(http_module.uvicorn, "Config", return_value=MagicMock()),
         patch.object(http_module.uvicorn, "Server", return_value=fake_uvicorn_server),
         pytest.raises(RuntimeError, match="boom"),
     ):
-        http_module._run_http(plan, server_module._build_fastmcp)
+        http_module._run_http(plan, fake_fastmcp, ProcessResources())
 
     assert not (tmp_path / "daemon" / "daemon.json").exists()
 
 
 @pytest.mark.parametrize(
     "failure_target",
-    ["_build_fastmcp", "uvicorn.Config", "uvicorn.Server"],
+    ["_build_http_app", "uvicorn.Config", "uvicorn.Server"],
 )
 def test_run_http_closes_unhanded_socket_on_pre_run_failure(
     tmp_path: Path, failure_target: str
 ) -> None:
     """Any failure before ``run()`` releases the planner's pre-bound socket.
 
-    Pins the runner's ``try`` arm width: ``_build_fastmcp``,
+    Pins the runner's ``try`` arm width: ``_build_http_app(...)``,
     ``uvicorn.Config(...)``, and ``uvicorn.Server(...)`` all run
     *after* the planner has bound a 127.0.0.1:0 socket but *before*
     uvicorn takes ownership of the descriptor. A failure in any of
@@ -765,12 +778,8 @@ def test_run_http_closes_unhanded_socket_on_pre_run_failure(
 
     boom = RuntimeError(f"{failure_target} boom")
     patches = []
-    if failure_target == "_build_fastmcp":
-        patches.append(patch.object(server_module, "_build_fastmcp", side_effect=boom))
-    else:
-        patches.append(
-            patch.object(server_module, "_build_fastmcp", return_value=fake_fastmcp)
-        )
+    if failure_target == "_build_http_app":
+        patches.append(patch.object(http_module, "_build_http_app", side_effect=boom))
     if failure_target == "uvicorn.Config":
         patches.append(patch.object(http_module.uvicorn, "Config", side_effect=boom))
     else:
@@ -788,7 +797,7 @@ def test_run_http_closes_unhanded_socket_on_pre_run_failure(
         for p in patches:
             stack.enter_context(p)
         with pytest.raises(RuntimeError, match=f"{failure_target} boom"):
-            http_module._run_http(plan, server_module._build_fastmcp)
+            http_module._run_http(plan, fake_fastmcp, ProcessResources())
 
     # The pre-bound socket is closed; ``getsockname`` raises EBADF.
     with pytest.raises(OSError):
@@ -826,12 +835,11 @@ def test_run_http_daemon_plan_publishes_127_0_0_1_regardless_of_server_host(
         return real_write(self, entry)
 
     with (
-        patch.object(server_module, "_build_fastmcp", return_value=fake_fastmcp),
         patch.object(http_module.uvicorn, "Config", return_value=MagicMock()),
         patch.object(http_module.uvicorn, "Server", return_value=MagicMock()),
         patch.object(LockedRegistry, "write", capturing_write),
     ):
-        http_module._run_http(plan, server_module._build_fastmcp)
+        http_module._run_http(plan, fake_fastmcp, ProcessResources())
 
     entry = captured_entry["entry"]
     assert entry.host == "127.0.0.1"
@@ -947,6 +955,52 @@ def test_build_http_app_psk_gate_enforced_end_to_end() -> None:
     assert health.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_install_process_lifespan_wraps_session_manager() -> None:
+    """``_install_process_lifespan`` wraps the SDK's app lifespan so
+    process-scoped resources are built around (outside) the session-manager
+    lifespan, once per process."""
+    from starlette.applications import Starlette
+
+    events: list[str] = []
+
+    @contextlib.asynccontextmanager
+    async def _session_manager_lifespan(_app):
+        events.append("sm-enter")
+        try:
+            yield
+        finally:
+            events.append("sm-exit")
+
+    app = Starlette()
+    app.router.lifespan_context = _session_manager_lifespan
+
+    holder = ProcessResources()
+    multi_config = MagicMock()
+    captured: dict[str, object] = {}
+
+    @contextlib.asynccontextmanager
+    async def _fake_process_lifespan(mc, *, idle, holder):
+        captured["args"] = (mc, idle, holder)
+        events.append("proc-enter")
+        try:
+            yield
+        finally:
+            events.append("proc-exit")
+
+    with patch.object(http_module, "process_lifespan", _fake_process_lifespan):
+        http_module._install_process_lifespan(
+            app, multi_config=multi_config, idle=None, holder=holder
+        )
+        async with app.router.lifespan_context(app):
+            pass
+
+    # process_lifespan wraps the session-manager lifespan: it enters first
+    # and exits last, so the registry outlives every MCP session.
+    assert events == ["proc-enter", "sm-enter", "sm-exit", "proc-exit"]
+    assert captured["args"] == (multi_config, None, holder)
+
+
 # ---------------------------------------------------------------------------
 # _publish_daemon_registry / _unpublish_daemon_registry / _log_http_started
 # ---------------------------------------------------------------------------
@@ -960,24 +1014,17 @@ def _operator_run(*, psk: str = "secret") -> "http_module._HttpRun":
         psk=psk,
         bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
         idle_seconds=0,
-        daemon_handle=None,
-        daemon_process_name=None,
+        daemon=None,
     )
 
 
 def test_publish_daemon_registry_writes_entry(tmp_path: Path) -> None:
-    """The helper composes a registry entry from the plan and writes it.
-
-    ``handle`` and ``process_name`` are required arguments so the
-    caller is forced to narrow at the call site (no defensive
-    guards or coverage-suppressed dead code in the helper body).
-    """
+    """The helper composes a registry entry from the plan and writes it."""
     server_cfg = ServerConfig.model_validate({"daemon": {"idle_shutdown_seconds": 60}})
     plan = _daemon_plan_for_test(
         server_cfg, config_dir=tmp_path / "cfg", runtime_dir=tmp_path
     )
-    assert plan.daemon_handle is not None
-    assert plan.daemon_process_name is not None
+    assert plan.daemon is not None
 
     captured: dict[str, object] = {}
     real_write = LockedRegistry.write
@@ -988,20 +1035,18 @@ def test_publish_daemon_registry_writes_entry(tmp_path: Path) -> None:
 
     try:
         with patch.object(LockedRegistry, "write", capturing_write):
-            http_module._publish_daemon_registry(
-                plan, plan.daemon_handle, plan.daemon_process_name
-            )
+            http_module._publish_daemon_registry(plan, plan.daemon)
         entry = captured["entry"]
         assert entry.host == "127.0.0.1"
         assert entry.port == plan.bind.port
-        assert entry.process_name == plan.daemon_process_name
+        assert entry.process_name == plan.daemon.process_name
         assert entry.server_name == plan.server_name
     finally:
         plan.bind.close_unhanded()
 
 
 def test_unpublish_daemon_registry_no_op_for_operator_plan() -> None:
-    """Operator plan (no ``daemon_handle``) does not touch the registry."""
+    """Operator plan (no ``daemon``) does not touch the registry."""
     plan = _operator_run()
     with patch.object(LockedRegistry, "delete") as mock_delete:
         http_module._unpublish_daemon_registry(plan)
@@ -1087,8 +1132,7 @@ def _daemon_publish_plan(handle: DaemonDirectory) -> "http_module._HttpRun":
         psk="secret",
         bind=http_module._BindSpec(host="127.0.0.1", port=22000, sock=None),
         idle_seconds=0,
-        daemon_handle=handle,
-        daemon_process_name="python",
+        daemon=http_module._DaemonPublish(handle=handle, process_name="python"),
     )
 
 
@@ -1107,7 +1151,7 @@ def test_publish_refuses_when_live_peer_already_registered(tmp_path: Path) -> No
 
     plan = _daemon_publish_plan(dd)
     with pytest.raises(DaemonAlreadyPublishedError, match="already registered"):
-        http_module._publish_daemon_registry(plan, dd, "python")
+        http_module._publish_daemon_registry(plan, plan.daemon)
 
 
 def test_publish_overwrites_stale_entry(tmp_path: Path) -> None:
@@ -1129,7 +1173,7 @@ def test_publish_overwrites_stale_entry(tmp_path: Path) -> None:
         "deephaven_mcp._processes.ProcessIdentity.is_alive",
         return_value=False,
     ):
-        http_module._publish_daemon_registry(plan, dd, "python")
+        http_module._publish_daemon_registry(plan, plan.daemon)
 
     # Replaced with the new port.
     new_entry = dd.read_entry()
@@ -1150,7 +1194,7 @@ def test_publish_treats_corrupt_existing_entry_as_stale(tmp_path: Path) -> None:
     dd.registry_path.write_text("not json")
 
     plan = _daemon_publish_plan(dd)
-    http_module._publish_daemon_registry(plan, dd, "python")
+    http_module._publish_daemon_registry(plan, plan.daemon)
     new_entry = dd.read_entry()
     assert new_entry is not None
     assert new_entry.port == 22000
@@ -1170,7 +1214,7 @@ def test_publish_clears_start_marker(tmp_path: Path) -> None:
         assert reg.read_start_marker() is not None
 
     plan = _daemon_publish_plan(dd)
-    http_module._publish_daemon_registry(plan, dd, "python")
+    http_module._publish_daemon_registry(plan, plan.daemon)
 
     with dd.locked() as reg:
         assert reg.read_start_marker() is None

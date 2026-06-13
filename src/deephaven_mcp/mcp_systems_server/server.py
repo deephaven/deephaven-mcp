@@ -35,11 +35,8 @@ from pathlib import Path
 
 import click
 from mcp.server.fastmcp import FastMCP
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 from deephaven_mcp._exceptions import ConfigurationError
-from deephaven_mcp._health import HEALTH_PATH
 from deephaven_mcp._logging import (
     setup_global_exception_logging,
     setup_logging,
@@ -50,18 +47,9 @@ from deephaven_mcp.config import DATA_DIR_ENV_VAR
 from deephaven_mcp.config.schema import ServerConfig
 from deephaven_mcp.config.tree import ConfigTree, ConfigTreeLoader
 
+from . import _fastmcp
 from ._http import _plan_daemon, _plan_default, _run_http
-from ._idle import IdleWatcher
-from ._lifespan import LifespanContext, make_lifespan
-from ._tools import (
-    catalog,
-    pq,
-    script,
-    session,
-    session_community,
-    session_enterprise,
-    table,
-)
+from ._lifespan import LifespanContext, ProcessResources, process_lifespan
 
 __all__ = ["main"]
 
@@ -78,20 +66,14 @@ async def _load_multi_config_or_exit(
 ) -> ConfigTree:
     """Load and validate the entire on-disk configuration tree.
 
-    Returns the :class:`ConfigTree` produced by
-    :class:`ConfigTreeLoader`. The result carries the resolved
-    ``config_dir`` and the optional ``server`` block; downstream
-    callers extract whatever they need (PSK, host, port, ...) from the
-    one returned instance instead of re-parsing the tree.
-
     Args:
-        config_dir (Path | None): The directory passed via
-            ``--config-dir``, or ``None`` to use
-            ``$DH_MCP_DATA_DIR/config`` (or the platform default
-            user-data root's ``config`` subdirectory).
+        config_dir (Path | None): The directory passed via ``--config-dir``,
+            or ``None`` to use ``$DH_MCP_DATA_DIR/config`` (or the platform
+            default user-data root's ``config`` subdirectory).
 
     Returns:
-        ConfigTree: The validated multi-system configuration.
+        ConfigTree: The validated multi-system configuration, carrying the
+            resolved ``config_dir`` and the optional ``server`` block.
 
     Raises:
         SystemExit: When configuration loading fails with a
@@ -114,118 +96,35 @@ async def _load_multi_config_or_exit(
 
 
 # ---------------------------------------------------------------------------
-# FastMCP construction (shared by all transports)
-# ---------------------------------------------------------------------------
-
-
-def _register_tools(server: FastMCP[LifespanContext], multi_config: ConfigTree) -> None:
-    """Register every MCP tool on the multiplexed systems server.
-
-    Section-specific tool modules are gated on which configuration
-    sections were loaded: community-only tools register only when
-    ``multi_config.community is not None``; enterprise-only tools
-    (``session_enterprise``, ``catalog``, ``pq``) register only when
-    ``multi_config.enterprise is not None``. Cross-cutting tools that
-    operate on whatever sessions exist are always registered.
-
-    Args:
-        server (FastMCP[LifespanContext]): The FastMCP instance to
-            register tool modules on.
-        multi_config (ConfigTree): The validated configuration;
-            used to gate registration on loaded sections.
-    """
-    session.register_tools(server)
-    table.register_tools(server)
-    script.register_tools(server)
-    sections: list[str] = ["shared"]
-    if multi_config.community is not None:
-        session_community.register_tools(server)
-        sections.append("community")
-    if multi_config.enterprise is not None:
-        session_enterprise.register_tools(server)
-        catalog.register_tools(server)
-        pq.register_tools(server)
-        sections.append("enterprise")
-    _LOGGER.debug(
-        f"[mcp_systems_server:_register_tools] Registered tool sections: "
-        f"{', '.join(sections)}"
-    )
-
-
-def _register_health_endpoint(server: FastMCP[LifespanContext]) -> None:
-    """Register the ``/health`` liveness/readiness route on ``server``.
-
-    The route is registered for both transports but is only ever
-    exercised under HTTP. It is also added to
-    :class:`PSKMiddleware`'s ``bypass_paths`` so external probes do not
-    need to share the PSK.
-
-    Args:
-        server (FastMCP[LifespanContext]): The FastMCP instance whose
-            ASGI app will own the route.
-    """
-
-    @server.custom_route(HEALTH_PATH, methods=["GET"])  # type: ignore[untyped-decorator]
-    async def health_check(_request: Request) -> JSONResponse:
-        """Return a 200/JSON liveness probe for the systems server."""
-        _LOGGER.debug("[mcp_systems_server:health_check] Health check requested")
-        return JSONResponse({"status": "ok"})
-
-
-def _build_fastmcp(
-    multi_config: ConfigTree,
-    server_name: str,
-    *,
-    idle: IdleWatcher | None,
-) -> FastMCP[LifespanContext]:
-    """Build the FastMCP instance with lifespan + tools + health route.
-
-    Args:
-        multi_config (ConfigTree): Pre-validated configuration
-            forwarded to :func:`make_lifespan` so the lifespan does not
-            re-parse the on-disk tree.
-        server_name (str): The FastMCP server name advertised in MCP
-            handshakes; sourced from ``ServerConfig.server_name``.
-        idle (IdleWatcher | None): Unstarted watcher controlling idle
-            shutdown. Forwarded verbatim to :func:`make_lifespan`,
-            which owns the watcher's lifecycle. Pass ``None`` to
-            disable supervision (stdio and default HTTP both pass
-            ``None``; only daemon mode supplies a watcher).
-
-    Returns:
-        FastMCP[LifespanContext]: The fully wired MCP server. The
-            caller selects the transport (``run_stdio_async`` vs the
-            streamable-HTTP app) without further mutation of the
-            instance.
-    """
-    server: FastMCP[LifespanContext] = FastMCP(
-        name=server_name,
-        lifespan=make_lifespan(multi_config, idle=idle),
-    )
-    _register_tools(server, multi_config)
-    _register_health_endpoint(server)
-    _LOGGER.debug(
-        f"[mcp_systems_server:_build_fastmcp] Built FastMCP instance "
-        f"name={server_name!r}, idle={'on' if idle is not None else 'off'}"
-    )
-    return server
-
-
-# ---------------------------------------------------------------------------
 # stdio transport
 # ---------------------------------------------------------------------------
 
 
-def _run_stdio(server: FastMCP[LifespanContext]) -> None:
+def _run_stdio(
+    server: FastMCP[LifespanContext],
+    multi_config: ConfigTree,
+    holder: ProcessResources,
+) -> None:
     """Run the FastMCP instance under stdio transport.
 
+    The process-scoped subsystems are built once by :func:`process_lifespan`
+    wrapping ``run_stdio_async`` and stored on ``holder``; the per-session
+    lifespan attached at construction reads them from there.
+
     Args:
-        server (FastMCP[LifespanContext]): The configured server. The
-            lifespan attached at construction is responsible for
-            loading configuration and tearing it down on exit.
+        server (FastMCP[LifespanContext]): The configured server.
+        multi_config (ConfigTree): Pre-validated configuration passed to
+            :func:`process_lifespan`.
+        holder (ProcessResources): Holder shared with the server's
+            per-session lifespan; populated by :func:`process_lifespan`.
     """
     _LOGGER.info("[mcp_systems_server:_run_stdio] Starting stdio transport")
-    asyncio.run(server.run_stdio_async())
+
+    async def _serve() -> None:
+        async with process_lifespan(multi_config, idle=None, holder=holder):
+            await server.run_stdio_async()
+
+    asyncio.run(_serve())
     _LOGGER.info("[mcp_systems_server:_run_stdio] stdio transport stopped")
 
 
@@ -243,28 +142,17 @@ def _validate_cli_args(
 ) -> None:
     """Reject CLI flag combinations that would behave surprisingly.
 
-    Three categories of rejection:
+    Rejections:
 
-    - **Daemon-mode conflicts**: ``--daemon`` is a preset whose
-      transport / bind / port are fixed by the registry wire
-      format. Combining it with ``--transport``, ``--host``, or
-      ``--port`` would leave the operator with no hint that those
-      flags were ignored, so reject up-front.
-    - **Out-of-range port**: TCP ports are ``[1, 65535]``; uvicorn
-      would also error, but a click-level :class:`UsageError`
-      yields a cleaner stderr message.
-    - **Empty host**: ``--host ""`` would silently fall through to
-      :class:`ServerConfig` defaults; reject so the operator
-      notices the typo.
+    - **Daemon-mode conflicts**: ``--daemon`` is a preset, so combining it
+      with ``--transport``, ``--host``, or ``--port`` is rejected.
+    - **Out-of-range port**: TCP ports must be in ``[1, 65535]``.
+    - **Empty host**: ``--host ""`` is rejected rather than silently falling
+      through to the :class:`ServerConfig` default.
 
-    Behaviour-neutral combinations are *not* rejected:
-
-    - ``--runtime-dir`` without ``--daemon`` is silently ignored
-      (the runtime dir is only consulted on the daemon path);
-      rejecting would surprise users with shared shell aliases.
-    - ``--transport stdio`` with ``--host`` / ``--port`` / ``--psk``
-      is also silently ignored (HTTP-only flags on a non-HTTP
-      transport).
+    Behavior-neutral combinations are not rejected: ``--runtime-dir`` without
+    ``--daemon``, and HTTP-only flags (``--host`` / ``--port`` / ``--psk``)
+    with ``--transport stdio``, are silently ignored.
 
     Args:
         transport (str | None): Value of ``--transport``.
@@ -273,9 +161,8 @@ def _validate_cli_args(
         daemon (bool): Value of ``--daemon`` flag.
 
     Raises:
-        click.UsageError: For each of the rejection categories
-            above; click renders the message to stderr and the
-            wrapping :func:`main` translates that to ``sys.exit(2)``.
+        click.UsageError: For each rejection category above; click renders it
+            to stderr and :func:`main` translates it to ``sys.exit(2)``.
     """
     if daemon:
         conflicts: list[str] = []
@@ -401,26 +288,14 @@ def _command(
     runtime_dir: Path | None,
     daemon: bool,
 ) -> None:
-    """Click command for ``dh-mcp-systems-server``.
+    """Click callback for ``dh-mcp-systems-server``.
 
-    The ``@click.command`` decorator wraps this function into a
-    :class:`click.core.Command` instance bound to the module-level
-    name :data:`_command`; the function body below is invoked by
-    click as the command's callback after argument parsing. The
-    callable read by Python at module load time is therefore the
-    ``Command`` object, not this raw function — see
-    :func:`main` for the entry-point invocation.
-
-    Argument-handling notes:
-
-    All flags default to ``None`` / ``False`` so the JSON-loaded
-    :class:`ServerConfig` provides the effective value per field.
-    Click's ``path_type=Path`` returns the user-supplied path
-    verbatim (no resolution); ``--config-dir`` is resolved here via
-    :meth:`Path.expanduser` + :meth:`Path.resolve` so the rest of
-    the pipeline sees an absolute path, while ``--runtime-dir`` is
-    only ``expanduser()``-ed (matching the prior argparse-era
-    semantics — :func:`resolve_runtime_dir` does the rest).
+    Sets up logging, validates the flag combination, loads the configuration
+    tree, and dispatches to the stdio or HTTP transport. All flags default to
+    ``None`` / ``False`` so ``server.json`` provides the effective value per
+    field. ``--config-dir`` is resolved to an absolute path here;
+    ``--runtime-dir`` is only ``expanduser()``-ed (:func:`resolve_runtime_dir`
+    does the rest).
     """
     setup_logging()
     setup_global_exception_logging()
@@ -440,16 +315,18 @@ def _command(
         config_dir.expanduser().resolve() if config_dir is not None else None
     )
 
-    # Load the entire configuration tree once. Every operator-tunable
-    # knob (transport, host, port, server_name, psk, sessions, systems,
-    # ...) lives in this validated tree. CLI flags override the JSON
-    # values per-field when supplied. The resulting ``ConfigTree``
-    # is then threaded into ``_build_fastmcp`` (for the lifespan) and
-    # the planners (for the resolved bind / PSK).
+    # Load the entire configuration tree once; CLI flags override the JSON
+    # values per-field when supplied.
     multi_config = asyncio.run(_load_multi_config_or_exit(config_dir_resolved))
     server_cfg = (
         multi_config.server if multi_config.server is not None else ServerConfig()
     )
+
+    # Composition root: build the holder and the FastMCP server once, then
+    # hand both to whichever transport runs. The server's per-session lifespan
+    # reads the holder, which the process-scoped lifespan populates.
+    holder = ProcessResources()
+    server = _fastmcp.build_fastmcp(server_cfg.server_name, holder=holder)
 
     # Three-arm dispatch: daemon mode always implies HTTP (the daemon
     # planner owns its bind/PSK/registry); stdio bypasses the HTTP
@@ -457,10 +334,8 @@ def _command(
     # HTTP via a different planner.
     transport_resolved = transport if transport is not None else server_cfg.transport
     if daemon:
-        # ``--transport``, ``--host``, ``--port`` were already rejected
-        # by ``_validate_cli_args`` when combined with ``--daemon``;
-        # ``--psk`` is honoured by the daemon planner as a debug
-        # override, otherwise the planner auto-generates a fresh PSK.
+        # ``--psk`` is honoured by the daemon planner as a debug override,
+        # otherwise the planner auto-generates a fresh PSK.
         runtime_override = runtime_dir.expanduser() if runtime_dir is not None else None
         plan = _plan_daemon(
             multi_config,
@@ -468,10 +343,9 @@ def _command(
             runtime_dir_override=runtime_override,
             cli_psk=psk,
         )
-        _run_http(plan, _build_fastmcp)
+        _run_http(plan, server, holder)
     elif transport_resolved == "stdio":
-        server = _build_fastmcp(multi_config, server_cfg.server_name, idle=None)
-        _run_stdio(server)
+        _run_stdio(server, multi_config, holder)
     else:
         plan = _plan_default(
             multi_config,
@@ -480,31 +354,17 @@ def _command(
             cli_port=port,
             cli_psk=psk,
         )
-        _run_http(plan, _build_fastmcp)
+        _run_http(plan, server, holder)
 
 
 def main(argv: list[str] | None = None) -> None:
     """Console entry point for ``dh-mcp-systems-server``.
 
-    Thin wrapper around the click command. ``argv=None`` defers to
-    ``sys.argv[1:]``; supplying an explicit list lets tests drive
-    the CLI without touching the global argv.
-
-    Runs click with ``standalone_mode=False`` so successful
-    completion returns ``None`` (rather than calling ``sys.exit(0)``);
-    this preserves the pre-click test contract where callers can
-    invoke ``main([...])`` and observe side effects directly.
-    Click handles ``--help`` internally (prints help text, returns
-    the exit code without raising) so the wrapper does not need to
-    translate it. Bad flags raise :class:`click.exceptions.UsageError`
-    which is rendered to stderr and translated to ``sys.exit(2)``;
-    :class:`SystemExit` raised by inner helpers (e.g.
-    :func:`_resolve_psk_or_exit`) propagates unchanged. Note that
-    :data:`_command` is a :class:`click.core.Command` instance
-    (the result of decorating ``_command``'s callback with
-    ``@click.command``); ``_command.main(...)`` is click's public
-    entry point on that instance, not a recursive call into this
-    module's :func:`main`.
+    Runs the click command with ``standalone_mode=False`` so successful
+    completion returns ``None`` instead of raising ``SystemExit(0)``. Bad
+    flags raise :class:`click.exceptions.UsageError`, which is rendered to
+    stderr and translated to ``sys.exit(2)``; a :class:`SystemExit` from an
+    inner helper propagates unchanged.
 
     Args:
         argv (list[str] | None): Argument list, or ``None`` to use

@@ -18,18 +18,51 @@ from __future__ import annotations
 __all__ = [
     "CliError",
     "ErrorCode",
+    "ExitCode",
     "render_error",
+    "render_warning",
 ]
 
 import json
 import sys
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import TextIO, assert_never
 
 import click
 import yaml
 
 from deephaven_mcp.cli._format import OutputMode
+
+
+class ExitCode(IntEnum):
+    """Stable process exit codes for the ``dh-mcp`` CLI.
+
+    Each member carries its agent-facing help text intrinsically via the
+    ``(value, help_text)`` tuple — adding a member without a help string
+    is a ``TypeError`` at class-construction time, the same guard
+    :class:`ErrorCode` uses. Read ``ec.help_text`` for the explanation
+    and ``ec.value`` (or the member itself, an ``int``) for the code.
+    """
+
+    SUCCESS = (0, "success")
+    USER_ERROR = (2, "user-facing failure")
+    TOOL_ERROR = (3, "the invoked MCP tool returned isError=True")
+
+    help_text: str
+
+    def __new__(cls, value: int, help_text: str) -> ExitCode:
+        """Bind the numeric exit code and its help text together.
+
+        ``IntEnum``'s default ``__new__`` accepts a single integer
+        value. Extending it to a ``(value, help_text)`` tuple makes the
+        help text a first-class attribute of each member; adding a
+        member without help fails at class-construction time when this
+        initializer raises ``TypeError`` for the missing argument.
+        """
+        member = int.__new__(cls, value)
+        member._value_ = value
+        member.help_text = help_text
+        return member
 
 
 class ErrorCode(StrEnum):
@@ -95,7 +128,31 @@ class ErrorCode(StrEnum):
     )
     ARG_PARSE_ERROR = (
         "arg_parse_error",
-        "A --arg key=value token was malformed.",
+        "A key=value token (--arg, --env, --session-arg) was malformed.",
+    )
+    MISSING_ARGUMENT = (
+        "missing_argument",
+        "A required positional argument or option was not provided.",
+    )
+    MUTUALLY_EXCLUSIVE_OPTIONS = (
+        "mutually_exclusive_options",
+        "Two or more options that cannot be combined were supplied together.",
+    )
+    OPTION_NOT_APPLICABLE = (
+        "option_not_applicable",
+        (
+            "An option/argument combination is invalid for the selected "
+            "--system type: an option that does not apply (e.g. a Docker option "
+            "with an Enterprise system), or a missing required one (e.g. no "
+            "session name for a Community session)."
+        ),
+    )
+    BROWSER_LAUNCH_FAILED = (
+        "browser_launch_failed",
+        (
+            "The default web browser could not be launched; the URL is included "
+            "in the error message so it can be opened manually."
+        ),
     )
     CONFIG_INVALID = (
         "config_invalid",
@@ -189,4 +246,45 @@ def render_error(
             # Statically unreachable thanks to the ``OutputMode``
             # ``Literal``; the runtime ``assert_never`` is the safety
             # net for callers that bypassed type checking.
+            assert_never(unexpected)
+
+
+def render_warning(
+    message: str,
+    *,
+    output: OutputMode,
+    details: dict[str, str] | None = None,
+    stream: TextIO | None = None,
+) -> None:
+    """Render a non-fatal warning to stderr in the requested output mode.
+
+    Stdout carries the command's result; warnings (e.g. partial-result or
+    discovery diagnostics) go to stderr so they never pollute ``-o json`` /
+    ``-o yaml`` stdout.
+
+    Args:
+        message (str): Human-readable warning summary.
+        output (OutputMode): Active output mode (``human``, ``json``,
+            ``yaml``).
+        details (dict[str, str] | None): Optional per-item detail (e.g.
+            ``{system: error}``); listed beneath the message in ``human``
+            mode and nested under ``details`` in ``json`` / ``yaml`` mode.
+        stream (TextIO | None): Stream to write to. ``None`` falls back to
+            :data:`sys.stderr`. Useful for tests.
+    """
+    target = stream if stream is not None else sys.stderr
+    payload: dict[str, object] = {"warning": message}
+    if details:
+        payload["details"] = details
+    match output:
+        case "human":
+            target.write(f"warning: {message}\n")
+            for name, detail in (details or {}).items():
+                target.write(f"  {name}: {detail}\n")
+        case "json":
+            target.write(json.dumps(payload, indent=2, sort_keys=True))
+            target.write("\n")
+        case "yaml":
+            target.write(yaml.safe_dump(payload, sort_keys=True))
+        case _ as unexpected:
             assert_never(unexpected)

@@ -25,7 +25,7 @@ Compose help with `build_help(...)`. Required sections (drop one only when genui
 - **Summary** — one imperative line, ≤ ~70 chars. Click also uses it as the parent group's short help.
 - **Description** — what it does *and* when to use it. State side effects (spawns a daemon, quarantines a file).
 - **Arguments** — every positional argument, with its meaning and a discovery hint. Click renders no help for positional arguments, so the `arguments=` block is the only place a reader learns what `NAME` is and how to find a valid value.
-- **Options** — set `help=` on every `click.option` (effect, and decode/repeat rules); set `show_default=True` for options with a default. Click renders the Options table itself.
+- **Options** — set `help=` on every `click.option`: state the effect **and the value space** (what to type), never value-blind help that only restates the effect. For a **closed** value set use a `click.Choice` — it validates and self-documents (e.g. `--launch-method`, `--language`). For a **free or dynamic** value, name the form and point to a discovery command (e.g. `--system`: a system name — `community` or a configured Enterprise system; run `dh-mcp system list`). Include decode/repeat rules; set `show_default=True` for options with a default. Click renders the Options table itself.
 - **Output** — what the command prints, and the key fields an agent reads under `-o json`. Single-source it (§4).
 - **Examples** — at least one human example and at least one agent example (`-o json … | jq …`).
 - **Exit codes** — the numeric process codes (default set covers `0`/`2`/`3`).
@@ -38,21 +38,24 @@ Canonical implementation: `cli/_commands/tool.py` (`tool_call`, `_OUTPUT_CALL`) 
 
 ## 3. build_help sections
 
-Every help string is built by `build_help`; never hand-concatenate. Parameters map to sections rendered in this fixed order: summary → description → `arguments` → `output` → `examples` → `see_also` → `environment` (default set) → `exit_codes` (default set) → `error_codes`.
+Every help string is built by `build_help`; never hand-concatenate. Parameters map to sections rendered in this fixed order: summary → description → `arguments` → `output` → `examples` → `see_also` → `environment` (default set) → `exit_codes` → `error_codes`.
+
+No `build_help` section takes a positional `(str, str)` tuple. `arguments` and `environment` take `HelpEntry(name, help)` objects; `error_codes` and `exit_codes` take enum **members** (`ErrorCode` / `ExitCode`), rendered as `(value, help_text)` so the descriptions are single-sourced from the enums (`cli/_errors.py`) and can never disagree with the introspect manifest. `exit_codes` members are `SUCCESS`/`USER_ERROR`/`TOOL_ERROR`. Put any per-command failure nuance in the `description`, not a re-typed code description.
 
 ```python
 help=build_help(
     summary="Invoke a single MCP tool and print its result.",
     description="...",
-    arguments=(("NAME", "Tool name. Run 'dh-mcp tool list' to discover names."),),
+    arguments=(HelpEntry("NAME", "Tool name. Run 'dh-mcp tool list' to discover names."),),
     output=OUTPUT_TOOL_CALL,          # see §4
     examples=("$ dh-mcp tool call session_list", "$ dh-mcp -o json tool call ... | jq ."),
     see_also=("dh-mcp tool list", "dh-mcp tool show NAME"),
-    error_codes=(("tool_returned_error", "The tool returned isError=true (exit 3)."),),
+    exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
+    error_codes=(ErrorCode.ARG_PARSE_ERROR, ErrorCode.TOOL_RETURNED_ERROR),
 )
 ```
 
-Canonical implementation: `cli/_help.py` (`build_help`, `DEFAULT_ENVIRONMENT_LINES`, `DEFAULT_EXIT_CODE_LINES`).
+Canonical implementation: `cli/_help.py` (`build_help`, `HelpEntry`, `COMMON_ENV_VARS`), `cli/_errors.py` (`ErrorCode`, `ExitCode`).
 
 ## 4. Output is single-source
 

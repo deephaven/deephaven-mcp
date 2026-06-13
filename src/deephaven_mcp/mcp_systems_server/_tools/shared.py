@@ -12,7 +12,7 @@ Provides common helpers used across the MCP tool modules:
   :func:`get_enterprise_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
   :func:`build_table_data_response`, :func:`format_meta_table_result`.
-- Initialization-status formatting: :func:`format_initialization_status`.
+- Partial-result formatting: :func:`format_partial_result`.
 - JSON redaction: :func:`redact_json_sensitive_fields`.
 
 This module is internal — none of its functions are MCP tools.
@@ -27,12 +27,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import NamedTuple
+from typing import NamedTuple, assert_never
 
 import pyarrow
 from mcp.server.fastmcp import Context
 
 from deephaven_mcp._exceptions import (
+    CommunityNotConfiguredError,
+    EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
 )
@@ -62,8 +64,8 @@ __all__ = [
     "check_response_size",
     "check_session_limit",
     "error_response",
-    "format_initialization_status",
     "format_meta_table_result",
+    "format_partial_result",
     "get_community_registry",
     "get_community_settings",
     "get_enterprise_registry",
@@ -100,49 +102,55 @@ def error_response(msg: str) -> dict[str, object]:
     return {"success": False, "error": msg, "isError": True}
 
 
-def format_initialization_status(
+def format_partial_result(
     phase: InitializationPhase,
     init_errors: dict[str, str],
 ) -> dict[str, object] | None:
-    """Format initialization phase + errors into a response-ready dict.
+    """Describe an incomplete result for a discovery-spanning tool.
 
-    Pure formatting function — does not query any registry. Callers are
-    responsible for obtaining ``phase`` and ``init_errors`` from the
-    same atomic snapshot (e.g. via :meth:`MultiSystemRegistry.get_all`).
+    Tools whose result spans enterprise systems (``sessions_list``,
+    ``enterprise_systems_status``) attach the returned block to their
+    ``success=True`` payload when the result may be missing data. Pure
+    formatting — callers obtain ``phase`` and ``init_errors`` from the same
+    atomic snapshot (e.g. via :meth:`MultiSystemRegistry.get_all`).
 
     Args:
-        phase (InitializationPhase): Current initialization phase.
-        init_errors (dict[str, str]): Dict mapping factory names to
-            error descriptions.
+        phase (InitializationPhase): Current enterprise-discovery phase.
+        init_errors (dict[str, str]): Factory name → error description.
 
     Returns:
-        dict[str, object] | None: A dict with ``status`` (str, always)
-            and ``errors`` (dict[str, str], only when present), or
-            ``None`` if initialization completed cleanly.
+        dict[str, object] | None: ``None`` when the result is complete (``phase``
+            is ``COMPLETED`` with no errors). Otherwise a ``partial_result``
+            block: ``phase`` (the machine-readable :class:`InitializationPhase`
+            value, e.g. ``"loading"``), ``detail`` (a human-readable message),
+            and ``errors`` (factory name → message, only when present).
     """
-    init_info: dict[str, object] = {}
-    if phase == InitializationPhase.FAILED:
-        init_info["status"] = (
-            "Enterprise session discovery failed critically (e.g. cancelled "
-            "during shutdown). The registry may have partial or no data."
-        )
-    elif phase in (InitializationPhase.NOT_STARTED, InitializationPhase.PARTIAL):
-        init_info["status"] = (
-            "Enterprise session discovery has not yet started. Some sessions "
-            "or systems may not yet be visible."
-        )
-    elif phase == InitializationPhase.LOADING:
-        init_info["status"] = (
-            "Enterprise session discovery is actively running. Some sessions "
-            "or systems may not yet be visible."
-        )
-    elif init_errors:
-        init_info["status"] = (
-            "Some enterprise systems had connection issues during discovery."
-        )
+    if phase == InitializationPhase.COMPLETED and not init_errors:
+        return None
+    match phase:
+        case InitializationPhase.FAILED:
+            detail = (
+                "Enterprise session discovery failed critically (e.g. cancelled "
+                "during shutdown). The registry may have partial or no data."
+            )
+        case InitializationPhase.NOT_STARTED | InitializationPhase.PARTIAL:
+            detail = (
+                "Enterprise session discovery has not yet started. Some sessions "
+                "or systems may not yet be visible."
+            )
+        case InitializationPhase.LOADING:
+            detail = (
+                "Enterprise session discovery is actively running. Some sessions "
+                "or systems may not yet be visible."
+            )
+        case InitializationPhase.COMPLETED:
+            detail = "Some enterprise systems had connection issues during discovery."
+        case _ as unexpected:
+            assert_never(unexpected)
+    block: dict[str, object] = {"phase": phase.value, "detail": detail}
     if init_errors:
-        init_info["errors"] = init_errors
-    return init_info or None
+        block["errors"] = init_errors
+    return block
 
 
 # ---------------------------------------------------------------------------
@@ -204,18 +212,16 @@ def get_enterprise_settings(context: Context) -> EnterpriseSettings:
             model (timeouts, evictor knobs, ``pq_tools``, ...).
 
     Raises:
-        InternalError: If no enterprise configuration is loaded
-            (``multi_config.enterprise is None``). Enterprise tools
-            (``pq_*``, ``catalog_*``, ``session_enterprise_*``) only
-            register when enterprise config is loaded; reaching this
-            branch means the registration-time gate was bypassed.
+        EnterpriseNotConfiguredError: If no Enterprise system is
+            configured (``multi_config.enterprise is None``). Enterprise
+            tools register unconditionally, so this is a foreseeable
+            user-correctable condition (configure an Enterprise system),
+            surfaced as a clean error rather than an internal one.
     """
     enterprise = get_multi_config(context).enterprise
     if enterprise is None:
-        raise InternalError(
-            "get_enterprise_settings called without enterprise config "
-            "loaded; an enterprise tool was registered on a community-"
-            "only deployment (registration-time invariant violated)."
+        raise EnterpriseNotConfiguredError(
+            "No Enterprise (Core+) system is configured on this server."
         )
     return enterprise.settings
 
@@ -231,18 +237,16 @@ def get_community_settings(context: Context) -> CommunitySettings:
             model (security, session creation defaults, ...).
 
     Raises:
-        InternalError: If no community configuration is loaded
-            (``multi_config.community is None``). Community tools
-            (``session_community_*``) only register when community
-            config is loaded; reaching this branch means the
-            registration-time gate was bypassed.
+        CommunityNotConfiguredError: If no Community sessions are
+            configured (``multi_config.community is None``). Community
+            tools register unconditionally, so this is a foreseeable
+            user-correctable condition (configure a Community session),
+            surfaced as a clean error rather than an internal one.
     """
     community = get_multi_config(context).community
     if community is None:
-        raise InternalError(
-            "get_community_settings called without community config "
-            "loaded; a community tool was registered on an enterprise-"
-            "only deployment (registration-time invariant violated)."
+        raise CommunityNotConfiguredError(
+            "No Community sessions are configured on this server."
         )
     return community.settings
 
@@ -258,15 +262,15 @@ def get_community_registry(context: Context) -> CommunitySessionRegistry:
             multi-system registry.
 
     Raises:
-        InternalError: If no community section is configured. Tools
-            that require a community session should defend against
-            this and surface a friendlier error to the caller.
+        CommunityNotConfiguredError: If no Community sessions are
+            configured. Community tools register unconditionally, so this
+            is a foreseeable user-correctable condition surfaced as a
+            clean error rather than an internal one.
     """
     registry = get_registry(context).community
     if registry is None:
-        raise InternalError(
-            "No community sessions are configured; community/sessions/ is "
-            "empty or absent."
+        raise CommunityNotConfiguredError(
+            "No Community sessions are configured on this server."
         )
     return registry
 

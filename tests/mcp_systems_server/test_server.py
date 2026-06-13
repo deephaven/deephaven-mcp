@@ -25,6 +25,7 @@ import pytest
 
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.config.schema import ServerConfig
+from deephaven_mcp.mcp_systems_server import _fastmcp as fastmcp_module
 from deephaven_mcp.mcp_systems_server import _http as http_module
 from deephaven_mcp.mcp_systems_server import server as server_module
 from deephaven_mcp.mcp_systems_server._http import (
@@ -168,14 +169,16 @@ def test_main_stdio_path_from_cli_flag(_mute_logging_setup):
     with (
         _patch_load_server_config(ServerConfig()),
         patch.object(
-            server_module, "_build_fastmcp", return_value=fake_server
+            fastmcp_module, "build_fastmcp", return_value=fake_server
         ) as mock_build,
         patch.object(server_module, "_run_stdio") as mock_stdio,
         patch.object(server_module, "_run_http") as mock_http,
     ):
         main(["--transport", "stdio"])
     mock_build.assert_called_once()
-    mock_stdio.assert_called_once_with(fake_server)
+    # _run_stdio(server, multi_config, holder): the server is the first arg.
+    mock_stdio.assert_called_once()
+    assert mock_stdio.call_args.args[0] is fake_server
     mock_http.assert_not_called()
 
 
@@ -184,12 +187,13 @@ def test_main_stdio_path_from_server_json(_mute_logging_setup):
     fake_server = MagicMock()
     with (
         _patch_load_server_config(ServerConfig.model_validate({"transport": "stdio"})),
-        patch.object(server_module, "_build_fastmcp", return_value=fake_server),
+        patch.object(fastmcp_module, "build_fastmcp", return_value=fake_server),
         patch.object(server_module, "_run_stdio") as mock_stdio,
         patch.object(server_module, "_run_http") as mock_http,
     ):
         main([])
-    mock_stdio.assert_called_once_with(fake_server)
+    mock_stdio.assert_called_once()
+    assert mock_stdio.call_args.args[0] is fake_server
     mock_http.assert_not_called()
 
 
@@ -218,8 +222,7 @@ def test_main_http_path_calls_run_http_with_cli_overrides(_mute_logging_setup):
     assert plan.bind.port == 8765
     assert plan.bind.sock is None
     assert plan.idle_seconds == 0
-    assert plan.daemon_handle is None
-    assert plan.daemon_process_name is None
+    assert plan.daemon is None
     mock_stdio.assert_not_called()
 
 
@@ -253,180 +256,33 @@ def test_main_http_refuses_non_loopback_host(_mute_logging_setup):
 
 
 # ---------------------------------------------------------------------------
-# _register_health_endpoint / _register_tools / _build_fastmcp
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_register_health_endpoint_returns_ok():
-    """The /health route handler returns ``{"status": "ok"}`` with HTTP 200."""
-    captured: dict[str, object] = {}
-
-    def _custom_route(path, methods):
-        captured["path"] = path
-        captured["methods"] = methods
-
-        def decorator(fn):
-            captured["fn"] = fn
-            return fn
-
-        return decorator
-
-    fake_server = MagicMock()
-    fake_server.custom_route = _custom_route
-    server_module._register_health_endpoint(fake_server)
-
-    # Route registered with the documented path + GET method.
-    from deephaven_mcp._health import HEALTH_PATH
-
-    assert captured["path"] == HEALTH_PATH
-    assert captured["methods"] == ["GET"]
-
-    # Invoke the handler with a dummy request; it must return a JSON 200.
-    response = await captured["fn"](MagicMock())
-    assert response.status_code == 200
-    # The body is a JSONResponse; decoding the content payload is enough.
-    import json as _json
-
-    assert _json.loads(response.body) == {"status": "ok"}
-
-
-def _multi_config_with_sections(
-    *, community: object | None, enterprise: object | None
-) -> MagicMock:
-    """Build a ConfigTree-shaped mock with explicit ``community``/``enterprise``."""
-    multi = MagicMock()
-    multi.community = community
-    multi.enterprise = enterprise
-    return multi
-
-
-def test_register_tools_registers_all_modules_when_both_loaded():
-    """When both community and enterprise sections are loaded, every tool module registers."""
-    fake_server = MagicMock()
-    multi = _multi_config_with_sections(
-        community=MagicMock(name="community"),
-        enterprise=MagicMock(name="enterprise"),
-    )
-    with (
-        patch.object(server_module, "session") as m_session,
-        patch.object(server_module, "table") as m_table,
-        patch.object(server_module, "script") as m_script,
-        patch.object(server_module, "session_community") as m_sc,
-        patch.object(server_module, "session_enterprise") as m_se,
-        patch.object(server_module, "catalog") as m_catalog,
-        patch.object(server_module, "pq") as m_pq,
-    ):
-        server_module._register_tools(fake_server, multi)
-    for m in (m_session, m_table, m_script, m_sc, m_se, m_catalog, m_pq):
-        m.register_tools.assert_called_once_with(fake_server)
-
-
-def test_register_tools_skips_enterprise_modules_on_community_only():
-    """A community-only deployment must not expose enterprise tools."""
-    fake_server = MagicMock()
-    multi = _multi_config_with_sections(
-        community=MagicMock(name="community"), enterprise=None
-    )
-    with (
-        patch.object(server_module, "session") as m_session,
-        patch.object(server_module, "table") as m_table,
-        patch.object(server_module, "script") as m_script,
-        patch.object(server_module, "session_community") as m_sc,
-        patch.object(server_module, "session_enterprise") as m_se,
-        patch.object(server_module, "catalog") as m_catalog,
-        patch.object(server_module, "pq") as m_pq,
-    ):
-        server_module._register_tools(fake_server, multi)
-    # Always-on tools register.
-    for m in (m_session, m_table, m_script, m_sc):
-        m.register_tools.assert_called_once_with(fake_server)
-    # Enterprise tools are gated off.
-    for m in (m_se, m_catalog, m_pq):
-        m.register_tools.assert_not_called()
-
-
-def test_register_tools_skips_community_module_on_enterprise_only():
-    """An enterprise-only deployment must not expose community session tools."""
-    fake_server = MagicMock()
-    multi = _multi_config_with_sections(
-        community=None, enterprise=MagicMock(name="enterprise")
-    )
-    with (
-        patch.object(server_module, "session") as m_session,
-        patch.object(server_module, "table") as m_table,
-        patch.object(server_module, "script") as m_script,
-        patch.object(server_module, "session_community") as m_sc,
-        patch.object(server_module, "session_enterprise") as m_se,
-        patch.object(server_module, "catalog") as m_catalog,
-        patch.object(server_module, "pq") as m_pq,
-    ):
-        server_module._register_tools(fake_server, multi)
-    for m in (m_session, m_table, m_script, m_se, m_catalog, m_pq):
-        m.register_tools.assert_called_once_with(fake_server)
-    m_sc.register_tools.assert_not_called()
-
-
-def test_register_tools_skips_section_specific_modules_when_neither_loaded():
-    """When neither section is loaded, only cross-cutting tools register."""
-    fake_server = MagicMock()
-    multi = _multi_config_with_sections(community=None, enterprise=None)
-    with (
-        patch.object(server_module, "session") as m_session,
-        patch.object(server_module, "table") as m_table,
-        patch.object(server_module, "script") as m_script,
-        patch.object(server_module, "session_community") as m_sc,
-        patch.object(server_module, "session_enterprise") as m_se,
-        patch.object(server_module, "catalog") as m_catalog,
-        patch.object(server_module, "pq") as m_pq,
-    ):
-        server_module._register_tools(fake_server, multi)
-    for m in (m_session, m_table, m_script):
-        m.register_tools.assert_called_once_with(fake_server)
-    for m in (m_sc, m_se, m_catalog, m_pq):
-        m.register_tools.assert_not_called()
-
-
-def test_build_fastmcp_wires_lifespan_tools_and_health():
-    """``_build_fastmcp`` returns a FastMCP wired with the lifespan, tools, and health."""
-    fake_server = MagicMock()
-    fake_lifespan = object()
-    with (
-        patch.object(
-            server_module, "FastMCP", return_value=fake_server
-        ) as mock_fastmcp,
-        patch.object(
-            server_module, "make_lifespan", return_value=fake_lifespan
-        ) as mock_lifespan,
-        patch.object(server_module, "_register_tools") as mock_tools,
-        patch.object(server_module, "_register_health_endpoint") as mock_health,
-    ):
-        fake_multi = _multi_config_with(ServerConfig(), Path("/tmp/x"))
-        result = server_module._build_fastmcp(fake_multi, "custom-name", idle=None)
-    assert result is fake_server
-    mock_lifespan.assert_called_once_with(fake_multi, idle=None)
-    mock_fastmcp.assert_called_once()
-    # FastMCP receives the lifespan and the configured server name.
-    assert mock_fastmcp.call_args.kwargs["lifespan"] is fake_lifespan
-    assert mock_fastmcp.call_args.kwargs["name"] == "custom-name"
-    mock_tools.assert_called_once_with(fake_server, fake_multi)
-    mock_health.assert_called_once_with(fake_server)
-
-
-# ---------------------------------------------------------------------------
 # _run_stdio
 # ---------------------------------------------------------------------------
 
 
-def test_run_stdio_calls_run_stdio_async():
-    """``_run_stdio`` drives ``server.run_stdio_async()`` via ``asyncio.run``."""
+def test_run_stdio_wraps_run_stdio_async_in_process_lifespan():
+    """``_run_stdio`` runs the stdio transport inside ``process_lifespan``.
+
+    The process-scoped resources are built around ``run_stdio_async`` so the
+    per-session lifespan can read them from the shared holder.
+    """
     fake_server = MagicMock()
-    sentinel = object()
-    fake_server.run_stdio_async = MagicMock(return_value=sentinel)
-    with patch.object(server_module.asyncio, "run") as mock_run:
-        server_module._run_stdio(fake_server)
-    fake_server.run_stdio_async.assert_called_once_with()
-    mock_run.assert_called_once_with(sentinel)
+    fake_server.run_stdio_async = AsyncMock()
+    multi = _multi_config_with(ServerConfig(), Path("/tmp/x"))
+    holder = object()
+
+    captured: dict[str, object] = {}
+
+    @contextlib.asynccontextmanager
+    async def _fake_process_lifespan(mc, *, idle, holder):
+        captured["args"] = (mc, idle, holder)
+        yield MagicMock()
+
+    with patch.object(server_module, "process_lifespan", _fake_process_lifespan):
+        server_module._run_stdio(fake_server, multi, holder)
+
+    fake_server.run_stdio_async.assert_awaited_once_with()
+    assert captured["args"] == (multi, None, holder)
 
 
 # ---------------------------------------------------------------------------
@@ -445,12 +301,13 @@ def test_main_daemon_path_invokes_run_http_with_daemon_plan(_mute_logging_setup)
     mock_run.assert_called_once()
     mock_stdio.assert_not_called()
     plan = mock_run.call_args.args[0]
-    # Daemon-mode shape: handoff bind, registry handle paired with
-    # process_name, idle_seconds populated from daemon_cfg defaults.
+    # Daemon-mode shape: handoff bind, registry publish params, idle_seconds
+    # populated from daemon_cfg defaults.
     assert plan.bind.host is None
     assert plan.bind.sock is not None
-    assert plan.daemon_handle is not None
-    assert plan.daemon_process_name is not None
+    assert plan.daemon is not None
+    assert plan.daemon.handle is not None
+    assert plan.daemon.process_name is not None
     plan.bind.close_unhanded()
 
 
@@ -468,8 +325,7 @@ def test_main_daemon_path_threads_runtime_dir_override(_mute_logging_setup):
             psk="x" * 32,
             bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
             idle_seconds=0,
-            daemon_handle=None,
-            daemon_process_name=None,
+            daemon=None,
         )
 
     with (
@@ -547,7 +403,7 @@ def test_main_runtime_dir_without_daemon_is_no_op(_mute_logging_setup) -> None:
         _patch_load_server_config(ServerConfig()),
         patch.object(server_module, "_run_stdio") as mock_stdio,
         patch.object(server_module, "_run_http") as mock_http,
-        patch.object(server_module, "_build_fastmcp", return_value=MagicMock()),
+        patch.object(fastmcp_module, "build_fastmcp", return_value=MagicMock()),
     ):
         main(["--runtime-dir", "/var/tmp/dh-runtime"])
     mock_stdio.assert_called_once()
@@ -566,8 +422,7 @@ def test_main_daemon_path_threads_psk_override(_mute_logging_setup, tmp_path):
             psk="x" * 32,
             bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
             idle_seconds=0,
-            daemon_handle=None,
-            daemon_process_name=None,
+            daemon=None,
         )
 
     with (

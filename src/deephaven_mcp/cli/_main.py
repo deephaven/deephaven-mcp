@@ -27,13 +27,18 @@ import click
 
 from deephaven_mcp._logging import setup_logging
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._commands.catalog import catalog as catalog_group
 from deephaven_mcp.cli._commands.config import config as config_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
 from deephaven_mcp.cli._commands.introspect import introspect as introspect_command
+from deephaven_mcp.cli._commands.pq import pq as pq_group
+from deephaven_mcp.cli._commands.script import script as script_group
 from deephaven_mcp.cli._commands.session import session as session_group
+from deephaven_mcp.cli._commands.system import system as system_group
+from deephaven_mcp.cli._commands.table import table as table_group
 from deephaven_mcp.cli._commands.tool import tool as tool_group
 from deephaven_mcp.cli._errors import CliError, ErrorCode, render_error
-from deephaven_mcp.cli._format import OUTPUT_MODES, OutputMode
+from deephaven_mcp.cli._format import OUTPUT_ENV_VAR, OUTPUT_MODES, OutputMode
 from deephaven_mcp.cli._help import build_help
 from deephaven_mcp.cli._runtime import load_runtime
 from deephaven_mcp.config.schema import CliConfig
@@ -127,12 +132,15 @@ def _verbosity_to_level(verbose: int, quiet: bool) -> int:
         description=(
             "dh-mcp manages a per-user background daemon that hosts the "
             "Deephaven MCP systems server, then connects to it to inspect "
-            "and invoke tools. Getting started: run 'dh-mcp tool list' to "
-            "see the available tools (the daemon auto-starts on first use), "
-            "then 'dh-mcp tool call NAME' to invoke one. Use the 'daemon' "
-            "group to manage the daemon lifecycle (start, stop, status, "
-            "restart, reset, logs), 'tool' to list, show, and call MCP "
-            "tools, and 'config' to inspect and validate configuration. "
+            "and invoke tools. Getting started: run 'dh-mcp session list' to "
+            "see the available sessions (the daemon auto-starts on first "
+            "use), then use a verb like 'dh-mcp table data' to act on one. "
+            "Use the 'daemon' group to manage the daemon lifecycle (start, "
+            "stop, status, restart, reset, logs); the 'session', 'system', "
+            "'table', 'script', 'catalog', and 'pq' groups to inspect and "
+            "operate sessions and Enterprise resources with first-class "
+            "flags; 'tool' to list, show, and call any MCP tool directly; "
+            "and 'config' to inspect and validate configuration. "
             "Pass --no-auto-start to require an already-running daemon "
             "instead of spawning one. AI agents should run 'dh-mcp "
             "introspect' for a machine-readable manifest of every command, "
@@ -175,7 +183,7 @@ def _verbosity_to_level(verbose: int, quiet: bool) -> int:
     "-o",
     "--output",
     type=click.Choice(OUTPUT_MODES),
-    envvar="DH_MCP_OUTPUT",
+    envvar=OUTPUT_ENV_VAR,
     default=None,
     help=(
         "Output format. Takes precedence over the DH_MCP_OUTPUT "
@@ -269,6 +277,11 @@ async def cli(
 cli.add_command(daemon_group)
 cli.add_command(tool_group)
 cli.add_command(session_group)
+cli.add_command(system_group)
+cli.add_command(table_group)
+cli.add_command(script_group)
+cli.add_command(catalog_group)
+cli.add_command(pq_group)
 cli.add_command(config_group)
 cli.add_command(introspect_command)
 

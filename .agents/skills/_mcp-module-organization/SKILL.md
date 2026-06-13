@@ -31,7 +31,7 @@ user-invocable: false
 5. **Registering New Tool Modules**:
    - **CRITICAL**: Every tool module must define a `register_tools(server: FastMCP) -> None` function
    - This function calls `server.tool()(tool_fn)` for each tool in the module
-   - After creating a new module, add a `module.register_tools(server)` call to `_register_tools()` in `src/deephaven_mcp/mcp_systems_server/server.py`. The systems server is multiplexed in one binary, but tool *registration* is section-gated: cross-cutting modules (`session`, `table`, `script` — anything that operates on either side) register unconditionally; section-specific modules register only when the corresponding configuration section is present (`session_community` when `multi_config.community is not None`; `session_enterprise`, `catalog`, `pq` when `multi_config.enterprise is not None`). See `_register_tools` in `mcp_systems_server/server.py`.
+   - After creating a new module, add a `module.register_tools(server)` call to `_register_tools()` in `src/deephaven_mcp/mcp_systems_server/_fastmcp.py`. **Registration is not gated by configuration** — every tool module registers unconditionally, so the tool surface is stable and self-describing across all deployment shapes (and matches the static `dh-mcp` CLI command tree). A tool that needs a configuration section the deployment lacks **self-reports applicability when invoked**: it returns an empty result where one is meaningful (e.g. `enterprise_systems_status` → `{"systems": []}`) or a clean user-facing error otherwise. The section accessors enforce this — `get_enterprise_settings` raises `EnterpriseNotConfiguredError` and `get_community_settings`/`get_community_registry` raise `CommunityNotConfiguredError` (both `ConfigurationError` subclasses), which each tool's `except` handler converts to a `success=False` response. Do **not** gate registration on `multi_config.community`/`multi_config.enterprise`. See `_register_tools` in `mcp_systems_server/_fastmcp.py`.
 
 ## Required Pattern for MCP Tool Modules
 
@@ -54,7 +54,7 @@ Common shared utilities (import only what you need):
 ```python
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     error_response,                   # Build a standard error response dict
-    format_initialization_status,     # Format registry initialization phase/errors
+    format_partial_result,            # Flag an incomplete (partial-discovery) result
     get_lifespan_context,             # Get the LifespanContext from MCP context
     get_registry,                     # Get the MultiSystemRegistry from context
     get_multi_config,                 # Get the merged ConfigTree from context

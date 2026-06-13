@@ -19,9 +19,12 @@ import click
 
 from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.cli._async import run_async
-from deephaven_mcp.cli._commands.shared import acquire_daemon, registry_corrupt_message
+from deephaven_mcp.cli._commands._acquire import (
+    acquire_daemon,
+    registry_corrupt_message,
+)
 from deephaven_mcp.cli._daemon import DaemonClientError, stop_daemon
-from deephaven_mcp.cli._errors import CliError, ErrorCode
+from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._help import (
     HelpfulGroup,
@@ -123,11 +126,6 @@ def daemon() -> None:
     """
 
 
-_EXIT_CODES = (
-    (0, "success"),
-    (2, "user-facing failure (config or daemon)"),
-)
-
 # Fields emitted by dump_redacted(entry) for the daemon registry entry;
 # shared by start, status, and restart (psk is redacted).
 _ENTRY_FIELDS = (
@@ -178,11 +176,11 @@ _OUTPUT_START = OutputSpec(
             "$ dh-mcp -o json daemon start | jq .port",
         ),
         see_also=("dh-mcp daemon status", "dh-mcp daemon stop"),
-        exit_codes=_EXIT_CODES,
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
-            ("daemon_startup_timeout", "Spawned but did not register in time."),
-            ("daemon_client_error", "Client-side daemon-management failure."),
-            ("daemon_registry_corrupt", "daemon.json exists but cannot be parsed."),
+            ErrorCode.DAEMON_STARTUP_TIMEOUT,
+            ErrorCode.DAEMON_CLIENT_ERROR,
+            ErrorCode.DAEMON_REGISTRY_CORRUPT,
         ),
     ),
 )
@@ -227,10 +225,10 @@ _OUTPUT_STOP = OutputSpec(
         output=_OUTPUT_STOP,
         examples=("$ dh-mcp daemon stop",),
         see_also=("dh-mcp daemon start", "dh-mcp daemon status"),
-        exit_codes=_EXIT_CODES,
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
-            ("daemon_client_error", "Client-side daemon-management failure."),
-            ("daemon_registry_corrupt", "daemon.json exists but cannot be parsed."),
+            ErrorCode.DAEMON_CLIENT_ERROR,
+            ErrorCode.DAEMON_REGISTRY_CORRUPT,
         ),
     ),
 )
@@ -281,13 +279,8 @@ _OUTPUT_STATUS = OutputSpec(
             "$ dh-mcp -o json daemon status | jq .running",
         ),
         see_also=("dh-mcp daemon start", "dh-mcp daemon logs"),
-        exit_codes=_EXIT_CODES,
-        error_codes=(
-            (
-                "daemon_registry_corrupt",
-                "daemon.json exists but cannot be parsed; recover with dh-mcp daemon reset.",
-            ),
-        ),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(ErrorCode.DAEMON_REGISTRY_CORRUPT,),
     ),
 )
 @click.pass_obj
@@ -370,11 +363,11 @@ _OUTPUT_RESTART = OutputSpec(
             "$ dh-mcp -o json daemon restart | jq .pid",
         ),
         see_also=("dh-mcp daemon start", "dh-mcp daemon stop"),
-        exit_codes=_EXIT_CODES,
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
-            ("daemon_startup_timeout", "Spawned but did not register in time."),
-            ("daemon_client_error", "Client-side daemon-management failure."),
-            ("daemon_registry_corrupt", "daemon.json exists but cannot be parsed."),
+            ErrorCode.DAEMON_STARTUP_TIMEOUT,
+            ErrorCode.DAEMON_CLIENT_ERROR,
+            ErrorCode.DAEMON_REGISTRY_CORRUPT,
         ),
     ),
 )
@@ -432,13 +425,8 @@ _OUTPUT_RESET = OutputSpec(
             "$ dh-mcp -o json daemon reset | jq .quarantined_to",
         ),
         see_also=("dh-mcp daemon status", "dh-mcp daemon stop"),
-        exit_codes=_EXIT_CODES,
-        error_codes=(
-            (
-                "daemon_registry_live",
-                "Refused: a live daemon is still registered; stop it first.",
-            ),
-        ),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(ErrorCode.DAEMON_REGISTRY_LIVE,),
     ),
 )
 @click.pass_obj
@@ -564,8 +552,8 @@ async def _tail_and_follow(
             "$ dh-mcp daemon logs -f",
         ),
         see_also=("dh-mcp daemon status",),
-        exit_codes=_EXIT_CODES,
-        error_codes=(("daemon_not_running", "No daemon log file exists yet."),),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(ErrorCode.DAEMON_NOT_RUNNING,),
     ),
 )
 @click.option(

@@ -1,4 +1,10 @@
-"""Helpers shared across the ``dh-mcp`` command modules."""
+"""Daemon acquisition for ``dh-mcp`` command modules.
+
+Adapts the ``cli/_daemon.py`` lifecycle layer for command use: acquire a
+running daemon (get-or-start) and translate daemon-lifecycle exceptions into
+:class:`CliError` with stable error codes and an operator recovery hint. The
+error mapping is supplied by the caller, so each command sets its own policy.
+"""
 
 from __future__ import annotations
 

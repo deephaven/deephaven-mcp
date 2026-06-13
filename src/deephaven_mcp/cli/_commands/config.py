@@ -10,6 +10,7 @@ import click
 
 from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._errors import ErrorCode, ExitCode
 from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._help import (
     HelpfulGroup,
@@ -32,11 +33,6 @@ def config() -> None:
     useful in CI ('validate').
     """
 
-
-_EXIT_CODES = (
-    (0, "success"),
-    (2, "user-facing failure (configuration invalid or missing)"),
-)
 
 _OUTPUT_SHOW = OutputSpec(
     "object",
@@ -86,8 +82,8 @@ _OUTPUT_VALIDATE = OutputSpec(
             "$ dh-mcp -o json config show | jq .community",
         ),
         see_also=("dh-mcp config validate",),
-        exit_codes=_EXIT_CODES,
-        error_codes=(("config_invalid", "The configuration tree failed validation."),),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(ErrorCode.CONFIG_INVALID,),
     ),
 )
 @click.pass_obj
@@ -118,8 +114,8 @@ async def config_show(runtime: Runtime) -> None:
         output=_OUTPUT_VALIDATE,
         examples=("$ dh-mcp config validate",),
         see_also=("dh-mcp config show",),
-        exit_codes=_EXIT_CODES,
-        error_codes=(("config_invalid", "The configuration tree failed validation."),),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(ErrorCode.CONFIG_INVALID,),
     ),
 )
 @click.pass_obj

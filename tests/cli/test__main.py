@@ -248,11 +248,44 @@ def test_value_taking_options_excludes_arguments_and_flags() -> None:
 
 
 def test_help_lists_top_level_nouns() -> None:
+    """Every group registered in ``_main`` is reachable from the root help."""
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"], standalone_mode=False)
     assert result.exit_code == 0
-    for noun in ("daemon", "tool", "config", "introspect"):
+    for noun in (
+        "daemon",
+        "tool",
+        "session",
+        "system",
+        "table",
+        "script",
+        "catalog",
+        "pq",
+        "config",
+        "introspect",
+    ):
         assert noun in result.output
+
+
+def test_main_registers_exactly_the_expected_groups() -> None:
+    """``cli.add_command`` wiring matches the documented command surface.
+
+    Pins the registration in ``_main`` so a group added to (or dropped
+    from) ``_commands`` without wiring it here fails this test rather
+    than silently going missing from the CLI.
+    """
+    assert set(cli.commands) == {
+        "daemon",
+        "tool",
+        "session",
+        "system",
+        "table",
+        "script",
+        "catalog",
+        "pq",
+        "config",
+        "introspect",
+    }
 
 
 def test_version_flag() -> None:
@@ -351,6 +384,59 @@ def test_main_returns_zero_on_success(capsys) -> None:
     assert exc_info.value.code == 0
     out = capsys.readouterr().out
     payload = json.loads(out)
+    assert payload["stopped"] is False
+
+
+# ---------------------------------------------------------------------------
+# DH_MCP_OUTPUT environment variable
+# ---------------------------------------------------------------------------
+
+
+def test_output_env_var_drives_a_normal_command(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DH_MCP_OUTPUT (no -o flag) selects a normal command's output mode.
+
+    Exercises the full wiring the constant single-sources: the root
+    option's ``envvar=OUTPUT_ENV_VAR`` resolves the env value, the
+    callback folds it into ``cli_overrides``, and the command renders
+    in that mode. JSON parsing fails (and the test with it) if the env
+    var is not honored — human mode prints ``stopped: false``.
+    """
+    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    rt = _runtime()
+    with (
+        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch(
+            "deephaven_mcp.cli._commands.daemon.stop_daemon",
+            AsyncMock(return_value=False),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main(["daemon", "stop"])
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stopped"] is False
+
+
+def test_explicit_output_flag_overrides_env_var(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit ``-o`` wins over DH_MCP_OUTPUT (the documented precedence)."""
+    monkeypatch.setenv("DH_MCP_OUTPUT", "yaml")
+    rt = _runtime()
+    with (
+        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch(
+            "deephaven_mcp.cli._commands.daemon.stop_daemon",
+            AsyncMock(return_value=False),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main(["-o", "json", "daemon", "stop"])
+    assert exc_info.value.code == 0
+    # JSON (the flag), not YAML (the env): YAML output would not parse here.
+    payload = json.loads(capsys.readouterr().out)
     assert payload["stopped"] is False
 
 

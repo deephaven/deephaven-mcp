@@ -78,7 +78,7 @@ This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH with n
 
 > **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
 
-**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
+**For stdio-only AI tools** (e.g. Claude Desktop), also install [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) — it bridges a stdio-only client to HTTP MCP servers such as the hosted docs server:
 
 ```bash
 uv tool install --python-preference managed mcp-proxy
@@ -155,10 +155,7 @@ To stop the server: `pkill -f dh-mcp-systems-server`
   "mcpServers": {
     "deephaven-systems": {
       "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "DH_MCP_DATA_DIR": "/full/path/to/your/dh-mcp-data"
-      }
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
@@ -167,6 +164,11 @@ To stop the server: `pkill -f dh-mcp-systems-server`
   }
 }
 ```
+
+> The default config directory is `~/.deephaven/ai/config/` (created in
+> Step 2), so no `DH_MCP_DATA_DIR` is needed. To use a different location,
+> add an `env` block setting `DH_MCP_DATA_DIR` to a data root that contains
+> a `config/` subdirectory.
 
 For an HTTP setup, replace the `deephaven-systems` stanza with one
 that bridges through `mcp-proxy` and forwards the PSK header:
@@ -220,7 +222,7 @@ This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH. Use `
 
 > **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
 
-**For stdio-only AI tools** (e.g. Claude Desktop), also install `mcp-proxy`, which bridges stdio transport to the HTTP servers:
+**For stdio-only AI tools** (e.g. Claude Desktop), also install [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy) — it bridges a stdio-only client to HTTP MCP servers such as the hosted docs server:
 
 ```bash
 uv tool install --python-preference managed mcp-proxy
@@ -310,10 +312,7 @@ To stop the server: `pkill -f dh-mcp-systems-server`
   "mcpServers": {
     "deephaven-systems": {
       "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "DH_MCP_DATA_DIR": "/full/path/to/your/dh-mcp-data"
-      }
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
@@ -322,6 +321,11 @@ To stop the server: `pkill -f dh-mcp-systems-server`
   }
 }
 ```
+
+> The default config directory is `~/.deephaven/ai/config/` (created in
+> Step 2), so no `DH_MCP_DATA_DIR` is needed. To use a different location,
+> add an `env` block setting `DH_MCP_DATA_DIR` to a data root that contains
+> a `config/` subdirectory.
 
 Or, for an HTTP-bridged setup, use:
 
@@ -392,9 +396,13 @@ A thin local client for the systems server. The `dh-mcp` console
 script auto-spawns a per-user background daemon on first use,
 discovers it via a `daemon.json` registry under the runtime
 directory, and dispatches MCP tool calls over loopback HTTP with a
-random PSK. Useful for shell scripting, tool exploration, and
-local debugging without managing a server lifecycle yourself. See
-[`docs/CLI.md`](docs/CLI.md) for the full reference.
+random PSK. Beyond the raw `dh-mcp tool call` escape hatch, it offers
+friendly noun-verb commands — `session`, `system`, `table`, `script`,
+`catalog`, and `pq` — with typed flags, shaped output, and
+`-o human|json|yaml` (e.g. `dh-mcp session list`,
+`dh-mcp session open <id>`). Useful for shell scripting, tool
+exploration, and local debugging without managing a server lifecycle
+yourself. See [`docs/CLI.md`](docs/CLI.md) for the full reference.
 
 ### Systems Server (`dh-mcp-systems-server`)
 
@@ -435,7 +443,7 @@ in the PQ id (form `<system>:<serial>`).
 *System discovery:*
 
 - `list_systems` - List every configured Community session and Enterprise system as `(name, type)` pairs
-- `enterprise_systems_status(system)` - Get the initialization status / last error of one configured DHE system
+- `enterprise_systems_status(system)` - Report a configured DHE system's health (liveness) and any discovery errors
 
 *Community sessions:*
 
@@ -512,9 +520,13 @@ graph TD
 
 ```mermaid
 graph TD
-    A["MCP Clients"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    A["MCP Clients with HTTP support"] --"streamable-http (direct)"--> B("MCP Docs Server")
+    C["stdio-only MCP Clients (e.g. Claude Desktop)"] --"stdio"--> D["mcp-proxy"]
+    D --"streamable-http"--> B
     B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
+
+*The hosted Docs Server speaks streamable-HTTP. Clients with native HTTP MCP support connect directly; stdio-only clients (e.g. Claude Desktop) bridge through [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy).*
 
 ---
 
@@ -699,10 +711,7 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
   "mcpServers": {
     "deephaven-systems": {
       "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "DH_MCP_DATA_DIR": "/full/path/to/your/dh-mcp-data"
-      }
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
@@ -711,6 +720,11 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
   }
 }
 ```
+
+> The systems server reads the default config directory
+> `~/.deephaven/ai/config/`; add an `env` block setting `DH_MCP_DATA_DIR`
+> only to point at a non-default data root (which must contain a `config/`
+> subdirectory).
 
 If you instead want to share a single HTTP-transport server across
 several clients, install `mcp-proxy` (see
@@ -834,8 +848,8 @@ This section provides comprehensive guidance for diagnosing and resolving common
 Before diving into detailed troubleshooting, try these common solutions:
 
 1. **Restart your IDE/AI assistant** after any configuration changes
-2. **Check that all file paths are absolute** in your JSON configurations
-3. **Verify your virtual environment is activated** when running commands
+2. **Check that file paths are correct** in your JSON configurations (use absolute paths for venv-based installs)
+3. **Verify your virtual environment is activated** when running commands (venv-based installs only — not needed with `uv tool install`)
 4. **Validate JSON syntax** using [https://jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
 
 ### Common Error Messages
@@ -865,7 +879,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Common mistake: trailing comma in last object property
 
 - **Incorrect File Paths:**
-  - All paths in JSON configurations must be **absolute paths**
+  - Use **absolute paths** for venv-based installs; with `uv tool install`, the `command` is just the bare executable name (e.g. `dh-mcp-systems-server`)
   - Use forward slashes `/` even on Windows in JSON
   - Verify files exist at the specified paths
 

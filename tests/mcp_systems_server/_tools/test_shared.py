@@ -8,7 +8,7 @@ Covers the helpers used by every tool:
 - Session retrieval (``get_session_from_context``, ``get_enterprise_session``).
 - Response shapers / size guards (``error_response``, ``check_response_size``,
   ``format_meta_table_result``, ``build_table_data_response``).
-- ``format_initialization_status``, ``redact_json_sensitive_fields``.
+- ``format_partial_result``, ``redact_json_sensitive_fields``.
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ import pytest
 from conftest import MockContext
 
 from deephaven_mcp._exceptions import (
+    CommunityNotConfiguredError,
+    EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
 )
@@ -53,7 +55,7 @@ def _ctx(*, registry: object = None, multi_config: object = None) -> MockContext
 
 
 # ---------------------------------------------------------------------------
-# error_response / format_initialization_status
+# error_response / format_partial_result
 # ---------------------------------------------------------------------------
 
 
@@ -65,36 +67,51 @@ def test_error_response_shape():
     }
 
 
-def test_format_initialization_status_completed_no_errors():
-    assert (
-        shared.format_initialization_status(InitializationPhase.COMPLETED, {}) is None
-    )
+def test_format_partial_result_completed_no_errors_is_none():
+    assert shared.format_partial_result(InitializationPhase.COMPLETED, {}) is None
 
 
-def test_format_initialization_status_loading_phase_emits_status():
-    info = shared.format_initialization_status(InitializationPhase.LOADING, {})
+def test_format_partial_result_loading_phase():
+    info = shared.format_partial_result(InitializationPhase.LOADING, {})
     assert info is not None
-    assert "actively running" in info["status"].lower()
+    assert info["phase"] == "loading"
+    assert "actively running" in info["detail"].lower()
+    assert "errors" not in info
 
 
-def test_format_initialization_status_partial_phase_emits_status():
-    info = shared.format_initialization_status(InitializationPhase.PARTIAL, {})
+def test_format_partial_result_partial_phase():
+    info = shared.format_partial_result(InitializationPhase.PARTIAL, {})
     assert info is not None
-    assert "not yet" in info["status"].lower()
+    assert info["phase"] == "partial"
+    assert "not yet" in info["detail"].lower()
 
 
-def test_format_initialization_status_failed_phase_emits_status():
-    info = shared.format_initialization_status(InitializationPhase.FAILED, {})
+def test_format_partial_result_failed_phase():
+    info = shared.format_partial_result(InitializationPhase.FAILED, {})
     assert info is not None
-    assert "failed" in info["status"].lower()
+    assert info["phase"] == "failed"
+    assert "failed" in info["detail"].lower()
 
 
-def test_format_initialization_status_includes_errors():
-    info = shared.format_initialization_status(
+def test_format_partial_result_completed_with_errors():
+    info = shared.format_partial_result(
         InitializationPhase.COMPLETED, {"sys-a": "boom"}
     )
     assert info is not None
+    assert info["phase"] == "completed"
     assert info["errors"] == {"sys-a": "boom"}
+    assert "connection issues" in info["detail"].lower()
+
+
+def test_format_partial_result_unknown_phase_hits_assert_never():
+    """An out-of-band phase hits the ``assert_never`` safety net.
+
+    ``InitializationPhase`` makes the ``case _`` branch statically
+    unreachable; passing a non-member value with the type checker silenced
+    proves the runtime ``assert_never`` branch is covered.
+    """
+    with pytest.raises(AssertionError):
+        shared.format_partial_result("bogus", {})  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -131,18 +148,16 @@ def test_get_enterprise_settings_returns_settings():
 
 
 def test_get_enterprise_settings_raises_when_enterprise_none():
-    """Defensive guard required by _python-coding-practices rule 11.
+    """A community-only deployment surfaces a clean user-facing error.
 
-    The registration-time gate in ``server._register_tools`` makes this
-    branch unreachable in normal operation, but the guard must still be
-    exercised by a unit test that constructs the bypass.
+    Every tool registers unconditionally, so an Enterprise tool can be
+    invoked with no Enterprise system configured; this must be a
+    user-correctable ``EnterpriseNotConfiguredError``, not an InternalError.
     """
     multi_config = MagicMock()
     multi_config.enterprise = None
     ctx = _ctx(multi_config=multi_config)
-    with pytest.raises(
-        InternalError, match="get_enterprise_settings called without enterprise"
-    ):
+    with pytest.raises(EnterpriseNotConfiguredError, match="No Enterprise"):
         shared.get_enterprise_settings(ctx)
 
 
@@ -156,13 +171,11 @@ def test_get_community_settings_returns_settings():
 
 
 def test_get_community_settings_raises_when_community_none():
-    """Defensive guard required by _python-coding-practices rule 11."""
+    """An enterprise-only deployment surfaces a clean user-facing error."""
     multi_config = MagicMock()
     multi_config.community = None
     ctx = _ctx(multi_config=multi_config)
-    with pytest.raises(
-        InternalError, match="get_community_settings called without community"
-    ):
+    with pytest.raises(CommunityNotConfiguredError, match="No Community"):
         shared.get_community_settings(ctx)
 
 
@@ -176,7 +189,7 @@ def test_get_community_registry_returns_child():
 def test_get_community_registry_raises_when_absent():
     registry = MagicMock(community=None)
     ctx = _ctx(registry=registry)
-    with pytest.raises(InternalError, match="No community sessions are configured"):
+    with pytest.raises(CommunityNotConfiguredError, match="No Community"):
         shared.get_community_registry(ctx)
 
 

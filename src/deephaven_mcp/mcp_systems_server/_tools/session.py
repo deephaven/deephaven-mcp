@@ -17,7 +17,7 @@ from deephaven_mcp import queries
 from deephaven_mcp.client import BaseSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     error_response,
-    format_initialization_status,
+    format_partial_result,
     get_multi_config,
     get_registry,
 )
@@ -169,6 +169,9 @@ async def sessions_list(
     - Use returned 'session_id' values with other tools like run_script, get_table_data
     - Check 'type' / 'system' / 'origin' fields on returned rows to scope subsequent calls
     - For detailed session information, use session_details with a specific session_id
+    - If 'partial_result' is present, this list may be incomplete: check its 'phase'
+      ('loading'/'partial' → discovery still running, retry later; 'failed' → report)
+      and 'errors' for which enterprise systems could not be reached
 
     Args:
         context (Context): The MCP context object.
@@ -202,9 +205,13 @@ async def sessions_list(
                 - 'origin' (str | None): ``"static"`` or ``"dynamic"`` for
                   community sessions; ``None`` for enterprise sessions.
                 - 'session_name' (str): Session name within the system.
-            - 'initialization' (dict, optional): Present when enterprise session discovery is
-                still in progress or completed with errors. Contains:
-                - 'status' (str): Human-readable description of the initialization state.
+            - 'partial_result' (dict, optional): Present only when this list may be
+                incomplete — enterprise session discovery is still in progress or some
+                systems failed. Contains:
+                - 'phase' (str): Machine-readable discovery phase — one of 'not_started',
+                    'partial', 'loading', 'completed', 'failed'. Use it to decide whether
+                    to retry (still loading) or report (failed).
+                - 'detail' (str): Human-readable description of why the result is partial.
                 - 'errors' (dict[str, str], optional): Present when one or more enterprise systems
                     had connection errors during initial discovery. Keys are factory names, values
                     are error descriptions.
@@ -230,6 +237,25 @@ async def sessions_list(
                     'session_name': 'default',
                 },
             ],
+        }
+
+    Example Partial Result (an enterprise system failed discovery):
+        {
+            'success': True,
+            'sessions': [
+                {
+                    'session_id': 'community:community:default',
+                    'type': 'community',
+                    'system': 'community',
+                    'origin': 'static',
+                    'session_name': 'default',
+                },
+            ],
+            'partial_result': {
+                'phase': 'completed',
+                'detail': 'Some enterprise systems had connection issues during discovery.',
+                'errors': {'prod-system': 'connection refused'},
+            },
         }
 
     Example Error Response:
@@ -280,12 +306,12 @@ async def sessions_list(
 
         response: dict[str, object] = {"success": True, "sessions": results}
 
-        # Surface initialization status from the same atomic snapshot
-        init_info = format_initialization_status(
+        # Flag a partial result (incomplete discovery) from the same atomic snapshot
+        partial = format_partial_result(
             snapshot.initialization_phase, snapshot.initialization_errors
         )
-        if init_info:
-            response["initialization"] = init_info
+        if partial:
+            response["partial_result"] = partial
 
         return response
     except Exception as e:

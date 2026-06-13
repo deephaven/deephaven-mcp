@@ -1,24 +1,23 @@
-"""Output rendering for ``dh-mcp`` subcommand results.
+"""Output-mode vocabulary and rendering for ``dh-mcp`` subcommand results.
 
-Subcommand handlers produce one of these things:
+This module owns the output-mode vocabulary every command shares — the
+``OutputMode`` type, its valid values (``OUTPUT_MODES``), and the
+environment variable that supplies it (``OUTPUT_ENV_VAR``) — and renders
+any subcommand return value in the selected mode via :func:`format_output`.
 
-- A list of MCP tool descriptors (``dh-mcp tool list``).
-- A single ``CallToolResult`` (``dh-mcp tool call <name>``).
-- A diagnostic record (``dh-mcp daemon status``).
-
-Each is rendered through :func:`format_output`, which dispatches on
-the requested ``output`` mode (``"human"`` / ``"json"`` / ``"yaml"``)
-and the runtime value type. Human output is intentionally minimal: a
-flat two-column listing for tool catalogs, ``TextContent``
-concatenation for tool results, and ``key: value`` lines for
-diagnostic dicts. ``json`` and ``yaml`` modes emit deterministically
-sorted documents suitable for piping into ``jq`` / ``yq`` or for
-programmatic consumption by AI agents.
+:func:`format_output` dispatches on the requested ``output`` mode
+(``"human"`` / ``"json"`` / ``"yaml"``) and the runtime value type. Human
+output is terminal-friendly: a flat two-column listing for tool catalogs,
+``TextContent`` concatenation for tool results, an aligned table for a list
+of row dicts (and for a ``data`` block nested in a dict), ``key: value``
+lines for other dicts, and a best-effort string for scalars. ``json`` and
+``yaml`` modes emit deterministically sorted documents suitable for piping
+into ``jq`` / ``yq`` or for programmatic consumption by AI agents.
 """
 
 from __future__ import annotations
 
-__all__ = ["OUTPUT_MODES", "OutputMode", "format_output"]
+__all__ = ["OUTPUT_ENV_VAR", "OUTPUT_MODES", "OutputMode", "format_output"]
 
 import json
 import shutil
@@ -33,6 +32,9 @@ OutputMode = Literal["human", "json", "yaml"]
 
 OUTPUT_MODES: tuple[OutputMode, ...] = get_args(OutputMode)
 """Runtime tuple of accepted ``-o/--output`` values, derived from :data:`OutputMode`."""
+
+OUTPUT_ENV_VAR = "DH_MCP_OUTPUT"
+"""Environment variable backing the ``-o/--output`` flag."""
 
 
 # ``Any``: renders heterogeneous CLI return values (pydantic models,
@@ -59,24 +61,29 @@ def _coerce_jsonable(value: Any) -> Any:
 
 # ``Any``: ``value`` is any subcommand return value (tool results,
 # redacted-config dicts, scalars); the render path dispatches on type.
-def format_output(value: Any, *, output: OutputMode) -> str:
+def format_output(
+    value: Any, *, output: OutputMode, empty_message: str = "(none)"
+) -> str:
     """Render ``value`` according to the requested CLI output mode.
 
     Args:
         value (Any): The value to render. Supported types include
             :class:`mcp.types.CallToolResult`, :class:`mcp.types.Tool`
-            lists, plain dicts, and primitive scalars.
+            lists, plain dicts, lists of row dicts, and primitive scalars.
         output (OutputMode): One of :data:`OUTPUT_MODES`. ``"human"``
             for terminal-friendly output; ``"json"`` for a single
             deterministically-formatted JSON document; ``"yaml"`` for
             a deterministically-formatted YAML document.
+        empty_message (str): Human-mode text for an empty list. Defaults
+            to ``"(none)"``; ``json``/``yaml`` modes ignore it and emit
+            ``[]``.
 
     Returns:
         str: The rendered output, *without* a trailing newline.
     """
     match output:
         case "human":
-            return _format_human(value)
+            return _format_human(value, empty_message=empty_message)
         case "json":
             return json.dumps(_coerce_jsonable(value), indent=2, sort_keys=True)
         case "yaml":
@@ -93,22 +100,91 @@ def format_output(value: Any, *, output: OutputMode) -> str:
             assert_never(unexpected)
 
 
-def _format_human(value: Any) -> str:
+# ``Any``: ``value`` is any subcommand return value (tool results,
+# redacted-config dicts, scalars); the render path dispatches on type.
+def _is_row_list(value: Any) -> bool:
+    """Return whether ``value`` is a non-empty list whose items are all dicts.
+
+    Such a value renders as an aligned :func:`_format_table` (a tabular tool
+    result or a ``data`` block); this is the single test that selects that path.
+    """
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, dict) for item in value)
+    )
+
+
+# ``Any``: ``value`` is any subcommand return value (tool results,
+# redacted-config dicts, scalars); the render path dispatches on type.
+def _format_human(value: Any, *, empty_message: str = "(none)") -> str:
     """Render ``value`` for a human reader on a terminal.
 
     Unrecognized types render via ``repr`` as a best-effort fallback.
     """
     if isinstance(value, CallToolResult):
         return _format_tool_result_human(value)
-    if isinstance(value, list) and all(isinstance(v, Tool) for v in value):
-        # An empty list still routes here so :func:`_format_tool_list`
-        # can emit the canonical "(no tools registered)" message.
-        return _format_tool_list(value)
+    if isinstance(value, list):
+        if not value:
+            return empty_message
+        if all(isinstance(v, Tool) for v in value):
+            return _format_tool_list(value)
+        if _is_row_list(value):
+            return _format_table(value)
+        return "\n".join(str(v) for v in value)
     if isinstance(value, dict):
-        return "\n".join(f"{k}: {v}" for k, v in value.items())
+        return _format_dict(value)
     if isinstance(value, str):
         return value
     return repr(value)
+
+
+def _format_dict(value: dict[str, Any]) -> str:
+    """Render a dict as ``key: value`` lines, with row-list values as tables.
+
+    A value that is a non-empty list of dicts (e.g. the ``data`` block of a
+    tabular tool result) renders as an indented :func:`_format_table`; every
+    other value renders inline as ``key: value``.
+    """
+    lines: list[str] = []
+    for k, v in value.items():
+        if _is_row_list(v):
+            lines.append(f"{k}:")
+            lines.append(_indent(_format_table(v)))
+        else:
+            lines.append(f"{k}: {v}")
+    return "\n".join(lines)
+
+
+def _indent(text: str, prefix: str = "  ") -> str:
+    """Prefix every line of ``text`` with ``prefix``."""
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
+def _format_table(rows: list[dict[str, Any]]) -> str:
+    """Render a list of row dicts as an aligned, header-topped text table.
+
+    Callers pass a non-empty list (:func:`_is_row_list` gates this path); the
+    column-width math assumes at least one row. Columns are ordered by first
+    appearance across the rows (the first row's keys, then any keys that only
+    later rows introduce). Cell values render via ``str``; missing cells render
+    empty. Columns are not truncated.
+    """
+    columns: list[str] = []
+    for row in rows:
+        for key in row:
+            if key not in columns:
+                columns.append(key)
+    cells = [[str(row.get(col, "")) for col in columns] for row in rows]
+    widths = [
+        max(len(col), max((len(row[i]) for row in cells), default=0))
+        for i, col in enumerate(columns)
+    ]
+    header = "  ".join(col.ljust(widths[i]) for i, col in enumerate(columns))
+    body = [
+        "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)) for row in cells
+    ]
+    return "\n".join([header, *body])
 
 
 def _format_tool_result_human(result: CallToolResult) -> str:
@@ -144,10 +220,9 @@ def _format_tool_list(tools: list[Tool]) -> str:
     description truncated to fit on a single line scaled to the
     current terminal width, falling back to 80 columns when no TTY
     is detected. The operator can request ``-o json`` for the full
-    payload.
+    payload. Callers pass a non-empty list; :func:`_format_human`
+    handles the empty case via its ``empty_message``.
     """
-    if not tools:
-        return "(no tools registered)"
     name_width = max(len(t.name) for t in tools)
     # ``shutil.get_terminal_size`` falls back to ``(80, 24)`` when
     # stdout is not a TTY (pipes, redirected output, tests). The

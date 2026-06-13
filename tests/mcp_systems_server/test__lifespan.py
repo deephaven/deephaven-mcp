@@ -1,12 +1,14 @@
 """Tests for ``deephaven_mcp.mcp_systems_server._lifespan``.
 
-The lifespan factory is now a thin orchestrator: it builds an
-``InstanceTracker`` + ``MultiSystemRegistry``, hands the per-child
-evictor lifecycle off to :class:`EvictorPool`, and (when supplied)
-the idle-watcher lifecycle off to :class:`IdleWatcher`. These tests
-cover the orchestrator wiring and its teardown discipline; the
-subsystem behaviours are covered in ``test__evictors.py`` and
-``test__idle.py``.
+The process-scoped context manager :func:`process_lifespan` is a thin
+orchestrator: it builds an ``InstanceTracker`` + ``MultiSystemRegistry``,
+hands the per-child evictor lifecycle off to :class:`EvictorPool`, and
+(when supplied) the idle-watcher lifecycle off to :class:`IdleWatcher`,
+storing the resulting :class:`LifespanContext` on a :class:`ProcessResources`
+holder. The per-MCP-session lifespan from :func:`make_lifespan` only reads
+that holder. These tests cover the orchestrator wiring + teardown
+discipline and the per-session shim; the subsystem behaviours are covered
+in ``test__evictors.py`` and ``test__idle.py``.
 """
 
 from __future__ import annotations
@@ -17,11 +19,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from deephaven_mcp._exceptions import InternalError
 from deephaven_mcp._taxonomy import SystemRef, SystemType
 from deephaven_mcp.mcp_systems_server import _lifespan as lifespan_module
 from deephaven_mcp.mcp_systems_server._lifespan import (
     LifespanContext,
+    ProcessResources,
     make_lifespan,
+    process_lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -149,14 +154,25 @@ def test_lifespan_context_is_frozen_dataclass():
 
 
 # ---------------------------------------------------------------------------
-# make_lifespan: startup wiring
+# ProcessResources holder
+# ---------------------------------------------------------------------------
+
+
+def test_process_resources_defaults_to_empty():
+    """A fresh holder carries no context."""
+    assert ProcessResources().context is None
+
+
+# ---------------------------------------------------------------------------
+# process_lifespan: startup wiring
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_yields_context_and_shuts_down_cleanly(caplog):
-    """Happy-path: every subsystem is started, the context is yielded, and
-    every subsystem is torn down in reverse order."""
+async def test_process_lifespan_yields_context_and_shuts_down_cleanly(caplog):
+    """Happy-path: every subsystem is started, the context is yielded and
+    stored on the holder, and every subsystem is torn down in reverse order
+    with the holder cleared."""
     multi_config = _make_multi_config(community_idle=10, community_sweep=2)
     multi_config.list_systems = MagicMock(
         return_value=[SystemRef(name="default", type=SystemType.COMMUNITY)]
@@ -168,8 +184,7 @@ async def test_make_lifespan_yields_context_and_shuts_down_cleanly(caplog):
     evictor_pool.start = AsyncMock()
     evictor_pool.stop = AsyncMock()
 
-    server = MagicMock()
-    server.name = "test-server"
+    holder = ProcessResources()
 
     patches = _patch_subsystems(
         multi_config=multi_config,
@@ -183,13 +198,14 @@ async def test_make_lifespan_yields_context_and_shuts_down_cleanly(caplog):
         caplog.set_level(
             logging.INFO, logger="deephaven_mcp.mcp_systems_server._lifespan"
         )
-        cm = make_lifespan(multi_config, idle=None)(server)
-        async with cm as ctx:
+        async with process_lifespan(multi_config, idle=None, holder=holder) as ctx:
             assert isinstance(ctx, LifespanContext)
             assert ctx.multi_config is multi_config
             assert ctx.registry is registry
             assert ctx.instance_tracker is instance_tracker
+            assert holder.context is ctx
 
+        assert holder.context is None
         registry.initialize.assert_awaited_once()
         evictor_pool.start.assert_awaited_once()
         evictor_pool.stop.assert_awaited_once()
@@ -201,8 +217,8 @@ async def test_make_lifespan_yields_context_and_shuts_down_cleanly(caplog):
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_forwards_multi_config_to_registry():
-    """The lifespan unpacks per-section ingredients into ``MultiSystemRegistry``."""
+async def test_process_lifespan_forwards_multi_config_to_registry():
+    """``process_lifespan`` unpacks per-section ingredients into ``MultiSystemRegistry``."""
     multi_config = _make_multi_config(
         community_idle=10,
         community_sweep=2,
@@ -236,7 +252,7 @@ async def test_make_lifespan_forwards_multi_config_to_registry():
             ),
         ),
     ):
-        async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
+        async with process_lifespan(multi_config, idle=None, holder=ProcessResources()):
             pass
         mock_registry_cls.assert_called_once_with(
             community_sessions=multi_config.community.sessions,
@@ -247,12 +263,12 @@ async def test_make_lifespan_forwards_multi_config_to_registry():
 
 
 # ---------------------------------------------------------------------------
-# make_lifespan: failure-path teardown discipline
+# process_lifespan: failure-path teardown discipline
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_failure_during_startup_still_cleans_up():
+async def test_process_lifespan_failure_during_startup_still_cleans_up():
     """If registry.initialize raises, the partial resources are still cleaned up."""
     multi_config = _make_multi_config()
     multi_config.list_systems = MagicMock(return_value=[])
@@ -266,6 +282,8 @@ async def test_make_lifespan_failure_during_startup_still_cleans_up():
     evictor_pool.start = AsyncMock()
     evictor_pool.stop = AsyncMock()
 
+    holder = ProcessResources()
+
     patches = _patch_subsystems(
         multi_config=multi_config,
         registry=registry,
@@ -276,12 +294,14 @@ async def test_make_lifespan_failure_during_startup_still_cleans_up():
         p.start()
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
+            async with process_lifespan(multi_config, idle=None, holder=holder):
                 pass
 
         # registry.initialize raised before EvictorPool was started, so
         # the pool was never started — but the tracker was registered
-        # and the registry-close fallback runs unconditionally.
+        # and the registry-close fallback runs unconditionally. The holder
+        # is never populated because the failure precedes the yield.
+        assert holder.context is None
         evictor_pool.start.assert_not_called()
         evictor_pool.stop.assert_not_called()
         registry.close.assert_awaited_once()
@@ -292,7 +312,7 @@ async def test_make_lifespan_failure_during_startup_still_cleans_up():
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_pool_start_failure_still_cleans_up():
+async def test_process_lifespan_pool_start_failure_still_cleans_up():
     """If EvictorPool.start raises, the tracker and registry are still torn down.
 
     The ``pool.stop`` teardown callback is pushed only *after*
@@ -322,7 +342,9 @@ async def test_make_lifespan_pool_start_failure_still_cleans_up():
         p.start()
     try:
         with pytest.raises(RuntimeError, match="pool-boom"):
-            async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
+            async with process_lifespan(
+                multi_config, idle=None, holder=ProcessResources()
+            ):
                 pass
 
         evictor_pool.start.assert_awaited_once()
@@ -335,7 +357,7 @@ async def test_make_lifespan_pool_start_failure_still_cleans_up():
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_swallows_shutdown_errors(caplog):
+async def test_process_lifespan_swallows_shutdown_errors(caplog):
     """Errors during shutdown are logged, never re-raised."""
     multi_config = _make_multi_config(community_idle=10, community_sweep=2)
     multi_config.list_systems = MagicMock(return_value=[])
@@ -364,7 +386,7 @@ async def test_make_lifespan_swallows_shutdown_errors(caplog):
         p.start()
     try:
         caplog.set_level(logging.ERROR)
-        async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
+        async with process_lifespan(multi_config, idle=None, holder=ProcessResources()):
             pass
     finally:
         for p in patches:
@@ -381,7 +403,7 @@ async def test_make_lifespan_swallows_shutdown_errors(caplog):
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_uses_idle_watcher_when_idle_supplied():
+async def test_process_lifespan_uses_idle_watcher_when_idle_supplied():
     """When ``idle`` is supplied, the orchestrator drives its lifecycle."""
     multi_config = _make_multi_config(community_idle=10, community_sweep=2)
     multi_config.list_systems = MagicMock(return_value=[])
@@ -389,9 +411,9 @@ async def test_make_lifespan_uses_idle_watcher_when_idle_supplied():
     registry = _build_registry_mock(community=True, enterprise=[])
     tracker = MagicMock(instance_id="i", unregister=AsyncMock())
 
-    # The caller now constructs the watcher and hands it to the
-    # lifespan; the orchestrator just calls start() and registers
-    # stop(). Pass a mock with explicit start/stop AsyncMocks.
+    # The caller constructs the watcher and hands it to process_lifespan;
+    # the orchestrator just calls start() and registers stop(). Pass a
+    # mock with explicit start/stop AsyncMocks.
     idle_mock = MagicMock()
     idle_mock.start = AsyncMock()
     idle_mock.stop = AsyncMock()
@@ -404,7 +426,9 @@ async def test_make_lifespan_uses_idle_watcher_when_idle_supplied():
     for p in patches:
         p.start()
     try:
-        async with make_lifespan(multi_config, idle=idle_mock)(MagicMock(name="srv")):
+        async with process_lifespan(
+            multi_config, idle=idle_mock, holder=ProcessResources()
+        ):
             pass
         idle_mock.start.assert_awaited_once()
         idle_mock.stop.assert_awaited_once()
@@ -414,8 +438,8 @@ async def test_make_lifespan_uses_idle_watcher_when_idle_supplied():
 
 
 @pytest.mark.asyncio
-async def test_make_lifespan_does_not_construct_idle_watcher_when_idle_none():
-    """When ``idle`` is ``None``, ``IdleWatcher`` is never constructed or driven."""
+async def test_process_lifespan_does_not_drive_idle_watcher_when_idle_none():
+    """When ``idle`` is ``None``, no idle watcher is started or constructed."""
     multi_config = _make_multi_config(community_idle=10, community_sweep=2)
     multi_config.list_systems = MagicMock(return_value=[])
 
@@ -446,9 +470,98 @@ async def test_make_lifespan_does_not_construct_idle_watcher_when_idle_none():
         ),
         patch.object(lifespan_module, "IdleWatcher") as mock_idle_watcher_cls,
     ):
-        async with make_lifespan(multi_config, idle=None)(MagicMock(name="srv")):
+        async with process_lifespan(multi_config, idle=None, holder=ProcessResources()):
             pass
         mock_idle_watcher_cls.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# make_lifespan: per-MCP-session shim
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_make_lifespan_yields_holder_context_without_building():
+    """The per-session lifespan yields the holder's context and builds nothing."""
+    ctx = LifespanContext(
+        multi_config=MagicMock(),
+        registry=MagicMock(),
+        instance_tracker=MagicMock(),
+    )
+    holder = ProcessResources(context=ctx)
+
+    # No subsystem patches: a build attempt would call the real
+    # InstanceTracker/registry and fail, proving the shim builds nothing.
+    async with make_lifespan(holder)(MagicMock(name="srv")) as yielded:
+        assert yielded is ctx
+
+
+@pytest.mark.asyncio
+async def test_make_lifespan_raises_when_holder_unpopulated():
+    """Entering the per-session lifespan before process resources exist raises."""
+    holder = ProcessResources()  # context is None
+    with pytest.raises(InternalError, match="process-scoped resources"):
+        async with make_lifespan(holder)(MagicMock(name="srv")):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sessions_share_one_process_scoped_registry():
+    """Overlapping MCP sessions read the single process-scoped registry, so a
+    dynamic session added through one session is visible to another.
+
+    This is the property that makes a dynamically-created session persist
+    across ``dh-mcp`` invocations: every per-session lifespan yields the same
+    registry built once by ``process_lifespan``.
+    """
+
+    class _StubRegistry:
+        """Minimal stateful stand-in for the shared registry."""
+
+        def __init__(self) -> None:
+            self._items: dict[str, object] = {}
+
+        async def initialize(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+        async def add(self, name: str, value: object) -> None:
+            self._items[name] = value
+
+        async def list_names(self) -> set[str]:
+            return set(self._items)
+
+    multi_config = _make_multi_config(community_idle=10, community_sweep=2)
+    multi_config.list_systems = MagicMock(return_value=[])
+    registry = _StubRegistry()
+    tracker = MagicMock(instance_id="i", unregister=AsyncMock())
+    holder = ProcessResources()
+
+    patches = _patch_subsystems(
+        multi_config=multi_config,
+        registry=registry,
+        instance_tracker=tracker,
+    )
+    for p in patches:
+        p.start()
+    try:
+        async with process_lifespan(multi_config, idle=None, holder=holder):
+            session_lifespan = make_lifespan(holder)
+            async with (
+                session_lifespan(MagicMock(name="srv-a")) as ctx_a,
+                session_lifespan(MagicMock(name="srv-b")) as ctx_b,
+            ):
+                # Both sessions resolve to the one registry instance.
+                assert ctx_a.registry is registry
+                assert ctx_b.registry is registry
+                # A dynamic session added via session A is visible to B.
+                await ctx_a.registry.add("community:community:dyn", object())
+                assert "community:community:dyn" in await ctx_b.registry.list_names()
+    finally:
+        for p in patches:
+            p.stop()
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from deephaven_mcp.mcp_systems_server import _fastmcp as fastmcp_module
 from deephaven_mcp.mcp_systems_server import _http as http_module
 from deephaven_mcp.mcp_systems_server import server as server_module
 
@@ -83,7 +84,7 @@ def test_main_defaults_to_stdio(_mute_logging_setup):
     """No args + default ``ServerConfig`` ⇒ stdio transport, no HTTP work."""
     with (
         _patch_default_server_config(),
-        patch.object(server_module, "_build_fastmcp", return_value=MagicMock()),
+        patch.object(fastmcp_module, "build_fastmcp", return_value=MagicMock()),
         patch.object(server_module, "_run_stdio") as mock_stdio,
         patch.object(server_module, "_run_http") as mock_http,
     ):
@@ -97,7 +98,7 @@ def test_main_http_with_default_loopback_host(_mute_logging_setup):
     with (
         _patch_default_server_config(),
         patch.object(http_module, "_resolve_psk_or_exit", MagicMock(return_value="pw")),
-        patch.object(server_module, "_build_fastmcp", return_value=MagicMock()),
+        patch.object(fastmcp_module, "build_fastmcp", return_value=MagicMock()),
         patch.object(server_module, "_run_http") as mock_http,
     ):
         server_module.main(["--transport", "http"])

@@ -21,7 +21,7 @@ from deephaven_mcp.client import CorePlusQueryConfig, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_session_limit,
     error_response,
-    format_initialization_status,
+    format_partial_result,
     get_enterprise_registry,
     get_multi_config,
     parse_session_id,
@@ -121,8 +121,11 @@ async def enterprise_systems_status(
     - Use attempt_to_connect=False (default) for quick status checks
     - Use attempt_to_connect=True to actively verify system connectivity
     - Check 'systems' array in response for individual system status
-    - Use 'detail' field for troubleshooting connection issues
+    - Use each system's 'liveness_detail' field for troubleshooting connection issues
     - Configuration details are included but sensitive fields are redacted
+    - If 'partial_result' is present, this report may be incomplete: check its 'phase'
+      ('loading'/'partial' → discovery still running, retry later; 'failed' → report)
+      and 'errors' for which enterprise systems could not be reached
 
     Args:
         context (Context): The MCP context object.
@@ -142,9 +145,13 @@ async def enterprise_systems_status(
                 - 'liveness_detail' (str, optional): Explanation message for the status, useful for troubleshooting
                 - 'is_alive' (bool): Simple boolean indicating if the system is responsive
                 - 'config' (dict): System configuration with sensitive fields redacted
-            - 'initialization' (dict, optional): Present when enterprise session discovery is
-                still in progress or completed with errors. Contains:
-                - 'status' (str): Human-readable description of the initialization state.
+            - 'partial_result' (dict, optional): Present only when this report may be
+                incomplete — enterprise session discovery is still in progress or some
+                systems failed. Contains:
+                - 'phase' (str): Machine-readable discovery phase — one of 'not_started',
+                    'partial', 'loading', 'completed', 'failed'. Use it to decide whether
+                    to retry (still loading) or report (failed).
+                - 'detail' (str): Human-readable description of why the report is partial.
                 - 'errors' (dict[str, str], optional): Present when one or more enterprise systems
                     had connection errors during initial discovery. Keys are factory names, values
                     are error descriptions.
@@ -163,6 +170,24 @@ async def enterprise_systems_status(
                     'config': {'host': 'prod.example.com', 'port': 10000, 'auth_type': 'anonymous'}
                 }
             ]
+        }
+
+    Example Partial Result (discovery still in progress):
+        {
+            'success': True,
+            'systems': [
+                {
+                    'name': 'prod-system',
+                    'liveness_status': 'ONLINE',
+                    'liveness_detail': 'Connection established successfully',
+                    'is_alive': True,
+                    'config': {'host': 'prod.example.com', 'port': 10000, 'auth_type': 'anonymous'}
+                }
+            ],
+            'partial_result': {
+                'phase': 'loading',
+                'detail': 'Enterprise session discovery is actively running. Some sessions or systems may not yet be visible.',
+            },
         }
 
     Example Error Response:
@@ -216,9 +241,9 @@ async def enterprise_systems_status(
 
         merged_phase = least_advanced_phase(phases)
         response: dict[str, object] = {"success": True, "systems": systems_info}
-        init_info = format_initialization_status(merged_phase, merged_errors)
-        if init_info:
-            response["initialization"] = init_info
+        partial = format_partial_result(merged_phase, merged_errors)
+        if partial:
+            response["partial_result"] = partial
         return response
     except Exception as e:
         _LOGGER.error(
@@ -934,10 +959,13 @@ async def session_enterprise_delete(
 
 
 def register_tools(server: FastMCP) -> None:
-    """Register all enterprise session tools with the given FastMCP server.
+    """Register all Enterprise session tools with the given FastMCP server.
 
-    These tools are specific to the DHE server and should NOT be registered
-    on the DHC server.
+    Registers ``enterprise_systems_status`` (which returns an empty system
+    list when no Enterprise system is configured) plus the Enterprise session
+    create/delete tools (which return a clean "not configured" error in that
+    case). Every tool module registers unconditionally; tools self-report
+    applicability rather than being gated by configuration.
 
     Args:
         server (FastMCP): The server to register tools with.
