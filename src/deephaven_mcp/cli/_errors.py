@@ -130,6 +130,10 @@ class ErrorCode(StrEnum):
         "arg_parse_error",
         "A key=value token (--arg, --env, --session-arg) was malformed.",
     )
+    MISSING_ARGUMENT = (
+        "missing_argument",
+        "A required positional argument or option was not provided.",
+    )
     OPTION_NOT_APPLICABLE = (
         "option_not_applicable",
         (

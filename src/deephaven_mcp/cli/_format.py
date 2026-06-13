@@ -177,7 +177,8 @@ def _format_table(rows: list[dict[str, Any]]) -> str:
                 columns.append(key)
     cells = [[str(row.get(col, "")) for col in columns] for row in rows]
     widths = [
-        max(len(col), *(len(row[i]) for row in cells)) for i, col in enumerate(columns)
+        max(len(col), max((len(row[i]) for row in cells), default=0))
+        for i, col in enumerate(columns)
     ]
     header = "  ".join(col.ljust(widths[i]) for i, col in enumerate(columns))
     body = [

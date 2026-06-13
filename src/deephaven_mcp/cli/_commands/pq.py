@@ -401,7 +401,7 @@ def _ids(pq_id: tuple[str, ...]) -> list[str]:
     """Validate and return the PQ id list from a variadic argument."""
     if not pq_id:
         raise CliError(
-            "At least one PQ_ID is required.", code=ErrorCode.ARG_PARSE_ERROR
+            "At least one PQ_ID is required.", code=ErrorCode.MISSING_ARGUMENT
         )
     return list(pq_id)
 
@@ -423,7 +423,7 @@ def _ids(pq_id: tuple[str, ...]) -> list[str]:
         examples=("$ dh-mcp pq delete 1234567890 1234567891",),
         see_also=("dh-mcp pq list SYSTEM",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=(ErrorCode.ARG_PARSE_ERROR, *wrapper_error_codes()),
+        error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
     ),
 )
 @click.argument("pq_id", nargs=-1)
@@ -469,7 +469,7 @@ def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]
             examples=(f"$ dh-mcp pq {name} 1234567890",),
             see_also=("dh-mcp pq details ID",),
             exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-            error_codes=(ErrorCode.ARG_PARSE_ERROR, *wrapper_error_codes()),
+            error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
         ),
     )
     @click.argument("pq_id", nargs=-1)

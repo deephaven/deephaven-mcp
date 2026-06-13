@@ -545,6 +545,7 @@ registry programmatically via `dh-mcp introspect` (look under
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
+| `missing_argument`            | A required positional argument or option was not provided.         |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
 | `browser_launch_failed`       | `dh-mcp session open` could not launch a browser; the URL is included in the error message to open manually. |
 | `config_invalid`              | The configuration tree failed validation.                          |

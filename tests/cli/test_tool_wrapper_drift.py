@@ -30,6 +30,9 @@ exact argument dict passed to ``call_tool``, cover that.
 
 from __future__ import annotations
 
+import asyncio
+from functools import cache
+
 import click
 import pytest
 from mcp.server.fastmcp import FastMCP
@@ -63,13 +66,17 @@ _TOOL_MODULES = (
 _NON_TOOL_PARAMS = frozenset({"help"})
 
 
+@cache
 def _tool_schemas() -> dict[str, dict]:
-    """Return ``{tool_name: input_json_schema}`` for every registered tool."""
+    """Return ``{tool_name: input_json_schema}`` for every registered tool.
+
+    Computed lazily and cached so a tool-registration import failure surfaces
+    as a failure of the tests that read it, not a collection-time error that
+    aborts the whole suite.
+    """
     server: FastMCP = FastMCP("drift")
     for module in _TOOL_MODULES:
         module.register_tools(server)
-    import asyncio
-
     tools = asyncio.run(server.list_tools())
     return {t.name: t.inputSchema for t in tools}
 
@@ -88,7 +95,6 @@ def _wrapped_commands(
     return found
 
 
-_SCHEMAS = _tool_schemas()
 _WRAPPERS = _wrapped_commands(cli)
 
 
@@ -100,12 +106,13 @@ def test_at_least_one_wrapper_is_discovered() -> None:
 @pytest.mark.parametrize("path, cmd", _WRAPPERS, ids=[p for p, _ in _WRAPPERS])
 def test_wrapper_matches_tool_schema(path: str, cmd: HelpfulCommand) -> None:
     """A wrapper surfaces every required tool param and no phantom flags."""
+    schemas = _tool_schemas()
     tools = sorted({*cmd.wraps_tools, *([cmd.wraps_tool] if cmd.wraps_tool else [])})
     declared = {p.name for p in cmd.params if p.name and p.name not in _NON_TOOL_PARAMS}
 
     for tool in tools:
-        assert tool in _SCHEMAS, f"{path}: wraps unknown tool {tool!r}"
-        schema = _SCHEMAS[tool]
+        assert tool in schemas, f"{path}: wraps unknown tool {tool!r}"
+        schema = schemas[tool]
         required = set(schema.get("required", []) or [])
         # Drift: every required tool param must be surfaced or allowlisted.
         missing = required - declared - cmd.intentionally_unsupported
@@ -118,7 +125,7 @@ def test_wrapper_matches_tool_schema(path: str, cmd: HelpfulCommand) -> None:
     # must be a real parameter of at least one wrapped tool.
     props_union: set[str] = set()
     for tool in tools:
-        props_union |= set(_SCHEMAS[tool].get("properties", {}))
+        props_union |= set(schemas[tool].get("properties", {}))
     phantom = declared - props_union - cmd.router_params - cmd.client_only_params
     assert not phantom, (
         f"{path}: declares {sorted(phantom)} which are not parameters of "
