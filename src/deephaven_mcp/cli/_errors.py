@@ -134,6 +134,10 @@ class ErrorCode(StrEnum):
         "missing_argument",
         "A required positional argument or option was not provided.",
     )
+    MUTUALLY_EXCLUSIVE_OPTIONS = (
+        "mutually_exclusive_options",
+        "Two or more options that cannot be combined were supplied together.",
+    )
     OPTION_NOT_APPLICABLE = (
         "option_not_applicable",
         (

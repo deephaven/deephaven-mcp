@@ -145,6 +145,11 @@ def _norm(value: Any) -> Any:
     return list(value) if isinstance(value, tuple) else value
 
 
+def _provided(value: Any) -> bool:
+    """Whether a click option value was set (not ``None`` and not an empty tuple)."""
+    return value is not None and value != ()
+
+
 def _create_modify_args(params: dict[str, Any]) -> dict[str, Any]:
     """Build the MCP argument dict from a create/modify command's params.
 
@@ -152,11 +157,30 @@ def _create_modify_args(params: dict[str, Any]) -> dict[str, Any]:
     defaults apply, and converts repeatable-option tuples to lists. Every
     parameter on these commands maps directly to a tool argument.
     """
-    return {
-        name: _norm(value)
-        for name, value in params.items()
-        if value is not None and value != ()
-    }
+    return {name: _norm(value) for name, value in params.items() if _provided(value)}
+
+
+# Option pairs the controller rejects when combined, as
+# ``(flag_a, param_a, flag_b, param_b)``.
+_MUTUALLY_EXCLUSIVE: tuple[tuple[str, str, str, str], ...] = (
+    ("--script-body", "script_body", "--script-path", "script_path"),
+    ("--auto-delete-timeout", "auto_delete_timeout", "--schedule", "schedule"),
+)
+
+
+def _check_mutually_exclusive(params: dict[str, Any]) -> None:
+    """Reject create/modify options the controller forbids in combination.
+
+    Raises:
+        CliError: With :attr:`ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS` when both
+            members of a mutually exclusive pair are supplied.
+    """
+    for flag_a, key_a, flag_b, key_b in _MUTUALLY_EXCLUSIVE:
+        if _provided(params.get(key_a)) and _provided(params.get(key_b)):
+            raise CliError(
+                f"{flag_a} and {flag_b} cannot be combined; supply at most one.",
+                code=ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
+            )
 
 
 def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
@@ -279,8 +303,9 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
         description=(
             "Enterprise (Core+) only. Creates a PQ named PQ_NAME on --system with "
             "--heap-size-gb of heap. Provide the script inline with --script-body "
-            "or from a file with --script-path. Unset options use the controller's "
-            "defaults."
+            "or from a file with --script-path (at most one). --auto-delete-timeout "
+            "and --schedule are mutually exclusive. Unset options use the "
+            "controller's defaults."
         ),
         arguments=(HelpEntry("PQ_NAME", "Name for the new PQ."),),
         output=_OUTPUT_OBJECT,
@@ -290,7 +315,7 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
         ),
         see_also=("dh-mcp pq modify ID", "dh-mcp pq start ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS, *wrapper_error_codes()),
     ),
 )
 @click.argument("pq_name")
@@ -320,6 +345,7 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
     click's per-option keyword arguments.
     """
     runtime: Runtime = ctx.obj
+    _check_mutually_exclusive(ctx.params)
     await call_and_echo(
         runtime,
         "pq_create",
@@ -336,8 +362,9 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
         summary="Modify an existing Persistent Query.",
         description=(
             "Enterprise (Core+) only. Updates only the fields you pass on PQ_ID; "
-            "everything else is left unchanged. Pass --restart to restart the PQ "
-            "after applying the change."
+            "everything else is left unchanged. --script-body/--script-path and "
+            "--auto-delete-timeout/--schedule are each mutually exclusive. Pass "
+            "--restart to restart the PQ after applying the change."
         ),
         arguments=(
             HelpEntry("PQ_ID", "PQ serial id. Run 'pq list' or 'pq name-to-id'."),
@@ -349,7 +376,7 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
         ),
         see_also=("dh-mcp pq details ID", "dh-mcp pq restart ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS, *wrapper_error_codes()),
     ),
 )
 @click.argument("pq_id")
@@ -384,6 +411,7 @@ async def pq_modify(ctx: click.Context, **_options: Any) -> None:
     click's per-option keyword arguments.
     """
     runtime: Runtime = ctx.obj
+    _check_mutually_exclusive(ctx.params)
     await call_and_echo(
         runtime,
         "pq_modify",

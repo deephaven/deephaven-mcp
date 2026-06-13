@@ -17,7 +17,7 @@ from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo_field,
     wrapper_error_codes,
 )
-from deephaven_mcp.cli._errors import ExitCode
+from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
@@ -59,8 +59,8 @@ _OUTPUT_RUN = OutputSpec(
         description=(
             "Executes a script in the session's worker. Provide the code inline "
             "with --script or from a file readable by the daemon with "
-            "--script-path (supply exactly one). A missing or duplicate source, "
-            "or a script error, exits 3."
+            "--script-path; supply exactly one. Supplying neither or both exits 2; "
+            "a script error exits 3."
         ),
         arguments=(HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_RUN,
@@ -70,7 +70,11 @@ _OUTPUT_RUN = OutputSpec(
         ),
         see_also=("dh-mcp script pip-list ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(
+            ErrorCode.MISSING_ARGUMENT,
+            ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
+            *wrapper_error_codes(),
+        ),
     ),
 )
 @click.argument("session_id")
@@ -87,10 +91,20 @@ async def script_run(
     runtime: Runtime, session_id: str, script: str | None, script_path: str | None
 ) -> None:
     """Run a script in a session."""
+    if script is not None and script_path is not None:
+        raise CliError(
+            "--script and --script-path cannot be combined; supply exactly one.",
+            code=ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
+        )
+    if script is None and script_path is None:
+        raise CliError(
+            "Provide a script source: --script or --script-path.",
+            code=ErrorCode.MISSING_ARGUMENT,
+        )
     arguments: dict[str, Any] = {"session_id": session_id}
     if script is not None:
         arguments["script"] = script
-    if script_path is not None:
+    else:
         arguments["script_path"] = script_path
     await call_and_echo(
         runtime,

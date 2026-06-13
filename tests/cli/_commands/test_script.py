@@ -54,12 +54,30 @@ def test_run_script_path(tmp_path: Path) -> None:
 
 def test_run_failure_exits_3(tmp_path: Path) -> None:
     result, _ = _run(
-        ["script", "run", _SID],
-        {"success": False, "error": "must provide script"},
+        ["script", "run", _SID, "--script", "boom()"],
+        {"success": False, "error": "script blew up"},
         tmp_path,
     )
     assert result.exit_code == 3
-    assert "must provide script" in result.output
+    assert "script blew up" in result.output
+
+
+def test_run_requires_a_source(tmp_path: Path) -> None:
+    result, call = _run(["script", "run", _SID], {"success": True}, tmp_path)
+    assert result.exit_code == 2
+    assert "Provide a script source" in result.output
+    call.assert_not_awaited()
+
+
+def test_run_rejects_both_sources(tmp_path: Path) -> None:
+    result, call = _run(
+        ["script", "run", _SID, "--script", "print(1)", "--script-path", "/tmp/j.py"],
+        {"success": True},
+        tmp_path,
+    )
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
+    call.assert_not_awaited()
 
 
 def test_pip_list_emits_array(tmp_path: Path) -> None:

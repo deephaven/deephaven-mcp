@@ -435,7 +435,9 @@ shared flags are: `--script-body`/`--script-path`, `--language`
 `--class-path` (repeatable), `--python-venv`, `--env` (repeatable),
 `--init-timeout-nanos`, `--auto-delete-timeout`, `--admin-group`/`--viewer-group`
 (repeatable), `--restart-users`, and `--owner`. Run `dh-mcp pq create --help`
-(or `modify`) for the full per-flag detail.
+(or `modify`) for the full per-flag detail. `--script-body`/`--script-path` and
+`--auto-delete-timeout`/`--schedule` are each mutually exclusive; combining a
+pair exits `2` with `mutually_exclusive_options`.
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the
@@ -546,6 +548,7 @@ registry programmatically via `dh-mcp introspect` (look under
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
 | `missing_argument`            | A required positional argument or option was not provided.         |
+| `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
 | `browser_launch_failed`       | `dh-mcp session open` could not launch a browser; the URL is included in the error message to open manually. |
 | `config_invalid`              | The configuration tree failed validation.                          |

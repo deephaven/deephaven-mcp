@@ -121,6 +121,44 @@ def test_modify_restart_flag(tmp_path: Path) -> None:
     assert call.await_args.args[3]["restart"] is True
 
 
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--script-body", "print(1)", "--script-path", "/pq/n.py"],
+        ["--auto-delete-timeout", "60", "--schedule", "daily"],
+    ],
+)
+def test_create_rejects_mutually_exclusive_options(
+    extra_args: list[str], tmp_path: Path
+) -> None:
+    result, call = _run(
+        ["pq", "create", "n", "--system", "prod", "--heap-size-gb", "4", *extra_args],
+        {"success": True},
+        tmp_path,
+    )
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
+    call.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--script-body", "print(1)", "--script-path", "/pq/n.py"],
+        ["--auto-delete-timeout", "60", "--schedule", "daily"],
+    ],
+)
+def test_modify_rejects_mutually_exclusive_options(
+    extra_args: list[str], tmp_path: Path
+) -> None:
+    result, call = _run(
+        ["pq", "modify", "123", *extra_args], {"success": True}, tmp_path
+    )
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
+    call.assert_not_awaited()
+
+
 def test_delete_multiple_with_max_concurrent(tmp_path: Path) -> None:
     result, call = _run(
         ["pq", "delete", "1", "2", "--max-concurrent", "3"], {"success": True}, tmp_path
