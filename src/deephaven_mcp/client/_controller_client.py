@@ -40,10 +40,9 @@ See Also:
 import asyncio
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.controller  # pragma: no cover
+from deephaven_enterprise.client.controller import ControllerClient
 
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
@@ -64,9 +63,7 @@ from ._timeouts import EnterpriseClientTimeouts
 _LOGGER = logging.getLogger(__name__)
 
 
-class CorePlusControllerClient(
-    ClientObjectWrapper["deephaven_enterprise.client.controller.ControllerClient"]
-):
+class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
     """Asynchronous wrapper around the ControllerClient for managing persistent queries.
 
     This class provides an asynchronous interface to the ControllerClient, which connects to the
@@ -128,7 +125,7 @@ class CorePlusControllerClient(
 
     def __init__(
         self,
-        controller_client: "deephaven_enterprise.client.controller.ControllerClient",
+        controller_client: ControllerClient,
         timeouts: EnterpriseClientTimeouts,
     ):
         """Initialize the CorePlusControllerClient with a ControllerClient instance.
@@ -140,7 +137,7 @@ class CorePlusControllerClient(
                 Constructed by the :class:`CorePlusSessionFactory` that
                 owns this client and forwarded here at construction time.
         """
-        super().__init__(controller_client, is_enterprise=True)
+        super().__init__(controller_client)
         self._subscribed = False
         self._subscribe_lock: asyncio.Lock = asyncio.Lock()
         self._timeouts = timeouts
@@ -985,8 +982,6 @@ class CorePlusControllerClient(
         Raises:
             ValueError: If script_body/script_path or auto_delete_timeout/schedule are
                 supplied together, or if a parameter value is invalid.
-            MissingEnterprisePackageError: If a temporary scheduler or enum conversion is
-                requested but the enterprise package is unavailable.
         """
         validate_pq_config_args(auto_delete_timeout, schedule, script_body, script_path)
         return apply_pq_config_fields(

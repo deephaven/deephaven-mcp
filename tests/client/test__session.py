@@ -57,20 +57,6 @@ def _from_config(cfg, *, name: str = "test", timeout_seconds: float | None = Non
     return CoreSession.from_session_config(session_config, timeouts)
 
 
-# Patch sys.modules for enterprise imports BEFORE any tested imports
-mock_enterprise = types.ModuleType("deephaven_enterprise")
-mock_sm = types.ModuleType("deephaven_enterprise.client.session_manager")
-mock_sm.SessionManager = MagicMock()
-sys.modules["deephaven_enterprise"] = mock_enterprise
-sys.modules["deephaven_enterprise.client"] = types.ModuleType(
-    "deephaven_enterprise.client"
-)
-sys.modules["deephaven_enterprise.client.session_manager"] = mock_sm
-# Patch controller client as well for _protobuf.py import
-mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
-mock_controller.ControllerClient = MagicMock()
-sys.modules["deephaven_enterprise.client.controller"] = mock_controller
-
 # Patch pydeephaven Table, InputTable, and Query with dummy types for isinstance checks
 import types as _types
 
@@ -951,9 +937,7 @@ def test_base_session_programming_language():
     from deephaven_mcp.client._session import BaseSession
 
     # Create a session with programming_language specified
-    session = BaseSession(
-        DummySession(), is_enterprise=False, programming_language="python"
-    )
+    session = BaseSession(DummySession(), programming_language="python")
 
     # Verify the programming_language property returns the specified value
     assert session.programming_language == "python"
@@ -965,9 +949,7 @@ def test_base_session_programming_language_custom():
 
     # Create a session with a custom programming_language using a unique test value
     test_lang = "test_unique_language_xyz123"
-    session = BaseSession(
-        DummySession(), is_enterprise=False, programming_language=test_lang
-    )
+    session = BaseSession(DummySession(), programming_language=test_lang)
 
     # Verify the programming_language property returns the custom value
     assert session.programming_language == test_lang

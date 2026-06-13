@@ -2,33 +2,11 @@
 Unit tests for deephaven_mcp.client._protobuf module.
 """
 
-import sys
-import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Patch sys.modules so _protobuf can be imported even if enterprise modules are missing
-mock_enterprise = types.ModuleType("deephaven_enterprise")
-mock_proto = types.ModuleType("deephaven_enterprise.proto")
-mock_auth_pb2 = types.ModuleType("deephaven_enterprise.proto.auth_pb2")
-mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
-mock_controller.ControllerClient = MagicMock()
-
-with patch.dict(
-    sys.modules,
-    {
-        "deephaven_enterprise": mock_enterprise,
-        "deephaven_enterprise.proto": mock_proto,
-        "deephaven_enterprise.proto.auth_pb2": mock_auth_pb2,
-        "deephaven_enterprise.client": types.ModuleType("deephaven_enterprise.client"),
-        "deephaven_enterprise.client.controller": mock_controller,
-        "deephaven_enterprise.client.util": types.ModuleType(
-            "deephaven_enterprise.client.util"
-        ),
-    },
-):
-    from deephaven_mcp.client import _protobuf
+from deephaven_mcp.client import _protobuf
 
 
 # Helper: create a mock protobuf message

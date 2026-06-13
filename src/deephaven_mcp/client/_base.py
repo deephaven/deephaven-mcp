@@ -6,8 +6,7 @@ standard and enterprise client components.
 
 The primary purpose of this module is to establish a consistent wrapping pattern
 for Java client objects, providing them with enhanced Pythonic interfaces and
-asynchronous capabilities. It handles feature detection for enterprise components
-and provides appropriate error handling when required features are not available.
+asynchronous capabilities.
 
 The wrapping pattern implemented here enables several key benefits:
 1. Transparent conversion of blocking Java calls to non-blocking Python async calls
@@ -17,42 +16,11 @@ The wrapping pattern implemented here enables several key benefits:
 
 Classes:
     ClientObjectWrapper: Generic base class for wrapping client objects with enhanced interfaces
-
-Functions:
-    is_enterprise_available() -> bool: Whether enterprise features are available in the
-                                       current environment, determined by attempting to
-                                       import the deephaven_enterprise package.
 """
 
 import logging
 
-from deephaven_mcp._exceptions import InternalError
-
 _LOGGER = logging.getLogger(__name__)
-
-# Check for enterprise features. This is evaluated once, at import time. It is kept
-# private and exposed only through is_enterprise_available() so call sites read the
-# live value through one function rather than snapshotting a module-level bool (a
-# snapshot import would capture whatever value happened to be set at import time).
-_ENTERPRISE_AVAILABLE = False
-try:
-    # The following imports are required for enterprise features
-    import deephaven_enterprise  # noqa: F401
-
-    _ENTERPRISE_AVAILABLE = True
-    _LOGGER.debug("Enterprise features available")
-except ImportError:
-    _LOGGER.debug("Enterprise features not available")
-
-
-def is_enterprise_available() -> bool:
-    """Return whether Deephaven Enterprise (Core+) client features are available.
-
-    Returns:
-        bool: True if the ``deephaven_enterprise`` package was importable when this
-            module was first imported; False otherwise.
-    """
-    return _ENTERPRISE_AVAILABLE
 
 
 class ClientObjectWrapper[T]:
@@ -66,12 +34,11 @@ class ClientObjectWrapper[T]:
     Purpose:
         1. Provide a consistent pattern for wrapping Java client objects with Python interfaces
         2. Enable non-blocking asynchronous access to potentially blocking Java methods
-        3. Ensure proper detection and handling of enterprise feature requirements
-        4. Establish a consistent error handling pattern across client components
+        3. Establish a consistent error handling pattern across client components
 
     Usage Pattern:
         When extending this class, implementers should:
-        1. Initialize with the object to be wrapped and specify whether it requires enterprise features
+        1. Initialize with the object to be wrapped
         2. Create async wrapper methods that delegate to the underlying wrapped client object
         3. Use asyncio.to_thread for potentially blocking operations to prevent blocking the event loop
         4. Add enhanced error handling by catching Java exceptions and translating them to Python exceptions
@@ -92,7 +59,7 @@ class ClientObjectWrapper[T]:
 
         class TableWrapper(ClientObjectWrapper[DeephavenTable]):
             def __init__(self, table: DeephavenTable):
-                super().__init__(table, is_enterprise=False)
+                super().__init__(table)
 
             async def get_column_names(self) -> List[str]:
                 # Wrap potentially blocking operation in a background thread
@@ -108,13 +75,11 @@ class ClientObjectWrapper[T]:
                     raise ValueError(f"Filter failed: {e}") from e
     """
 
-    def __init__(self, wrapped: T, is_enterprise: bool) -> None:
+    def __init__(self, wrapped: T) -> None:
         """Initialize a wrapper for a client object.
 
-        This constructor creates a wrapper around a client object and verifies that the
-        required features (enterprise or non-enterprise) are available. It performs
-        validation to ensure that the wrapped object is not None and that enterprise
-        features are available when required.
+        This constructor creates a wrapper around a client object and validates that the
+        wrapped object is not None.
 
         The wrapper pattern established by this constructor is fundamental to the
         Deephaven client architecture, allowing Java client objects to be wrapped with
@@ -125,34 +90,16 @@ class ClientObjectWrapper[T]:
                    object (typically a Java object) that this wrapper will delegate to.
                    The type T is determined by the generic type parameter used when
                    subclassing ClientObjectWrapper.
-            is_enterprise: Specifies whether the wrapped object requires enterprise features.
-                          Must be True for enterprise objects and False for non-enterprise objects.
-                          When True, availability of enterprise features will be verified using
-                          is_enterprise_available(). This helps prevent runtime errors by
-                          ensuring required features are available at initialization.
 
         Raises:
             ValueError: If the wrapped object is None. A non-None wrapped object is essential
                       for the wrapper to function correctly.
-            InternalError: If is_enterprise=True but enterprise features are not available.
-                          This typically indicates a programming error in the library, as enterprise
-                          wrappers should only be created in environments where enterprise features
-                          are available.
         """
         if wrapped is None:
             _LOGGER.error("ClientObjectWrapper constructor called with None")
             raise ValueError("Cannot wrap None")
 
         self._wrapped = wrapped
-
-        if is_enterprise and not is_enterprise_available():
-            _LOGGER.error(
-                "[ClientObjectWrapper] Constructor called with enterprise=True when enterprise features are not available. "
-                "Please report this issue."
-            )
-            raise InternalError(
-                "ClientObjectWrapper constructor called with enterprise=True when enterprise features are not available. Please report this issue."
-            )
 
     @property
     def wrapped(self) -> T:

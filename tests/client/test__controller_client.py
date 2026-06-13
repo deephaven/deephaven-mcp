@@ -1,34 +1,11 @@
 import asyncio
-import sys
-import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
-@pytest.fixture(scope="session", autouse=True)
-def patch_enterprise_modules():
-    # Patch sys.modules for enterprise imports before _controller_client is imported
-    mock_enterprise = types.ModuleType("deephaven_enterprise")
-    mock_proto = types.ModuleType("deephaven_enterprise.proto")
-    mock_auth_pb2 = types.ModuleType("deephaven_enterprise.proto.auth_pb2")
-    mock_controller = types.ModuleType("deephaven_enterprise.client.controller")
-    mock_controller.ControllerClient = MagicMock()
-    sys.modules["deephaven_enterprise"] = mock_enterprise
-    sys.modules["deephaven_enterprise.proto"] = mock_proto
-    sys.modules["deephaven_enterprise.proto.auth_pb2"] = mock_auth_pb2
-    sys.modules["deephaven_enterprise.client"] = types.ModuleType(
-        "deephaven_enterprise.client"
-    )
-    sys.modules["deephaven_enterprise.client.controller"] = mock_controller
-    sys.modules["deephaven_enterprise.client.util"] = types.ModuleType(
-        "deephaven_enterprise.client.util"
-    )
-    yield
-
-
 @pytest.fixture(scope="session")
-def controller_client_mod(patch_enterprise_modules):
+def controller_client_mod():
     from deephaven_mcp.client import _controller_client
 
     return _controller_client

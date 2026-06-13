@@ -29,14 +29,13 @@ Exported Classes and Attributes:
     PQ_STATES (dict[str, str])    -- Mapping of PQ state name to lifecycle category
     BaseSession                   -- Base async session wrapper
     CorePlusSessionFactory        -- Factory for creating enterprise sessions
-    is_enterprise_available()     -- Returns True if enterprise features are available
 
 Note:
     All logging is performed in the respective submodules/classes; this file does not log directly.
 """
 
 from ._auth_client import CorePlusAuthClient
-from ._base import ClientObjectWrapper, is_enterprise_available
+from ._base import ClientObjectWrapper
 from ._controller_client import CorePlusControllerClient
 from ._protobuf import (
     PQ_STATES,
@@ -57,7 +56,6 @@ __all__ = [
     "EnterpriseClientTimeouts",
     "CorePlusAuthClient",
     "ClientObjectWrapper",
-    "is_enterprise_available",
     "CorePlusControllerClient",
     "CorePlusQueryConfig",
     "CorePlusQueryInfo",

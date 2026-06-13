@@ -347,10 +347,22 @@ A *system* is the source dimension of every fully qualified session id
 (`type:system:name`): the single Community umbrella (named `community`)
 plus every configured Enterprise (Core+) system.
 
-| Verb       | Purpose                                                                                       |
-|------------|-----------------------------------------------------------------------------------------------|
-| `list`     | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
-| `status`   | Reports Enterprise (Core+) system health (`liveness_status`, `is_alive`, redacted `config`). Wraps `enterprise_systems_status`. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. Exits `3` if the tool reports failure. |
+| Verb         | Purpose                                                                                       |
+|--------------|-----------------------------------------------------------------------------------------------|
+| `list`       | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
+| `status`     | Reports Enterprise (Core+) system health (`liveness_status`, `is_alive`, redacted `config`). Wraps `enterprise_systems_status`. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. Exits `3` if the tool reports failure. |
+| `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
+| `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
+
+`url` and `open` are Enterprise-only and computed locally from
+configuration — they do **not** contact the daemon. The URL is the
+system's `connection_json_url` origin with the `/iriside` path (e.g.
+`https://dhe.example.com:8123/iriside`). Unlike `session url`, the URL is
+**unauthenticated**: you log in interactively in the browser (Deephaven
+Enterprise has no token-in-URL). They exit `2` (`system_not_found`) when
+no Enterprise system has that name — including `community`, which has no
+web console — and `open` exits `2` (`browser_launch_failed`, with the URL
+in the message) when no browser can be launched.
 
 Examples:
 
@@ -358,6 +370,8 @@ Examples:
 dh-mcp system list
 dh-mcp -o json system list | jq '.[].name'
 dh-mcp system status --system prod --connect
+dh-mcp system url prod
+dh-mcp system open prod --print
 ```
 
 ### `dh-mcp table`
@@ -464,6 +478,36 @@ defaults to JSON (so `dh-mcp introspect | jq .` works without `-o`)
 but honors the root `-o/--output` flag and `DH_MCP_OUTPUT` (`json`,
 `yaml`, or `human`).
 
+For progressive disclosure, pass an optional `PATH` (one or more
+command-name tokens) to emit just that command's node instead of the
+whole tree:
+
+```bash
+dh-mcp introspect daemon          # the daemon group node (its verbs included)
+dh-mcp introspect daemon start    # just the start verb node
+```
+
+The scoped node is byte-identical to the object found at
+`.commands.<path…>` in the unscoped manifest — e.g.
+`dh-mcp introspect daemon start` equals
+`dh-mcp introspect | jq '.commands.daemon.subcommands.start'`. A path
+that does not resolve exits `2` with `command_not_found`.
+
+The two ways of running this command return different information, so do
+not expect the same fields in both:
+
+- **Without a command name** (`dh-mcp introspect`), you get the whole
+  CLI: the package `version`, the full list of `commands`, the
+  project-wide `error_codes`, and the other top-level fields.
+- **With a command name** (`dh-mcp introspect daemon start`), you get
+  only that one command's details: its `name`, help text, options and
+  arguments (`params`), any `subcommands`, its `output` shape, and which
+  MCP tool it `wraps` — and nothing else.
+
+So the project-wide fields like `version` and `error_codes` appear only
+when you run it without a command name. They are not included when you
+ask about a single command.
+
 ## Top-level flags
 
 | Flag                | Envvar               | Purpose                                                                              |
@@ -547,10 +591,12 @@ registry programmatically via `dh-mcp introspect` (look under
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
+| `command_not_found`           | `dh-mcp introspect PATH` referenced a command path that does not exist. |
 | `missing_argument`            | A required positional argument or option was not provided.         |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
-| `browser_launch_failed`       | `dh-mcp session open` could not launch a browser; the URL is included in the error message to open manually. |
+| `browser_launch_failed`       | `dh-mcp session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
+| `system_not_found`            | `dh-mcp system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
 | `config_invalid`              | The configuration tree failed validation.                          |
 | `internal_error`              | An unexpected internal failure not attributable to a specific subsystem. |
 

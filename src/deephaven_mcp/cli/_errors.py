@@ -130,6 +130,10 @@ class ErrorCode(StrEnum):
         "arg_parse_error",
         "A key=value token (--arg, --env, --session-arg) was malformed.",
     )
+    COMMAND_NOT_FOUND = (
+        "command_not_found",
+        "'dh-mcp introspect PATH' referenced a command path that does not exist.",
+    )
     MISSING_ARGUMENT = (
         "missing_argument",
         "A required positional argument or option was not provided.",
@@ -153,6 +157,10 @@ class ErrorCode(StrEnum):
             "The default web browser could not be launched; the URL is included "
             "in the error message so it can be opened manually."
         ),
+    )
+    SYSTEM_NOT_FOUND = (
+        "system_not_found",
+        "The named Enterprise system is not configured (run 'dh-mcp system list').",
     )
     CONFIG_INVALID = (
         "config_invalid",

@@ -728,7 +728,7 @@ Both servers expose their tools through FastMCP, following the Model Context Pro
    uv pip install -e ".[dev]"
    ```
 
-   The `[dev]` extra installs everything: all tests, linting tools, Community Core support, and Enterprise (Core+) support.
+   Community Core and Enterprise (Core+) support are always part of the base install; the `[dev]` extra adds the development tooling (test and lint dependencies).
 
    > **Tip:** Regenerate the entire environment in one line:
    >

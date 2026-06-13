@@ -125,7 +125,9 @@ Dependencies:
     - aiofiles: For async file I/O (certificate and key file loading)
     - aiohttp: For session health checking (HTTP endpoint polling)
     - Docker (optional): Required for dynamic session launching via docker
-    - deephaven-server (optional): Required for dynamic session launching via python
+    - deephaven-server: Base dependency providing the ``deephaven`` executable used for
+      dynamic session launching via the python method (a custom venv target must have it
+      installed too)
 
 Usage Example - Static Sessions:
     >>> from deephaven_mcp.resource_manager import CommunitySessionRegistry

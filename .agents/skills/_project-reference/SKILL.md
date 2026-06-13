@@ -159,4 +159,4 @@ INKEEP_API_KEY=your-key python scripts/mcp_docs_test_client.py \
 - **Non-loopback bind refused**: HTTP transport requires a loopback host. Front the server with a reverse proxy if remote access is needed.
 - **PSK missing**: HTTP transport requires a PSK from `--psk` or `server.json`'s `psk` field. Stdio transport never reads the PSK.
 - **Java required**: Deephaven test server requires Java 11+ in PATH.
-- **Reinstalling dependencies**: `uv pip install ".[dev]"` (~3 seconds). For enterprise (Core+) support, install the `enterprise` extra — `uv pip install ".[enterprise]"` or `pip install "deephaven-mcp[enterprise]"` — which pulls `deephaven-coreplus-client` from PyPI (see `pyproject.toml`'s `[project.optional-dependencies]` `enterprise` and `dev` entries).
+- **Reinstalling dependencies**: `uv pip install ".[dev]"` (~3 seconds) — installs the base dependencies plus the tooling extras (`test`, `lint`; `dev` = `test,lint`). There are no per-component extras. The dependency model is owned by `AGENTS.md` (Dependencies); the authoritative package list is `pyproject.toml`'s `[project]` `dependencies` and `[project.optional-dependencies]`.

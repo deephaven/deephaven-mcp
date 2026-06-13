@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent
 
+from deephaven_mcp.cli import _browser as browser_mod
 from deephaven_mcp.cli import _main
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._commands import session as session_mod
@@ -396,7 +397,7 @@ def test_open_launches_browser(tmp_path: Path) -> None:
     with (
         acquire_p,
         call_p,
-        patch.object(session_mod.webbrowser, "open", return_value=True) as wb,
+        patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
     ):
         result = _invoke(["-o", "json", "session", "open", _SID], rt)
     assert result.exit_code == 0
@@ -411,7 +412,7 @@ def test_open_print_only_does_not_launch(tmp_path: Path) -> None:
     with (
         acquire_p,
         call_p,
-        patch.object(session_mod.webbrowser, "open", return_value=True) as wb,
+        patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
     ):
         result = _invoke(["session", "open", _SID, "--print"], rt)
     assert result.exit_code == 0
@@ -424,7 +425,7 @@ def test_open_no_browser_found_exits_2(tmp_path: Path) -> None:
     with (
         acquire_p,
         call_p,
-        patch.object(session_mod.webbrowser, "open", return_value=False),
+        patch.object(browser_mod.webbrowser, "open", return_value=False),
     ):
         result = _invoke(["session", "open", _SID], rt, standalone_mode=False)
     assert _error_code(result) == "browser_launch_failed"
@@ -439,7 +440,7 @@ def test_open_browser_error_exits_2(tmp_path: Path) -> None:
         acquire_p,
         call_p,
         patch.object(
-            session_mod.webbrowser, "open", side_effect=webbrowser.Error("nope")
+            browser_mod.webbrowser, "open", side_effect=webbrowser.Error("nope")
         ),
     ):
         result = _invoke(["session", "open", _SID], rt, standalone_mode=False)

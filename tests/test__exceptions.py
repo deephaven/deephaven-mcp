@@ -14,7 +14,6 @@ from deephaven_mcp._exceptions import (
     InternalError,
     McpClientError,
     McpError,
-    MissingEnterprisePackageError,
     QueryError,
     RegistryCorruptError,
     ResourceError,
@@ -60,19 +59,6 @@ class TestBaseExceptions:
         with pytest.raises(RuntimeError) as exc_info:
             raise InternalError(message)
         assert str(exc_info.value) == message
-
-    def test_missing_enterprise_package_error(self):
-        """Test that MissingEnterprisePackageError provides prominent error message."""
-        # Test with default message
-        with pytest.raises(MissingEnterprisePackageError) as exc_info:
-            raise MissingEnterprisePackageError()
-
-        error_message = str(exc_info.value)
-        assert "deephaven-coreplus-client" in error_message
-        assert "ERROR: Core+ features are not available" in error_message
-        assert "pip install" in error_message
-        assert isinstance(exc_info.value, InternalError)
-        assert isinstance(exc_info.value, McpError)
 
     def test_unsupported_operation_error(self):
         """Test that UnsupportedOperationError can be raised and caught properly."""
@@ -120,11 +106,6 @@ class TestExceptionParameterized:
                 [SessionCreationError, SessionError, McpError],
                 "session launch error",
             ),
-            (
-                MissingEnterprisePackageError,
-                [InternalError, McpError, RuntimeError],
-                "Core+ features are not available (deephaven-coreplus-client Python package not installed)",
-            ),
             # File-lock, daemon-registry, and CLI exceptions
             (FileLockTimeoutError, [McpError], "lock timeout"),
             (DaemonRegistryError, [McpError], "registry error"),
@@ -154,9 +135,7 @@ class TestExceptionParameterized:
         with pytest.raises(exception_class) as exc_info:
             raise exception_class(message)
 
-        # MissingEnterprisePackageError has custom __str__ formatting, so skip the message check
-        if exception_class != MissingEnterprisePackageError:
-            assert str(exc_info.value) == message
+        assert str(exc_info.value) == message
 
         # Test inheritance
         for parent_class in parent_classes:

@@ -62,17 +62,14 @@ import io
 import logging
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pydeephaven
-
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.session_manager  # pragma: no cover
+from deephaven_enterprise.client.session_manager import SessionManager
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
     DeephavenConnectionError,
-    MissingEnterprisePackageError,
     QueryError,
     ResourceError,
     SessionCreationError,
@@ -88,7 +85,7 @@ from deephaven_mcp.sessions import EnterpriseSystemConfig
 from ._auth_client import CorePlusAuthClient
 
 # Local application imports
-from ._base import ClientObjectWrapper, is_enterprise_available
+from ._base import ClientObjectWrapper
 from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
 from ._session import CorePlusSession
 from ._timeouts import EnterpriseClientTimeouts
@@ -97,9 +94,7 @@ from ._timeouts import EnterpriseClientTimeouts
 _LOGGER = logging.getLogger(__name__)
 
 
-class CorePlusSessionFactory(
-    ClientObjectWrapper["deephaven_enterprise.client.session_manager.SessionManager"]
-):
+class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
     """Asynchronous wrapper for the Deephaven Core+ SessionManager providing non-blocking operations.
 
     This class wraps an existing Deephaven Core+ session manager instance, delegating all
@@ -142,7 +137,7 @@ class CorePlusSessionFactory(
 
     def __init__(
         self,
-        session_manager: "deephaven_enterprise.client.session_manager.SessionManager",  # noqa: F821
+        session_manager: SessionManager,
         timeouts: EnterpriseClientTimeouts,
     ):
         """Initialize the CorePlusSessionFactory wrapper with an existing SessionManager.
@@ -172,7 +167,7 @@ class CorePlusSessionFactory(
             ```
 
         """
-        super().__init__(session_manager, is_enterprise=True)
+        super().__init__(session_manager)
         self._timeouts = timeouts
         _LOGGER.info(
             "[CorePlusSessionFactory:__init__] Successfully initialized CorePlusSessionFactory"
@@ -229,9 +224,6 @@ class CorePlusSessionFactory(
                 ready for authentication. You can then authenticate and create sessions.
 
         Raises:
-            MissingEnterprisePackageError: If the deephaven-coreplus-client package is not
-                installed. This package is required for Enterprise functionality and must be
-                installed separately from the base deephaven-mcp package.
             DeephavenConnectionError: If unable to connect to the server at the specified URL.
                 Common causes include network issues, incorrect URL, server not running, or
                 firewall blocking the connection.
@@ -260,62 +252,54 @@ class CorePlusSessionFactory(
             before calling this method, as it uses the system's default HTTP client
             configuration for the initial connection.json download.
         """
-        if not is_enterprise_available():
-            raise MissingEnterprisePackageError()
-        else:
-            timeout_seconds = timeouts.session_connect_timeout_seconds
-            # Imported lazily: deephaven_enterprise is an optional dependency
-            # (see is_enterprise_available in _base.py). A top-level import
-            # would break community-only installs at module load time.
-            from deephaven_enterprise.client.session_manager import SessionManager
-
-            _LOGGER.debug(
-                f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
+        timeout_seconds = timeouts.session_connect_timeout_seconds
+        _LOGGER.debug(
+            f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
+        )
+        start_time = time.monotonic()
+        try:
+            # Run the blocking SessionManager constructor in a background thread so
+            # that this method is cancellable and doesn't block the event loop.
+            manager = await asyncio.wait_for(
+                asyncio.to_thread(SessionManager, url),
+                timeout=timeout_seconds,
             )
-            start_time = time.monotonic()
-            try:
-                # Run the blocking SessionManager constructor in a background thread so
-                # that this method is cancellable and doesn't block the event loop.
-                manager = await asyncio.wait_for(
-                    asyncio.to_thread(SessionManager, url),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError:
-                _LOGGER.error(
-                    f"[CorePlusSessionFactory:from_url] Connection to {url} timed out after {timeout_seconds}s. "
-                    f"Increase enterprise/settings.json: timeouts.client.session_connect_timeout_seconds."
-                )
-                raise DeephavenConnectionError(
-                    f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
-                    f"The server may be unreachable. To allow more time, increase "
-                    f"enterprise/settings.json: timeouts.client.session_connect_timeout_seconds "
-                    f"in the operator config."
-                ) from None
-            except Exception as e:
-                elapsed = time.monotonic() - start_time
-                _LOGGER.error(
-                    "[CorePlusSessionFactory:from_url] Failed to create "
-                    "SessionManager with URL %s after %.2fs: %r",
-                    url,
-                    elapsed,
-                    e,
-                    exc_info=True,
-                )
-                raise DeephavenConnectionError(
-                    f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
-                ) from e
-
+        except TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:from_url] Connection to {url} timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.session_connect_timeout_seconds."
+            )
+            raise DeephavenConnectionError(
+                f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
+                f"The server may be unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.session_connect_timeout_seconds "
+                f"in the operator config."
+            ) from None
+        except Exception as e:
             elapsed = time.monotonic() - start_time
-            _LOGGER.info(
-                f"[CorePlusSessionFactory:from_url] Successfully created SessionManager for URL {url} in {elapsed:.2f}s"
+            _LOGGER.error(
+                "[CorePlusSessionFactory:from_url] Failed to create "
+                "SessionManager with URL %s after %.2fs: %r",
+                url,
+                elapsed,
+                e,
+                exc_info=True,
             )
-            instance = cls(manager, timeouts=timeouts)
+            raise DeephavenConnectionError(
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
+            ) from e
 
-            # Subscribe to controller client for persistent query operations.
-            # Subscribe uses its own timeout from EnterpriseClientTimeouts.subscribe_timeout_seconds.
-            await instance._controller_client.subscribe()
+        elapsed = time.monotonic() - start_time
+        _LOGGER.info(
+            f"[CorePlusSessionFactory:from_url] Successfully created SessionManager for URL {url} in {elapsed:.2f}s"
+        )
+        instance = cls(manager, timeouts=timeouts)
 
-            return instance
+        # Subscribe to controller client for persistent query operations.
+        # Subscribe uses its own timeout from EnterpriseClientTimeouts.subscribe_timeout_seconds.
+        await instance._controller_client.subscribe()
+
+        return instance
 
     @classmethod
     async def from_credentials(
@@ -362,8 +346,6 @@ class CorePlusSessionFactory(
             CorePlusSessionFactory: A fully authenticated factory.
 
         Raises:
-            MissingEnterprisePackageError: If the
-                ``deephaven-coreplus-client`` package is not installed.
             DeephavenConnectionError: If the underlying ``SessionManager``
                 cannot be constructed within the operator-configured
                 ``timeouts.client.session_connect_timeout_seconds`` (or at all).
@@ -375,20 +357,12 @@ class CorePlusSessionFactory(
                 time, not here.
         """
         timeout_seconds = timeouts.session_connect_timeout_seconds
-        if not is_enterprise_available():
-            raise MissingEnterprisePackageError()
-
         url = system_config.connection_json_url
         creds_type = type(creds).__name__
         _LOGGER.debug(
             f"[CorePlusSessionFactory:from_credentials] Creating SessionManager: "
             f"url={url}, creds={creds_type}"
         )
-        # Imported lazily: deephaven_enterprise is an optional dependency
-        # (see is_enterprise_available in _base.py). A top-level import
-        # would break community-only installs at module load time.
-        from deephaven_enterprise.client.session_manager import SessionManager
-
         start_time = time.monotonic()
         try:
             manager = await asyncio.wait_for(

@@ -14,13 +14,13 @@ from __future__ import annotations
 
 __all__ = ["session"]
 
-import webbrowser
 from typing import Any, cast
 
 import click
 
 from deephaven_mcp._taxonomy import SystemType
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._browser import launch_browser
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
@@ -766,18 +766,5 @@ async def session_open(runtime: Runtime, session_id: str, print_only: bool) -> N
         runtime, session_id, retry_command="dh-mcp session open"
     )
     url = _authenticated_url(payload)
-    launched = False
-    if not print_only:
-        try:
-            launched = webbrowser.open(url)
-        except webbrowser.Error as exc:
-            raise CliError(
-                f"Could not launch a browser ({exc}). Open this URL manually: {url}",
-                code=ErrorCode.BROWSER_LAUNCH_FAILED,
-            ) from exc
-        if not launched:
-            raise CliError(
-                f"No usable browser was found. Open this URL manually: {url}",
-                code=ErrorCode.BROWSER_LAUNCH_FAILED,
-            )
+    launched = False if print_only else launch_browser(url)
     echo_payload(runtime, {"opened": url, "launched": launched})

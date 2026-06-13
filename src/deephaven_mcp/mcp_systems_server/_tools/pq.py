@@ -16,8 +16,21 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import Annotated, cast
 
+from deephaven_enterprise.proto.common_pb2 import ExceptionDetailsMessage
+from deephaven_enterprise.proto.controller_common_pb2 import NamedStringList
+from deephaven_enterprise.proto.persistent_query_pb2 import (
+    ExportedObjectInfoMessage,
+    ExportedObjectTypeEnum,
+    ProcessorConnectionDetailsMessage,
+    RestartUsersEnum,
+    WorkerProtocolMessage,
+)
+from deephaven_enterprise.proto.table_definition_pb2 import (
+    ColumnDefinitionMessage,
+    TableDefinitionMessage,
+)
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
@@ -44,40 +57,6 @@ from deephaven_mcp.resource_manager import (
     BaseItemManager,
     SystemType,
 )
-
-if TYPE_CHECKING:
-    from deephaven.proto.table_pb2 import (
-        ColumnDefinitionMessage,
-        ExportedObjectInfoMessage,
-        TableDefinitionMessage,
-    )
-    from deephaven_enterprise.proto.common_pb2 import (
-        ExceptionDetailsMessage,
-    )
-    from deephaven_enterprise.proto.controller_common_pb2 import (
-        NamedStringList,
-    )
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExportedObjectTypeEnum,
-        ProcessorConnectionDetailsMessage,
-        RestartUsersEnum,
-        WorkerProtocolMessage,
-    )
-
-# Runtime sentinels for the optional protobuf enums. ``ExportedObjectTypeEnum``
-# and ``RestartUsersEnum`` are also imported under TYPE_CHECKING above so that
-# annotations like ``RestartUsersEnum.ValueType`` resolve for mypy/pyright.
-try:
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        ExportedObjectTypeEnum,
-        RestartUsersEnum,
-    )
-except (
-    ImportError
-):  # pragma: no cover - only reached when the enterprise package is absent
-    ExportedObjectTypeEnum = None  # type: ignore[misc,assignment]
-    RestartUsersEnum = None  # type: ignore[misc,assignment]
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -186,13 +165,10 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
     # Get restartUsers enum name using protobuf enum class Name() method
     # Handle unknown enum values (server may have newer proto than client)
     restart_users = pb.restartUsers
-    if RestartUsersEnum is not None:
-        try:
-            restart_users_str = RestartUsersEnum.Name(restart_users)
-        except ValueError:
-            restart_users_str = f"UNKNOWN_RESTART_USERS_{restart_users}"
-    else:
-        restart_users_str = str(restart_users)
+    try:
+        restart_users_str = RestartUsersEnum.Name(restart_users)
+    except ValueError:
+        restart_users_str = f"UNKNOWN_RESTART_USERS_{restart_users}"
 
     return {
         "serial": pb.serial,
@@ -254,7 +230,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
     }
 
 
-def _format_named_string_list(nsl: "NamedStringList") -> dict[str, object]:
+def _format_named_string_list(nsl: NamedStringList) -> dict[str, object]:
     """Format NamedStringList protobuf into dict.
 
     Protobuf reference:
@@ -276,7 +252,7 @@ def _format_named_string_list(nsl: "NamedStringList") -> dict[str, object]:
     }
 
 
-def _format_column_definition(col: "ColumnDefinitionMessage") -> dict[str, object]:
+def _format_column_definition(col: ColumnDefinitionMessage) -> dict[str, object]:
     """Format ColumnDefinitionMessage protobuf into dict.
 
     Protobuf reference:
@@ -312,7 +288,7 @@ def _format_column_definition(col: "ColumnDefinitionMessage") -> dict[str, objec
     }
 
 
-def _format_table_definition(td: "TableDefinitionMessage") -> dict[str, object]:
+def _format_table_definition(td: TableDefinitionMessage) -> dict[str, object]:
     """Format TableDefinitionMessage protobuf into dict.
 
     Protobuf reference:
@@ -339,7 +315,7 @@ def _format_table_definition(td: "TableDefinitionMessage") -> dict[str, object]:
     }
 
 
-def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict[str, object]:
+def _format_exported_object_info(obj: ExportedObjectInfoMessage) -> dict[str, object]:
     """Format ExportedObjectInfoMessage protobuf into dict.
 
     Protobuf reference:
@@ -359,12 +335,10 @@ def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict[str, 
     """
     # Get enum name using protobuf enum class Name() method
     # Handle unknown enum values (server may have newer proto than client)
-    obj_type = obj.type
-    if obj_type is not None and ExportedObjectTypeEnum is not None:
-        try:
-            obj_type = ExportedObjectTypeEnum.Name(obj_type)
-        except ValueError:
-            obj_type = f"UNKNOWN_EXPORTED_TYPE_{obj_type}"
+    try:
+        type_name = ExportedObjectTypeEnum.Name(obj.type)
+    except ValueError:
+        type_name = f"UNKNOWN_EXPORTED_TYPE_{obj.type}"
 
     # Format tableDefinition if present
     table_def = (
@@ -373,13 +347,13 @@ def _format_exported_object_info(obj: "ExportedObjectInfoMessage") -> dict[str, 
 
     return {
         "name": obj.name,
-        "type": obj_type,
+        "type": type_name,
         "table_definition": table_def,
         "original_type": obj.originalType or None,
     }
 
 
-def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict[str, object]:
+def _format_worker_protocol(wp: WorkerProtocolMessage) -> dict[str, object]:
     """Format WorkerProtocolMessage protobuf into dict.
 
     Protobuf reference:
@@ -402,7 +376,7 @@ def _format_worker_protocol(wp: "WorkerProtocolMessage") -> dict[str, object]:
 
 
 def _format_connection_details(
-    cd: "ProcessorConnectionDetailsMessage",
+    cd: ProcessorConnectionDetailsMessage,
 ) -> dict[str, object]:
     """Format ProcessorConnectionDetailsMessage protobuf into dict.
 
@@ -438,7 +412,7 @@ def _format_connection_details(
     }
 
 
-def _format_exception_details(ed: "ExceptionDetailsMessage") -> dict[str, object]:
+def _format_exception_details(ed: ExceptionDetailsMessage) -> dict[str, object]:
     """Format ExceptionDetailsMessage protobuf into dict.
 
     Protobuf reference:

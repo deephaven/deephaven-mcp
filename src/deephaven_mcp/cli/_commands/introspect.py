@@ -17,10 +17,11 @@ from typing import Any
 
 import click
 
-from deephaven_mcp.cli._errors import ErrorCode, ExitCode
+from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._format import OutputMode, format_output
 from deephaven_mcp.cli._help import (
     COMMON_ENV_VARS,
+    HelpEntry,
     HelpfulCommand,
     OutputField,
     OutputSpec,
@@ -266,6 +267,39 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
     }
 
 
+def _resolve_command(root: click.Command, path: tuple[str, ...]) -> click.Command:
+    """Resolve a command path against the live click command tree.
+
+    Walks ``path`` token by token, descending through each
+    :class:`click.Group`'s ``commands`` mapping.
+
+    Args:
+        root (click.Command): The command to start the walk from
+            (the ``dh-mcp`` root group in production).
+        path (tuple[str, ...]): Command-name tokens to descend,
+            e.g. ``("daemon", "start")``.
+
+    Returns:
+        click.Command: The command reached by following ``path``.
+
+    Raises:
+        CliError: With :attr:`ErrorCode.COMMAND_NOT_FOUND` when a
+            token names no subcommand of the current command, or when
+            a token asks a non-group (leaf command) to descend.
+    """
+    current = root
+    for index, token in enumerate(path):
+        if not isinstance(current, click.Group) or token not in current.commands:
+            resolved = " ".join(path[:index]) or (root.name or "dh-mcp")
+            raise CliError(
+                f"Unknown command path: {' '.join(path)!r} "
+                f"(no command {token!r} under {resolved!r}).",
+                code=ErrorCode.COMMAND_NOT_FOUND,
+            )
+        current = current.commands[token]
+    return current
+
+
 _OUTPUT_INTROSPECT = OutputSpec(
     "object",
     (
@@ -284,7 +318,14 @@ _OUTPUT_INTROSPECT = OutputSpec(
             "error_codes", "array", "Stable error_code registry (code + help)."
         ),
     ),
-    note="Always JSON unless -o overrides; sorted for stable diffs.",
+    note=(
+        "Always JSON unless -o overrides; sorted for stable diffs. The "
+        "fields above are what you get without a PATH (the whole CLI). "
+        "Add a PATH (e.g. 'daemon start') and you instead get only that "
+        "one command — its name, help, short_help, params, subcommands, "
+        "output, and wraps — so the project-wide fields above (version, "
+        "error_codes, etc.) are not included."
+    ),
 )
 
 
@@ -293,32 +334,52 @@ _OUTPUT_INTROSPECT = OutputSpec(
     cls=HelpfulCommand,
     output_spec=_OUTPUT_INTROSPECT,
     help=build_help(
-        summary="Print the full command tree as a structured manifest.",
+        summary="Print the command tree as a structured manifest.",
         description=(
             "Designed for AI-agent self-discovery: prefer this over "
             "scraping --help. The manifest describes every command, "
             "option, argument, environment variable, exit code, and "
             "the stable error_code registry returned in error "
-            "payloads. Defaults to JSON (so 'dh-mcp introspect | jq .' "
-            "works without -o); honors the root -o/--output flag and "
-            "DH_MCP_OUTPUT (json, yaml, or human). Runs without a valid "
-            "configuration tree, so it works even when 'config validate' "
-            "fails."
+            "payloads. Pass a PATH (one or more command-name tokens, e.g. "
+            "'daemon start') to emit just that command's node instead of "
+            "the whole tree — the same object found at .commands.<path...> "
+            "in the unscoped manifest. Defaults to JSON (so 'dh-mcp "
+            "introspect | jq .' works without -o); honors the root "
+            "-o/--output flag and DH_MCP_OUTPUT (json, yaml, or human). "
+            "Runs without a valid configuration tree, so it works even "
+            "when 'config validate' fails."
+        ),
+        arguments=(
+            HelpEntry(
+                "[PATH]...",
+                "Optional command-name tokens (e.g. 'daemon start') "
+                "scoping output to that command's node; omit for the "
+                "full manifest.",
+            ),
         ),
         output=_OUTPUT_INTROSPECT,
         examples=(
             "$ dh-mcp introspect | jq '.commands | keys'",
-            "$ dh-mcp introspect | jq '.commands.tool.subcommands.call.params'",
-            "$ dh-mcp introspect | jq '.commands.tool.subcommands.call.output'",
+            "$ dh-mcp introspect daemon",
+            "$ dh-mcp introspect daemon start",
+            "$ dh-mcp introspect tool call | jq '.params'",
             "$ dh-mcp introspect | jq '.error_codes'",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
+        error_codes=(ErrorCode.COMMAND_NOT_FOUND,),
         see_also=("dh-mcp --help",),
     ),
 )
+@click.argument("path", nargs=-1)
 @click.pass_context
-def introspect(ctx: click.Context) -> None:
-    """Emit the introspection manifest for the root command.
+def introspect(ctx: click.Context, path: tuple[str, ...]) -> None:
+    """Emit the introspection manifest for the root command, or one node.
+
+    With no ``path``, emits the full manifest for the root command.
+    With one or more ``path`` tokens, resolves them against the live
+    command tree and emits just that command's node (see
+    :func:`_describe_command`), raising
+    :attr:`ErrorCode.COMMAND_NOT_FOUND` when the path does not resolve.
 
     Output mode is resolved from the root ``-o/--output`` flag
     (or ``DH_MCP_OUTPUT``); defaults to ``"json"`` when neither is
@@ -330,6 +391,9 @@ def introspect(ctx: click.Context) -> None:
     still discover the surface.
     """
     root_ctx = ctx.find_root()
-    manifest = build_manifest(root_ctx.command)
+    if path:
+        payload = _describe_command(_resolve_command(root_ctx.command, path))
+    else:
+        payload = build_manifest(root_ctx.command)
     output: OutputMode = root_ctx.params.get("output") or "json"
-    click.echo(format_output(manifest, output=output))
+    click.echo(format_output(payload, output=output))
