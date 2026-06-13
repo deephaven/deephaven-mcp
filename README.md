@@ -195,7 +195,22 @@ that bridges through `mcp-proxy` and forwards the PSK header:
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
-#### 3. Try It Out
+#### 3. Verify Your Configuration (optional, AI-free)
+
+Before wiring up an AI client, confirm your config is valid and the server works using the
+`dh-mcp` CLI. It auto-starts its own background daemon — no server to launch, no PSK, no
+`mcp-proxy`:
+
+```bash
+dh-mcp session list
+```
+
+This lists your **configured** sessions (it reads config; the Deephaven server need not be
+running). If you see your `local` session, the config tree and systems server are good — any
+remaining problem is in your AI-tool wiring, not the server. A malformed config fails fast
+here with a clear error. See [`docs/CLI.md`](docs/CLI.md) for the full CLI reference.
+
+#### 4. Try It Out
 
 Restart your AI tool (or IDE) after starting the servers.
 
@@ -353,7 +368,21 @@ Or, for an HTTP-bridged setup, use:
 
 **For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
 
-#### 3. Try It Out
+#### 3. Verify Your Configuration (optional, AI-free)
+
+Before wiring up an AI client, confirm your config is valid using the `dh-mcp` CLI — it
+auto-starts its own daemon, so nothing else needs to be running:
+
+```bash
+dh-mcp system list
+```
+
+This lists your **configured** Enterprise systems straight from the config tree (no live
+connection required). Seeing your system here confirms the config and systems server are
+good; a malformed config fails fast with a clear error. See [`docs/CLI.md`](docs/CLI.md) for
+the full CLI reference.
+
+#### 4. Try It Out
 
 Restart your AI tool (or IDE) after starting the server.
 
