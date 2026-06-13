@@ -130,6 +130,10 @@ class ErrorCode(StrEnum):
         "arg_parse_error",
         "A key=value token (--arg, --env, --session-arg) was malformed.",
     )
+    COMMAND_NOT_FOUND = (
+        "command_not_found",
+        "'dh-mcp introspect PATH' referenced a command path that does not exist.",
+    )
     MISSING_ARGUMENT = (
         "missing_argument",
         "A required positional argument or option was not provided.",

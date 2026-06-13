@@ -478,61 +478,6 @@ def test_format_pq_config_unknown_enum_fallback(mock_restart_enum):
     assert result["restart_users"] == "UNKNOWN_RESTART_USERS_99"
 
 
-@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum", None)
-def test_format_pq_config_no_restart_enum():
-    """Test _format_pq_config when RestartUsersEnum is None (missing enterprise package)."""
-    mock_config = MagicMock()
-    mock_pb = MagicMock()
-
-    # Set minimal required fields
-    mock_pb.serial = 12345
-    mock_pb.version = 1
-    mock_pb.name = "test"
-    mock_pb.owner = "owner"
-    mock_pb.enabled = True
-    mock_pb.heapSizeGb = 8.0
-    mock_pb.bufferPoolToHeapRatio = 0.0
-    mock_pb.detailedGCLoggingEnabled = False
-    mock_pb.extraJvmArguments = []
-    mock_pb.extraEnvironmentVariables = []
-    mock_pb.classPathAdditions = []
-    mock_pb.serverName = ""
-    mock_pb.adminGroups = []
-    mock_pb.viewerGroups = []
-    mock_pb.restartUsers = 1
-    mock_pb.scriptCode = ""
-    mock_pb.scriptPath = ""
-    mock_pb.scriptLanguage = "Python"
-    mock_pb.configurationType = "Script"
-    mock_pb.typeSpecificFieldsJson = ""
-    mock_pb.scheduling = []
-    mock_pb.timeoutNanos = 0
-    mock_pb.jvmProfile = ""
-    mock_pb.lastModifiedByAuthenticated = ""
-    mock_pb.lastModifiedByEffective = ""
-    mock_pb.lastModifiedTimeNanos = 0
-    mock_pb.completedStatus = ""
-    mock_pb.expirationTimeNanos = 0
-    mock_pb.kubernetesControl = ""
-    mock_pb.workerKind = "DeephavenCommunity"
-    mock_pb.createdTimeNanos = 0
-    mock_pb.replicaCount = 0
-    mock_pb.spareCount = 0
-    mock_pb.assignmentPolicy = ""
-    mock_pb.assignmentPolicyParams = ""
-    mock_pb.additionalMemoryGb = 0.0
-    mock_pb.pythonControl = ""
-    mock_pb.genericWorkerControl = ""
-
-    mock_config.pb = mock_pb
-
-    result = _format_pq_config(mock_config)
-
-    # When RestartUsersEnum is None, restart_users should be str(numeric_value)
-    assert result["restart_users"] == "1"
-    assert result["serial"] == 12345
-
-
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
 def test_format_pq_config_redacts_type_specific_fields_json(mock_restart_enum):
     """_format_pq_config must redact sensitive keys in typeSpecificFieldsJson."""
@@ -1116,23 +1061,6 @@ def test_format_exported_object_info_with_table_definition(mock_exported_enum):
     assert result["type"] == "EOT_TABLE"
     assert result["table_definition"] is not None
     assert result["table_definition"]["namespace"] == "ns"
-    assert result["original_type"] is None
-
-
-@patch("deephaven_mcp.mcp_systems_server._tools.pq.ExportedObjectTypeEnum", None)
-def test_format_exported_object_info_enum_not_available():
-    """Test _format_exported_object_info when ExportedObjectTypeEnum is None (import failed)."""
-    mock_obj = MagicMock()
-    mock_obj.name = "my_table"
-    mock_obj.type = 1
-    mock_obj.tableDefinition = None
-    mock_obj.originalType = ""
-
-    result = _format_exported_object_info(mock_obj)
-
-    assert result["name"] == "my_table"
-    assert result["type"] == 1  # raw integer returned when enum unavailable
-    assert result["table_definition"] is None
     assert result["original_type"] is None
 
 
@@ -3315,50 +3243,6 @@ async def test_pq_modify_set_owner():
     assert (
         mock_controller.update_pq_config.call_args.kwargs["owner"] == "service-account"
     )
-
-
-@pytest.mark.asyncio
-async def test_pq_modify_restart_users_enum_not_available():
-    """Test pq_modify surfaces MissingEnterprisePackageError from update_pq_config.
-
-    The restart_users enum conversion now lives in the client layer; when the Core+
-    package is absent, update_pq_config raises MissingEnterprisePackageError, which
-    pq_modify reports as an error response.
-    """
-    from deephaven_mcp._exceptions import MissingEnterprisePackageError
-
-    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_session_registry.system_name = _TEST_SYSTEM_NAME
-    mock_factory_manager = MagicMock()
-    mock_factory = MagicMock()
-    mock_controller = MagicMock()
-
-    # Setup mock chain
-    mock_session_registry.factory_manager = mock_factory_manager
-    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
-    mock_factory.controller_client = mock_controller
-
-    # Mock current PQ info
-    current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
-    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
-    mock_controller.update_pq_config.side_effect = MissingEnterprisePackageError()
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_session_registry,
-        }
-    )
-
-    result = await pq_modify(
-        context,
-        pq_id="system:12345",
-        restart_users="RU_ADMIN",
-    )
-
-    assert result["success"] is False
-    assert "Core+ features are not available" in result["error"]
-    assert result["isError"] is True
 
 
 @pytest.mark.asyncio

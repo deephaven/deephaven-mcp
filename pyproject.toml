@@ -30,6 +30,9 @@ dependencies = [
     "mcp[cli]>=1.12.0",          # CLI and fastmcp server
     # Deephaven integration
     "pydeephaven>=0.39",      # Deephaven Python API
+    "deephaven-server>=0.39", # Deephaven Community Core server for python-based session creation
+    "pytz",                   # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
+    "deephaven-coreplus-client",  # Client for Deephaven Enterprise (Core+) systems
     "numba>=0.63.1",          # Force Python 3.12+ compatible numba (see https://github.com/deephaven/deephaven-mcp/issues/145)
     # Docs/LLM and web server dependencies
     "fastapi>=0.116.0",         # FastAPI web framework for Docs server
@@ -57,8 +60,6 @@ test = [
     "pytest-cov>=7.1.0",       # Code coverage reporting
     "pytest-timeout>=2.1.0",   # Test timeout support for integration tests
     "httpx2>=2.3.0",           # Required by starlette.testclient >=1.2 (replaces httpx)
-    "deephaven-server>=0.39",  # Deephaven server for integration tests
-    "pytz",                    # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
     # Stress testing dependencies
     "aiolimiter>=1.1.0",       # Rate limiting for stress tests
     "python-dotenv>=1.0.0",    # Optional .env file loading for test scripts
@@ -76,20 +77,9 @@ lint = [
     "types-aiofiles",          # Type stubs for aiofiles
 ]
 
-# Community Core session creation (python launch method)
-community = [
-    "deephaven-server>=0.39",  # Deephaven Community Core server for python-based session creation
-    "pytz",                    # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
-]
-
-# Enterprise support (Deephaven Core+)
-enterprise = [
-    "deephaven-coreplus-client",  # Client for Deephaven Enterprise (Core+) systems
-]
-
 # Full development environment (all features + tools)
 dev = [
-    "deephaven-mcp[test,community,enterprise,lint]",  # All features and tools
+    "deephaven-mcp[test,lint]",  # All features and tools
 ]
 
 [project.urls]

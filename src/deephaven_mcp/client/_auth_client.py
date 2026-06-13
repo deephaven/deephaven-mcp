@@ -39,10 +39,8 @@ Example:
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.auth  # pragma: no cover
+from deephaven_enterprise.client.auth import AuthClient
 
 from deephaven_mcp._exceptions import AuthenticationError, DeephavenConnectionError
 
@@ -53,9 +51,7 @@ from ._timeouts import EnterpriseClientTimeouts
 _LOGGER = logging.getLogger(__name__)
 
 
-class CorePlusAuthClient(
-    ClientObjectWrapper["deephaven_enterprise.client.auth.AuthClient"]
-):
+class CorePlusAuthClient(ClientObjectWrapper[AuthClient]):
     """
     Asynchronous wrapper for the Deephaven AuthClient, providing non-blocking token management.
 
@@ -93,7 +89,7 @@ class CorePlusAuthClient(
 
     def __init__(
         self,
-        auth_client: "deephaven_enterprise.client.auth.AuthClient",  # noqa: F821
+        auth_client: AuthClient,
         timeouts: EnterpriseClientTimeouts,
     ) -> None:
         """Initialize CorePlusAuthClient with a synchronous AuthClient instance.
@@ -107,7 +103,7 @@ class CorePlusAuthClient(
             This constructor is intended for use by CorePlusSessionFactory. Users should not instantiate
             this class directly.
         """
-        super().__init__(auth_client, is_enterprise=True)
+        super().__init__(auth_client)
         self._timeouts = timeouts
         _LOGGER.debug("[CorePlusAuthClient] Initialized")
 

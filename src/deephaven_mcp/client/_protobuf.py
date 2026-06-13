@@ -41,28 +41,21 @@ Type Definitions:
 
 Usage Note:
     These wrapper classes are designed to be used with the Deephaven Enterprise
-    protobuf definitions. The wrappers themselves do not depend on the Enterprise
-    package at import time (conditional imports are used), but they expect to
-    wrap specific protobuf message types at runtime.
+    protobuf definitions, wrapping specific protobuf message types at runtime.
 """
 
-from typing import TYPE_CHECKING, Any, NewType, cast, override
+from typing import Any, NewType, cast, override
 
+from deephaven_enterprise.client.controller import ControllerClient
+from deephaven_enterprise.proto.auth_pb2 import Token
+from deephaven_enterprise.proto.persistent_query_pb2 import (
+    PersistentQueryConfigMessage,
+    PersistentQueryInfoMessage,
+    PersistentQueryStateMessage,
+    PersistentQueryStatusEnum,
+)
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.protobuf.message import Message
-
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.auth  # pragma: no cover
-    import deephaven_enterprise.client.controller  # pragma: no cover
-    import deephaven_enterprise.proto.controller  # pragma: no cover
-
-from ._base import is_enterprise_available
-
-if is_enterprise_available():
-    from deephaven_enterprise.client.controller import ControllerClient
-else:
-    ControllerClient = None  # type: ignore[misc,assignment]  # pragma: no cover
-
 
 PQ_STATES: dict[str, str] = {
     "RUNNING": "ACTIVE",
@@ -224,13 +217,13 @@ class CorePlusQueryStatus(ProtobufWrapper):
     @override
     def __init__(
         self,
-        status: "deephaven_enterprise.proto.controller.PersistentQueryStatusEnum",
+        status: PersistentQueryStatusEnum,
     ):
         """Initialize with a protobuf status enum value.
 
         Args:
-            status (deephaven_enterprise.proto.controller.PersistentQueryStatusEnum):
-                The protobuf enum value for query status. Must not be None.
+            status (PersistentQueryStatusEnum): The protobuf enum value for query
+                status. Must not be None.
         """
         super().__init__(status)
 
@@ -378,14 +371,11 @@ class CorePlusToken(ProtobufWrapper):
     """
 
     @override
-    def __init__(
-        self, token: "deephaven_enterprise.proto.auth_pb2.Token"  # noqa: F821
-    ):
+    def __init__(self, token: Token):
         """Initialize with a protobuf Token message.
 
         Args:
-            token (deephaven_enterprise.proto.auth_pb2.Token): The protobuf
-                Token message to wrap. Must not be None.
+            token (Token): The protobuf Token message to wrap. Must not be None.
         """
         super().__init__(token)
 
@@ -448,13 +438,13 @@ class CorePlusQueryConfig(ProtobufWrapper):
     @override
     def __init__(
         self,
-        config: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryConfigMessage",  # noqa: F821
+        config: PersistentQueryConfigMessage,
     ):
         """Initialize with a protobuf PersistentQueryConfigMessage.
 
         Args:
-            config (deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryConfigMessage):
-                The protobuf configuration message to wrap. Must not be None.
+            config (PersistentQueryConfigMessage): The protobuf configuration
+                message to wrap. Must not be None.
         """
         super().__init__(config)
 
@@ -495,13 +485,13 @@ class CorePlusQueryState(ProtobufWrapper):
     @override
     def __init__(
         self,
-        state: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryStateMessage",  # noqa: F821
+        state: PersistentQueryStateMessage,
     ):
         """Initialize with a protobuf PersistentQueryStateMessage.
 
         Args:
-            state (deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryStateMessage):
-                The protobuf state message to wrap. Must not be None.
+            state (PersistentQueryStateMessage): The protobuf state message to
+                wrap. Must not be None.
         """
         super().__init__(state)
 
@@ -560,13 +550,13 @@ class CorePlusQueryInfo(ProtobufWrapper):
     @override
     def __init__(
         self,
-        info: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryInfoMessage",  # noqa: F821
+        info: PersistentQueryInfoMessage,
     ):
         """Initialize with a protobuf PersistentQueryInfoMessage.
 
         Args:
-            info (deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryInfoMessage):
-                The protobuf query info message to wrap. Must not be None.
+            info (PersistentQueryInfoMessage): The protobuf query info message to
+                wrap. Must not be None.
         """
         super().__init__(info)
         self._config: CorePlusQueryConfig = CorePlusQueryConfig(info.config)

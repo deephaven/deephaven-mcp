@@ -6,15 +6,17 @@ import json
 from unittest.mock import patch
 
 import click
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from deephaven_mcp.cli._commands.introspect import (
     _clean_help,
+    _resolve_command,
     build_manifest,
     introspect,
 )
-from deephaven_mcp.cli._errors import ErrorCode
+from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._main import cli
 
 
@@ -340,3 +342,111 @@ def test_manifest_emits_router_and_client_params_for_session() -> None:
     open_ = manifest["commands"]["session"]["subcommands"]["open"]["wraps"]
     assert open_["tools"] == ["session_community_credentials"]
     assert open_["client_only_params"] == ["print_only"]
+
+
+# ---------------------------------------------------------------------------
+# _resolve_command — scoping introspect to a command path
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_command_empty_path_returns_root() -> None:
+    """An empty path resolves to the root command unchanged."""
+    assert _resolve_command(cli, ()) is cli
+
+
+def test_resolve_command_descends_to_group_and_leaf() -> None:
+    """A path descends through groups to the named leaf command."""
+    daemon = _resolve_command(cli, ("daemon",))
+    assert daemon is cli.commands["daemon"]
+    start = _resolve_command(cli, ("daemon", "start"))
+    assert start is cli.commands["daemon"].commands["start"]
+
+
+def test_resolve_command_unknown_noun_raises_command_not_found() -> None:
+    """An unknown top-level token raises COMMAND_NOT_FOUND (exit 2)."""
+    with pytest.raises(CliError) as excinfo:
+        _resolve_command(cli, ("bogus",))
+    assert excinfo.value.code is ErrorCode.COMMAND_NOT_FOUND
+    assert excinfo.value.exit_code == 2
+
+
+def test_resolve_command_unknown_verb_raises_command_not_found() -> None:
+    """An unknown verb under a real noun raises COMMAND_NOT_FOUND."""
+    with pytest.raises(CliError) as excinfo:
+        _resolve_command(cli, ("daemon", "bogus"))
+    assert excinfo.value.code is ErrorCode.COMMAND_NOT_FOUND
+
+
+def test_resolve_command_descend_into_leaf_raises_command_not_found() -> None:
+    """Asking a leaf (non-group) command to descend raises COMMAND_NOT_FOUND."""
+    with pytest.raises(CliError) as excinfo:
+        _resolve_command(cli, ("daemon", "start", "deeper"))
+    assert excinfo.value.code is ErrorCode.COMMAND_NOT_FOUND
+
+
+# ---------------------------------------------------------------------------
+# introspect command — scoped output
+# ---------------------------------------------------------------------------
+
+
+def test_introspect_scoped_to_noun_matches_manifest_node() -> None:
+    """``introspect daemon`` equals the manifest's ``.commands.daemon`` node."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["introspect", "daemon"], standalone_mode=False)
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload == build_manifest(cli)["commands"]["daemon"]
+
+
+def test_introspect_scoped_to_verb_matches_manifest_node() -> None:
+    """``introspect daemon start`` equals the nested ``subcommands`` node.
+
+    Pins the documented invariant:
+    ``introspect daemon start`` == ``introspect | jq
+    '.commands.daemon.subcommands.start'``.
+    """
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["introspect", "daemon", "start"], standalone_mode=False
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    expected = build_manifest(cli)["commands"]["daemon"]["subcommands"]["start"]
+    assert payload == expected
+    # The scoped node carries no top-level manifest keys.
+    assert "version" not in payload
+    assert "error_codes" not in payload
+
+
+def test_introspect_scoped_unknown_path_exits_2() -> None:
+    """A path that does not resolve fails with COMMAND_NOT_FOUND, exit 2."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["introspect", "daemon", "bogus"])
+    assert result.exit_code == 2
+
+
+def test_introspect_scoped_honors_yaml_output_mode() -> None:
+    """``-o yaml introspect daemon`` renders the scoped node as YAML."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["-o", "yaml", "introspect", "daemon"])
+    assert result.exit_code == 0
+    payload = yaml.safe_load(result.output)
+    assert payload == build_manifest(cli)["commands"]["daemon"]
+
+
+def test_introspect_scoped_bypasses_config_load(tmp_path) -> None:
+    """Scoped introspect works even when the config dir is empty/malformed.
+
+    The runtime-load bypass keys on ``invoked_subcommand == "introspect"``;
+    path tokens are introspect's positional argument, so the bypass holds
+    and an agent can learn one subtree before any valid config exists.
+    """
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["--config-dir", str(tmp_path / "nonexistent"), "introspect", "daemon"],
+        standalone_mode=False,
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["name"] == "daemon"

@@ -464,6 +464,21 @@ defaults to JSON (so `dh-mcp introspect | jq .` works without `-o`)
 but honors the root `-o/--output` flag and `DH_MCP_OUTPUT` (`json`,
 `yaml`, or `human`).
 
+For progressive disclosure, pass an optional `PATH` (one or more
+command-name tokens) to emit just that command's node instead of the
+whole tree:
+
+```bash
+dh-mcp introspect daemon          # the daemon group node (its verbs included)
+dh-mcp introspect daemon start    # just the start verb node
+```
+
+The scoped node is byte-identical to the object found at
+`.commands.<path…>` in the unscoped manifest — e.g.
+`dh-mcp introspect daemon start` equals
+`dh-mcp introspect | jq '.commands.daemon.subcommands.start'`. A path
+that does not resolve exits `2` with `command_not_found`.
+
 ## Top-level flags
 
 | Flag                | Envvar               | Purpose                                                                              |
@@ -547,6 +562,7 @@ registry programmatically via `dh-mcp introspect` (look under
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
+| `command_not_found`           | `dh-mcp introspect PATH` referenced a command path that does not exist. |
 | `missing_argument`            | A required positional argument or option was not provided.         |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |

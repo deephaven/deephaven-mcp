@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from deephaven_mcp._exceptions import MissingEnterprisePackageError
 from deephaven_mcp.client._pq_config import (
     _apply_auto_delete_timeout,
     _apply_pq_config_list_fields,
@@ -23,14 +22,11 @@ def pq_config_mod():
     return _pq_config
 
 
-# Capture the real protobuf class at collection time. Used by the oneof test
-# (protobuf oneof semantics cannot be exercised with a MagicMock).
-try:
-    from deephaven_enterprise.proto.persistent_query_pb2 import (
-        PersistentQueryConfigMessage as _PQConfigMessage,
-    )
-except Exception:
-    _PQConfigMessage = None
+# The real protobuf class is used by the oneof test (protobuf oneof
+# semantics cannot be exercised with a MagicMock).
+from deephaven_enterprise.proto.persistent_query_pb2 import (
+    PersistentQueryConfigMessage as _PQConfigMessage,
+)
 
 
 def _make_config_mock():
@@ -65,13 +61,6 @@ def test_normalize_programming_language_groovy():
 def test_normalize_programming_language_invalid():
     with pytest.raises(ValueError, match="Invalid programming_language"):
         _normalize_programming_language("javascript")
-
-
-def test_convert_restart_users_to_enum_missing_package(pq_config_mod):
-    """RestartUsersEnum is None (enterprise absent) -> MissingEnterprisePackageError."""
-    with patch.object(pq_config_mod, "RestartUsersEnum", None):
-        with pytest.raises(MissingEnterprisePackageError):
-            _convert_restart_users_to_enum("RU_ADMIN")
 
 
 def test_convert_restart_users_to_enum_valid(pq_config_mod):
@@ -175,14 +164,6 @@ def test_apply_auto_delete_timeout_positive_installs_temporary(pq_config_mod):
     }
 
 
-def test_apply_auto_delete_timeout_positive_missing_package(pq_config_mod):
-    config = MagicMock()
-    config.typeSpecificFieldsJson = ""
-    with patch.object(pq_config_mod, "GenerateScheduling", None):
-        with pytest.raises(MissingEnterprisePackageError):
-            _apply_auto_delete_timeout(config, 300)
-
-
 def test_apply_pq_config_simple_fields_all_none():
     config = MagicMock()
     assert (
@@ -283,9 +264,6 @@ def test_validate_pq_config_args_ok():
     assert validate_pq_config_args(None, ["sched"], None, None) is None
 
 
-@pytest.mark.skipif(
-    _PQConfigMessage is None, reason="deephaven_enterprise not available"
-)
 def test_apply_pq_config_fields_script_body_oneof():
     """scriptCode and scriptPath are a protobuf oneof; setting one clears the other."""
     nones = dict(

@@ -72,15 +72,13 @@ race conditions.
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
 import pyarrow as pa
+from deephaven_enterprise.client.session_manager import DndSession
 from pydeephaven import Session
 from pydeephaven.query import Query
 from pydeephaven.table import InputTable, Table
-
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.session_manager  # pragma: no cover
 
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
@@ -163,19 +161,18 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
         ```
     """
 
-    def __init__(self, session: T, is_enterprise: bool, programming_language: str):
+    def __init__(self, session: T, programming_language: str):
         """
         Initialize the async session wrapper with a pydeephaven Session instance.
 
         Args:
             session: An initialized pydeephaven Session object to wrap.
-            is_enterprise: Set True for enterprise (Core+) sessions, False for standard sessions.
             programming_language: The programming language associated with this session (e.g., "python", "groovy").
 
         Note:
             Do not instantiate this class directly; use a SessionManager to obtain session instances.
         """
-        super().__init__(session, is_enterprise=is_enterprise)
+        super().__init__(session)
         self._programming_language = programming_language
 
     # ===== Properties =====
@@ -1138,9 +1135,7 @@ class CoreSession(BaseSession[Session]):
             session: A pydeephaven Session instance that will be wrapped by this class.
             programming_language: The programming language associated with this session (e.g., "python", "groovy").
         """
-        super().__init__(
-            session, is_enterprise=False, programming_language=programming_language
-        )
+        super().__init__(session, programming_language=programming_language)
 
     @classmethod
     async def from_credentials(
@@ -1441,9 +1436,7 @@ class CoreSession(BaseSession[Session]):
             )
 
 
-class CorePlusSession(
-    BaseSession["deephaven_enterprise.client.session_manager.DndSession"]
-):
+class CorePlusSession(BaseSession[DndSession]):
     """A wrapper around the enterprise DndSession class.
 
     This class provides a standardized interface while delegating to the
@@ -1499,7 +1492,7 @@ class CorePlusSession(
     @override
     def __init__(
         self,
-        session: "deephaven_enterprise.client.session_manager.DndSession",  # noqa: F821
+        session: DndSession,
         programming_language: str,
     ):
         """
@@ -1528,11 +1521,6 @@ class CorePlusSession(
                      DndSession object with proper enterprise capabilities.
 
         Raises:
-            InternalError: If ``is_enterprise=True`` is passed to the
-                           parent :class:`ClientObjectWrapper` constructor but the
-                           ``deephaven_enterprise`` package is not available in the
-                           current environment. This typically indicates a deployment
-                           configuration problem rather than a caller-visible bug.
             ValueError: If the ``session`` argument is ``None``.
 
         Note:
@@ -1543,17 +1531,13 @@ class CorePlusSession(
               resources like persistent queries and historical tables.
             - Closing a CorePlusSession does not necessarily terminate the underlying persistent query,
               which can continue running on the server.
-            - The session is automatically marked as an enterprise session (is_enterprise=True)
-              which enables specialized handling of enterprise-specific methods and objects.
 
         Thread Safety:
             As with CoreSession, methods of this class are not thread-safe and should only be called
             from a single thread. Each method should be awaited before calling another method on the
             same session.
         """
-        super().__init__(
-            session, is_enterprise=True, programming_language=programming_language
-        )
+        super().__init__(session, programming_language=programming_language)
 
     async def pqinfo(self) -> CorePlusQueryInfo:
         """

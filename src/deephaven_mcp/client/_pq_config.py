@@ -7,31 +7,13 @@ everything else is internal. These helpers perform no IO.
 """
 
 import json
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
-if TYPE_CHECKING:
-    from deephaven_enterprise.proto.persistent_query_pb2 import (  # pragma: no cover
-        PersistentQueryConfigMessage,
-        RestartUsersEnum,
-    )
-
-from deephaven_mcp._exceptions import MissingEnterprisePackageError
-
-# Runtime sentinels for the optional enterprise symbols used here. Both are also imported
-# under TYPE_CHECKING above so annotations like ``RestartUsersEnum.ValueType`` resolve. A
-# try/except (rather than is_enterprise_available()) guards these specific submodule imports:
-# it matches pq.py and catches a partial/version-skewed enterprise install where the top
-# package is present but a submodule is missing. Helpers that need them raise
-# MissingEnterprisePackageError when they are None.
-try:
-    from deephaven_enterprise.client.generate_scheduling import GenerateScheduling
-    from deephaven_enterprise.proto.persistent_query_pb2 import RestartUsersEnum
-except (
-    ImportError
-):  # pragma: no cover - only reached when the enterprise package is absent
-    GenerateScheduling = None  # type: ignore[misc,assignment]
-    RestartUsersEnum = None  # type: ignore[misc,assignment]
-
+from deephaven_enterprise.client.generate_scheduling import GenerateScheduling
+from deephaven_enterprise.proto.persistent_query_pb2 import (
+    PersistentQueryConfigMessage,
+    RestartUsersEnum,
+)
 
 # Default scheduling entries applied to a *permanent* PQ (auto_delete_timeout None or 0).
 # Produces a continuous scheduler that auto-starts the PQ after the controller accepts it.
@@ -95,13 +77,8 @@ def _convert_restart_users_to_enum(
             to ``PersistentQueryConfigMessage.restartUsers``.
 
     Raises:
-        MissingEnterprisePackageError: If RestartUsersEnum is unavailable (enterprise package
-            not installed).
         ValueError: If restart_users_str is not a valid enum value.
     """
-    if RestartUsersEnum is None:
-        raise MissingEnterprisePackageError()
-
     try:
         # EnumTypeWrapper.Value() is untyped (Any) in the runtime google.protobuf package;
         # the cast pins the precise protobuf type at the point upstream type info is lost so
@@ -118,7 +95,7 @@ def _convert_restart_users_to_enum(
 
 
 def _set_termination_delay(
-    config_pb: "PersistentQueryConfigMessage", delay_ms: int | None
+    config_pb: PersistentQueryConfigMessage, delay_ms: int | None
 ) -> None:
     """Set or remove the ``TerminationDelay`` entry in ``typeSpecificFieldsJson``.
 
@@ -138,7 +115,7 @@ def _set_termination_delay(
 
 
 def _apply_auto_delete_timeout(
-    config_pb: "PersistentQueryConfigMessage", auto_delete_timeout: int | None
+    config_pb: PersistentQueryConfigMessage, auto_delete_timeout: int | None
 ) -> bool:
     """Apply the auto-delete timeout to a PQ config's scheduler and ``TerminationDelay``.
 
@@ -156,10 +133,6 @@ def _apply_auto_delete_timeout(
 
     Returns:
         bool: True if the config was modified, False when auto_delete_timeout is None.
-
-    Raises:
-        MissingEnterprisePackageError: If the enterprise scheduling generator is unavailable
-            and a temporary scheduler is requested.
     """
     if auto_delete_timeout is None:
         return False
@@ -169,8 +142,6 @@ def _apply_auto_delete_timeout(
         config_pb.scheduling.extend(_DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING)
         _set_termination_delay(config_pb, None)
     else:
-        if GenerateScheduling is None:
-            raise MissingEnterprisePackageError()
         config_pb.scheduling.extend(
             GenerateScheduling.generate_temporary_scheduler(
                 expiration_time_minutes=_TEMPORARY_EXPIRATION_MINUTES,
@@ -183,7 +154,7 @@ def _apply_auto_delete_timeout(
 
 
 def _apply_pq_config_simple_fields(
-    config_pb: "PersistentQueryConfigMessage",
+    config_pb: PersistentQueryConfigMessage,
     pq_name: str | None,
     heap_size_gb: float | int | None,
     configuration_type: str | None,
@@ -245,7 +216,7 @@ def _apply_pq_config_simple_fields(
 
 
 def _apply_pq_config_list_fields(
-    config_pb: "PersistentQueryConfigMessage",
+    config_pb: PersistentQueryConfigMessage,
     schedule: list[str] | None,
     extra_jvm_args: list[str] | None,
     extra_class_path: list[str] | None,
@@ -328,7 +299,7 @@ def validate_pq_config_args(
 
 
 def apply_pq_config_fields(
-    config_pb: "PersistentQueryConfigMessage",
+    config_pb: PersistentQueryConfigMessage,
     *,
     pq_name: str | None,
     heap_size_gb: float | int | None,
