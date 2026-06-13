@@ -4,17 +4,13 @@ Two MCP servers register a GET handler at :data:`HEALTH_PATH` via
 ``FastMCP.custom_route``:
 
 - The systems server
-  (:func:`deephaven_mcp.mcp_systems_server.server._register_health_endpoint`).
-  Because this server mounts
-  :class:`~deephaven_mcp.auth.middleware.TlsEnforcementMiddleware` and
-  :class:`~deephaven_mcp.auth.middleware.AuthenticationMiddleware`, its
-  startup code also lists :data:`HEALTH_PATH` in
-  :attr:`~deephaven_mcp.auth.middleware.TransportSecurityPolicy.bypass_paths`
-  and in the ``bypass_paths`` argument to the auth middleware so that
-  probes succeed regardless of peer, scheme, or credentials.
+  (:func:`deephaven_mcp.mcp_systems_server._fastmcp._register_health_endpoint`).
+  Its HTTP transport mounts :class:`~deephaven_mcp.auth.middleware.PSKMiddleware`
+  and lists :data:`HEALTH_PATH` in that middleware's ``bypass_paths`` (in
+  :mod:`deephaven_mcp.mcp_systems_server._http`) so probes succeed without the
+  pre-shared key.
 - The docs server (:mod:`deephaven_mcp.mcp_docs_server._mcp`). This
-  server does not mount any auth/TLS middleware, so no bypass list is
-  needed.
+  server does not mount any auth middleware, so no bypass is needed.
 
 Defining the constant here — outside of any middleware module — keeps
 the auth/middleware layer free of application-route knowledge while

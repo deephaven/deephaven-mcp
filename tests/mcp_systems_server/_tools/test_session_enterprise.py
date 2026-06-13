@@ -23,6 +23,7 @@ from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _generate_session_name_if_none,
     _resolve_session_parameters,
     enterprise_systems_status,
+    register_tools,
     session_enterprise_create,
     session_enterprise_delete,
 )
@@ -2424,20 +2425,19 @@ def test_resolve_session_parameters_zero_values():
     assert result["auto_delete_timeout"] == 0  # Should use explicit 0, not default
 
 
-def test_register_tools_registers_enterprise_tools():
-    """register_tools() registers all DHE-specific session tools."""
+def test_register_tools_registers_all_enterprise_tools():
+    """register_tools() registers every Enterprise session tool, including the
+    always-available enterprise_systems_status."""
     from mcp.server.fastmcp import FastMCP
-
-    from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
-        register_tools,
-    )
 
     server = FastMCP("test-enterprise-server")
     register_tools(server)
     tools = server._tool_manager._tools
-    assert "enterprise_systems_status" in tools
-    assert "session_enterprise_create" in tools
-    assert "session_enterprise_delete" in tools
+    assert set(tools) == {
+        "enterprise_systems_status",
+        "session_enterprise_create",
+        "session_enterprise_delete",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2586,3 +2586,20 @@ async def test_enterprise_systems_status_aggregation_failed_outranks_loading():
     # message rather than the in-progress "actively running" message.
     assert "failed critically" in result["partial_result"]["detail"]
     assert "prod:factory" in result["partial_result"]["errors"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_aggregate_no_enterprise_returns_empty():
+    """Aggregating with no enterprise section returns an empty system list.
+
+    This is the Community-only path exercised by ``dh-mcp system status``:
+    ``system=None`` with no enterprise config returns early, before any
+    enterprise registry is consulted.
+    """
+    with patch(
+        f"{_SE_MODULE}.get_multi_config",
+        return_value=SimpleNamespace(enterprise=None),
+    ):
+        result = await enterprise_systems_status(MagicMock())
+
+    assert result == {"success": True, "systems": []}

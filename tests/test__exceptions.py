@@ -2,12 +2,14 @@ import pytest
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
+    CommunityNotConfiguredError,
     ConfigurationError,
     DaemonAlreadyPublishedError,
     DaemonClientError,
     DaemonRegistryError,
     DaemonStartupTimeoutError,
     DeephavenConnectionError,
+    EnterpriseNotConfiguredError,
     FileLockTimeoutError,
     InternalError,
     McpClientError,
@@ -20,6 +22,7 @@ from deephaven_mcp._exceptions import (
     SessionError,
     SessionLaunchError,
     SpawnError,
+    SystemNotConfiguredError,
     UnsupportedOperationError,
 )
 
@@ -94,6 +97,21 @@ class TestExceptionParameterized:
             (DeephavenConnectionError, [McpError], "connection error"),
             (ResourceError, [McpError], "resource error"),
             (ConfigurationError, [McpError], "configuration error"),
+            (
+                SystemNotConfiguredError,
+                [ConfigurationError, McpError],
+                "system not configured",
+            ),
+            (
+                EnterpriseNotConfiguredError,
+                [SystemNotConfiguredError, ConfigurationError, McpError],
+                "no enterprise configured",
+            ),
+            (
+                CommunityNotConfiguredError,
+                [SystemNotConfiguredError, ConfigurationError, McpError],
+                "no community configured",
+            ),
             (UnsupportedOperationError, [McpError], "unsupported operation error"),
             # Specialized exceptions with additional inheritance
             (SessionCreationError, [SessionError, McpError], "session creation error"),

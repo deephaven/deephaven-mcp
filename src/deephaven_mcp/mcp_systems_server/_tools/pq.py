@@ -1686,15 +1686,15 @@ async def pq_delete(
             "isError": True
         }
     """
-    if max_concurrent is None:
-        max_concurrent = get_enterprise_settings(
-            context
-        ).pq_tools.default_max_concurrent
     _LOGGER.info(f"[mcp_systems_server:pq_delete] Invoked: pq_id={pq_id!r}")
 
     result: dict[str, object] = {"success": False}
 
     try:
+        if max_concurrent is None:
+            max_concurrent = get_enterprise_settings(
+                context
+            ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
         (
             parsed_pqs,
@@ -2306,15 +2306,15 @@ async def pq_start(
             "isError": True
         }
     """
-    if max_concurrent is None:
-        max_concurrent = get_enterprise_settings(
-            context
-        ).pq_tools.default_max_concurrent
     _LOGGER.info(f"[mcp_systems_server:pq_start] Invoked: pq_id={pq_id!r}, wait={wait}")
 
     result: dict[str, object] = {"success": False}
 
     try:
+        if max_concurrent is None:
+            max_concurrent = get_enterprise_settings(
+                context
+            ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
         (
             parsed_pqs,
@@ -2516,15 +2516,15 @@ async def pq_stop(
             "isError": True
         }
     """
-    if max_concurrent is None:
-        max_concurrent = get_enterprise_settings(
-            context
-        ).pq_tools.default_max_concurrent
     _LOGGER.info(f"[mcp_systems_server:pq_stop] Invoked: pq_id={pq_id!r}, wait={wait}")
 
     result: dict[str, object] = {"success": False}
 
     try:
+        if max_concurrent is None:
+            max_concurrent = get_enterprise_settings(
+                context
+            ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
         (
             parsed_pqs,
@@ -2778,10 +2778,6 @@ async def pq_restart(
             "isError": True
         }
     """
-    if max_concurrent is None:
-        max_concurrent = get_enterprise_settings(
-            context
-        ).pq_tools.default_max_concurrent
     _LOGGER.info(
         f"[mcp_systems_server:pq_restart] Invoked: pq_id={pq_id!r}, wait={wait}"
     )
@@ -2789,6 +2785,10 @@ async def pq_restart(
     result: dict[str, object] = {"success": False}
 
     try:
+        if max_concurrent is None:
+            max_concurrent = get_enterprise_settings(
+                context
+            ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
         (
             parsed_pqs,

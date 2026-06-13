@@ -15,7 +15,10 @@ from conftest import (
     stub_session_config,
 )
 
-from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp._exceptions import (
+    CommunityNotConfiguredError,
+    RegistryItemNotFoundError,
+)
 from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.config.schema import CommunitySessionCreationDefaults
 from deephaven_mcp.mcp_systems_server._tools.session_community import (
@@ -334,6 +337,37 @@ async def test_session_community_create_launch_failure():
         assert result["success"] is False
         assert "Launch failed" in result["error"]
         assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_session_community_delete_no_community_returns_clean_error():
+    """On a deployment with no Community sessions, session_community_delete
+    surfaces a clean structured error rather than an uncaught/internal error.
+
+    Tools register unconditionally, so a Community tool can be invoked with no
+    Community section configured; ``get_community_registry`` raises
+    ``CommunityNotConfiguredError``, which the tool's handler converts to
+    ``success=False``.
+    """
+    context = MockContext(
+        {
+            "registry": MagicMock(),
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_community.get_community_registry",
+        side_effect=CommunityNotConfiguredError(
+            "No Community sessions are configured on this server."
+        ),
+    ):
+        result = await session_community_delete(
+            context, session_id="community:community:test-session"
+        )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Community" in result["error"]
 
 
 @pytest.mark.asyncio

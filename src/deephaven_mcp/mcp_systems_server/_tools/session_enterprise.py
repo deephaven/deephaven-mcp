@@ -959,10 +959,13 @@ async def session_enterprise_delete(
 
 
 def register_tools(server: FastMCP) -> None:
-    """Register all enterprise session tools with the given FastMCP server.
+    """Register all Enterprise session tools with the given FastMCP server.
 
-    These tools are specific to the DHE server and should NOT be registered
-    on the DHC server.
+    Registers ``enterprise_systems_status`` (which returns an empty system
+    list when no Enterprise system is configured) plus the Enterprise session
+    create/delete tools (which return a clean "not configured" error in that
+    case). Every tool module registers unconditionally; tools self-report
+    applicability rather than being gated by configuration.
 
     Args:
         server (FastMCP): The server to register tools with.

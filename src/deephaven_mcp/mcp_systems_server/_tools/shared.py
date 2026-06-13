@@ -33,6 +33,8 @@ import pyarrow
 from mcp.server.fastmcp import Context
 
 from deephaven_mcp._exceptions import (
+    CommunityNotConfiguredError,
+    EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
 )
@@ -210,18 +212,16 @@ def get_enterprise_settings(context: Context) -> EnterpriseSettings:
             model (timeouts, evictor knobs, ``pq_tools``, ...).
 
     Raises:
-        InternalError: If no enterprise configuration is loaded
-            (``multi_config.enterprise is None``). Enterprise tools
-            (``pq_*``, ``catalog_*``, ``session_enterprise_*``) only
-            register when enterprise config is loaded; reaching this
-            branch means the registration-time gate was bypassed.
+        EnterpriseNotConfiguredError: If no Enterprise system is
+            configured (``multi_config.enterprise is None``). Enterprise
+            tools register unconditionally, so this is a foreseeable
+            user-correctable condition (configure an Enterprise system),
+            surfaced as a clean error rather than an internal one.
     """
     enterprise = get_multi_config(context).enterprise
     if enterprise is None:
-        raise InternalError(
-            "get_enterprise_settings called without enterprise config "
-            "loaded; an enterprise tool was registered on a community-"
-            "only deployment (registration-time invariant violated)."
+        raise EnterpriseNotConfiguredError(
+            "No Enterprise (Core+) system is configured on this server."
         )
     return enterprise.settings
 
@@ -237,18 +237,16 @@ def get_community_settings(context: Context) -> CommunitySettings:
             model (security, session creation defaults, ...).
 
     Raises:
-        InternalError: If no community configuration is loaded
-            (``multi_config.community is None``). Community tools
-            (``session_community_*``) only register when community
-            config is loaded; reaching this branch means the
-            registration-time gate was bypassed.
+        CommunityNotConfiguredError: If no Community sessions are
+            configured (``multi_config.community is None``). Community
+            tools register unconditionally, so this is a foreseeable
+            user-correctable condition (configure a Community session),
+            surfaced as a clean error rather than an internal one.
     """
     community = get_multi_config(context).community
     if community is None:
-        raise InternalError(
-            "get_community_settings called without community config "
-            "loaded; a community tool was registered on an enterprise-"
-            "only deployment (registration-time invariant violated)."
+        raise CommunityNotConfiguredError(
+            "No Community sessions are configured on this server."
         )
     return community.settings
 
@@ -264,15 +262,15 @@ def get_community_registry(context: Context) -> CommunitySessionRegistry:
             multi-system registry.
 
     Raises:
-        InternalError: If no community section is configured. Tools
-            that require a community session should defend against
-            this and surface a friendlier error to the caller.
+        CommunityNotConfiguredError: If no Community sessions are
+            configured. Community tools register unconditionally, so this
+            is a foreseeable user-correctable condition surfaced as a
+            clean error rather than an internal one.
     """
     registry = get_registry(context).community
     if registry is None:
-        raise InternalError(
-            "No community sessions are configured; community/sessions/ is "
-            "empty or absent."
+        raise CommunityNotConfiguredError(
+            "No Community sessions are configured on this server."
         )
     return registry
 

@@ -15,7 +15,7 @@ Exception Hierarchy:
     - Query exceptions: QueryError (extends McpError)
     - Connection exceptions: DeephavenConnectionError (extends McpError)
     - Resource exceptions: ResourceError (extends McpError), RegistryItemNotFoundError (extends ResourceError and KeyError)
-    - Configuration exceptions: ConfigurationError (extends McpError)
+    - Configuration exceptions: ConfigurationError (extends McpError), SystemNotConfiguredError (extends ConfigurationError), EnterpriseNotConfiguredError (extends SystemNotConfiguredError), CommunityNotConfiguredError (extends SystemNotConfiguredError)
 
 Usage Example:
     ```python
@@ -58,6 +58,9 @@ __all__ = [
     "RegistryItemNotFoundError",
     # Configuration exceptions
     "ConfigurationError",
+    "SystemNotConfiguredError",
+    "EnterpriseNotConfiguredError",
+    "CommunityNotConfiguredError",
     # File-lock exceptions
     "FileLockTimeoutError",
     # Daemon registry exceptions
@@ -538,6 +541,33 @@ class ConfigurationError(McpError):
             # Provide guidance to user on fixing configuration
         ```
     """
+
+    pass
+
+
+class SystemNotConfiguredError(ConfigurationError):
+    """Base class for "the deployment has not configured this system type" errors.
+
+    Raised when a tool that requires a configuration section is invoked on a
+    deployment that did not load that section. Every MCP tool is registered
+    unconditionally, so a tool may be called on a deployment that lacks its
+    section; the tool surfaces this as a user-correctable configuration error
+    (configure the missing section) rather than an internal error. Distinct
+    from :class:`InvalidSessionNameError`, which names a *specific* system that
+    is absent.
+    """
+
+    pass
+
+
+class EnterpriseNotConfiguredError(SystemNotConfiguredError):
+    """Raised when an Enterprise tool is invoked but no Enterprise system is configured."""
+
+    pass
+
+
+class CommunityNotConfiguredError(SystemNotConfiguredError):
+    """Raised when a Community tool is invoked but no Community sessions are configured."""
 
     pass
 

@@ -3,7 +3,7 @@
 This package contains the implementation of every Deephaven MCP tool the
 multiplexed systems server registers. Each module exposes a
 ``register_tools(server: FastMCP)`` function invoked by
-:func:`deephaven_mcp.mcp_systems_server.server._register_tools` at
+:func:`deephaven_mcp.mcp_systems_server._fastmcp._register_tools` at
 startup.
 
 Modules:

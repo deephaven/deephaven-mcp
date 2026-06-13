@@ -20,6 +20,8 @@ import pytest
 from conftest import MockContext
 
 from deephaven_mcp._exceptions import (
+    CommunityNotConfiguredError,
+    EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
 )
@@ -146,18 +148,16 @@ def test_get_enterprise_settings_returns_settings():
 
 
 def test_get_enterprise_settings_raises_when_enterprise_none():
-    """Defensive guard required by _python-coding-practices rule 11.
+    """A community-only deployment surfaces a clean user-facing error.
 
-    The registration-time gate in ``server._register_tools`` makes this
-    branch unreachable in normal operation, but the guard must still be
-    exercised by a unit test that constructs the bypass.
+    Every tool registers unconditionally, so an Enterprise tool can be
+    invoked with no Enterprise system configured; this must be a
+    user-correctable ``EnterpriseNotConfiguredError``, not an InternalError.
     """
     multi_config = MagicMock()
     multi_config.enterprise = None
     ctx = _ctx(multi_config=multi_config)
-    with pytest.raises(
-        InternalError, match="get_enterprise_settings called without enterprise"
-    ):
+    with pytest.raises(EnterpriseNotConfiguredError, match="No Enterprise"):
         shared.get_enterprise_settings(ctx)
 
 
@@ -171,13 +171,11 @@ def test_get_community_settings_returns_settings():
 
 
 def test_get_community_settings_raises_when_community_none():
-    """Defensive guard required by _python-coding-practices rule 11."""
+    """An enterprise-only deployment surfaces a clean user-facing error."""
     multi_config = MagicMock()
     multi_config.community = None
     ctx = _ctx(multi_config=multi_config)
-    with pytest.raises(
-        InternalError, match="get_community_settings called without community"
-    ):
+    with pytest.raises(CommunityNotConfiguredError, match="No Community"):
         shared.get_community_settings(ctx)
 
 
@@ -191,7 +189,7 @@ def test_get_community_registry_returns_child():
 def test_get_community_registry_raises_when_absent():
     registry = MagicMock(community=None)
     ctx = _ctx(registry=registry)
-    with pytest.raises(InternalError, match="No community sessions are configured"):
+    with pytest.raises(CommunityNotConfiguredError, match="No Community"):
         shared.get_community_registry(ctx)
 
 
