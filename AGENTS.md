@@ -61,3 +61,8 @@ Apply `_python-coding-practices` rule 16 before using version-gated syntax (PEP 
 ## Python Code
 
 Before writing or editing Python source under `src/` or `tests/` — including docstring-only edits — load `_python-coding-practices` and apply its rules. The most-violated are rule 12 (docstrings describe *what*, not *why*; no rationale, API-symmetry, or cross-call-site narrative) and rule 14 (every field on a field-bearing value class — a Pydantic schema, `@dataclass`, or `NamedTuple` — carries a per-field PEP 257 trailing docstring, never a class-level `Attributes:` block; see `Runtime` in `cli/_runtime.py`). Enums are different: they bind per-member metadata via `__new__`, not field docstrings — see `ErrorCode` in `cli/_errors.py`.
+
+## Build & Distribution
+
+- **Wheels**: built and published to PyPI by CI on `v*` tag pushes (`.github/workflows/publish-wheels.yml`); the dependency list is authoritative in `pyproject.toml`.
+- **Standalone binaries (PyApp)**: self-contained, offline, no-Python executables (`dh-mcp-systems-server`, `dh-mcp`) built per-platform via `uv run scripts/build_pyapp.py` and released by `.github/workflows/build-pyapp.yml`. See `docs/STANDALONE_BINARIES.md` for the full procedure.

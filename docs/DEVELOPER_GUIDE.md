@@ -78,6 +78,7 @@ This repository houses the Python-based [Model Context Protocol (MCP)](https://m
       - [Script References](#script-references)
     - [Dependencies](#dependencies)
     - [Versioning](#versioning)
+    - [Standalone Binaries (PyApp)](#standalone-binaries-pyapp)
     - [Docker Compose](#docker-compose)
     - [Performance Testing](#performance-testing)
       - [MCP Docs Server Stress Testing](#mcp-docs-server-stress-testing)
@@ -1002,6 +1003,7 @@ The project includes several utility scripts to help with development and testin
 | [`../scripts/mcp_docs_test_client.py`](../scripts/mcp_docs_test_client.py) | Tests the Docs Server chat functionality | `uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"` |
 | [`../scripts/mcp_docs_stress_test.py`](../scripts/mcp_docs_stress_test.py) | In-process concurrent load test of the `docs_chat` tool | `uv run scripts/mcp_docs_stress_test.py` |
 | [`../scripts/mcp_docs_stress_http.py`](../scripts/mcp_docs_stress_http.py) | Stress tests the streamable-HTTP endpoint with concurrent connections | `uv run scripts/mcp_docs_stress_http.py --url "http://localhost:8001/mcp"` |
+| [`../scripts/build_pyapp.py`](../scripts/build_pyapp.py) | Builds standalone, self-contained binaries via PyApp (see [`STANDALONE_BINARIES.md`](STANDALONE_BINARIES.md)) | `uv run scripts/build_pyapp.py` |
 | [`../bin/precommit.sh`](../bin/precommit.sh) | Runs pre-commit code quality checks | `bin/precommit.sh` |
 
 ### Dependencies
@@ -1016,6 +1018,10 @@ These dependencies are automatically installed when using `pip install -e .` or 
 ### Versioning
 
 This package uses [setuptools-scm](https://github.com/pypa/setuptools_scm) for dynamic versioning based on git tags. Version information is automatically generated during the build process and stored in `src/deephaven_mcp/_version.py`. This file should not be manually edited or tracked in version control.
+
+### Standalone Binaries (PyApp)
+
+Self-contained, offline native binaries (no Python required at runtime) are built with [PyApp](https://ofek.dev/pyapp/). See [`STANDALONE_BINARIES.md`](STANDALONE_BINARIES.md).
 
 ### Docker Compose
 

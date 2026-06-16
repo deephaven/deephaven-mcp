@@ -654,6 +654,10 @@ python3.12 -m venv .venv
 
 When using a venv, use the full path to executables (e.g., `.venv/bin/dh-mcp-systems-server`).
 
+#### Alternative: Standalone binaries (no Python required)
+
+If you do not have Python (or `uv`), download a prebuilt **standalone binary** — a single self-contained executable that embeds its own Python interpreter and all dependencies and runs fully offline. Get the archive for your platform from the [GitHub Releases page](https://github.com/deephaven/deephaven-mcp/releases). See [`docs/STANDALONE_BINARIES.md`](docs/STANDALONE_BINARIES.md) for the full install steps.
+
 ---
 
 ## Configuration

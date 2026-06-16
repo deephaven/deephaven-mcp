@@ -1,12 +1,12 @@
 ---
 name: _documentation-roles
-description: Defines the role (audience and scope) of every top-level markdown document in this project — invoked by `docs-improve` and `docs-accuracy` to keep edits in-scope and prevent content drift between documents
+description: Defines the role (audience and scope) of every top-level markdown document in this project — loaded by the docs and CLI-authoring workflows to keep edits in-scope and prevent content drift between documents
 user-invocable: false
 ---
 
 # Documentation Roles
 
-Every top-level markdown file in this repository has a single, intentional role. Edits must respect that role. This skill is the canonical source of truth for those roles; `docs-improve` and `docs-accuracy` load it before making changes.
+Every top-level markdown file in this repository has a single, intentional role. Edits must respect that role. This skill is the canonical source of truth for those roles; the docs workflows (`docs-improve`, `docs-accuracy`) and `cli-command-add` load it before making changes.
 
 ## Roles
 
@@ -19,6 +19,7 @@ Every top-level markdown file in this repository has a single, intentional role.
 | `docs/UV.md` | developer new to `uv` | Generic `uv` crash course. | Project-specific commands, project env vars, project tests, project install lines. |
 | `docs/CLI.md` | operator + AI agent using the local `dh-mcp` CLI | Full `dh-mcp` reference: command surface (noun-verb tree), global flags, env-var bindings, exit codes, `error_code` registry, output modes (`human` / `json` / `yaml`), examples, shell completion, `dh-mcp introspect` agent self-discovery. | Server-side configuration (lives in `CONFIGURATION.md`); developer/contributor mechanics (lives in `DEVELOPER_GUIDE.md`); environment variables consumed by the server processes (those live in `ENV.md`; CLI-specific env vars stay here). |
 | `docs/DEVELOPER_GUIDE.md` | contributor | Everything a developer working *on* the project needs. Catch-all. | Per-tool reference (parameters, returns, examples) — see [Tool reference is owned by code](#tool-reference-is-owned-by-code). |
+| `docs/STANDALONE_BINARIES.md` | anyone building, installing, or deploying the standalone binaries (not just contributors) | **Self-contained, end-to-end**: installing a prebuilt binary (download, extract, point an AI tool at it) and building/releasing them (prerequisites including the Rust/PyApp setup needed to build, build commands, output artifacts, supported platforms, the CI release workflow). README's install section is a one-line pointer here, not a parallel copy. | Project-maintainer minutiae (e.g. bumping pinned-version source constants); server configuration schema (lives in `CONFIGURATION.md`, linked); per-tool reference (lives in code docstrings). |
 | `docs/design/*.md` | contributor / architect | Design rationale for a subsystem — the *why* behind a structural decision (trade-offs weighed, chosen approach, invariants). One file per subsystem; e.g. `docs/design/CLI_TOOL_WRAPPING.md`. | Per-command / per-API reference (lives in `docs/CLI.md` or the code); step-by-step contributor workflow (lives in `DEVELOPER_GUIDE.md`). |
 | `AGENTS.md` | AI agent | Agent process rules. Not human documentation; **no TOC**. | Anything intended for humans. |
 
