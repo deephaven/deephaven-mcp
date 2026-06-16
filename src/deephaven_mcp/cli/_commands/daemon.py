@@ -254,10 +254,26 @@ _OUTPUT_STATUS = OutputSpec(
     "object",
     (
         OutputField("running", "boolean", "Whether a live daemon is registered."),
+        OutputField(
+            "runtime_dir",
+            "string",
+            "Absolute path to the runtime directory root (holds the daemon subdirectory).",
+        ),
+        OutputField(
+            "registry_path", "string", "Absolute path to the daemon.json registry file."
+        ),
+        OutputField(
+            "log_path",
+            "string",
+            "Absolute path to the daemon.log captured stdout/stderr log (the file may not exist yet).",
+        ),
         OutputField("stale_pid", "integer", "PID of a dead entry that was cleaned up."),
         *_ENTRY_FIELDS,
     ),
-    note="When running is true, the registry-entry fields are also present.",
+    note=(
+        "runtime_dir, registry_path, and log_path are always present; when "
+        "running is true, the registry-entry fields are also present."
+    ),
 )
 
 
@@ -288,6 +304,13 @@ _OUTPUT_STATUS = OutputSpec(
 async def daemon_status(runtime: Runtime) -> None:
     """Report daemon status."""
     output = runtime.config.cli.output.format
+    # Always-present daemon-directory locations, independent of running state
+    # so the log/registry paths are discoverable even when the daemon is down.
+    paths = {
+        "runtime_dir": str(runtime.runtime_dir),
+        "registry_path": str(runtime.daemon_dir.registry_path),
+        "log_path": str(runtime.daemon_dir.log_path),
+    }
     try:
         entry = runtime.daemon_dir.read_entry()
     except RegistryCorruptError as exc:
@@ -301,7 +324,7 @@ async def daemon_status(runtime: Runtime) -> None:
             code=ErrorCode.DAEMON_REGISTRY_CORRUPT,
         ) from exc
     if entry is None:
-        click.echo(format_output({"running": False}, output=output))
+        click.echo(format_output({"running": False, **paths}, output=output))
         return
     if not entry.is_live():
         # Re-read inside the lock before deleting so we do not blast
@@ -316,13 +339,15 @@ async def daemon_status(runtime: Runtime) -> None:
                 stale_pid = None
         if stale_pid is not None:
             click.echo(
-                format_output({"running": False, "stale_pid": stale_pid}, output=output)
+                format_output(
+                    {"running": False, "stale_pid": stale_pid, **paths}, output=output
+                )
             )
             return
         # The entry vanished or became live during the re-read; fall
         # through and re-evaluate the entry we now hold.
         if entry is None:
-            click.echo(format_output({"running": False}, output=output))
+            click.echo(format_output({"running": False, **paths}, output=output))
             return
 
     # Dump the entry through the project-canonical redact pipeline
@@ -333,7 +358,7 @@ async def daemon_status(runtime: Runtime) -> None:
     # consumers.
     payload = dump_redacted(entry)
     payload["running"] = True
-    click.echo(format_output(payload, output=output))
+    click.echo(format_output({**payload, **paths}, output=output))
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +518,11 @@ async def daemon_reset(runtime: Runtime) -> None:
 # ---------------------------------------------------------------------------
 
 _OUTPUT_LOGS = OutputSpec(
-    "text", note="Raw lines from daemon.log; not structured even under -o json."
+    "text",
+    note=(
+        "Raw lines from daemon.log; not structured even under -o json. With "
+        "--path, prints only the absolute log-file path on a single line."
+    ),
 )
 
 
@@ -543,13 +572,16 @@ async def _tail_and_follow(
         description=(
             "Without -f, prints the last --lines lines and exits. With -f, "
             "follows the file until interrupted (Ctrl-C). Output is raw log "
-            "text in every output mode."
+            "text in every output mode. With --path, prints the absolute path "
+            "to the log file and exits without reading it (works even if the "
+            "daemon has never started)."
         ),
         output=_OUTPUT_LOGS,
         examples=(
             "$ dh-mcp daemon logs",
             "$ dh-mcp daemon logs -n 500",
             "$ dh-mcp daemon logs -f",
+            "$ dh-mcp daemon logs --path",
         ),
         see_also=("dh-mcp daemon status",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
@@ -571,17 +603,31 @@ async def _tail_and_follow(
     show_default=True,
     help="Number of trailing lines to print before following.",
 )
+@click.option(
+    "--path",
+    "show_path",
+    is_flag=True,
+    default=False,
+    help="Print the absolute path to the log file and exit.",
+)
 @click.pass_obj
 @run_async
-async def daemon_logs(runtime: Runtime, follow: bool, lines: int) -> None:
+async def daemon_logs(
+    runtime: Runtime, follow: bool, lines: int, show_path: bool
+) -> None:
     """Tail the daemon log file."""
-    path = runtime.daemon_dir.log_path
-    if not path.exists():
+    log_path = runtime.daemon_dir.log_path
+    if show_path:
+        # Discover-the-path mode: report the location without touching the
+        # file, so it works before the daemon has ever started.
+        click.echo(str(log_path))
+        return
+    if not log_path.exists():
         raise CliError(
-            f"No daemon log at {path}. Has the daemon been started?",
+            f"No daemon log at {log_path}. Has the daemon been started?",
             code=ErrorCode.DAEMON_NOT_RUNNING,
         )
     try:
-        await _tail_and_follow(path, lines=lines, follow=follow)
+        await _tail_and_follow(log_path, lines=lines, follow=follow)
     except (KeyboardInterrupt, asyncio.CancelledError):  # pragma: no cover
         return

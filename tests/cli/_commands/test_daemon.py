@@ -35,6 +35,25 @@ def _invoke(args: list[str], runtime: Runtime):
         return runner.invoke(cli, args)
 
 
+def _expected_paths(rt: Runtime, tmp_path: Path) -> dict[str, str]:
+    """Point the mock daemon_dir at known paths; return the status path fields.
+
+    ``daemon status`` always emits ``runtime_dir``, ``registry_path``, and
+    ``log_path``. ``runtime_dir`` is real on the Runtime built by
+    ``make_runtime``; the registry/log paths come from the (mocked)
+    DaemonDirectory, so set them to deterministic values here.
+    """
+    registry = tmp_path / "rt" / "daemon" / "daemon.json"
+    log = tmp_path / "rt" / "daemon" / "daemon.log"
+    rt.daemon_dir.registry_path = registry  # type: ignore[union-attr]
+    rt.daemon_dir.log_path = log  # type: ignore[union-attr]
+    return {
+        "runtime_dir": str(rt.runtime_dir),
+        "registry_path": str(registry),
+        "log_path": str(log),
+    }
+
+
 # ---------------------------------------------------------------------------
 # start
 # ---------------------------------------------------------------------------
@@ -109,10 +128,11 @@ def test_stop_client_error_returns_2(tmp_path: Path) -> None:
 def test_status_no_registry(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     rt.daemon_dir.read_entry.return_value = None  # type: ignore[union-attr]
+    paths = _expected_paths(rt, tmp_path)
     result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"running": False}
+    assert payload == {"running": False, **paths}
 
 
 def test_status_stale_pid(tmp_path: Path) -> None:
@@ -143,11 +163,12 @@ def test_status_stale_then_vanished_inside_lock(tmp_path: Path) -> None:
     rt.daemon_dir.read_entry.return_value = make_entry()  # type: ignore[union-attr]
     reg = locked_session(rt)
     reg.read.return_value = None
+    paths = _expected_paths(rt, tmp_path)
     with patch.object(DaemonRegistryEntry, "is_live", return_value=False):
         result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"running": False}
+    assert payload == {"running": False, **paths}
     reg.delete.assert_not_called()
 
 
@@ -189,6 +210,7 @@ def test_status_live_returns_registry_fields(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     entry = make_entry()
     rt.daemon_dir.read_entry.return_value = entry  # type: ignore[union-attr]
+    paths = _expected_paths(rt, tmp_path)
     with patch.object(DaemonRegistryEntry, "is_live", return_value=True):
         result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
@@ -207,11 +229,26 @@ def test_status_live_returns_registry_fields(tmp_path: Path) -> None:
         # serialization path used by the production code.
         "started_at": entry.model_dump(mode="json")["started_at"],
         "config_dir": str(entry.config_dir),
+        **paths,
     }
     # Defense-in-depth: the PSK plaintext must never appear anywhere
     # in the rendered output. The redacted form (``REDACTED``) is
     # expected and asserted above.
     assert entry.psk.get_secret_value() not in result.output
+
+
+def test_status_surfaces_daemon_paths_when_down(tmp_path: Path) -> None:
+    """runtime_dir/registry_path/log_path are reported even with no daemon."""
+    rt = make_runtime(tmp_path)
+    rt.daemon_dir.read_entry.return_value = None  # type: ignore[union-attr]
+    paths = _expected_paths(rt, tmp_path)
+    result = _invoke(["-o", "json", "daemon", "status"], rt)
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["running"] is False
+    assert payload["runtime_dir"] == paths["runtime_dir"]
+    assert payload["registry_path"] == paths["registry_path"]
+    assert payload["log_path"] == paths["log_path"]
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +563,16 @@ def test_logs_missing_file_returns_2(tmp_path: Path) -> None:
     rt.daemon_dir.log_path = daemon_dir / "daemon.log"  # type: ignore[union-attr]
     result = _invoke(["daemon", "logs"], rt)
     assert result.exit_code == 2
+
+
+def test_logs_path_flag_prints_absolute_path(tmp_path: Path) -> None:
+    """--path prints the log-file path and exits 0 even when the file is absent."""
+    rt = make_runtime(tmp_path)
+    log_path = tmp_path / "rt" / "daemon" / "daemon.log"  # never created
+    rt.daemon_dir.log_path = log_path  # type: ignore[union-attr]
+    result = _invoke(["daemon", "logs", "--path"], rt)
+    assert result.exit_code == 0
+    assert result.output.strip() == str(log_path)
 
 
 def test_logs_tails_last_n_lines(tmp_path: Path) -> None:

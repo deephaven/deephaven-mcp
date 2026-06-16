@@ -268,10 +268,10 @@ verb honors the top-level `-o/--output` flag.
 |------------|-----------------------------------------------------------------------------------------------|
 | `start`    | Idempotently spawn the daemon (or print the existing handle). Reports pid/host/port.          |
 | `stop`     | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                        |
-| `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir. |
+| `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir, plus the always-present `runtime_dir`, `registry_path`, and `log_path`. |
 | `restart`  | `stop` then `start` in one shot; reports the new handle.                                      |
 | `reset`    | Quarantines a corrupt `daemon.json` (renames it to `daemon.json.corrupt-<UTC>`) so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
-| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit). |
+| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
 
 ### `dh-mcp tool`
 
