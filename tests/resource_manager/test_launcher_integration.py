@@ -543,7 +543,7 @@ class TestOrphanCleanupIntegration:
 
         try:
             # Create instance tracker and register
-            instances_dir = tmp_path / ".deephaven-mcp" / "instances"
+            instances_dir = tmp_path / "instances"
             instances_dir.mkdir(parents=True, exist_ok=True)
 
             # Create a real Docker container with our label
@@ -583,44 +583,32 @@ class TestOrphanCleanupIntegration:
                 )
             )
 
-            # Temporarily override Path.home() to use tmp_path
-            original_home = Path.home
+            # Run cleanup - should find and stop the container
+            await cleanup_orphaned_resources(instances_dir)
 
-            def mock_home():
-                return tmp_path
+            # Wait a moment for Docker to process the stop
+            await asyncio.sleep(2)
 
-            Path.home = staticmethod(mock_home)
+            # Verify container was stopped
+            check_process = await asyncio.create_subprocess_exec(
+                "docker",
+                "ps",
+                "-q",
+                "--filter",
+                f"id={container_id}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await check_process.communicate()
 
-            try:
-                # Run cleanup - should find and stop the container
-                await cleanup_orphaned_resources()
+            # Container should not be in running containers list
+            running_containers = stdout.decode().strip()
+            assert (
+                not running_containers
+            ), f"Container {container_id} still running after cleanup"
 
-                # Wait a moment for Docker to process the stop
-                await asyncio.sleep(2)
-
-                # Verify container was stopped
-                check_process = await asyncio.create_subprocess_exec(
-                    "docker",
-                    "ps",
-                    "-q",
-                    "--filter",
-                    f"id={container_id}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, _ = await check_process.communicate()
-
-                # Container should not be in running containers list
-                running_containers = stdout.decode().strip()
-                assert (
-                    not running_containers
-                ), f"Container {container_id} still running after cleanup"
-
-                # Instance metadata should be removed
-                assert not instance_file.exists()
-
-            finally:
-                Path.home = original_home
+            # Instance metadata should be removed
+            assert not instance_file.exists()
 
         finally:
             # Cleanup - make sure container is stopped even if test fails
@@ -672,7 +660,7 @@ class TestOrphanCleanupIntegration:
             assert process.returncode is None
 
             # Create instance metadata directory
-            instances_dir = tmp_path / ".deephaven-mcp" / "instances"
+            instances_dir = tmp_path / "instances"
             instances_dir.mkdir(parents=True, exist_ok=True)
 
             # Create fake instance metadata with dead server PID but live python process
@@ -692,33 +680,21 @@ class TestOrphanCleanupIntegration:
                 )
             )
 
-            # Temporarily override Path.home() to use tmp_path
-            original_home = Path.home
+            # Run cleanup - should find and kill the process
+            await cleanup_orphaned_resources(instances_dir)
 
-            def mock_home():
-                return tmp_path
+            # Wait for process to be terminated
+            await asyncio.sleep(2)
 
-            Path.home = staticmethod(mock_home)
-
+            # Verify process was killed
             try:
-                # Run cleanup - should find and kill the process
-                await cleanup_orphaned_resources()
+                os.kill(process.pid, 0)
+                pytest.fail(f"Process {process.pid} still running after cleanup")
+            except OSError:
+                pass  # Good - process is dead
 
-                # Wait for process to be terminated
-                await asyncio.sleep(2)
-
-                # Verify process was killed
-                try:
-                    os.kill(process.pid, 0)
-                    pytest.fail(f"Process {process.pid} still running after cleanup")
-                except OSError:
-                    pass  # Good - process is dead
-
-                # Instance metadata should be removed
-                assert not instance_file.exists()
-
-            finally:
-                Path.home = original_home
+            # Instance metadata should be removed
+            assert not instance_file.exists()
 
         finally:
             # Cleanup - make sure process is killed even if test fails
@@ -748,18 +724,11 @@ class TestInstanceTrackerIntegration:
         process = None
         tracker = None
         port = find_available_port_locked()
-
-        # Temporarily override Path.home() to use tmp_path
-        original_home = Path.home
-
-        def mock_home():
-            return tmp_path
-
-        Path.home = staticmethod(mock_home)
+        instances_dir = tmp_path / "instances"
 
         try:
             # Create and register instance tracker
-            tracker = await InstanceTracker.create_and_register()
+            tracker = await InstanceTracker.create_and_register(instances_dir)
 
             # Start a real pip process
             process = await asyncio.create_subprocess_exec(
@@ -794,12 +763,7 @@ class TestInstanceTrackerIntegration:
             # Verify process is tracked in metadata
             import json
 
-            instance_file = (
-                tmp_path
-                / ".deephaven-mcp"
-                / "instances"
-                / f"{tracker.instance_id}.json"
-            )
+            instance_file = instances_dir / f"{tracker.instance_id}.json"
             data = json.loads(instance_file.read_text())
             assert "test-session" in data["python_processes"]
             assert data["python_processes"]["test-session"] == process.pid
@@ -815,8 +779,6 @@ class TestInstanceTrackerIntegration:
             assert process.returncode is None
 
         finally:
-            Path.home = original_home
-
             # Cleanup
             if tracker:
                 await tracker.unregister()

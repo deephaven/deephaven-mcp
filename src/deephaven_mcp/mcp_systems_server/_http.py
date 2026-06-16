@@ -31,7 +31,7 @@ from deephaven_mcp._exceptions import DaemonAlreadyPublishedError
 from deephaven_mcp._health import HEALTH_PATH
 from deephaven_mcp._processes import ProcessIdentity
 from deephaven_mcp.auth.middleware import PSK_HEADER_NAME, PSKMiddleware
-from deephaven_mcp.config import harden_private_dir, resolve_runtime_dir
+from deephaven_mcp.config import harden_private_dir
 from deephaven_mcp.config.schema import DaemonProcessConfig, ServerConfig
 from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.daemon_registry import DaemonDirectory, DaemonRegistryEntry
@@ -215,6 +215,7 @@ def _install_process_lifespan(
     multi_config: ConfigTree,
     idle: IdleWatcher | None,
     holder: ProcessResources,
+    runtime_dir: Path,
 ) -> None:
     """Wrap the app's lifespan with the process-scoped subsystem lifecycle.
 
@@ -233,12 +234,16 @@ def _install_process_lifespan(
         holder (ProcessResources): Holder populated by
             :func:`._lifespan.process_lifespan` and read by the per-session
             lifespan.
+        runtime_dir (Path): Resolved runtime directory passed to
+            :func:`._lifespan.process_lifespan` for the instance tracker.
     """
     session_manager_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
     async def _process_scoped_lifespan(app_: Starlette) -> AsyncIterator[None]:
-        async with process_lifespan(multi_config, idle=idle, holder=holder):
+        async with process_lifespan(
+            multi_config, idle=idle, holder=holder, runtime_dir=runtime_dir
+        ):
             async with session_manager_lifespan(app_):
                 yield
 
@@ -343,6 +348,10 @@ class _HttpRun:
     """Threaded into ``_install_process_lifespan`` for the process-scoped
     lifespan, and reused for the registry entry's ``config_dir``."""
 
+    runtime_dir: Path
+    """Resolved runtime directory, threaded into the process-scoped lifespan
+    so the instance tracker writes under its ``instances`` subdirectory."""
+
     server_name: str
     """FastMCP server name advertised in MCP handshakes. Sourced from
     ``ServerConfig.server_name``."""
@@ -371,6 +380,7 @@ def _plan_default(
     multi_config: ConfigTree,
     server_cfg: ServerConfig,
     *,
+    runtime_dir: Path,
     cli_host: str | None,
     cli_port: int | None,
     cli_psk: str | None,
@@ -385,6 +395,8 @@ def _plan_default(
         multi_config (ConfigTree): The validated configuration tree; threaded
             into the plan for the lifespan and the ``config_dir`` reference.
         server_cfg (ServerConfig): Resolved ``server`` block.
+        runtime_dir (Path): Resolved runtime directory, carried on the plan for
+            the instance tracker.
         cli_host (str | None): Value of ``--host``; falls through to
             ``server_cfg.host`` when ``None``.
         cli_port (int | None): Value of ``--port``; falls through to
@@ -416,6 +428,7 @@ def _plan_default(
     )
     return _HttpRun(
         multi_config=multi_config,
+        runtime_dir=runtime_dir,
         server_name=server_cfg.server_name,
         psk=psk,
         bind=_BindSpec(host=host, port=port, sock=None),
@@ -428,7 +441,7 @@ def _plan_daemon(
     multi_config: ConfigTree,
     server_cfg: ServerConfig,
     *,
-    runtime_dir_override: Path | None,
+    runtime_dir: Path,
     cli_psk: str | None,
 ) -> _HttpRun:
     """Resolve daemon-mode HTTP policy into an :class:`_HttpRun` plan.
@@ -450,9 +463,8 @@ def _plan_daemon(
             into the plan and reused for the registry entry's ``config_dir``.
         server_cfg (ServerConfig): Resolved ``server`` block, which owns the
             daemon sub-block (idle window, process name).
-        runtime_dir_override (Path | None): Override for the runtime
-            directory. ``None`` falls through to ``$DH_MCP_DATA_DIR/runtime``
-            (or the platform-default user-data root's ``runtime`` subdir).
+        runtime_dir (Path): Resolved runtime directory. The daemon registry,
+            lock, and log live in its ``daemon`` subdirectory.
         cli_psk (str | None): Value of ``--psk`` (debug override); ``None``
             triggers :func:`_generate_daemon_psk`.
 
@@ -462,7 +474,6 @@ def _plan_daemon(
             handoff-mode ``bind``.
     """
     daemon_cfg: DaemonProcessConfig = server_cfg.daemon
-    runtime_dir = resolve_runtime_dir(runtime_dir_override)
     handle = DaemonDirectory.for_runtime_dir(runtime_dir)
     harden_private_dir(handle.path)
     _LOGGER.debug(
@@ -489,6 +500,7 @@ def _plan_daemon(
     )
     return _HttpRun(
         multi_config=multi_config,
+        runtime_dir=runtime_dir,
         server_name=server_cfg.server_name,
         psk=psk,
         bind=_BindSpec(host=None, port=int(bound_port), sock=sock),
@@ -676,6 +688,7 @@ def _run_http(
             multi_config=plan.multi_config,
             idle=idle,
             holder=holder,
+            runtime_dir=plan.runtime_dir,
         )
 
         # 3. Uvicorn config (direct host/port or fd handoff; plan.bind owns the choice)

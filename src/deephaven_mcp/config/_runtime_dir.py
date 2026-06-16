@@ -23,15 +23,17 @@ once.
 
 The :func:`daemon_dir` helper returns the subdirectory under the
 runtime root that owns the daemon's registry, lock, and log files.
-It is exposed alongside :func:`resolve_runtime_dir` because both the
-CLI (reader) and the systems-server daemon entry point (writer) need
-to compose this exact path.
+The :func:`instances_dir` helper returns the subdirectory that owns
+the per-instance metadata files written by the systems-server's
+instance tracker. Both are exposed alongside :func:`resolve_runtime_dir`
+because callers need to compose these exact paths.
 """
 
 from __future__ import annotations
 
 __all__ = [
     "daemon_dir",
+    "instances_dir",
     "resolve_runtime_dir",
 ]
 
@@ -75,3 +77,23 @@ def daemon_dir(runtime_dir: Path) -> Path:
             disk are responsible for creating it.
     """
     return runtime_dir / "daemon"
+
+
+def instances_dir(runtime_dir: Path) -> Path:
+    """Return the instance-metadata subdirectory of ``runtime_dir``.
+
+    This is where the systems-server's instance tracker writes one
+    ``{uuid}.json`` file per running process. The path is deterministic
+    and always one level deep, so callers can construct it without
+    consulting any env var or platform conditional.
+
+    Args:
+        runtime_dir (Path): The resolved runtime directory, typically
+            from :func:`resolve_runtime_dir`.
+
+    Returns:
+        Path: ``runtime_dir / "instances"``. The path is returned even
+            if it does not exist; callers that need the directory on
+            disk are responsible for creating it.
+    """
+    return runtime_dir / "instances"

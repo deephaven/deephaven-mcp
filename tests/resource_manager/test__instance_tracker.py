@@ -12,7 +12,6 @@ Tests cover:
 import asyncio
 import json
 import os
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -28,15 +27,9 @@ from deephaven_mcp.resource_manager._instance_tracker import (
 @pytest.fixture
 def temp_instances_dir(tmp_path):
     """Create a temporary instances directory for testing."""
-    instances_dir = tmp_path / ".deephaven-mcp" / "instances"
+    instances_dir = tmp_path / "instances"
     instances_dir.mkdir(parents=True)
-
-    # Patch Path.home() to return our temp directory
-    with patch(
-        "deephaven_mcp.resource_manager._instance_tracker.Path.home",
-        return_value=tmp_path,
-    ):
-        yield instances_dir
+    return instances_dir
 
 
 class TestInstanceTracker:
@@ -45,7 +38,7 @@ class TestInstanceTracker:
     @pytest.mark.asyncio
     async def test_create_and_register(self, temp_instances_dir):
         """Test creating and registering a new instance."""
-        tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(temp_instances_dir)
 
         # Verify instance has required attributes
         assert tracker.instance_id is not None
@@ -66,7 +59,7 @@ class TestInstanceTracker:
     @pytest.mark.asyncio
     async def test_track_python_process(self, temp_instances_dir):
         """Test tracking a python process."""
-        tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(temp_instances_dir)
 
         # Track a process
         await tracker.track_python_process("test-session", 12345)
@@ -81,7 +74,7 @@ class TestInstanceTracker:
     @pytest.mark.asyncio
     async def test_track_multiple_python_processes(self, temp_instances_dir):
         """Test tracking multiple python processes."""
-        tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(temp_instances_dir)
 
         # Track multiple processes
         await tracker.track_python_process("session-1", 11111)
@@ -101,7 +94,7 @@ class TestInstanceTracker:
     @pytest.mark.asyncio
     async def test_untrack_python_process(self, temp_instances_dir):
         """Test untracking a python process."""
-        tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(temp_instances_dir)
 
         # Track and then untrack
         await tracker.track_python_process("test-session", 12345)
@@ -117,7 +110,7 @@ class TestInstanceTracker:
     @pytest.mark.asyncio
     async def test_untrack_nonexistent_process(self, temp_instances_dir):
         """Test untracking a process that isn't tracked (should not error)."""
-        tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(temp_instances_dir)
 
         # Untracking a non-existent process should not raise
         await tracker.untrack_python_process("nonexistent")
@@ -127,7 +120,7 @@ class TestInstanceTracker:
     @pytest.mark.asyncio
     async def test_unregister(self, temp_instances_dir):
         """Test unregistering an instance."""
-        tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(temp_instances_dir)
 
         instance_file = tracker.instance_file
         assert instance_file.exists()
@@ -141,7 +134,7 @@ class TestInstanceTracker:
     @pytest.mark.asyncio
     async def test_unregister_missing_file(self, temp_instances_dir):
         """Test unregistering when file is already missing (should not error)."""
-        tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(temp_instances_dir)
 
         # Manually remove file
         tracker.instance_file.unlink()
@@ -219,18 +212,14 @@ class TestCleanupOrphanedResources:
     @pytest.mark.asyncio
     async def test_no_instances_directory(self, tmp_path):
         """Test cleanup when instances directory doesn't exist."""
-        with patch(
-            "deephaven_mcp.resource_manager._instance_tracker.Path.home",
-            return_value=tmp_path,
-        ):
-            # Should not raise, just log and return
-            await cleanup_orphaned_resources()
+        # Should not raise, just log and return
+        await cleanup_orphaned_resources(tmp_path / "instances")
 
     @pytest.mark.asyncio
     async def test_empty_instances_directory(self, temp_instances_dir):
         """Test cleanup when no instance files exist."""
         # Should not raise, just log and return
-        await cleanup_orphaned_resources()
+        await cleanup_orphaned_resources(temp_instances_dir)
 
     @pytest.mark.asyncio
     async def test_skip_running_instances(self, temp_instances_dir):
@@ -247,7 +236,7 @@ class TestCleanupOrphanedResources:
         }
         instance_file.write_text(json.dumps(data))
 
-        await cleanup_orphaned_resources()
+        await cleanup_orphaned_resources(temp_instances_dir)
 
         # Instance file should still exist (not cleaned up)
         assert instance_file.exists()
@@ -273,7 +262,7 @@ class TestCleanupOrphanedResources:
         ) as mock_docker:
             mock_docker.return_value = AsyncMock()
 
-            await cleanup_orphaned_resources()
+            await cleanup_orphaned_resources(temp_instances_dir)
 
             # Docker cleanup should have been called
             mock_docker.assert_called_once_with(instance_id)
@@ -317,7 +306,7 @@ class TestCleanupOrphanedResources:
         with patch(
             "asyncio.create_subprocess_exec", side_effect=create_subprocess_side_effect
         ):
-            await cleanup_orphaned_resources()
+            await cleanup_orphaned_resources(temp_instances_dir)
 
         # Verify stop and rm were called
         assert mock_stop.communicate.call_count == 1
@@ -370,7 +359,7 @@ class TestCleanupOrphanedResources:
                 True,
             ]  # Instance dead, both pip processes alive
 
-            await cleanup_orphaned_resources()
+            await cleanup_orphaned_resources(temp_instances_dir)
 
             # Verify we tried to terminate the pip processes via psutil
             assert mock_terminate.call_count == 2
@@ -405,7 +394,7 @@ class TestCleanupOrphanedResources:
             side_effect=docker_cleanup_side_effect,
         ):
             # Should not raise despite the error
-            await cleanup_orphaned_resources()
+            await cleanup_orphaned_resources(temp_instances_dir)
 
         # All three instances should have been attempted
         assert call_count[0] == 3
@@ -438,7 +427,7 @@ class TestCleanupOrphanedResources:
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_ps):
             # Should not raise
-            await cleanup_orphaned_resources()
+            await cleanup_orphaned_resources(temp_instances_dir)
 
         # Instance file should still be removed (we tried)
         assert not instance_file.exists()
@@ -446,18 +435,12 @@ class TestCleanupOrphanedResources:
     @pytest.mark.asyncio
     async def test_unregister_error_handling(self, tmp_path):
         """Test that unregister handles file removal errors gracefully."""
-        with patch(
-            "deephaven_mcp.resource_manager._instance_tracker.Path.home",
-            return_value=tmp_path,
-        ):
-            tracker = await InstanceTracker.create_and_register()
+        tracker = await InstanceTracker.create_and_register(tmp_path / "instances")
 
-            # Make unlink raise an exception
-            with patch.object(
-                Path, "unlink", side_effect=PermissionError("Access denied")
-            ):
-                # Should not raise, just log warning
-                await tracker.unregister()
+        # Make unlink raise an exception
+        with patch.object(Path, "unlink", side_effect=PermissionError("Access denied")):
+            # Should not raise, just log warning
+            await tracker.unregister()
 
     @pytest.mark.asyncio
     async def test_cleanup_no_docker_containers_found(self, temp_instances_dir):
@@ -482,7 +465,7 @@ class TestCleanupOrphanedResources:
             mock_ps.communicate = AsyncMock(return_value=(b"", b""))
 
             with patch("asyncio.create_subprocess_exec", return_value=mock_ps):
-                await cleanup_orphaned_resources()
+                await cleanup_orphaned_resources(temp_instances_dir)
 
         # Instance file should be removed
         assert not instance_file.exists()
@@ -527,7 +510,7 @@ class TestCleanupOrphanedResources:
 
             with patch("asyncio.create_subprocess_exec", side_effect=mock_exec):
                 # Should not raise
-                await cleanup_orphaned_resources()
+                await cleanup_orphaned_resources(temp_instances_dir)
 
         # Instance file should still be removed (we tried)
         assert not instance_file.exists()
@@ -561,7 +544,7 @@ class TestCleanupOrphanedResources:
                     "deephaven_mcp.resource_manager._instance_tracker.psutil.Process",
                     return_value=mock_psutil_process,
                 ):
-                    await cleanup_orphaned_resources()
+                    await cleanup_orphaned_resources(temp_instances_dir)
                     # Should not call terminate() since process is already dead
                     mock_psutil_process.terminate.assert_not_called()
 
@@ -608,7 +591,7 @@ class TestCleanupOrphanedResources:
                     return_value=mock_psutil_process,
                 ):
                     # Should not raise
-                    await cleanup_orphaned_resources()
+                    await cleanup_orphaned_resources(temp_instances_dir)
 
         # Instance file should still be removed (we tried)
         assert not instance_file.exists()
@@ -647,7 +630,7 @@ class TestCleanupOrphanedResources:
 
             with patch("asyncio.create_subprocess_exec", side_effect=mock_exec):
                 # Should not raise, just log error
-                await cleanup_orphaned_resources()
+                await cleanup_orphaned_resources(temp_instances_dir)
 
         # Instance file should still be removed (we tried)
         assert not instance_file.exists()

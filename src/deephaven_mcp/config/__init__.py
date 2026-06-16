@@ -23,6 +23,10 @@ function returns:
 - :func:`daemon_dir` — the ``daemon/`` subdirectory under the
   runtime root; deterministic and platform-independent given a
   resolved runtime directory.
+- :func:`instances_dir` — the ``instances/`` subdirectory under the
+  runtime root, holding the instance tracker's per-process metadata
+  files; deterministic and platform-independent given a resolved
+  runtime directory.
 
 Per-subdir env vars (``DH_MCP_CONFIG_DIR``, ``DH_MCP_RUNTIME_DIR``)
 are intentionally absent: a single root knob serves the operator use
@@ -73,6 +77,7 @@ __all__ = [
     "ConfigurationError",
     "daemon_dir",
     "harden_private_dir",
+    "instances_dir",
     "resolve_config_dir",
     "resolve_data_root",
     "resolve_runtime_dir",
@@ -85,4 +90,4 @@ from deephaven_mcp._platform.dir_permissions import harden_private_dir
 from ._config_dir import resolve_config_dir
 from ._data_root import DATA_DIR_ENV_VAR, resolve_data_root
 from ._dir_permissions import verify_config_directory_permissions
-from ._runtime_dir import daemon_dir, resolve_runtime_dir
+from ._runtime_dir import daemon_dir, instances_dir, resolve_runtime_dir

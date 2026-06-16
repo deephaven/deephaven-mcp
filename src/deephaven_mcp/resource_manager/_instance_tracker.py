@@ -13,14 +13,17 @@ Key Concepts:
     - On startup, dead instances are detected and their orphaned resources are cleaned up
 
 Architecture:
-    - Instance metadata stored in: ~/.deephaven-mcp/instances/{uuid}.json
+    - Instance metadata stored in the runtime directory's ``instances``
+      subdirectory (``<runtime>/instances/{uuid}.json``, e.g.
+      ~/.deephaven/ai/runtime/instances/{uuid}.json on POSIX)
     - Docker containers labeled with: deephaven-mcp-server-instance={uuid}
     - Python processes tracked in instance file: {"python_processes": {"session": pid}}
 
 Usage:
     # On server startup
-    instance = await InstanceTracker.create_and_register()
-    await cleanup_orphaned_resources()
+    instances_dir = deephaven_mcp.config.instances_dir(runtime_dir)
+    instance = await InstanceTracker.create_and_register(instances_dir)
+    await cleanup_orphaned_resources(instances_dir)
 
     # During operation
     await instance.track_python_process("my-session", 12345)
@@ -66,7 +69,9 @@ class InstanceTracker:
         instance_file (Path): Path to the instance metadata file.
     """
 
-    def __init__(self, instance_id: str, pid: int, started_at: str):
+    def __init__(
+        self, instance_id: str, pid: int, started_at: str, instance_file: Path
+    ):
         """
         Initialize an InstanceTracker.
 
@@ -77,32 +82,36 @@ class InstanceTracker:
             instance_id (str): Unique UUID for this instance.
             pid (int): Process ID of this server instance.
             started_at (str): ISO 8601 timestamp of when the instance started.
+            instance_file (Path): Path to this instance's metadata file. The
+                caller is responsible for ensuring the parent directory exists.
         """
         self.instance_id = instance_id
         self.pid = pid
         self.started_at = started_at
         self._python_processes: dict[str, int] = {}
 
-        # Ensure instances directory exists
-        instances_dir = Path.home() / ".deephaven-mcp" / "instances"
-        instances_dir.mkdir(parents=True, exist_ok=True)
-
-        self.instance_file = instances_dir / f"{instance_id}.json"
+        self.instance_file = instance_file
 
     @classmethod
-    async def create_and_register(cls) -> "InstanceTracker":
+    async def create_and_register(cls, instances_dir: Path) -> "InstanceTracker":
         """
         Create a new instance tracker and register it.
 
         This factory method creates a new instance with a unique UUID and immediately
         persists it to disk. Call this on MCP server startup.
 
+        The directory is created if missing; its permissions are not modified.
+
+        Args:
+            instances_dir (Path): Directory that holds the per-instance metadata
+                files, e.g. ``deephaven_mcp.config.instances_dir(runtime_dir)``.
+
         Returns:
             InstanceTracker: A new registered instance tracker.
 
         Example:
             ```python
-            instance = await InstanceTracker.create_and_register()
+            instance = await InstanceTracker.create_and_register(instances_dir)
             _LOGGER.info(f"Server instance: {instance.instance_id}")
             ```
         """
@@ -110,7 +119,10 @@ class InstanceTracker:
         pid = os.getpid()
         started_at = datetime.now().isoformat()
 
-        tracker = cls(instance_id, pid, started_at)
+        instances_dir.mkdir(parents=True, exist_ok=True)
+        instance_file = instances_dir / f"{instance_id}.json"
+
+        tracker = cls(instance_id, pid, started_at, instance_file)
         await tracker._save()
 
         _LOGGER.info(
@@ -144,6 +156,7 @@ class InstanceTracker:
             instance_id=data["instance_id"],
             pid=data["pid"],
             started_at=data["started_at"],
+            instance_file=instance_file,
         )
         tracker._python_processes = data.get("python_processes", {})
 
@@ -264,7 +277,7 @@ def is_process_running(pid: int) -> bool:
     return cast(bool, psutil.pid_exists(pid))
 
 
-async def cleanup_orphaned_resources() -> None:
+async def cleanup_orphaned_resources(instances_dir: Path) -> None:
     """
     Clean up orphaned Docker containers and python processes from dead server instances.
 
@@ -283,18 +296,21 @@ async def cleanup_orphaned_resources() -> None:
     Unix, or a forced kill on Windows) without a chance to clean up its resources
     in the finally block.
 
+    Args:
+        instances_dir (Path): Directory that holds the per-instance metadata
+            files, e.g. ``deephaven_mcp.config.instances_dir(runtime_dir)``. A
+            missing directory is treated as "no instances to clean up".
+
     Example:
         ```python
         # In app_lifespan, before yielding context
-        await cleanup_orphaned_resources()
+        await cleanup_orphaned_resources(instances_dir)
         ```
 
     Note:
         Errors during cleanup are logged but don't raise exceptions, ensuring
         that server startup continues even if cleanup partially fails.
     """
-    instances_dir = Path.home() / ".deephaven-mcp" / "instances"
-
     if not instances_dir.exists():
         _LOGGER.debug(
             "[InstanceTracker] No instances directory, skipping orphan cleanup"

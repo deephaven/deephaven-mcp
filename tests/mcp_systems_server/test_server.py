@@ -270,19 +270,23 @@ def test_run_stdio_wraps_run_stdio_async_in_process_lifespan():
     fake_server.run_stdio_async = AsyncMock()
     multi = _multi_config_with(ServerConfig(), Path("/tmp/x"))
     holder = object()
+    runtime_dir = Path("/tmp/rt")
 
     captured: dict[str, object] = {}
 
     @contextlib.asynccontextmanager
-    async def _fake_process_lifespan(mc, *, idle, holder):
+    async def _fake_process_lifespan(mc, *, idle, holder, runtime_dir):
         captured["args"] = (mc, idle, holder)
+        captured["runtime_dir"] = runtime_dir
         yield MagicMock()
 
     with patch.object(server_module, "process_lifespan", _fake_process_lifespan):
-        server_module._run_stdio(fake_server, multi, holder)
+        server_module._run_stdio(fake_server, multi, holder, runtime_dir=runtime_dir)
 
     fake_server.run_stdio_async.assert_awaited_once_with()
     assert captured["args"] == (multi, None, holder)
+    # The caller's resolved runtime_dir is forwarded to process_lifespan.
+    assert captured["runtime_dir"] == runtime_dir
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +316,7 @@ def test_main_daemon_path_invokes_run_http_with_daemon_plan(_mute_logging_setup)
 
 
 def test_main_daemon_path_threads_runtime_dir_override(_mute_logging_setup):
-    """``--runtime-dir`` reaches the daemon planner unchanged."""
+    """``--runtime-dir`` is resolved and reaches the daemon planner."""
     captured: dict[str, object] = {}
 
     def fake_planner(*args, **kwargs):
@@ -321,6 +325,7 @@ def test_main_daemon_path_threads_runtime_dir_override(_mute_logging_setup):
         # an exception. The runner is also mocked below.
         return http_module._HttpRun(
             multi_config=MagicMock(),
+            runtime_dir=Path("/tmp/runtime"),
             server_name="srv",
             psk="x" * 32,
             bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
@@ -334,7 +339,7 @@ def test_main_daemon_path_threads_runtime_dir_override(_mute_logging_setup):
         patch.object(server_module, "_run_http"),
     ):
         main(["--daemon", "--runtime-dir", "/var/tmp/dh-runtime"])
-    assert captured["runtime_dir_override"] == Path("/var/tmp/dh-runtime")
+    assert captured["runtime_dir"] == Path("/var/tmp/dh-runtime")
 
 
 @pytest.mark.parametrize(
@@ -390,14 +395,12 @@ def test_main_rejects_empty_host(_mute_logging_setup) -> None:
     assert exc_info.value.code == 2
 
 
-def test_main_runtime_dir_without_daemon_is_no_op(_mute_logging_setup) -> None:
-    """``--runtime-dir`` without ``--daemon`` is silently ignored.
+def test_main_runtime_dir_without_daemon_is_honored(_mute_logging_setup) -> None:
+    """``--runtime-dir`` without ``--daemon`` is honored on the stdio path.
 
-    The runtime dir is only consulted on the daemon path. Rejecting
-    would surprise users with shared shell aliases (``alias
-    dh-mcp-systems-server="dh-mcp-systems-server --runtime-dir
-    ~/.dh"``). The flag passes :func:`_validate_cli_args` without
-    error and reaches the stdio path unchanged.
+    The flag is a universal per-subdir override (parallel to
+    ``--config-dir``), so it reaches the stdio runner as the resolved
+    runtime directory rather than being silently dropped.
     """
     with (
         _patch_load_server_config(ServerConfig()),
@@ -408,6 +411,7 @@ def test_main_runtime_dir_without_daemon_is_no_op(_mute_logging_setup) -> None:
         main(["--runtime-dir", "/var/tmp/dh-runtime"])
     mock_stdio.assert_called_once()
     mock_http.assert_not_called()
+    assert mock_stdio.call_args.kwargs["runtime_dir"] == Path("/var/tmp/dh-runtime")
 
 
 def test_main_daemon_path_threads_psk_override(_mute_logging_setup, tmp_path):
@@ -418,6 +422,7 @@ def test_main_daemon_path_threads_psk_override(_mute_logging_setup, tmp_path):
         captured.update(kwargs)
         return http_module._HttpRun(
             multi_config=MagicMock(),
+            runtime_dir=Path("/tmp/runtime"),
             server_name="srv",
             psk="x" * 32,
             bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
@@ -498,14 +503,13 @@ def test_validate_cli_args_rejects_empty_or_whitespace_host(host: str) -> None:
         )
 
 
-def test_validate_cli_args_runtime_dir_without_daemon_is_silent() -> None:
-    """``_validate_cli_args`` does not see ``runtime_dir``: it's behaviour-neutral.
+def test_validate_cli_args_does_not_take_runtime_dir() -> None:
+    """``_validate_cli_args`` does not see ``runtime_dir``: it needs no validation.
 
-    Documents the deliberate decision (per principle of least
-    surprise) to *not* reject ``--runtime-dir`` without ``--daemon``.
-    Tested at the :func:`main` level by
-    :func:`test_main_runtime_dir_without_daemon_is_no_op`; here we
-    pin that the validator's signature does not even take it.
+    ``--runtime-dir`` is honored in every transport, so it is never a
+    rejected combination. Its effect is verified at the :func:`main`
+    level by :func:`test_main_runtime_dir_without_daemon_is_honored`;
+    here we pin that the validator's signature does not even take it.
     """
     import inspect
 

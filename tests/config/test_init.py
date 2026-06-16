@@ -24,6 +24,7 @@ _EXPECTED_PUBLIC_NAMES = {
     "ConfigurationError",
     "daemon_dir",
     "harden_private_dir",
+    "instances_dir",
     "resolve_config_dir",
     "resolve_data_root",
     "resolve_runtime_dir",
@@ -49,6 +50,7 @@ def test_reexports_are_same_objects_as_internal_definitions() -> None:
     assert config_pkg.resolve_config_dir is _config_dir.resolve_config_dir
     assert config_pkg.resolve_runtime_dir is _runtime_dir.resolve_runtime_dir
     assert config_pkg.daemon_dir is _runtime_dir.daemon_dir
+    assert config_pkg.instances_dir is _runtime_dir.instances_dir
     assert (
         config_pkg.verify_config_directory_permissions
         is _dir_permissions.verify_config_directory_permissions
