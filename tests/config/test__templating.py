@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -150,61 +149,53 @@ def test_file_other_oserror_raises(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_file_template_rejects_symlinked_path(tmp_path):
-    """A symlink target must not be silently followed."""
+def test_file_template_follows_symlink(tmp_path):
+    """A symlink is followed (common for system CA bundles)."""
     real = tmp_path / "real.pem"
     real.write_text("KEY", encoding="utf-8")
     link = tmp_path / "link.pem"
     os.symlink(real, link)
-    with pytest.raises(ConfigurationError, match="symlink"):
-        expand_string(
-            f"${{file:{link}}}",
-            source="t.json",
-            path="x",
-            config_dir=tmp_path,
-        )
+    out = expand_string(
+        f"${{file:{link}}}",
+        source="t.json",
+        path="x",
+        config_dir=tmp_path,
+    )
+    assert out == "KEY"
 
 
-def test_file_template_rejects_path_outside_config_dir(tmp_path):
-    """A path that resolves outside ``config_dir`` is refused."""
+def test_file_template_allows_absolute_path_outside_config_dir(tmp_path):
+    """An absolute path outside ``config_dir`` reads (e.g. a system CA bundle)."""
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
-    outside_file = outside_dir / "secret.pem"
+    outside_file = outside_dir / "ca.pem"
     outside_file.write_text("DATA", encoding="utf-8")
 
     config_dir = tmp_path / "ai"
     config_dir.mkdir()
 
-    with pytest.raises(ConfigurationError, match="resolves outside"):
-        expand_string(
-            f"${{file:{outside_file}}}",
-            source="t.json",
-            path="x",
-            config_dir=config_dir,
-        )
+    out = expand_string(
+        f"${{file:{outside_file}}}",
+        source="t.json",
+        path="x",
+        config_dir=config_dir,
+    )
+    assert out == "DATA"
 
 
-def test_file_template_resolve_oserror_raises(tmp_path, monkeypatch):
-    """``OSError`` while resolving paths surfaces a clear ``ConfigurationError``.
+def test_file_template_resolves_relative_path_against_config_dir(tmp_path):
+    """A relative ``${file:}`` path is resolved against ``config_dir``."""
+    config_dir = tmp_path / "ai"
+    (config_dir / "certs").mkdir(parents=True)
+    (config_dir / "certs" / "ca.pem").write_text("REL", encoding="utf-8")
 
-    Covers the ``except OSError`` branch in the containment check, which
-    wraps ``Path.resolve`` failures (e.g. permission errors, ELOOP) into
-    a structured configuration error.
-    """
-    path = tmp_path / "file.pem"
-    path.write_text("DATA", encoding="utf-8")
-
-    def _raise_oserror(self, strict=False):
-        raise OSError("resolve failed")
-
-    monkeypatch.setattr(Path, "resolve", _raise_oserror)
-    with pytest.raises(ConfigurationError, match="cannot resolve file"):
-        expand_string(
-            f"${{file:{path}}}",
-            source="t.json",
-            path="x",
-            config_dir=tmp_path,
-        )
+    out = expand_string(
+        "${file:certs/ca.pem}",
+        source="t.json",
+        path="x",
+        config_dir=config_dir,
+    )
+    assert out == "REL"
 
 
 def test_file_template_rejects_too_large_file(tmp_path):
@@ -235,11 +226,10 @@ def test_file_template_reads_file_under_size_cap(tmp_path):
 
 
 def test_file_template_allows_any_path_when_config_dir_none(tmp_path):
-    """Backward-compat: ``config_dir=None`` skips the containment check."""
+    """``config_dir=None``: an absolute path resolves against the filesystem."""
     payload = "anywhere"
     path = tmp_path / "anywhere.pem"
     path.write_text(payload, encoding="utf-8")
-    # No ``config_dir`` argument => no containment check.
     out = expand_string(
         f"${{file:{path}}}",
         source="t.json",
