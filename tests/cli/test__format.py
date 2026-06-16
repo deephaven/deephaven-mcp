@@ -143,6 +143,40 @@ def test_human_format_dict() -> None:
     assert "n: 1" in out
 
 
+def test_human_format_nested_dict_renders_indented_tree() -> None:
+    """A nested dict expands under its key instead of a one-line repr."""
+    out = format_output({"cli": {"output": {"format": "human"}}}, output="human")
+    lines = out.splitlines()
+    # No Python dict repr leaks into human output.
+    assert "{'" not in out
+    assert lines[0] == "cli:"
+    # The nested key is indented two spaces under its parent.
+    assert "  output:" in lines
+    # The leaf scalar is indented a further two spaces.
+    assert "    format: human" in lines
+
+
+def test_human_format_dict_indents_cumulatively_by_depth() -> None:
+    """Each nesting level adds two spaces of indentation."""
+    out = format_output(
+        {"daemon": {"timeouts": {"kill_after_seconds": 10}}}, output="human"
+    )
+    lines = out.splitlines()
+    assert lines[0] == "daemon:"
+    assert "  timeouts:" in lines
+    assert "    kill_after_seconds: 10" in lines
+
+
+def test_human_format_dict_scalar_list_renders_bullets() -> None:
+    """A list of scalars renders as indented bullets, not a ['...'] repr."""
+    out = format_output({"extra_jvm_args": ["-Xss2m", "-Dfoo=bar"]}, output="human")
+    lines = out.splitlines()
+    assert "[" not in out
+    assert lines[0] == "extra_jvm_args:"
+    assert "  - -Xss2m" in lines
+    assert "  - -Dfoo=bar" in lines
+
+
 def test_human_format_list_of_dicts_renders_aligned_table() -> None:
     rows = [
         {"Namespace": "Mkt", "Table": "Trades"},

@@ -140,17 +140,26 @@ def _format_human(value: Any, *, empty_message: str = "(none)") -> str:
 
 
 def _format_dict(value: dict[str, Any]) -> str:
-    """Render a dict as ``key: value`` lines, with row-list values as tables.
+    """Render a dict as an indented ``key: value`` tree.
 
-    A value that is a non-empty list of dicts (e.g. the ``data`` block of a
-    tabular tool result) renders as an indented :func:`_format_table`; every
-    other value renders inline as ``key: value``.
+    Nested structures expand under their key instead of collapsing to a
+    one-line ``str()`` repr: a non-empty list of dicts (e.g. the ``data`` block
+    of a tabular tool result) renders as an indented :func:`_format_table`; a
+    non-empty nested dict renders as an indented sub-tree; a non-empty list of
+    scalars renders as indented ``- item`` bullets. Scalars and empty
+    containers render inline as ``key: value``.
     """
     lines: list[str] = []
     for k, v in value.items():
         if _is_row_list(v):
             lines.append(f"{k}:")
             lines.append(_indent(_format_table(v)))
+        elif isinstance(v, dict) and v:
+            lines.append(f"{k}:")
+            lines.append(_indent(_format_dict(v)))
+        elif isinstance(v, list) and v:
+            lines.append(f"{k}:")
+            lines.append(_indent("\n".join(f"- {item}" for item in v)))
         else:
             lines.append(f"{k}: {v}")
     return "\n".join(lines)

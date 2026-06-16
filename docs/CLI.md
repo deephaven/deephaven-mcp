@@ -530,8 +530,10 @@ is resolved per invocation: `-o/--output` flag → `DH_MCP_OUTPUT` → `cli.json
 
 - `human` (default) — terminal-friendly. Row/tabular data and `tool list` render
   as aligned, header-topped tables (sized to the terminal width, falling back to
-  80 columns when output is not a TTY); objects render as `key: value` lines;
-  plain lists render one item per line; an empty list renders as `(none)`.
+  80 columns when output is not a TTY); objects render as an indented tree
+  (nested keys indented two spaces under their parent, scalar leaves as
+  `key: value`, scalar lists as `- item` bullets); plain lists render one item
+  per line; an empty list renders as `(none)`.
 - `json` — a single document via `json.dumps(..., indent=2, sort_keys=True)`:
   indented and key-sorted, so output is stable and diff-/`jq`-friendly.
 - `yaml` — block style with sorted keys (`yaml.safe_dump`), for `yq` or
