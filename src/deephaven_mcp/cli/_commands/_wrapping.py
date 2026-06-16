@@ -324,9 +324,18 @@ def _warn_if_incomplete(
             ``False`` when the row records already carry the per-system reason
             (e.g. ``system status`` promotes the exception type into
             ``liveness_detail``) so the stderr line doesn't duplicate the table.
+            In that case, a ``"completed"`` ``partial_result`` is suppressed
+            entirely — the phase ``detail`` ("had connection issues") would
+            only restate what each row's ``liveness_detail`` already shows.
+            ``"loading"`` / ``"failed"`` phases still warn because they carry
+            timing/severity the table cannot convey.
     """
     incomplete = payload.get("partial_result")
     if incomplete is None:
+        return
+    if not include_partial_errors and incomplete.get("phase") == "completed":
+        # Errors are attributed per-row; the only remaining signal would be
+        # the "had connection issues" detail, which restates the table.
         return
     details = incomplete.get("errors") if include_partial_errors else None
     render_warning(

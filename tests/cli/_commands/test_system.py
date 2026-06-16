@@ -166,12 +166,12 @@ def test_status_human_renders_as_aligned_table(tmp_path: Path) -> None:
     assert data == ["prod", "enterprise", "ONLINE", "True"]
 
 
-def test_status_partial_result_warns_phase_only_not_per_system_errors(
+def test_status_completed_partial_result_emits_no_stderr_noise(
     tmp_path: Path,
 ) -> None:
-    """Per-system errors live on each row's ``liveness_detail`` now, so the
-    stderr warning surfaces only the phase ``detail``, never the per-system
-    error message — the table already carries that attribution."""
+    """``phase=='completed'`` is fully attributed per-row via ``liveness_detail``,
+    so ``system status`` emits no stderr warning at all — the "had connection
+    issues" banner would only restate the table."""
     payload = {
         "success": True,
         "systems": [
@@ -194,16 +194,40 @@ def test_status_partial_result_warns_phase_only_not_per_system_errors(
     with acquire_p, call_p:
         result = _invoke(["system", "status"], rt)
     assert result.exit_code == 0
-    # partial_result diagnostic key stays out of stdout.
+    # partial_result key stays out of stdout.
     assert "partial_result" not in result.stdout
-    # Phase detail warns on stderr.
-    assert "connection issues" in result.stderr
-    # Per-system error attribution is suppressed: neither the system name
-    # nor the long error message leaks onto stderr.
-    assert "Network is unreachable" not in result.stderr
-    assert "prod:" not in result.stderr
+    # Stderr is entirely empty for the COMPLETED-with-errors case.
+    assert result.stderr == ""
     # The short reason still appears in the table row on stdout.
     assert "DeephavenConnectionError" in result.stdout
+
+
+def test_status_loading_partial_result_still_warns(tmp_path: Path) -> None:
+    """``phase=='loading'`` carries a timing signal ("retry in a moment") the
+    rows cannot convey, so it still emits a stderr warning even with the
+    per-row attribution opt-in."""
+    payload = {
+        "success": True,
+        "systems": [
+            {
+                "name": "prod",
+                "type": "enterprise",
+                "liveness_status": "OFFLINE",
+                "is_alive": False,
+                "liveness_detail": "No item cached",
+            },
+        ],
+        "partial_result": {
+            "phase": "loading",
+            "detail": "Enterprise session discovery is actively running. Some sessions or systems may not yet be visible.",
+        },
+    }
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(payload))
+    with acquire_p, call_p:
+        result = _invoke(["system", "status"], rt)
+    assert result.exit_code == 0
+    assert "actively running" in result.stderr
 
 
 def test_status_tool_failure_exits_3(tmp_path: Path) -> None:

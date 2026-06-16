@@ -401,12 +401,12 @@ async def test_call_and_echo_field_surfaces_partial_result_detail_only(
 
 
 @pytest.mark.asyncio
-async def test_call_and_echo_field_suppresses_partial_errors_when_opted_out(
+async def test_call_and_echo_field_suppresses_completed_partial_result_when_opted_out(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """With ``include_partial_errors=False`` the phase ``detail`` still warns,
-    but the per-system ``errors`` map is not rendered — used by ``system
-    status`` where each row carries its own reason in ``liveness_detail``."""
+    """With ``include_partial_errors=False`` a ``phase=='completed'``
+    ``partial_result`` is suppressed entirely — the banner ("had connection
+    issues") would only restate the per-row reasons in ``liveness_detail``."""
     rt = make_runtime(tmp_path)
     payload = {
         "success": True,
@@ -430,8 +430,37 @@ async def test_call_and_echo_field_suppresses_partial_errors_when_opted_out(
             include_partial_errors=False,
         )
     captured = capsys.readouterr()
-    # Phase detail still warns.
-    assert "connection issues" in captured.err
-    # Per-system error attribution is suppressed.
-    assert "Network is unreachable" not in captured.err
-    assert "prod:" not in captured.err
+    # Nothing on stderr — the per-row reasons fully cover the COMPLETED case.
+    assert captured.err == ""
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_loading_still_warns_when_opted_out(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``phase=='loading'`` carries a timing signal ("retry in a moment") that
+    rows cannot convey, so the warning still appears even with
+    ``include_partial_errors=False``."""
+    rt = make_runtime(tmp_path)
+    payload = {
+        "success": True,
+        "systems": [],
+        "partial_result": {
+            "phase": "loading",
+            "detail": "Enterprise session discovery is actively running.",
+        },
+    }
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "enterprise_systems_status",
+            retry_command="dh-mcp system status",
+            arguments={},
+            field="systems",
+            default=[],
+            include_partial_errors=False,
+        )
+    captured = capsys.readouterr()
+    assert "actively running" in captured.err
