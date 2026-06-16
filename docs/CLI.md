@@ -270,7 +270,7 @@ verb honors the top-level `-o/--output` flag.
 | `stop`     | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                        |
 | `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir, plus the always-present `runtime_dir`, `registry_path`, and `log_path`. |
 | `restart`  | `stop` then `start` in one shot; reports the new handle.                                      |
-| `reset`    | Quarantines a corrupt `daemon.json` (renames it to `daemon.json.corrupt-<UTC>`) so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
+| `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
 | `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
 
 ### `dh-mcp tool`
@@ -585,8 +585,8 @@ registry programmatically via `dh-mcp introspect` (look under
 | `daemon_startup_timeout`      | Daemon was spawned but did not publish a registry entry in time.   |
 | `daemon_not_running`          | No running daemon was found: either none is registered and `--no-auto-start` was specified, or a command that needs the daemon's files (e.g. `daemon logs`) found none yet. |
 | `daemon_client_error`         | A client-side daemon-management failure (signal denied, etc.).     |
-| `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon reset`. |
-| `daemon_registry_live`        | `dh-mcp daemon reset` refused to quarantine `daemon.json` because a live daemon is still registered; run `dh-mcp daemon stop` first. |
+| `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon repair`. |
+| `daemon_registry_live`        | `dh-mcp daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dh-mcp daemon stop` first. |
 | `mcp_request_failed`          | The MCP transport reported an error (connect, timeout, parse).     |
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
@@ -627,13 +627,13 @@ co-existing with a still-live daemon would otherwise produce a
 confusing port-bind timeout. Recovery:
 
 ```bash
-dh-mcp daemon status   # confirm whether a daemon is still running
-dh-mcp daemon stop     # if it is, stop it first
-dh-mcp daemon reset    # quarantine the corrupt file (renames to daemon.json.corrupt-<UTC>)
-dh-mcp daemon start    # fresh spawn
+dh-mcp daemon status    # confirm whether a daemon is still running
+dh-mcp daemon stop      # if it is, stop it first
+dh-mcp daemon repair    # move the corrupt file aside (renames to daemon.json.corrupt-<UTC>)
+dh-mcp daemon start     # fresh spawn
 ```
 
-`daemon reset` refuses to run while a live daemon is still
+`daemon repair` refuses to run while a live daemon is still
 registered (`daemon_registry_live`) so you cannot accidentally
 orphan a running process.
 

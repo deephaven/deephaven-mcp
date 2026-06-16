@@ -354,7 +354,7 @@ def test_start_corrupt_registry_returns_2(tmp_path: Path) -> None:
     ``get_or_start_daemon`` propagates ``RegistryCorruptError``
     unchanged (no more auto-quarantine); the command layer wraps it
     in ``CliError(DAEMON_REGISTRY_CORRUPT)`` and surfaces the
-    ``dh-mcp daemon reset`` recovery procedure to the operator.
+    ``dh-mcp daemon repair`` recovery procedure to the operator.
     """
     rt = make_runtime(tmp_path)
     with patch.object(
@@ -399,7 +399,7 @@ def test_restart_corrupt_on_start_returns_2(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# reset
+# repair
 # ---------------------------------------------------------------------------
 
 
@@ -408,9 +408,9 @@ def _make_real_runtime_with_daemon_dir(tmp_path: Path) -> Runtime:
 
     The default :func:`make_runtime` returns a ``MagicMock`` for
     ``daemon_dir`` because most command tests stub the lifecycle
-    helpers. ``daemon reset`` reaches through to real file I/O
+    helpers. ``daemon repair`` reaches through to real file I/O
     (``registry_path.exists``, ``reg.read``, ``reg.quarantine``),
-    so reset tests need an honest directory rooted at ``tmp_path``.
+    so repair tests need an honest directory rooted at ``tmp_path``.
     """
     from deephaven_mcp.daemon_registry import DaemonDirectory
 
@@ -421,7 +421,7 @@ def _make_real_runtime_with_daemon_dir(tmp_path: Path) -> Runtime:
 
 @pytest.fixture
 def _silence_registry_logger() -> Iterator[None]:
-    """Suppress ``deephaven_mcp.daemon_registry`` logging during reset tests.
+    """Suppress ``deephaven_mcp.daemon_registry`` logging during repair tests.
 
     The registry layer emits INFO / WARNING records during
     ``reg.write`` and ``reg.quarantine``. ``CliRunner`` mixes
@@ -441,23 +441,23 @@ def _silence_registry_logger() -> Iterator[None]:
         logger.setLevel(previous)
 
 
-def test_reset_no_registry_is_noop(tmp_path: Path) -> None:
-    """`daemon reset` with no registry file emits ``reset=false``.
+def test_repair_no_registry_is_noop(tmp_path: Path) -> None:
+    """`daemon repair` with no registry file emits ``repaired=false``.
 
-    The verb is idempotent: rerunning after a successful reset must
+    The verb is idempotent: rerunning after a successful repair must
     not error.
     """
     rt = _make_real_runtime_with_daemon_dir(tmp_path)
-    result = _invoke(["-o", "json", "daemon", "reset"], rt)
+    result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"reset": False, "message": "No registry to reset."}
+    assert payload == {"repaired": False, "message": "No registry to repair."}
 
 
-def test_reset_quarantines_stale_registry(
+def test_repair_quarantines_stale_registry(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
-    """A parseable-but-stale registry is quarantined cleanly.
+    """A parseable-but-stale registry is moved aside cleanly.
 
     The well-known path is freed (so a subsequent ``daemon start``
     can publish a fresh entry) and the malformed-or-stale bytes are
@@ -467,52 +467,52 @@ def test_reset_quarantines_stale_registry(
     with rt.daemon_dir.locked() as reg:
         reg.write(make_entry())
     with patch.object(DaemonRegistryEntry, "is_live", return_value=False):
-        result = _invoke(["-o", "json", "daemon", "reset"], rt)
+        result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["reset"] is True
+    assert payload["repaired"] is True
     assert "corrupt-" in payload["quarantined_to"]
     assert not rt.daemon_dir.registry_path.exists()
     quarantined = list(rt.daemon_dir.path.glob("daemon.json.corrupt-*"))
     assert len(quarantined) == 1
 
 
-def test_reset_quarantines_corrupt_registry(
+def test_repair_quarantines_corrupt_registry(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
-    """A registry that fails to parse is quarantined unconditionally.
+    """A registry that fails to parse is moved aside unconditionally.
 
     Liveness cannot be checked on a corrupt file (we have no PID),
-    so ``daemon reset`` proceeds. The operator has already been told
+    so ``daemon repair`` proceeds. The operator has already been told
     by the corrupt-registry recovery hint to verify no daemon is
-    running before invoking ``reset``.
+    running before invoking ``repair``.
     """
     rt = _make_real_runtime_with_daemon_dir(tmp_path)
     rt.daemon_dir.registry_path.write_text("not json")
-    result = _invoke(["-o", "json", "daemon", "reset"], rt)
+    result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["reset"] is True
+    assert payload["repaired"] is True
     quarantined_path = Path(payload["quarantined_to"])
     assert quarantined_path.read_text() == "not json"
     assert not rt.daemon_dir.registry_path.exists()
 
 
-def test_reset_refuses_when_daemon_is_live(
+def test_repair_refuses_when_daemon_is_live(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
-    """`daemon reset` refuses while a live daemon is registered.
+    """`daemon repair` refuses while a live daemon is registered.
 
-    Quarantining out from under a running daemon would orphan the
-    process from the CLI's perspective. The safety rail forces the
-    operator to ``daemon stop`` first.
+    Moving the registry aside out from under a running daemon would
+    orphan the process from the CLI's perspective. The safety rail
+    forces the operator to ``daemon stop`` first.
     """
     rt = _make_real_runtime_with_daemon_dir(tmp_path)
     entry = make_entry()
     with rt.daemon_dir.locked() as reg:
         reg.write(entry)
     with patch.object(DaemonRegistryEntry, "is_live", return_value=True):
-        result = _invoke(["daemon", "reset"], rt)
+        result = _invoke(["daemon", "repair"], rt)
     # ``CliRunner`` invokes ``cli`` directly (``standalone_mode=True``)
     # and does not pass through the ``main()`` wrapper that renders
     # structured ``error_code`` payloads; we therefore assert on the
@@ -524,7 +524,7 @@ def test_reset_refuses_when_daemon_is_live(
     assert rt.daemon_dir.registry_path.exists()
 
 
-def test_reset_handles_race_where_file_disappears(
+def test_repair_handles_race_where_file_disappears(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
     """The file exists at the gate but vanishes before quarantine.
@@ -545,10 +545,10 @@ def test_reset_handles_race_where_file_disappears(
         patch.object(DaemonRegistryEntry, "is_live", return_value=False),
         patch.object(LockedRegistry, "quarantine", return_value=None),
     ):
-        result = _invoke(["-o", "json", "daemon", "reset"], rt)
+        result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"reset": False, "message": "No registry to reset."}
+    assert payload == {"repaired": False, "message": "No registry to repair."}
 
 
 # ---------------------------------------------------------------------------

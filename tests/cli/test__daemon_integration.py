@@ -584,8 +584,8 @@ def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
     shutil.which("dh-mcp") is None,
     reason="dh-mcp entry point not on PATH",
 )
-def test_daemon_reset_quarantines_corrupt_registry(tmp_path: Path) -> None:
-    """``daemon reset`` quarantines an unparseable ``daemon.json``."""
+def test_daemon_repair_quarantines_corrupt_registry(tmp_path: Path) -> None:
+    """``daemon repair`` moves aside an unparseable ``daemon.json``."""
     cfg_dir = tmp_path / "cfg"
     runtime_dir = tmp_path / "rt"
     runtime_dir.mkdir()
@@ -599,10 +599,10 @@ def test_daemon_reset_quarantines_corrupt_registry(tmp_path: Path) -> None:
     registry_path.write_text("{ this is not valid json")
     os.chmod(registry_path, 0o600)
 
-    result = _run_cli(["daemon", "reset"], config_dir=cfg_dir, runtime_dir=runtime_dir)
+    result = _run_cli(["daemon", "repair"], config_dir=cfg_dir, runtime_dir=runtime_dir)
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["reset"] is True
+    assert payload["repaired"] is True
     assert "quarantined_to" in payload
     # The well-known path is freed; the corrupt bytes survive under the
     # timestamped sibling for postmortem.

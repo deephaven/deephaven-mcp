@@ -1,6 +1,6 @@
 """``dh-mcp daemon`` noun group: lifecycle of the local daemon.
 
-Verbs: ``start``, ``stop``, ``status``, ``restart``, ``reset``, ``logs``.
+Verbs: ``start``, ``stop``, ``status``, ``restart``, ``repair``, ``logs``.
 
 All callbacks are async and wrapped with the :func:`run_async` adapter.
 Failures raise :class:`CliError` with a stable :class:`ErrorCode`;
@@ -120,7 +120,7 @@ def daemon() -> None:
     The daemon is a per-user background process that hosts the MCP
     systems server; the 'tool' commands connect to it. Use these
     verbs to start, stop, restart, and inspect the daemon, tail its
-    log, or quarantine a corrupt registry file. Tool commands
+    log, or repair a corrupt registry file. Tool commands
     auto-start the daemon on demand, so an explicit 'daemon start'
     is rarely required.
     """
@@ -409,45 +409,51 @@ async def daemon_restart(runtime: Runtime) -> None:
 
 
 # ---------------------------------------------------------------------------
-# reset
+# repair
 # ---------------------------------------------------------------------------
 
-_OUTPUT_RESET = OutputSpec(
+_OUTPUT_REPAIR = OutputSpec(
     "object",
     (
-        OutputField("reset", "boolean", "True if a registry file was quarantined."),
+        OutputField(
+            "repaired",
+            "boolean",
+            "True if a corrupt registry file was moved aside.",
+        ),
         OutputField(
             "quarantined_to",
             "string",
-            "Path of the quarantined file (when reset is true).",
+            "Path of the moved-aside file (when repaired is true).",
         ),
         OutputField(
-            "message", "string", "Human-readable summary (when reset is false)."
+            "message",
+            "string",
+            "Human-readable summary (when repaired is false).",
         ),
     ),
 )
 
 
 @daemon.command(
-    "reset",
-    output_spec=_OUTPUT_RESET,
+    "repair",
+    output_spec=_OUTPUT_REPAIR,
     help=build_help(
-        summary="Quarantine the daemon registry file and exit.",
+        summary="Recover from a corrupt daemon registry file.",
         description=(
-            "Renames daemon.json to a timestamped daemon.json.corrupt-* "
-            "sibling so the well-known path is free for a fresh 'dh-mcp "
-            "daemon start'. The malformed bytes (if any) are preserved on "
-            "disk for operator postmortem.\n\n"
-            "Intended as the explicit recovery verb when status, stop, "
-            "start, or restart report the daemon_registry_corrupt error. "
-            "Refuses to run while a live daemon is still registered so the "
-            "operator cannot accidentally orphan a running process \u2014 run "
-            "'dh-mcp daemon stop' first in that case."
+            "Use this when 'dh-mcp daemon status' (or start, stop, restart) "
+            "reports the daemon_registry_corrupt error. It moves the "
+            "unreadable daemon.json aside to a timestamped "
+            "daemon.json.corrupt-<ts> sibling so the next 'dh-mcp daemon "
+            "start' can write a clean one. The corrupt bytes are preserved "
+            "on disk for postmortem.\n\n"
+            "Refuses to run while a live daemon is still registered, so you "
+            "cannot accidentally orphan a running process. Run 'dh-mcp "
+            "daemon stop' first in that case."
         ),
-        output=_OUTPUT_RESET,
+        output=_OUTPUT_REPAIR,
         examples=(
-            "$ dh-mcp daemon reset",
-            "$ dh-mcp -o json daemon reset | jq .quarantined_to",
+            "$ dh-mcp daemon repair",
+            "$ dh-mcp -o json daemon repair | jq .quarantined_to",
         ),
         see_also=("dh-mcp daemon status", "dh-mcp daemon stop"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
@@ -456,37 +462,37 @@ _OUTPUT_RESET = OutputSpec(
 )
 @click.pass_obj
 @run_async
-async def daemon_reset(runtime: Runtime) -> None:
-    """Quarantine the daemon registry file and exit."""
+async def daemon_repair(runtime: Runtime) -> None:
+    """Recover from a corrupt daemon registry file."""
     output = runtime.config.cli.output.format
     registry_path = runtime.daemon_dir.registry_path
 
     # Hold the registry lock for the entire decision-and-mutate
     # window: a peer daemon publishing between the liveness check
-    # and the rename would otherwise see its entry quarantined.
+    # and the rename would otherwise see its entry moved aside.
     with runtime.daemon_dir.locked() as reg:
         if not registry_path.exists():
             click.echo(
                 format_output(
-                    {"reset": False, "message": "No registry to reset."},
+                    {"repaired": False, "message": "No registry to repair."},
                     output=output,
                 )
             )
             return
 
         # Parse-or-not-parse is irrelevant for the *action* (we
-        # quarantine either way), but a parseable registry pointing
-        # at a live daemon is the one case we refuse: quarantining
-        # out from under a running daemon would orphan the process
-        # from the CLI's perspective. A corrupt registry cannot be
-        # liveness-checked, so it is always safe to quarantine.
+        # move the file aside either way), but a parseable registry
+        # pointing at a live daemon is the one case we refuse:
+        # moving it out from under a running daemon would orphan
+        # the process from the CLI's perspective. A corrupt registry
+        # cannot be liveness-checked, so it is always safe to repair.
         try:
             entry = reg.read()
         except RegistryCorruptError:
             entry = None
         if entry is not None and entry.is_live():
             raise CliError(
-                f"Refusing to reset registry while daemon pid={entry.pid} is "
+                f"Refusing to repair registry while daemon pid={entry.pid} is "
                 f"live on {entry.host}:{entry.port}. Run `dh-mcp daemon stop` "
                 f"first.",
                 code=ErrorCode.DAEMON_REGISTRY_LIVE,
@@ -500,14 +506,14 @@ async def daemon_reset(runtime: Runtime) -> None:
         # the rename. Report as no-op.
         click.echo(
             format_output(
-                {"reset": False, "message": "No registry to reset."},
+                {"repaired": False, "message": "No registry to repair."},
                 output=output,
             )
         )
         return
     click.echo(
         format_output(
-            {"reset": True, "quarantined_to": str(quarantined)},
+            {"repaired": True, "quarantined_to": str(quarantined)},
             output=output,
         )
     )

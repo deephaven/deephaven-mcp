@@ -553,7 +553,7 @@ async def test_get_or_start_propagates_registry_corrupt_error(
     Locks the fail-fast contract: ``get_or_start_daemon`` no longer
     auto-quarantines. Corruption propagates to the command layer,
     which translates it to ``CliError(DAEMON_REGISTRY_CORRUPT)``
-    with a recovery hint pointing at ``dh-mcp daemon reset``. The
+    with a recovery hint pointing at ``dh-mcp daemon repair``. The
     well-known path is left untouched so the operator's manual
     diagnostic does not race with an implicit rename.
     """
@@ -567,7 +567,7 @@ async def test_get_or_start_propagates_registry_corrupt_error(
         await get_or_start_daemon(ctx, **_start_kwargs(runtime))
 
     # The corrupt file is left in place for the operator to inspect /
-    # quarantine via ``dh-mcp daemon reset``.
+    # quarantine via ``dh-mcp daemon repair``.
     assert registry_path.exists()
     assert registry_path.read_text() == "not json"
     quarantined = list(runtime.daemon_dir.path.glob("daemon.json.corrupt-*"))

@@ -1217,7 +1217,7 @@ def test_publish_treats_corrupt_existing_entry_as_stale(tmp_path: Path) -> None:
 
     The defensive re-check cannot identity-check a corrupt entry;
     treating it as stale lets the daemon publish over it (the
-    operator has the explicit ``daemon reset`` recovery verb if
+    operator has the explicit ``daemon repair`` recovery verb if
     that is the wrong call).
     """
     dd = DaemonDirectory(tmp_path / "daemon")

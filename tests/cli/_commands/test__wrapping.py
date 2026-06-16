@@ -62,7 +62,7 @@ async def test_acquire_forwards_config_and_recovery_hint(tmp_path: Path) -> None
     assert captured["code"] is ErrorCode.DAEMON_NOT_RUNNING
     err = captured["on_corrupt"](RegistryCorruptError("bad json"))  # type: ignore[operator]
     assert err.code is ErrorCode.DAEMON_REGISTRY_CORRUPT
-    assert "dh-mcp daemon reset" in err.message
+    assert "dh-mcp daemon repair" in err.message
     assert "dh-mcp system list" in err.message
 
 

@@ -102,13 +102,13 @@ class ErrorCode(StrEnum):
             "from daemon_not_running so the operator gets an actionable "
             "diagnostic rather than the misleading 'no daemon running' the CLI "
             "would otherwise emit after silently treating a corrupt file as "
-            "absent."
+            "absent. Recover with 'dh-mcp daemon repair'."
         ),
     )
     DAEMON_REGISTRY_LIVE = (
         "daemon_registry_live",
         (
-            "'dh-mcp daemon reset' refused to quarantine daemon.json "
+            "'dh-mcp daemon repair' refused to move daemon.json aside "
             "because a live daemon is still registered. Run 'dh-mcp daemon "
             "stop' first to avoid orphaning the running process."
         ),
