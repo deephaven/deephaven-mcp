@@ -335,19 +335,30 @@ def main(argv: list[str] | None = None) -> None:
     Args:
         argv (list[str] | None): Optional argument list (used by
             tests). ``None`` defers to :data:`sys.argv` ``[1:]``.
+
+    Before delegating to :meth:`click.Group.main`, every recognized
+    root-level option in ``argv`` (including occurrences that appear
+    *after* the subcommand) is lifted to the front via
+    :func:`_lift_root_options`, so ``dh-mcp config show -o json`` is
+    accepted identically to ``dh-mcp -o json config show``. See that
+    function for the precise contract.
     """
+    # Normalize argv exactly once: every downstream reader (cli.main,
+    # the error renderer's output-mode probe, the error renderer's
+    # command-path probe) sees the same lifted view. The lifter
+    # handles the ``None`` fallback to ``sys.argv[1:]`` itself.
+    argv_lifted = _lift_root_options(argv)
     try:
-        cli.main(args=argv, prog_name="dh-mcp", standalone_mode=False)
+        cli.main(args=argv_lifted, prog_name="dh-mcp", standalone_mode=False)
     except CliError as exc:
         # ``standalone_mode=False`` lets us intercept ``CliError``
         # globally and render it according to the active output
         # mode. The live click context is gone by the time we get
         # here, so we approximate the command path from argv.
-        argv_used = argv if argv is not None else sys.argv[1:]
         render_error(
             exc,
-            output=_output_from_argv(argv_used),
-            command=_argv_command_path(argv_used),
+            output=_output_from_argv(argv_lifted),
+            command=_argv_command_path(argv_lifted),
         )
         sys.exit(exc.exit_code)
     except click.exceptions.UsageError as exc:
@@ -364,52 +375,204 @@ def main(argv: list[str] | None = None) -> None:
     except Exception as exc:  # noqa: BLE001 - top-level safety net
         # Unexpected failure: wrap as a CliError so the operator and
         # any agent caller see a structured payload before we exit.
-        argv_used = argv if argv is not None else sys.argv[1:]
         render_error(
             CliError(f"Unexpected error: {exc}", code=ErrorCode.INTERNAL_ERROR),
-            output=_output_from_argv(argv_used),
-            command=_argv_command_path(argv_used),
+            output=_output_from_argv(argv_lifted),
+            command=_argv_command_path(argv_lifted),
         )
         sys.exit(2)
     sys.exit(0)
 
 
-def _value_taking_options(params: Iterable[click.Parameter]) -> frozenset[str]:
-    """Spellings of every value-taking ``--flag value`` option in ``params``.
+def _liftable_options(
+    params: Iterable[click.Parameter],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Bucket ``params`` into value-taking and value-less liftable spellings.
 
-    Positional :class:`click.Argument` instances are excluded because
-    they don't carry ``--`` spellings; flag (``is_flag=True``) and
-    counter (``count=True``) options are excluded because they
-    consume no value. The remaining options contribute their primary
-    and secondary option strings.
+    Args:
+        params (Iterable[click.Parameter]): The Click parameters to
+            classify. Typically ``cli.params``; the iterable shape
+            makes the helper unit-testable against synthetic groups.
 
-    Factored to take an iterable so the helper is unit-testable
-    against synthetic groups containing positional ``Argument``
-    instances — a shape the real ``cli`` group does not (yet) have
-    but which the helper must handle correctly to remain forward
-    compatible.
+    Returns:
+        tuple[frozenset[str], frozenset[str]]: A pair
+            ``(value_taking, value_less)``. ``value_taking`` holds
+            option spellings (long and short) that consume a value via
+            a following token; ``value_less`` holds spellings of
+            boolean (``is_flag=True``) and counted (``count=True``)
+            options that consume no following value. Positional
+            :class:`click.Argument` instances are silently skipped.
+
+    ``--help`` / ``-h`` and ``--version`` are intentionally excluded:
+    Click resolves these per-command, so ``dh-mcp daemon --help`` is
+    expected to render the *daemon* group's help, not the root's;
+    lifting them would change that semantics.
     """
-    spellings: set[str] = set()
+    value_taking: set[str] = set()
+    value_less: set[str] = set()
     for param in params:
         if not isinstance(param, click.Option):
             # Positional ``click.Argument``: no ``--`` spellings to
             # contribute; skip without raising.
             continue
-        if param.is_flag or param.count:
+        spellings = set(param.opts) | set(param.secondary_opts)
+        # ``--help`` is wired via ``context_settings``; ``--version``
+        # is an eager :class:`click.Option` added by ``version_option``.
+        if "--help" in spellings or "-h" in spellings:
             continue
-        spellings.update(param.opts)
-        spellings.update(param.secondary_opts)
-    return frozenset(spellings)
+        if "--version" in spellings:
+            continue
+        if param.is_flag or param.count:
+            value_less.update(spellings)
+        else:
+            value_taking.update(spellings)
+    return frozenset(value_taking), frozenset(value_less)
+
+
+def _liftable_root_options() -> tuple[frozenset[str], frozenset[str]]:
+    """Return :func:`_liftable_options` applied to ``cli.params``.
+
+    Driven from ``cli.params`` so adding or removing a top-level
+    option does not desynchronize :func:`_lift_root_options`.
+    """
+    return _liftable_options(cli.params)
+
+
+def _lift_root_options(argv: list[str] | None = None) -> list[str]:
+    """Return ``argv`` with every recognized root option moved to the front.
+
+    Click requires group-level options to precede the subcommand, so
+    ``dh-mcp config show --output human`` would otherwise fail with
+    ``No such option '--output'``. This rewrite makes option position
+    immaterial without subclassing :class:`click.Group` or duplicating
+    options onto every subcommand.
+
+    Args:
+        argv (list[str] | None): The argument list to rewrite. ``None``
+            (the default) falls back to ``sys.argv[1:]``, matching the
+            convention of :meth:`click.Group.main`: ``sys.argv[0]`` is
+            the program name supplied by the OS and is never part of
+            the argument list a parser sees. Tests pass an explicit
+            list.
+
+    Returns:
+        list[str]: A new list with every lifted root option (and its
+            value, for value-taking options) moved to the front,
+            followed by the remaining tokens in their original order.
+
+    Algorithm:
+
+    - Single left-to-right pass.
+    - Tokens after a literal ``--`` are never touched (POSIX
+      end-of-options sentinel).
+    - A token matching a value-taking root option in its bare form
+      (``--output``, ``-o``) is lifted together with the next token,
+      which is its value. If the value is missing (option is the last
+      argv element), the option is lifted alone and Click then raises
+      its own usage error, identical to today.
+    - A token matching a value-taking root option in ``=`` form
+      (``--output=human``, ``-o=human``) is lifted as a single token.
+      Note: click only accepts the long ``--opt=value`` form; for
+      short options it parses ``-oVALUE`` with no separator, so
+      ``-o=human`` fails validation at click regardless of position.
+      The lifter still recognises the shape for symmetry; rejection
+      happens at click, same as it would without lifting.
+    - The attached short-value form (``-ohuman``, which click *does*
+      accept as ``-o human``) is **not** lifted: the lexical pass has
+      no per-option arity table to know ``-o`` consumes the rest of the
+      token, and the trailing chars are not all value-less bundle
+      spellings. So ``dh-mcp -ohuman config show`` works but
+      ``dh-mcp config show -ohuman`` does not — use the spaced
+      (``-o human``) or long ``=`` (``--output=human``) form after the
+      subcommand.
+    - A token matching a value-less root option (boolean ``is_flag``
+      or counter ``count``) is lifted as a single token. Counter
+      options preserve repetition (``-v -v -v`` and ``-vvv`` are both
+      handled — short-flag bundling is not expanded; Click's own
+      parser collapses ``-vvv`` once the token is at the front).
+
+    Lifted tokens preserve their relative order, so
+    ``dh-mcp config show -o json --timeout 5`` becomes
+    ``dh-mcp -o json --timeout 5 config show``, not the reverse.
+
+    Limitation: the lift is purely lexical — it has no grammar for
+    subcommand options, so a token that *equals* a root spelling is
+    hoisted even when it is the value of a subcommand option or a
+    positional (e.g. ``--jvm-arg --timeout`` would steal ``--timeout``
+    for the root). The colliding strings (``-o``, ``--timeout``,
+    ``--config-dir``, …) are implausible as real subcommand values, so
+    this rarely bites; when it must, guard the value with the POSIX
+    ``--`` sentinel — every token after ``--`` is preserved verbatim.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    value_taking, value_less = _liftable_root_options()
+    # Short-flag bundle support: Click accepts ``-vvv`` as three
+    # ``-v`` for a counter, and ``-vq`` as ``-v -q`` for two value-less
+    # flags. The single chars usable inside a bundle are exactly the
+    # value-less short spellings.
+    bundle_chars = {opt[1] for opt in value_less if len(opt) == 2 and opt[0] == "-"}
+    lifted: list[str] = []
+    remaining: list[str] = []
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            # POSIX end-of-options sentinel: stop lifting; preserve
+            # the sentinel and every following token verbatim.
+            remaining.extend(argv[i:])
+            break
+        # ``=`` form: the whole token is one option carrying its value.
+        if "=" in tok and tok.startswith("-"):
+            prefix = tok.split("=", 1)[0]
+            if prefix in value_taking:
+                lifted.append(tok)
+                i += 1
+                continue
+        # Bare value-taking form: lift this token *and* the next.
+        if tok in value_taking:
+            lifted.append(tok)
+            if i + 1 < len(argv):
+                lifted.append(argv[i + 1])
+                i += 2
+            else:
+                # Missing value — let Click surface its own usage error.
+                i += 1
+            continue
+        # Value-less form (flag or counter).
+        if tok in value_less:
+            lifted.append(tok)
+            i += 1
+            continue
+        # Short-flag bundle (e.g. ``-vvv``, ``-vq``): a single ``-``
+        # followed by characters that are *all* value-less short
+        # spellings. Conservative — if any char is not liftable, the
+        # token is left in place for Click to handle (or error on).
+        if (
+            len(tok) > 2
+            and tok.startswith("-")
+            and not tok.startswith("--")
+            and "=" not in tok
+            and all(ch in bundle_chars for ch in tok[1:])
+        ):
+            lifted.append(tok)
+            i += 1
+            continue
+        remaining.append(tok)
+        i += 1
+    return lifted + remaining
 
 
 def _value_taking_root_options() -> frozenset[str]:
-    """Return :func:`_value_taking_options` applied to ``cli.params``.
+    """Spellings of every value-taking root option (``--flag value``).
 
-    Driven from ``cli.params`` so adding or removing a top-level
-    option does not desynchronize callers that need the value-taking
-    set (``_argv_command_path`` and ``_is_help_invocation``).
+    The value-taking half of :func:`_liftable_root_options`, single-sourced
+    through that bucketer so the classification of ``cli.params`` lives in one
+    place. Callers that only need to know which root options consume a
+    following token — ``_argv_command_path`` and ``_is_help_invocation`` —
+    read this.
     """
-    return _value_taking_options(cli.params)
+    return _liftable_root_options()[0]
 
 
 def _argv_command_path(argv: list[str]) -> str:

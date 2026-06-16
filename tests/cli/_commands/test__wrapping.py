@@ -398,3 +398,40 @@ async def test_call_and_echo_field_surfaces_partial_result_detail_only(
         )
     err = capsys.readouterr().err
     assert "actively running" in err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_suppresses_partial_errors_when_opted_out(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With ``include_partial_errors=False`` the phase ``detail`` still warns,
+    but the per-system ``errors`` map is not rendered — used by ``system
+    status`` where each row carries its own reason in ``liveness_detail``."""
+    rt = make_runtime(tmp_path)
+    payload = {
+        "success": True,
+        "systems": [{"name": "prod", "liveness_detail": "DeephavenConnectionError"}],
+        "partial_result": {
+            "phase": "completed",
+            "detail": "Some enterprise systems had connection issues during discovery.",
+            "errors": {"prod": "DeephavenConnectionError: Network is unreachable"},
+        },
+    }
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "enterprise_systems_status",
+            retry_command="dh-mcp system status",
+            arguments={},
+            field="systems",
+            default=[],
+            include_partial_errors=False,
+        )
+    captured = capsys.readouterr()
+    # Phase detail still warns.
+    assert "connection issues" in captured.err
+    # Per-system error attribution is suppressed.
+    assert "Network is unreachable" not in captured.err
+    assert "prod:" not in captured.err

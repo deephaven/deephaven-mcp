@@ -25,7 +25,7 @@ Compose help with `build_help(...)`. Required sections (drop one only when genui
 - **Summary** — one imperative line, ≤ ~70 chars. Click also uses it as the parent group's short help.
 - **Description** — what it does *and* when to use it. State side effects (spawns a daemon, quarantines a file).
 - **Arguments** — every positional argument, with its meaning and a discovery hint. Click renders no help for positional arguments, so the `arguments=` block is the only place a reader learns what `NAME` is and how to find a valid value.
-- **Options** — set `help=` on every `click.option`: state the effect **and the value space** (what to type), never value-blind help that only restates the effect. For a **closed** value set use a `click.Choice` — it validates and self-documents (e.g. `--launch-method`, `--language`). For a **free or dynamic** value, name the form and point to a discovery command (e.g. `--system`: a system name — `community` or a configured Enterprise system; run `dh-mcp system list`). Include decode/repeat rules; set `show_default=True` for options with a default. Click renders the Options table itself.
+- **Options** — set `help=` on every `click.option`: state the effect **and the value space** (what to type), never value-blind help that only restates the effect. For a **closed** value set use a `click.Choice` — it validates and self-documents (e.g. `--launch-method`, `--language`). For a **free or dynamic** value, name the form and point to a discovery command (e.g. `--system`: a system name — `community` or a configured Enterprise system; run `dh-mcp system list`). Include decode/repeat rules; set `show_default=True` for options with a default. Click renders the Options table itself. Root-group options are position-immaterial (any position accepted); subcommand-local options must follow their subcommand; never redeclare a root option on a subcommand. Mechanism: `cli/_main.py` (`_lift_root_options`).
 - **Output** — what the command prints, and the key fields an agent reads under `-o json`. Single-source it (§4).
 - **Examples** — at least one human example and at least one agent example (`-o json … | jq …`).
 - **Exit codes** — the numeric process codes (default set covers `0`/`2`/`3`).
@@ -47,7 +47,7 @@ help=build_help(
     summary="Invoke a single MCP tool and print its result.",
     description="...",
     arguments=(HelpEntry("NAME", "Tool name. Run 'dh-mcp tool list' to discover names."),),
-    output=OUTPUT_TOOL_CALL,          # see §4
+    output=_OUTPUT_CALL,              # see §4
     examples=("$ dh-mcp tool call session_list", "$ dh-mcp -o json tool call ... | jq ."),
     see_also=("dh-mcp tool list", "dh-mcp tool show NAME"),
     exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),

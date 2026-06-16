@@ -15,13 +15,15 @@ from conftest import (
 )
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
+from deephaven_mcp._exceptions import RegistryItemNotFoundError
 from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
+    _SHORT_REASON_MAX_LEN,
     _check_session_id_available,
     _check_session_limit,
     _collect_one_enterprise_system_status,
     _generate_session_name_if_none,
     _resolve_session_parameters,
+    _short_reason,
     enterprise_systems_status,
     register_tools,
     session_enterprise_create,
@@ -45,26 +47,172 @@ _SE_MODULE = "deephaven_mcp.mcp_systems_server._tools.session_enterprise"
 
 
 @pytest.mark.asyncio
-async def test_collect_one_enterprise_system_status_raises_when_system_missing_from_config():
-    """``_collect_one_enterprise_system_status`` raises when the registry
-    resolves a system that the loaded multi-config does not contain — a
-    registry/config inconsistency that bypasses ``get_enterprise_registry``."""
+async def test_collect_one_enterprise_system_status_returns_compact_health_record():
+    """``_collect_one_enterprise_system_status`` returns runtime health only.
+
+    The returned record is the ``.status`` view (name, type, liveness_status,
+    is_alive, optional liveness_detail). It deliberately does not include the
+    system's declared ``config`` — that lives in 'list_systems' / config tools.
+    """
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_registry.system_name = "prod"
-    mock_registry.get_all = AsyncMock(return_value=MagicMock())
+    mock_registry.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
     mock_registry.factory_manager.liveness_status = AsyncMock(
-        return_value=(MagicMock(), None)
+        return_value=(ResourceLivenessStatus.ONLINE, "all good")
     )
     mock_registry.factory_manager.is_alive = AsyncMock(return_value=True)
 
-    multi_config = SimpleNamespace(enterprise=None)
+    with patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry):
+        info, _, _ = await _collect_one_enterprise_system_status(
+            MagicMock(), "prod", False
+        )
 
-    with (
-        patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry),
-        patch(f"{_SE_MODULE}.get_multi_config", return_value=multi_config),
-    ):
-        with pytest.raises(InvalidSessionNameError, match="not configured"):
-            await _collect_one_enterprise_system_status(MagicMock(), "prod", False)
+    assert info == {
+        "name": "prod",
+        "type": "enterprise",
+        "liveness_status": "ONLINE",
+        "is_alive": True,
+        "liveness_detail": "all good",
+    }
+
+
+def test_short_reason_extracts_exception_type_prefix():
+    """Init errors are recorded as 'Type: message'; ``_short_reason`` returns
+    the type prefix — the kubectl-style code shown in ``liveness_detail``."""
+    assert (
+        _short_reason("DeephavenConnectionError: Failed to connect to ...")
+        == "DeephavenConnectionError"
+    )
+
+
+def test_short_reason_returns_input_when_no_separator():
+    """Strings that don't follow the 'Type: message' convention are returned
+    verbatim so the column is still populated."""
+    assert _short_reason("something broke") == "something broke"
+
+
+def test_short_reason_truncates_overlong_input():
+    """Unconventional inputs are capped to a table-friendly width with an
+    ellipsis marker so a single row can't blow up the table."""
+    overlong = "x" * (_SHORT_REASON_MAX_LEN + 50)
+    short = _short_reason(overlong)
+    assert len(short) == _SHORT_REASON_MAX_LEN
+    assert short.endswith("\u2026")
+
+
+@pytest.mark.asyncio
+async def test_collect_one_promotes_init_error_type_when_probe_uninformative():
+    """When the cached probe falls back to 'No item cached' and discovery
+    recorded an init error, ``liveness_detail`` carries the exception type
+    instead of the uninformative sentinel — the actionable signal wins."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = "prod"
+    mock_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={"factory": "DeephavenConnectionError: Network is unreachable"},
+        )
+    )
+    mock_registry.factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, "No item cached")
+    )
+    mock_registry.factory_manager.is_alive = AsyncMock(return_value=False)
+
+    with patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry):
+        info, init_errors, _ = await _collect_one_enterprise_system_status(
+            MagicMock(), "prod", False
+        )
+
+    assert info["liveness_detail"] == "DeephavenConnectionError"
+    # Full message is preserved in init_errors for partial_result.errors.
+    assert init_errors == {
+        "factory": "DeephavenConnectionError: Network is unreachable"
+    }
+
+
+@pytest.mark.asyncio
+async def test_collect_one_keeps_probe_message_over_init_error():
+    """When the probe supplied a non-sentinel message (e.g. an actual probe
+    failure), it wins over discovery-time init errors — the live signal is
+    more recent than the recorded one."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = "prod"
+    mock_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={"factory": "DeephavenConnectionError: Network is unreachable"},
+        )
+    )
+    mock_registry.factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, "Ping returned False")
+    )
+    mock_registry.factory_manager.is_alive = AsyncMock(return_value=False)
+
+    with patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry):
+        info, _, _ = await _collect_one_enterprise_system_status(
+            MagicMock(), "prod", False
+        )
+
+    assert info["liveness_detail"] == "Ping returned False"
+
+
+@pytest.mark.asyncio
+async def test_collect_one_joins_multiple_init_error_types_with_comma():
+    """Multiple recorded sources for one system join their exception-type
+    prefixes with ', ' so the table cell stays one line."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = "prod"
+    mock_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={
+                "factory": "DeephavenConnectionError: Network unreachable",
+                "client": "AuthenticationError: Token expired",
+            },
+        )
+    )
+    mock_registry.factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, None)
+    )
+    mock_registry.factory_manager.is_alive = AsyncMock(return_value=False)
+
+    with patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry):
+        info, _, _ = await _collect_one_enterprise_system_status(
+            MagicMock(), "prod", False
+        )
+
+    reasons = info["liveness_detail"].split(", ")
+    assert set(reasons) == {"DeephavenConnectionError", "AuthenticationError"}
+
+
+@pytest.mark.asyncio
+async def test_collect_one_does_not_promote_init_error_when_online():
+    """An ONLINE system has recovered; stale init errors must not surface
+    as ``liveness_detail`` and falsely imply the system is broken."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = "prod"
+    mock_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={"factory": "DeephavenConnectionError: was unreachable earlier"},
+        )
+    )
+    mock_registry.factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.ONLINE, None)
+    )
+    mock_registry.factory_manager.is_alive = AsyncMock(return_value=True)
+
+    with patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry):
+        info, _, _ = await _collect_one_enterprise_system_status(
+            MagicMock(), "prod", False
+        )
+
+    assert "liveness_detail" not in info
+    assert info["liveness_status"] == "ONLINE"
 
 
 @pytest.mark.asyncio
@@ -399,9 +547,12 @@ async def test_enterprise_systems_status_success():
     # Check system (always named "system")
     system = result["systems"][0]
     assert system["name"] == "system"
+    assert system["type"] == "enterprise"
     assert system["liveness_status"] == "ONLINE"
     assert "liveness_detail" not in system  # No detail was provided
     assert system["is_alive"] is True
+    # Health-only contract: no declared configuration in the response.
+    assert "config" not in system
 
     # COMPLETED with no errors should not include initialization info
     assert "partial_result" not in result
@@ -501,52 +652,6 @@ async def test_enterprise_systems_status_all_status_types():
         assert system["liveness_detail"] == detail
         assert system["is_alive"] == (status == ResourceLivenessStatus.ONLINE)
         assert "partial_result" not in result
-
-
-@pytest.mark.asyncio
-async def test_enterprise_systems_status_config_error():
-    """Test enterprise systems status when config retrieval fails."""
-    # Mock factory_manager (liveness_status works fine)
-    mock_factory_manager = AsyncMock()
-    mock_factory_manager.liveness_status = AsyncMock(
-        return_value=(ResourceLivenessStatus.ONLINE, None)
-    )
-    mock_factory_manager.is_alive = AsyncMock(return_value=True)
-
-    # Mock session registry
-    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
-    mock_session_registry.system_name = _TEST_SYSTEM_NAME
-    mock_session_registry.factory_manager = mock_factory_manager
-    mock_session_registry.get_all = AsyncMock(
-        return_value=RegistrySnapshot.simple(items={})
-    )
-
-    # The lifespan-loaded config is read directly; trigger the error
-    # path by making the system config's ``model_dump`` raise.
-    mock_config_manager = AsyncMock()
-
-    # Create context
-    context = MockContext(
-        {
-            "registry": mock_session_registry,
-            "config_manager": mock_config_manager,
-            "instance_tracker": create_mock_instance_tracker(),
-        }
-    )
-    # Replace the system config entry with a Mock whose ``model_dump``
-    # raises (``EnterpriseSystemConfig`` is frozen, so we cannot mutate
-    # the validated instance in place).
-    multi_config = context.request_context.lifespan_context.multi_config
-    boom = MagicMock()
-    boom.model_dump = MagicMock(side_effect=Exception("Config error"))
-    multi_config.enterprise.systems[_TEST_SYSTEM_NAME] = boom
-
-    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
-
-    # Verify the result
-    assert result["success"] is False
-    assert result["isError"] is True
-    assert "Config error" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -742,13 +847,62 @@ async def test_enterprise_systems_status_factory_snapshot_with_errors():
 
     result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
-    # Errors from snapshot are surfaced in initialization info
+    # Errors from snapshot are surfaced in initialization info,
+    # keyed by system name so the diagnostic attributes per system.
     assert result["success"] is True
     assert len(result["systems"]) == 1
     assert result["systems"][0]["name"] == "system"
     assert "partial_result" in result
-    assert "errors" in result["partial_result"]
-    assert "factory_reg" in result["partial_result"]["errors"]
+    assert result["partial_result"]["errors"] == {"system": "something broke"}
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_status_joins_multiple_sources_with_semicolon():
+    """Multiple error sources for one system join with '; ' in partial_result.errors.
+
+    Pins the merged-errors contract documented in the Returns section: a single
+    system reporting several discovery sources collapses to one '; '-joined
+    string keyed by system name, so the diagnostic stays one line per system.
+    """
+    from deephaven_mcp.resource_manager import InitializationPhase
+
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.liveness_status = AsyncMock(
+        return_value=(ResourceLivenessStatus.OFFLINE, None)
+    )
+    mock_factory_manager.is_alive = AsyncMock(return_value=False)
+
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_session_registry.get_all = AsyncMock(
+        return_value=RegistrySnapshot.with_initialization(
+            items={},
+            phase=InitializationPhase.COMPLETED,
+            errors={
+                "factory_reg": "DeephavenConnectionError: network down",
+                "client": "AuthenticationError: bad token",
+            },
+        )
+    )
+
+    mock_config_manager = AsyncMock()
+    mock_config_manager.get_config = AsyncMock(return_value={})
+
+    context = MockContext(
+        {
+            "registry": mock_session_registry,
+            "config_manager": mock_config_manager,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
+
+    assert result["partial_result"]["errors"] == {
+        "system": "DeephavenConnectionError: network down; "
+        "AuthenticationError: bad token"
+    }
 
 
 # =============================================================================
@@ -830,8 +984,7 @@ async def test_enterprise_systems_status_discovery_in_progress_with_errors():
     assert result["success"] is True
     assert "partial_result" in result
     assert "actively running" in result["partial_result"]["detail"]
-    assert "errors" in result["partial_result"]
-    assert "factory1" in result["partial_result"]["errors"]
+    assert result["partial_result"]["errors"] == {"system": "Connection refused"}
 
 
 @pytest.mark.asyncio
@@ -869,8 +1022,9 @@ async def test_enterprise_systems_status_completed_with_errors():
 
     assert result["success"] is True
     assert "partial_result" in result
-    assert "errors" in result["partial_result"]
-    assert "factory1" in result["partial_result"]["errors"]
+    assert result["partial_result"]["errors"] == {
+        "system": "Connection failed: Connection refused"
+    }
     assert "connection issues" in result["partial_result"]["detail"]
 
 
@@ -2523,9 +2677,9 @@ async def test_enterprise_systems_status_aggregates_when_system_none():
 
     assert result["success"] is True
     assert {s["name"] for s in result["systems"]} == {"prod", "staging"}
-    # Aggregated calls namespace error keys with the originating system.
+    # Every error is keyed by its originating system name.
     assert "partial_result" in result
-    assert "staging:factory" in result["partial_result"]["errors"]
+    assert result["partial_result"]["errors"] == {"staging": "boom"}
 
 
 @pytest.mark.asyncio
@@ -2585,7 +2739,7 @@ async def test_enterprise_systems_status_aggregation_failed_outranks_loading():
     # FAILED outranks LOADING so the merged status surfaces the failure
     # message rather than the in-progress "actively running" message.
     assert "failed critically" in result["partial_result"]["detail"]
-    assert "prod:factory" in result["partial_result"]["errors"]
+    assert result["partial_result"]["errors"] == {"prod": "fatal"}
 
 
 @pytest.mark.asyncio

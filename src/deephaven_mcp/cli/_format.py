@@ -130,7 +130,7 @@ def _format_human(value: Any, *, empty_message: str = "(none)") -> str:
         if all(isinstance(v, Tool) for v in value):
             return _format_tool_list(value)
         if _is_row_list(value):
-            return _format_table(value)
+            return _format_row_list(value)
         return "\n".join(str(v) for v in value)
     if isinstance(value, dict):
         return _format_dict(value)
@@ -144,7 +144,7 @@ def _format_dict(value: dict[str, Any]) -> str:
 
     Nested structures expand under their key instead of collapsing to a
     one-line ``str()`` repr: a non-empty list of dicts (e.g. the ``data`` block
-    of a tabular tool result) renders as an indented :func:`_format_table`; a
+    of a tabular tool result) renders as an indented :func:`_format_row_list`; a
     non-empty nested dict renders as an indented sub-tree; a non-empty list of
     scalars renders as indented ``- item`` bullets. Scalars and empty
     containers render inline as ``key: value``.
@@ -153,7 +153,7 @@ def _format_dict(value: dict[str, Any]) -> str:
     for k, v in value.items():
         if _is_row_list(v):
             lines.append(f"{k}:")
-            lines.append(_indent(_format_table(v)))
+            lines.append(_indent(_format_row_list(v)))
         elif isinstance(v, dict) and v:
             lines.append(f"{k}:")
             lines.append(_indent(_format_dict(v)))
@@ -163,6 +163,31 @@ def _format_dict(value: dict[str, Any]) -> str:
         else:
             lines.append(f"{k}: {v}")
     return "\n".join(lines)
+
+
+def _row_has_complex_cell(row: dict[str, Any]) -> bool:
+    """Return whether any cell in ``row`` is a non-empty dict or list."""
+    return any(
+        (isinstance(v, dict) and v) or (isinstance(v, list) and v) for v in row.values()
+    )
+
+
+def _format_row_list(rows: list[dict[str, Any]]) -> str:
+    """Render a list of row dicts as an aligned table or stacked blocks.
+
+    When every cell across all rows is scalar, renders the aligned
+    :func:`_format_table`. When any row carries a nested dict or non-empty list,
+    each row instead renders as a ``- key: value`` block via
+    :func:`_format_dict`, with nested structures expanding under their key.
+    """
+    if any(_row_has_complex_cell(row) for row in rows):
+        blocks: list[str] = []
+        for row in rows:
+            rendered = _format_dict(row)
+            head, *rest = rendered.splitlines() or [""]
+            blocks.append("\n".join(["- " + head, *(_indent(line) for line in rest)]))
+        return "\n".join(blocks)
+    return _format_table(rows)
 
 
 def _indent(text: str, prefix: str = "  ") -> str:

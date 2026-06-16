@@ -350,7 +350,7 @@ plus every configured Enterprise (Core+) system.
 | Verb         | Purpose                                                                                       |
 |--------------|-----------------------------------------------------------------------------------------------|
 | `list`       | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
-| `status`     | Reports Enterprise (Core+) system health (`liveness_status`, `is_alive`, redacted `config`). Wraps `enterprise_systems_status`. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. Exits `3` if the tool reports failure. |
+| `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dh-mcp config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr (no per-system attribution — that lives on each row's `liveness_detail`). Exits `3` if the tool reports failure. |
 | `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
 | `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
 
@@ -521,6 +521,18 @@ ask about a single command.
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
 | `--version`         |                      | Print the package version and exit.                                                  |
+
+These flags accept any position on the command line — before the
+noun group, between the noun and the verb, or after the verb.
+For example `dh-mcp -o json config show`, `dh-mcp config -o json
+show`, and `dh-mcp config show -o json` are all equivalent. The
+CLI rewrites argv to lift recognized top-level options to the
+front before `click` parses it. `--help` and `--version` are
+*not* lifted: Click resolves them per-command, so `dh-mcp daemon
+--help` correctly renders the `daemon` group's help (not the
+root's). Use the POSIX `--` sentinel to force a literal token
+later in the command line (everything after `--` is preserved
+verbatim).
 
 ## Output modes
 

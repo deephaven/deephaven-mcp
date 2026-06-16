@@ -508,6 +508,130 @@ def test_config_validate_and_show(tmp_path: Path) -> None:
     shutil.which("dh-mcp") is None,
     reason="dh-mcp entry point not on PATH",
 )
+def test_root_options_accepted_after_subcommand(tmp_path: Path) -> None:
+    """End-to-end through the real ``dh-mcp`` binary: every root option is
+    accepted at any position on the command line.
+
+    ``_lift_root_options`` (``cli/_main.py``) is exhaustively unit-tested
+    against the lifter's contract, and ``test__main.py`` exercises the
+    full ``main()`` entry point in-process. This test closes the loop at
+    the OS-subprocess level, where Python is started fresh by the shell
+    and ``sys.argv`` is populated by the OS — the path that matters in
+    production for any operator typing ``dh-mcp config show -o json``.
+    """
+    cfg_dir = tmp_path / "cfg"
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir()
+    os.chmod(runtime_dir, 0o700)
+    _seed_anonymous_config(cfg_dir)
+
+    # All root options placed *after* the subcommand. Without
+    # ``_lift_root_options`` click would fail with ``No such option
+    # '--config-dir'`` at the first one.
+    cmd = [
+        "dh-mcp",
+        "config",
+        "show",
+        "--config-dir",
+        str(cfg_dir),
+        "--runtime-dir",
+        str(runtime_dir),
+        "--output",
+        "json",
+    ]
+    result = subprocess.run(  # noqa: S603 - argv is fully constructed locally
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert "cli" in payload
+    assert "community" in payload
+
+    # Long ``--opt=value`` form at the tail end is equivalent to the
+    # bare ``--opt value`` form. Click does not accept ``-o=value``
+    # for short options (it parses ``-oVALUE`` with no separator, so
+    # ``-o=yaml`` would become ``-o`` + value ``=yaml`` — broken
+    # regardless of position), so only the long ``=`` form is asserted.
+    cmd_equals = [
+        "dh-mcp",
+        "config",
+        "show",
+        f"--config-dir={cfg_dir}",
+        f"--runtime-dir={runtime_dir}",
+        "--output=yaml",
+    ]
+    result = subprocess.run(  # noqa: S603 - argv is fully constructed locally
+        cmd_equals,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    # YAML mode: line-oriented output, not JSON.
+    assert "cli:" in result.stdout
+    assert "community:" in result.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(
+    shutil.which("dh-mcp") is None,
+    reason="dh-mcp entry point not on PATH",
+)
+def test_help_at_depth_still_routes_to_subcommand(tmp_path: Path) -> None:
+    """``--help`` is deliberately not lifted: ``dh-mcp daemon --help``
+    must render the daemon group's help, not the root group's, even
+    though ``daemon`` precedes the flag on the command line.
+
+    Pins the exclusion-from-lift contract end-to-end against the real
+    binary so any future regression that starts lifting ``--help``
+    surfaces here as a test failure rather than as a confusing
+    user-facing behavior change.
+    """
+    cfg_dir = tmp_path / "cfg"
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir()
+    os.chmod(runtime_dir, 0o700)
+    _seed_anonymous_config(cfg_dir)
+
+    # ``--help`` does not require a daemon, and the help fast-path
+    # short-circuits before runtime loading; ``--config-dir`` is
+    # supplied only because ``_run_cli`` is not in play and the root
+    # callback expects the standard arg order.
+    cmd = [
+        "dh-mcp",
+        "--config-dir",
+        str(cfg_dir),
+        "--runtime-dir",
+        str(runtime_dir),
+        "daemon",
+        "--help",
+    ]
+    result = subprocess.run(  # noqa: S603 - argv is fully constructed locally
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    # Daemon group help (lists daemon verbs); not root help (which
+    # lists top-level nouns like 'tool', 'session', etc.).
+    assert "Manage the local dh-mcp daemon" in result.stdout
+    assert "repair" in result.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(
+    shutil.which("dh-mcp") is None,
+    reason="dh-mcp entry point not on PATH",
+)
 def test_config_invalid_exits_2(tmp_path: Path) -> None:
     """A malformed config tree fails fast with ``config_invalid`` (exit 2).
 

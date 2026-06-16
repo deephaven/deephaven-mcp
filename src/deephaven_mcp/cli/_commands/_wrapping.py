@@ -299,7 +299,12 @@ async def call_and_echo(
     echo_payload(runtime, payload)
 
 
-def _warn_if_incomplete(runtime: Runtime, payload: dict[str, Any]) -> None:
+def _warn_if_incomplete(
+    runtime: Runtime,
+    payload: dict[str, Any],
+    *,
+    include_partial_errors: bool = True,
+) -> None:
     """Warn on stderr when a successful result is flagged incomplete.
 
     Discovery tools (e.g. ``sessions_list``) attach a ``partial_result`` block
@@ -310,14 +315,24 @@ def _warn_if_incomplete(runtime: Runtime, payload: dict[str, Any]) -> None:
     <message>}}`` (``errors`` only on failures), and the key is absent when the
     result is complete. A shaping verb prints one field and drops the rest, so
     this re-emits the block's human-readable ``detail`` as a stderr warning.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        payload (dict[str, Any]): The full tool response.
+        include_partial_errors (bool, optional): When ``True`` (default) the
+            per-system ``errors`` block is rendered under the warning. Pass
+            ``False`` when the row records already carry the per-system reason
+            (e.g. ``system status`` promotes the exception type into
+            ``liveness_detail``) so the stderr line doesn't duplicate the table.
     """
     incomplete = payload.get("partial_result")
     if incomplete is None:
         return
+    details = incomplete.get("errors") if include_partial_errors else None
     render_warning(
         incomplete["detail"],
         output=runtime.config.cli.output.format,
-        details=incomplete.get("errors"),
+        details=details,
     )
 
 
@@ -329,6 +344,7 @@ async def call_and_echo_field(
     arguments: dict[str, Any],
     field: str,
     default: Any,
+    include_partial_errors: bool = True,
 ) -> None:
     """Acquire, invoke ``tool``, surface diagnostics, and print ``payload[field]``.
 
@@ -345,6 +361,10 @@ async def call_and_echo_field(
         arguments (dict[str, Any]): The tool arguments.
         field (str): The payload key to emit on stdout.
         default (Any): The value emitted when ``field`` is absent.
+        include_partial_errors (bool, optional): Forwarded to
+            :func:`_warn_if_incomplete`. Pass ``False`` when the emitted rows
+            already carry per-system error reasons, so the warning doesn't
+            duplicate them.
 
     Raises:
         CliError: When the daemon cannot be acquired, the MCP transport
@@ -353,5 +373,5 @@ async def call_and_echo_field(
     payload = await call_for_payload(
         runtime, tool, retry_command=retry_command, arguments=arguments
     )
-    _warn_if_incomplete(runtime, payload)
+    _warn_if_incomplete(runtime, payload, include_partial_errors=include_partial_errors)
     echo_payload(runtime, payload.get(field, default))

@@ -217,29 +217,23 @@ def test_is_help_invocation_table_driven(
 
 
 # ---------------------------------------------------------------------------
-# _value_taking_options
+# _value_taking_root_options
 # ---------------------------------------------------------------------------
 
 
-def test_value_taking_options_excludes_arguments_and_flags() -> None:
-    """A synthetic group exercises every branch of the helper."""
-    import click
+def test_value_taking_root_options_is_liftable_value_taking_half() -> None:
+    """The value-taking accessor is single-sourced from the lifter bucketer.
 
-    from deephaven_mcp.cli._main import _value_taking_options
+    Pins that ``_value_taking_root_options`` returns exactly the
+    value-taking half of ``_liftable_root_options`` — the single
+    ``cli.params`` classifier — so the two can never drift apart.
+    """
+    from deephaven_mcp.cli._main import (
+        _liftable_root_options,
+        _value_taking_root_options,
+    )
 
-    @click.command()
-    @click.argument("positional")
-    @click.option("--flag", is_flag=True)
-    @click.option("-v", "--verbose", count=True)
-    @click.option("-c", "--config", type=str)
-    @click.option("--name", type=str)
-    def synthetic(
-        positional: str, flag: bool, verbose: int, config: str, name: str
-    ) -> None:
-        pass
-
-    result = _value_taking_options(synthetic.params)
-    assert result == frozenset({"-c", "--config", "--name"})
+    assert _value_taking_root_options() == _liftable_root_options()[0]
 
 
 # ---------------------------------------------------------------------------
@@ -491,3 +485,227 @@ def test_v_and_q_are_mutually_exclusive() -> None:
     with patch.object(_main, "load_runtime", fake_load_runtime(rt)):
         result = runner.invoke(cli, ["-v", "-q", "daemon", "status"])
     assert result.exit_code == 2
+
+
+# ---------------------------------------------------------------------------
+# _liftable_root_options
+# ---------------------------------------------------------------------------
+
+
+def test_liftable_options_skips_arguments_help_and_version() -> None:
+    """Synthetic group exercises every classifier branch in one pass.
+
+    Drives :func:`_liftable_options` (the params-taking helper)
+    rather than the ``cli``-bound wrapper so both the
+    ``not isinstance(param, click.Option)`` skip (positional argument)
+    and the ``--help`` / ``--version`` exclusion branches are
+    exercised. The real ``cli.params`` only ever exposes options.
+    """
+    import click
+
+    from deephaven_mcp.cli._main import _liftable_options
+
+    @click.command()
+    @click.argument("positional")
+    @click.option("-h", "--help", "help_", is_flag=True)
+    @click.option("--version", is_flag=True)
+    @click.option("--flag", is_flag=True)
+    @click.option("-v", "--verbose", count=True)
+    @click.option("-c", "--config", type=str)
+    def synthetic(
+        positional: str,
+        help_: bool,
+        version: bool,
+        flag: bool,
+        verbose: int,
+        config: str,
+    ) -> None:
+        pass
+
+    value_taking, value_less = _liftable_options(synthetic.params)
+    assert value_taking == frozenset({"-c", "--config"})
+    assert value_less == frozenset({"--flag", "-v", "--verbose"})
+
+
+def test_liftable_root_options_excludes_help_and_version() -> None:
+    """``--help`` / ``-h`` / ``--version`` are never returned in either set.
+
+    Lifting them would actively break ``dh-mcp daemon --help`` (would
+    rewrite to ``dh-mcp --help daemon`` and render root help) and
+    ``dh-mcp daemon --version`` semantics. Pinned here so a future
+    refactor cannot silently start lifting them.
+    """
+    from deephaven_mcp.cli._main import _liftable_root_options
+
+    value_taking, value_less = _liftable_root_options()
+    excluded = {"--help", "-h", "--version"}
+    assert not (value_taking & excluded)
+    assert not (value_less & excluded)
+
+
+def test_liftable_root_options_classifies_known_root_options() -> None:
+    """Every other root option is bucketed by whether it takes a value.
+
+    Drives off the live ``cli.params`` so adding a new root option
+    that misclassifies (e.g. forgets ``is_flag=True``) fails this
+    test, not user-facing behavior.
+    """
+    from deephaven_mcp.cli._main import _liftable_root_options
+
+    value_taking, value_less = _liftable_root_options()
+    assert {"--config-dir", "--runtime-dir", "-o", "--output", "--timeout"} <= (
+        value_taking
+    )
+    assert {"-v", "--verbose", "-q", "--quiet", "--no-auto-start"} <= value_less
+    # Disjoint by construction.
+    assert not (value_taking & value_less)
+
+
+# ---------------------------------------------------------------------------
+# _lift_root_options
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        # Already at the front: no reordering.
+        (["-o", "json", "config", "show"], ["-o", "json", "config", "show"]),
+        (
+            ["--output", "yaml", "config", "show"],
+            ["--output", "yaml", "config", "show"],
+        ),
+        # Bare value-taking, lifted from after the subcommand.
+        (["config", "show", "-o", "json"], ["-o", "json", "config", "show"]),
+        (
+            ["config", "show", "--output", "yaml"],
+            ["--output", "yaml", "config", "show"],
+        ),
+        # ``=`` form. Long form: click accepts ``--opt=value`` and the
+        # lifter moves it cleanly. Short form: click does *not* accept
+        # ``-o=value`` (it parses ``-oVALUE`` with no separator, so
+        # ``-o=json`` would fail validation at click regardless of
+        # position). The lifter still recognizes the shape for symmetry
+        # and leaves rejection to click — same outcome as not lifting,
+        # never worse.
+        (["config", "show", "--output=json"], ["--output=json", "config", "show"]),
+        (["config", "show", "-o=json"], ["-o=json", "config", "show"]),
+        # ``=`` form whose prefix is *not* a root option: left in place
+        # (e.g. a subcommand option's ``key=value`` value). The lifter
+        # must not hoist it just because it contains ``=`` and starts with
+        # ``-``.
+        (
+            ["tool", "call", "x", "--arg=type=community"],
+            ["tool", "call", "x", "--arg=type=community"],
+        ),
+        # Value-less flags and counters.
+        (["daemon", "status", "-v"], ["-v", "daemon", "status"]),
+        (["daemon", "status", "-vvv"], ["-vvv", "daemon", "status"]),
+        (["daemon", "status", "--quiet"], ["--quiet", "daemon", "status"]),
+        (
+            ["daemon", "status", "--no-auto-start"],
+            ["--no-auto-start", "daemon", "status"],
+        ),
+        # Multiple root options after the subcommand preserve relative order.
+        (
+            ["config", "show", "-o", "json", "--timeout", "5"],
+            ["-o", "json", "--timeout", "5", "config", "show"],
+        ),
+        # Mixed: some root options before, some after.
+        (
+            ["-v", "config", "show", "-o", "json"],
+            ["-v", "-o", "json", "config", "show"],
+        ),
+        # Subcommand-local options (unknown to root) are never touched.
+        (
+            ["tool", "list", "--all"],
+            ["tool", "list", "--all"],
+        ),
+        # Empty argv is a no-op.
+        ([], []),
+        # ``--`` sentinel: tokens after it are preserved verbatim, even
+        # if they look like root options.
+        (
+            ["config", "show", "--", "-o", "json"],
+            ["config", "show", "--", "-o", "json"],
+        ),
+        # ``--`` rescues a subcommand-option value that collides with a
+        # root spelling: without the sentinel the lexical lift would
+        # hoist ``--timeout`` (and the following token) away from the
+        # subcommand; after ``--`` it stays put. This is the documented
+        # escape hatch for the lifter's grammar-free limitation.
+        (
+            ["session", "create", "--jvm-arg", "--", "--timeout"],
+            ["session", "create", "--jvm-arg", "--", "--timeout"],
+        ),
+        # Without the sentinel, the same colliding value IS hoisted —
+        # pins the limitation itself so the ``--`` workaround is the
+        # difference, not luck.
+        (
+            ["session", "create", "--jvm-arg", "--timeout", "5"],
+            ["--timeout", "5", "session", "create", "--jvm-arg"],
+        ),
+        # Value-taking option at end-of-argv with missing value: lifted
+        # alone; Click will then surface its own usage error.
+        (["config", "show", "-o"], ["-o", "config", "show"]),
+    ],
+)
+def test_lift_root_options_table_driven(argv: list[str], expected: list[str]) -> None:
+    """Pins the argv-rewrite contract across every supported shape."""
+    from deephaven_mcp.cli._main import _lift_root_options
+
+    assert _lift_root_options(argv) == expected
+
+
+def test_lift_root_options_none_defaults_to_sys_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``argv=None`` falls back to ``sys.argv[1:]`` (skipping the program name).
+
+    Mirrors :meth:`click.Group.main`'s convention. ``sys.argv[0]`` is
+    the OS-supplied program name and must not be treated as a user
+    argument; the slice is the standard Python idiom.
+    """
+    from deephaven_mcp.cli._main import _lift_root_options
+
+    monkeypatch.setattr("sys.argv", ["/path/to/dh-mcp", "config", "show", "-o", "json"])
+    assert _lift_root_options() == ["-o", "json", "config", "show"]
+    assert _lift_root_options(None) == ["-o", "json", "config", "show"]
+
+
+def test_main_accepts_output_after_subcommand(capsys) -> None:
+    """End-to-end: ``-o`` after the subcommand reaches the renderer.
+
+    Without ``_lift_root_options`` Click would fail this argv shape
+    with ``No such option '--output'``; with the lifter it succeeds
+    and JSON output reaches stdout.
+    """
+    rt = _runtime()
+    with (
+        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch(
+            "deephaven_mcp.cli._commands.daemon.stop_daemon",
+            AsyncMock(return_value=False),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main(["daemon", "stop", "-o", "json"])
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stopped"] is False
+
+
+def test_main_help_at_depth_still_routes_to_subcommand(capsys) -> None:
+    """``dh-mcp daemon --help`` must keep rendering daemon's help, not root.
+
+    ``--help`` is intentionally excluded from the lift set; this test
+    locks that exclusion against future regressions.
+    """
+    with pytest.raises(SystemExit) as exc_info:
+        main(["daemon", "--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    # The daemon group's help lists verbs, including 'repair'; the
+    # root help does not.
+    assert "repair" in out
+    assert "Manage the local dh-mcp daemon" in out

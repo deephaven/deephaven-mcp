@@ -33,7 +33,12 @@ _LIST_PAYLOAD = {
 _STATUS_PAYLOAD = {
     "success": True,
     "systems": [
-        {"name": "prod", "liveness_status": "ONLINE", "is_alive": True},
+        {
+            "name": "prod",
+            "type": "enterprise",
+            "liveness_status": "ONLINE",
+            "is_alive": True,
+        },
     ],
 }
 
@@ -140,8 +145,65 @@ def test_status_success_json(tmp_path: Path) -> None:
         result = _invoke(["-o", "json", "system", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"systems": _STATUS_PAYLOAD["systems"]}
-    assert "success" not in payload
+    assert payload == _STATUS_PAYLOAD["systems"]
+
+
+def test_status_human_renders_as_aligned_table(tmp_path: Path) -> None:
+    """Human mode renders the compact status array as a header + row table.
+
+    With ``config`` removed, every cell is scalar, so the renderer takes the
+    aligned-table path; no stacked-block fallback for the normal case.
+    """
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_STATUS_PAYLOAD))
+    with acquire_p, call_p:
+        result = _invoke(["system", "status"], rt)
+    assert result.exit_code == 0
+    lines = result.output.splitlines()
+    headers = lines[0].split()
+    assert headers == ["name", "type", "liveness_status", "is_alive"]
+    data = lines[1].split()
+    assert data == ["prod", "enterprise", "ONLINE", "True"]
+
+
+def test_status_partial_result_warns_phase_only_not_per_system_errors(
+    tmp_path: Path,
+) -> None:
+    """Per-system errors live on each row's ``liveness_detail`` now, so the
+    stderr warning surfaces only the phase ``detail``, never the per-system
+    error message — the table already carries that attribution."""
+    payload = {
+        "success": True,
+        "systems": [
+            {
+                "name": "prod",
+                "type": "enterprise",
+                "liveness_status": "OFFLINE",
+                "is_alive": False,
+                "liveness_detail": "DeephavenConnectionError",
+            },
+        ],
+        "partial_result": {
+            "phase": "completed",
+            "detail": "Some enterprise systems had connection issues during discovery.",
+            "errors": {"prod": "DeephavenConnectionError: Network is unreachable"},
+        },
+    }
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(payload))
+    with acquire_p, call_p:
+        result = _invoke(["system", "status"], rt)
+    assert result.exit_code == 0
+    # partial_result diagnostic key stays out of stdout.
+    assert "partial_result" not in result.stdout
+    # Phase detail warns on stderr.
+    assert "connection issues" in result.stderr
+    # Per-system error attribution is suppressed: neither the system name
+    # nor the long error message leaks onto stderr.
+    assert "Network is unreachable" not in result.stderr
+    assert "prod:" not in result.stderr
+    # The short reason still appears in the table row on stdout.
+    assert "DeephavenConnectionError" in result.stdout
 
 
 def test_status_tool_failure_exits_3(tmp_path: Path) -> None:
