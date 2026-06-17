@@ -109,7 +109,9 @@ async def _collect_one_enterprise_system_status(
         and probe_is_uninformative
         and status_enum is not ResourceLivenessStatus.ONLINE
     ):
-        liveness_detail = ", ".join(_short_reason(msg) for msg in init_errors.values())
+        liveness_detail = ", ".join(
+            _short_reason(msg) for _, msg in sorted(init_errors.items())
+        )
 
     system_info: dict[str, object] = {
         "name": session_registry.system_name,
@@ -288,7 +290,9 @@ async def enterprise_systems_status(
             # one system reports multiple sources, join them with '; ' so
             # the row stays a single line.
             if init_errors:
-                merged_errors[sys_name] = "; ".join(init_errors.values())
+                merged_errors[sys_name] = "; ".join(
+                    msg for _, msg in sorted(init_errors.items())
+                )
             phases.append(init_phase)
 
         merged_phase = least_advanced_phase(phases)

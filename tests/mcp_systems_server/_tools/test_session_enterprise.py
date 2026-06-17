@@ -863,6 +863,7 @@ async def test_enterprise_systems_status_joins_multiple_sources_with_semicolon()
     Pins the merged-errors contract documented in the Returns section: a single
     system reporting several discovery sources collapses to one '; '-joined
     string keyed by system name, so the diagnostic stays one line per system.
+    Sources join in sorted-by-key order so the output is deterministic.
     """
     from deephaven_mcp.resource_manager import InitializationPhase
 
@@ -900,8 +901,8 @@ async def test_enterprise_systems_status_joins_multiple_sources_with_semicolon()
     result = await enterprise_systems_status(context, _TEST_SYSTEM_NAME)
 
     assert result["partial_result"]["errors"] == {
-        "system": "DeephavenConnectionError: network down; "
-        "AuthenticationError: bad token"
+        "system": "AuthenticationError: bad token; "
+        "DeephavenConnectionError: network down"
     }
 
 

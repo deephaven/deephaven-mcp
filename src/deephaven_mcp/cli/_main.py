@@ -187,7 +187,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
             "see the available sessions (the daemon auto-starts on first "
             "use), then use a verb like 'dh-mcp table data' to act on one. "
             "Use the 'daemon' group to manage the daemon lifecycle (start, "
-            "stop, status, restart, reset, logs); the 'session', 'system', "
+            "stop, status, restart, repair, logs); the 'session', 'system', "
             "'table', 'script', 'catalog', and 'pq' groups to inspect and "
             "operate sessions and Enterprise resources with first-class "
             "flags; 'tool' to list, show, and call any MCP tool directly; "

@@ -75,8 +75,9 @@ class InstanceTracker:
         """
         Initialize an InstanceTracker.
 
-        This constructor should not be called directly. Use create_and_register()
-        or load_from_file() factory methods instead.
+        This constructor should not be called directly. Use the
+        create_and_register(instances_dir) or load_from_file(instance_file)
+        factory methods instead.
 
         Args:
             instance_id (str): Unique UUID for this instance.
