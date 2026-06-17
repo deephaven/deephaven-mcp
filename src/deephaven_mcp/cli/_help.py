@@ -677,11 +677,10 @@ def _emit(ctx: click.Context, payload: Any) -> None:
     """Render ``payload`` in the root ``-o/--output`` mode and print it.
 
     Output mode is resolved from the root ``-o/--output`` flag or
-    ``DH_MCP_OUTPUT``, falling back to :data:`DEFAULT_OUTPUT_MODE`. The
-    introspection surfaces run without the validated config, so they
-    cannot consult ``cli.json``'s ``output.format``; pass ``-o json``
-    (or set ``DH_MCP_OUTPUT``) for structured output to pipe into
-    ``jq``.
+    ``DH_MCP_OUTPUT``, falling back to :data:`DEFAULT_OUTPUT_MODE` (``json``).
+    The introspection surfaces run without the validated config, so they
+    cannot consult ``cli.json``'s ``output.format``; use ``-o`` (or set
+    ``DH_MCP_OUTPUT``) to opt into ``human``/``yaml`` output.
     """
     output: OutputMode = ctx.find_root().params.get("output") or DEFAULT_OUTPUT_MODE
     click.echo(format_output(payload, output=output))
