@@ -38,7 +38,7 @@ def registry_corrupt_message(exc: RegistryCorruptError, *, retry_command: str) -
         f"{exc}. The daemon process (if any) is unaffected. To recover:\n"
         "  1. Run `dh-mcp daemon status` to confirm whether a daemon is still running.\n"
         "  2. If a daemon is running, run `dh-mcp daemon stop` first.\n"
-        "  3. Run `dh-mcp daemon reset` to quarantine the corrupt file.\n"
+        "  3. Run `dh-mcp daemon repair` to move the corrupt file aside.\n"
         f"  4. Re-run `{retry_command}`."
     )
 

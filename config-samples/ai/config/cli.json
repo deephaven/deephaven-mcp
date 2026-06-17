@@ -1,6 +1,6 @@
 {
   "output": {
-    "format": "human"
+    "format": "json"
   },
   "daemon": {
     "auto_start": true,

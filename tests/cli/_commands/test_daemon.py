@@ -35,6 +35,25 @@ def _invoke(args: list[str], runtime: Runtime):
         return runner.invoke(cli, args)
 
 
+def _expected_paths(rt: Runtime, tmp_path: Path) -> dict[str, str]:
+    """Point the mock daemon_dir at known paths; return the status path fields.
+
+    ``daemon status`` always emits ``runtime_dir``, ``registry_path``, and
+    ``log_path``. ``runtime_dir`` is real on the Runtime built by
+    ``make_runtime``; the registry/log paths come from the (mocked)
+    DaemonDirectory, so set them to deterministic values here.
+    """
+    registry = tmp_path / "rt" / "daemon" / "daemon.json"
+    log = tmp_path / "rt" / "daemon" / "daemon.log"
+    rt.daemon_dir.registry_path = registry  # type: ignore[union-attr]
+    rt.daemon_dir.log_path = log  # type: ignore[union-attr]
+    return {
+        "runtime_dir": str(rt.runtime_dir),
+        "registry_path": str(registry),
+        "log_path": str(log),
+    }
+
+
 # ---------------------------------------------------------------------------
 # start
 # ---------------------------------------------------------------------------
@@ -109,10 +128,11 @@ def test_stop_client_error_returns_2(tmp_path: Path) -> None:
 def test_status_no_registry(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     rt.daemon_dir.read_entry.return_value = None  # type: ignore[union-attr]
+    paths = _expected_paths(rt, tmp_path)
     result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"running": False}
+    assert payload == {"running": False, **paths}
 
 
 def test_status_stale_pid(tmp_path: Path) -> None:
@@ -143,11 +163,12 @@ def test_status_stale_then_vanished_inside_lock(tmp_path: Path) -> None:
     rt.daemon_dir.read_entry.return_value = make_entry()  # type: ignore[union-attr]
     reg = locked_session(rt)
     reg.read.return_value = None
+    paths = _expected_paths(rt, tmp_path)
     with patch.object(DaemonRegistryEntry, "is_live", return_value=False):
         result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"running": False}
+    assert payload == {"running": False, **paths}
     reg.delete.assert_not_called()
 
 
@@ -189,6 +210,7 @@ def test_status_live_returns_registry_fields(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     entry = make_entry()
     rt.daemon_dir.read_entry.return_value = entry  # type: ignore[union-attr]
+    paths = _expected_paths(rt, tmp_path)
     with patch.object(DaemonRegistryEntry, "is_live", return_value=True):
         result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
@@ -207,11 +229,26 @@ def test_status_live_returns_registry_fields(tmp_path: Path) -> None:
         # serialization path used by the production code.
         "started_at": entry.model_dump(mode="json")["started_at"],
         "config_dir": str(entry.config_dir),
+        **paths,
     }
     # Defense-in-depth: the PSK plaintext must never appear anywhere
     # in the rendered output. The redacted form (``REDACTED``) is
     # expected and asserted above.
     assert entry.psk.get_secret_value() not in result.output
+
+
+def test_status_surfaces_daemon_paths_when_down(tmp_path: Path) -> None:
+    """runtime_dir/registry_path/log_path are reported even with no daemon."""
+    rt = make_runtime(tmp_path)
+    rt.daemon_dir.read_entry.return_value = None  # type: ignore[union-attr]
+    paths = _expected_paths(rt, tmp_path)
+    result = _invoke(["-o", "json", "daemon", "status"], rt)
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["running"] is False
+    assert payload["runtime_dir"] == paths["runtime_dir"]
+    assert payload["registry_path"] == paths["registry_path"]
+    assert payload["log_path"] == paths["log_path"]
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +354,7 @@ def test_start_corrupt_registry_returns_2(tmp_path: Path) -> None:
     ``get_or_start_daemon`` propagates ``RegistryCorruptError``
     unchanged (no more auto-quarantine); the command layer wraps it
     in ``CliError(DAEMON_REGISTRY_CORRUPT)`` and surfaces the
-    ``dh-mcp daemon reset`` recovery procedure to the operator.
+    ``dh-mcp daemon repair`` recovery procedure to the operator.
     """
     rt = make_runtime(tmp_path)
     with patch.object(
@@ -362,7 +399,7 @@ def test_restart_corrupt_on_start_returns_2(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# reset
+# repair
 # ---------------------------------------------------------------------------
 
 
@@ -371,9 +408,9 @@ def _make_real_runtime_with_daemon_dir(tmp_path: Path) -> Runtime:
 
     The default :func:`make_runtime` returns a ``MagicMock`` for
     ``daemon_dir`` because most command tests stub the lifecycle
-    helpers. ``daemon reset`` reaches through to real file I/O
+    helpers. ``daemon repair`` reaches through to real file I/O
     (``registry_path.exists``, ``reg.read``, ``reg.quarantine``),
-    so reset tests need an honest directory rooted at ``tmp_path``.
+    so repair tests need an honest directory rooted at ``tmp_path``.
     """
     from deephaven_mcp.daemon_registry import DaemonDirectory
 
@@ -384,7 +421,7 @@ def _make_real_runtime_with_daemon_dir(tmp_path: Path) -> Runtime:
 
 @pytest.fixture
 def _silence_registry_logger() -> Iterator[None]:
-    """Suppress ``deephaven_mcp.daemon_registry`` logging during reset tests.
+    """Suppress ``deephaven_mcp.daemon_registry`` logging during repair tests.
 
     The registry layer emits INFO / WARNING records during
     ``reg.write`` and ``reg.quarantine``. ``CliRunner`` mixes
@@ -404,23 +441,23 @@ def _silence_registry_logger() -> Iterator[None]:
         logger.setLevel(previous)
 
 
-def test_reset_no_registry_is_noop(tmp_path: Path) -> None:
-    """`daemon reset` with no registry file emits ``reset=false``.
+def test_repair_no_registry_is_noop(tmp_path: Path) -> None:
+    """`daemon repair` with no registry file emits ``repaired=false``.
 
-    The verb is idempotent: rerunning after a successful reset must
+    The verb is idempotent: rerunning after a successful repair must
     not error.
     """
     rt = _make_real_runtime_with_daemon_dir(tmp_path)
-    result = _invoke(["-o", "json", "daemon", "reset"], rt)
+    result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"reset": False, "message": "No registry to reset."}
+    assert payload == {"repaired": False, "message": "No registry to repair."}
 
 
-def test_reset_quarantines_stale_registry(
+def test_repair_quarantines_stale_registry(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
-    """A parseable-but-stale registry is quarantined cleanly.
+    """A parseable-but-stale registry is moved aside cleanly.
 
     The well-known path is freed (so a subsequent ``daemon start``
     can publish a fresh entry) and the malformed-or-stale bytes are
@@ -430,52 +467,52 @@ def test_reset_quarantines_stale_registry(
     with rt.daemon_dir.locked() as reg:
         reg.write(make_entry())
     with patch.object(DaemonRegistryEntry, "is_live", return_value=False):
-        result = _invoke(["-o", "json", "daemon", "reset"], rt)
+        result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["reset"] is True
+    assert payload["repaired"] is True
     assert "corrupt-" in payload["quarantined_to"]
     assert not rt.daemon_dir.registry_path.exists()
     quarantined = list(rt.daemon_dir.path.glob("daemon.json.corrupt-*"))
     assert len(quarantined) == 1
 
 
-def test_reset_quarantines_corrupt_registry(
+def test_repair_quarantines_corrupt_registry(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
-    """A registry that fails to parse is quarantined unconditionally.
+    """A registry that fails to parse is moved aside unconditionally.
 
     Liveness cannot be checked on a corrupt file (we have no PID),
-    so ``daemon reset`` proceeds. The operator has already been told
+    so ``daemon repair`` proceeds. The operator has already been told
     by the corrupt-registry recovery hint to verify no daemon is
-    running before invoking ``reset``.
+    running before invoking ``repair``.
     """
     rt = _make_real_runtime_with_daemon_dir(tmp_path)
     rt.daemon_dir.registry_path.write_text("not json")
-    result = _invoke(["-o", "json", "daemon", "reset"], rt)
+    result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["reset"] is True
+    assert payload["repaired"] is True
     quarantined_path = Path(payload["quarantined_to"])
     assert quarantined_path.read_text() == "not json"
     assert not rt.daemon_dir.registry_path.exists()
 
 
-def test_reset_refuses_when_daemon_is_live(
+def test_repair_refuses_when_daemon_is_live(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
-    """`daemon reset` refuses while a live daemon is registered.
+    """`daemon repair` refuses while a live daemon is registered.
 
-    Quarantining out from under a running daemon would orphan the
-    process from the CLI's perspective. The safety rail forces the
-    operator to ``daemon stop`` first.
+    Moving the registry aside out from under a running daemon would
+    orphan the process from the CLI's perspective. The safety rail
+    forces the operator to ``daemon stop`` first.
     """
     rt = _make_real_runtime_with_daemon_dir(tmp_path)
     entry = make_entry()
     with rt.daemon_dir.locked() as reg:
         reg.write(entry)
     with patch.object(DaemonRegistryEntry, "is_live", return_value=True):
-        result = _invoke(["daemon", "reset"], rt)
+        result = _invoke(["daemon", "repair"], rt)
     # ``CliRunner`` invokes ``cli`` directly (``standalone_mode=True``)
     # and does not pass through the ``main()`` wrapper that renders
     # structured ``error_code`` payloads; we therefore assert on the
@@ -487,7 +524,7 @@ def test_reset_refuses_when_daemon_is_live(
     assert rt.daemon_dir.registry_path.exists()
 
 
-def test_reset_handles_race_where_file_disappears(
+def test_repair_handles_race_where_file_disappears(
     tmp_path: Path, _silence_registry_logger: None
 ) -> None:
     """The file exists at the gate but vanishes before quarantine.
@@ -508,10 +545,10 @@ def test_reset_handles_race_where_file_disappears(
         patch.object(DaemonRegistryEntry, "is_live", return_value=False),
         patch.object(LockedRegistry, "quarantine", return_value=None),
     ):
-        result = _invoke(["-o", "json", "daemon", "reset"], rt)
+        result = _invoke(["-o", "json", "daemon", "repair"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"reset": False, "message": "No registry to reset."}
+    assert payload == {"repaired": False, "message": "No registry to repair."}
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +563,16 @@ def test_logs_missing_file_returns_2(tmp_path: Path) -> None:
     rt.daemon_dir.log_path = daemon_dir / "daemon.log"  # type: ignore[union-attr]
     result = _invoke(["daemon", "logs"], rt)
     assert result.exit_code == 2
+
+
+def test_logs_path_flag_prints_absolute_path(tmp_path: Path) -> None:
+    """--path prints the log-file path and exits 0 even when the file is absent."""
+    rt = make_runtime(tmp_path)
+    log_path = tmp_path / "rt" / "daemon" / "daemon.log"  # never created
+    rt.daemon_dir.log_path = log_path  # type: ignore[union-attr]
+    result = _invoke(["daemon", "logs", "--path"], rt)
+    assert result.exit_code == 0
+    assert result.output.strip() == str(log_path)
 
 
 def test_logs_tails_last_n_lines(tmp_path: Path) -> None:

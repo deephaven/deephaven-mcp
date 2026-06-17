@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import is_dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,6 +33,10 @@ from deephaven_mcp.mcp_systems_server._lifespan import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# The instance tracker is patched in these tests, so this value is only threaded
+# through ``instances_dir`` (a pure path op); no directory is created on disk.
+_RUNTIME_DIR = Path("/test/runtime")
 
 
 def _make_multi_config(
@@ -105,6 +110,7 @@ def _patch_subsystems(
         idle_watcher.start = AsyncMock()
         idle_watcher.stop = AsyncMock()
     return (
+        patch.object(lifespan_module, "harden_private_dir", MagicMock()),
         patch.object(
             lifespan_module.InstanceTracker,
             "create_and_register",
@@ -198,7 +204,9 @@ async def test_process_lifespan_yields_context_and_shuts_down_cleanly(caplog):
         caplog.set_level(
             logging.INFO, logger="deephaven_mcp.mcp_systems_server._lifespan"
         )
-        async with process_lifespan(multi_config, idle=None, holder=holder) as ctx:
+        async with process_lifespan(
+            multi_config, idle=None, holder=holder, runtime_dir=_RUNTIME_DIR
+        ) as ctx:
             assert isinstance(ctx, LifespanContext)
             assert ctx.multi_config is multi_config
             assert ctx.registry is registry
@@ -217,6 +225,51 @@ async def test_process_lifespan_yields_context_and_shuts_down_cleanly(caplog):
 
 
 @pytest.mark.asyncio
+async def test_process_lifespan_hardens_runtime_dir():
+    """The runtime directory is hardened to user-private mode at startup.
+
+    Also pins that the instance tracker and orphan cleanup operate on the
+    ``instances`` subdirectory of the runtime root (not the root itself), so a
+    regression that dropped the :func:`instances_dir` composition is caught.
+    """
+    multi_config = _make_multi_config(community_idle=10, community_sweep=2)
+    multi_config.list_systems = MagicMock(return_value=[])
+    registry = _build_registry_mock(community=True, enterprise=[])
+    tracker = MagicMock(instance_id="i", unregister=AsyncMock())
+    evictor_pool = MagicMock(start=AsyncMock(), stop=AsyncMock())
+    harden = MagicMock()
+    create_and_register = AsyncMock(return_value=tracker)
+    cleanup = AsyncMock()
+
+    with (
+        patch.object(lifespan_module, "harden_private_dir", harden),
+        patch.object(
+            lifespan_module.InstanceTracker,
+            "create_and_register",
+            create_and_register,
+        ),
+        patch.object(lifespan_module, "cleanup_orphaned_resources", cleanup),
+        patch.object(
+            lifespan_module, "MultiSystemRegistry", MagicMock(return_value=registry)
+        ),
+        patch.object(
+            lifespan_module, "EvictorPool", MagicMock(return_value=evictor_pool)
+        ),
+    ):
+        async with process_lifespan(
+            multi_config,
+            idle=None,
+            holder=ProcessResources(),
+            runtime_dir=_RUNTIME_DIR,
+        ):
+            pass
+
+    harden.assert_called_once_with(_RUNTIME_DIR)
+    create_and_register.assert_awaited_once_with(_RUNTIME_DIR / "instances")
+    cleanup.assert_awaited_once_with(_RUNTIME_DIR / "instances")
+
+
+@pytest.mark.asyncio
 async def test_process_lifespan_forwards_multi_config_to_registry():
     """``process_lifespan`` unpacks per-section ingredients into ``MultiSystemRegistry``."""
     multi_config = _make_multi_config(
@@ -230,6 +283,7 @@ async def test_process_lifespan_forwards_multi_config_to_registry():
     tracker = MagicMock(instance_id="i", unregister=AsyncMock())
 
     with (
+        patch.object(lifespan_module, "harden_private_dir", MagicMock()),
         patch.object(
             lifespan_module.InstanceTracker,
             "create_and_register",
@@ -252,7 +306,12 @@ async def test_process_lifespan_forwards_multi_config_to_registry():
             ),
         ),
     ):
-        async with process_lifespan(multi_config, idle=None, holder=ProcessResources()):
+        async with process_lifespan(
+            multi_config,
+            idle=None,
+            holder=ProcessResources(),
+            runtime_dir=_RUNTIME_DIR,
+        ):
             pass
         mock_registry_cls.assert_called_once_with(
             community_sessions=multi_config.community.sessions,
@@ -294,7 +353,9 @@ async def test_process_lifespan_failure_during_startup_still_cleans_up():
         p.start()
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            async with process_lifespan(multi_config, idle=None, holder=holder):
+            async with process_lifespan(
+                multi_config, idle=None, holder=holder, runtime_dir=_RUNTIME_DIR
+            ):
                 pass
 
         # registry.initialize raised before EvictorPool was started, so
@@ -343,7 +404,10 @@ async def test_process_lifespan_pool_start_failure_still_cleans_up():
     try:
         with pytest.raises(RuntimeError, match="pool-boom"):
             async with process_lifespan(
-                multi_config, idle=None, holder=ProcessResources()
+                multi_config,
+                idle=None,
+                holder=ProcessResources(),
+                runtime_dir=_RUNTIME_DIR,
             ):
                 pass
 
@@ -386,7 +450,12 @@ async def test_process_lifespan_swallows_shutdown_errors(caplog):
         p.start()
     try:
         caplog.set_level(logging.ERROR)
-        async with process_lifespan(multi_config, idle=None, holder=ProcessResources()):
+        async with process_lifespan(
+            multi_config,
+            idle=None,
+            holder=ProcessResources(),
+            runtime_dir=_RUNTIME_DIR,
+        ):
             pass
     finally:
         for p in patches:
@@ -427,7 +496,10 @@ async def test_process_lifespan_uses_idle_watcher_when_idle_supplied():
         p.start()
     try:
         async with process_lifespan(
-            multi_config, idle=idle_mock, holder=ProcessResources()
+            multi_config,
+            idle=idle_mock,
+            holder=ProcessResources(),
+            runtime_dir=_RUNTIME_DIR,
         ):
             pass
         idle_mock.start.assert_awaited_once()
@@ -447,6 +519,7 @@ async def test_process_lifespan_does_not_drive_idle_watcher_when_idle_none():
     tracker = MagicMock(instance_id="i", unregister=AsyncMock())
 
     with (
+        patch.object(lifespan_module, "harden_private_dir", MagicMock()),
         patch.object(
             lifespan_module.InstanceTracker,
             "create_and_register",
@@ -470,7 +543,12 @@ async def test_process_lifespan_does_not_drive_idle_watcher_when_idle_none():
         ),
         patch.object(lifespan_module, "IdleWatcher") as mock_idle_watcher_cls,
     ):
-        async with process_lifespan(multi_config, idle=None, holder=ProcessResources()):
+        async with process_lifespan(
+            multi_config,
+            idle=None,
+            holder=ProcessResources(),
+            runtime_dir=_RUNTIME_DIR,
+        ):
             pass
         mock_idle_watcher_cls.assert_not_called()
 
@@ -547,7 +625,9 @@ async def test_concurrent_sessions_share_one_process_scoped_registry():
     for p in patches:
         p.start()
     try:
-        async with process_lifespan(multi_config, idle=None, holder=holder):
+        async with process_lifespan(
+            multi_config, idle=None, holder=holder, runtime_dir=_RUNTIME_DIR
+        ):
             session_lifespan = make_lifespan(holder)
             async with (
                 session_lifespan(MagicMock(name="srv-a")) as ctx_a,

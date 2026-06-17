@@ -33,7 +33,12 @@ _LIST_PAYLOAD = {
 _STATUS_PAYLOAD = {
     "success": True,
     "systems": [
-        {"name": "prod", "liveness_status": "ONLINE", "is_alive": True},
+        {
+            "name": "prod",
+            "type": "enterprise",
+            "liveness_status": "ONLINE",
+            "is_alive": True,
+        },
     ],
 }
 
@@ -140,8 +145,89 @@ def test_status_success_json(tmp_path: Path) -> None:
         result = _invoke(["-o", "json", "system", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"systems": _STATUS_PAYLOAD["systems"]}
-    assert "success" not in payload
+    assert payload == _STATUS_PAYLOAD["systems"]
+
+
+def test_status_human_renders_as_aligned_table(tmp_path: Path) -> None:
+    """Human mode renders the compact status array as a header + row table.
+
+    With ``config`` removed, every cell is scalar, so the renderer takes the
+    aligned-table path; no stacked-block fallback for the normal case.
+    """
+    rt = make_runtime(tmp_path, output_format="human")
+    acquire_p, call_p = _patch(_result(_STATUS_PAYLOAD))
+    with acquire_p, call_p:
+        result = _invoke(["system", "status"], rt)
+    assert result.exit_code == 0
+    lines = result.output.splitlines()
+    headers = lines[0].split()
+    assert headers == ["name", "type", "liveness_status", "is_alive"]
+    data = lines[1].split()
+    assert data == ["prod", "enterprise", "ONLINE", "True"]
+
+
+def test_status_completed_partial_result_emits_no_stderr_noise(
+    tmp_path: Path,
+) -> None:
+    """``phase=='completed'`` is fully attributed per-row via ``liveness_detail``,
+    so ``system status`` emits no stderr warning at all — the "had connection
+    issues" banner would only restate the table."""
+    payload = {
+        "success": True,
+        "systems": [
+            {
+                "name": "prod",
+                "type": "enterprise",
+                "liveness_status": "OFFLINE",
+                "is_alive": False,
+                "liveness_detail": "DeephavenConnectionError",
+            },
+        ],
+        "partial_result": {
+            "phase": "completed",
+            "detail": "Some enterprise systems had connection issues during discovery.",
+            "errors": {"prod": "DeephavenConnectionError: Network is unreachable"},
+        },
+    }
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(payload))
+    with acquire_p, call_p:
+        result = _invoke(["system", "status"], rt)
+    assert result.exit_code == 0
+    # partial_result key stays out of stdout.
+    assert "partial_result" not in result.stdout
+    # Stderr is entirely empty for the COMPLETED-with-errors case.
+    assert result.stderr == ""
+    # The short reason still appears in the table row on stdout.
+    assert "DeephavenConnectionError" in result.stdout
+
+
+def test_status_loading_partial_result_still_warns(tmp_path: Path) -> None:
+    """``phase=='loading'`` carries a timing signal ("retry in a moment") the
+    rows cannot convey, so it still emits a stderr warning even with the
+    per-row attribution opt-in."""
+    payload = {
+        "success": True,
+        "systems": [
+            {
+                "name": "prod",
+                "type": "enterprise",
+                "liveness_status": "OFFLINE",
+                "is_alive": False,
+                "liveness_detail": "No item cached",
+            },
+        ],
+        "partial_result": {
+            "phase": "loading",
+            "detail": "Enterprise session discovery is actively running. Some sessions or systems may not yet be visible.",
+        },
+    }
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(payload))
+    with acquire_p, call_p:
+        result = _invoke(["system", "status"], rt)
+    assert result.exit_code == 0
+    assert "actively running" in result.stderr
 
 
 def test_status_tool_failure_exits_3(tmp_path: Path) -> None:

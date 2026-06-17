@@ -422,6 +422,14 @@ uv pip install --upgrade "deephaven-mcp"
 
 After upgrading, restart your AI tool for changes to take effect.
 
+### Upgrading a v1 configuration to v2
+
+v2 replaced the single v1 config file (named by the removed
+`DH_MCP_CONFIG_FILE` variable) with a [configuration directory
+tree](#configuration). If you are upgrading from v1, a bundled converter
+rewrites your old file into the new tree — follow the
+**[migration guide](docs/MIGRATION.md)**.
+
 ---
 
 ## Deephaven MCP Components

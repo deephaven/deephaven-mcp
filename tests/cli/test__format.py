@@ -8,6 +8,7 @@ import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
 from deephaven_mcp.cli._format import (
+    DEFAULT_OUTPUT_MODE,
     OUTPUT_ENV_VAR,
     OUTPUT_MODES,
     _format_tool_list,
@@ -22,6 +23,20 @@ def test_output_env_var_is_the_public_contract_name() -> None:
     breaking change, so it is asserted directly rather than left to behavior.
     """
     assert OUTPUT_ENV_VAR == "DH_MCP_OUTPUT"
+
+
+def test_default_output_mode_matches_config_schema_default() -> None:
+    """The CLI fallback and the ``cli.json`` schema default must not drift.
+
+    Operational commands fall back to ``CliConfig().output.format``;
+    config-independent surfaces (introspect, errors) fall back to
+    ``DEFAULT_OUTPUT_MODE``. They are one conceptual default, pinned equal
+    here without coupling the config layer to the CLI layer by import.
+    """
+    from deephaven_mcp.config.schema import CliConfig
+
+    assert DEFAULT_OUTPUT_MODE == CliConfig().output.format
+    assert DEFAULT_OUTPUT_MODE in OUTPUT_MODES
 
 
 def test_output_modes_are_the_three_supported_values() -> None:
@@ -143,6 +158,40 @@ def test_human_format_dict() -> None:
     assert "n: 1" in out
 
 
+def test_human_format_nested_dict_renders_indented_tree() -> None:
+    """A nested dict expands under its key instead of a one-line repr."""
+    out = format_output({"cli": {"output": {"format": "human"}}}, output="human")
+    lines = out.splitlines()
+    # No Python dict repr leaks into human output.
+    assert "{'" not in out
+    assert lines[0] == "cli:"
+    # The nested key is indented two spaces under its parent.
+    assert "  output:" in lines
+    # The leaf scalar is indented a further two spaces.
+    assert "    format: human" in lines
+
+
+def test_human_format_dict_indents_cumulatively_by_depth() -> None:
+    """Each nesting level adds two spaces of indentation."""
+    out = format_output(
+        {"daemon": {"timeouts": {"kill_after_seconds": 10}}}, output="human"
+    )
+    lines = out.splitlines()
+    assert lines[0] == "daemon:"
+    assert "  timeouts:" in lines
+    assert "    kill_after_seconds: 10" in lines
+
+
+def test_human_format_dict_scalar_list_renders_bullets() -> None:
+    """A list of scalars renders as indented bullets, not a ['...'] repr."""
+    out = format_output({"extra_jvm_args": ["-Xss2m", "-Dfoo=bar"]}, output="human")
+    lines = out.splitlines()
+    assert "[" not in out
+    assert lines[0] == "extra_jvm_args:"
+    assert "  - -Xss2m" in lines
+    assert "  - -Dfoo=bar" in lines
+
+
 def test_human_format_list_of_dicts_renders_aligned_table() -> None:
     rows = [
         {"Namespace": "Mkt", "Table": "Trades"},
@@ -155,6 +204,53 @@ def test_human_format_list_of_dicts_renders_aligned_table() -> None:
     # Columns align: the second column starts at the same offset on the
     # header and the data row.
     assert lines[1].index("Trades") == lines[0].index("Table")
+
+
+def test_human_format_list_of_dicts_with_nested_dict_cell_uses_stacked_blocks() -> None:
+    """A row carrying a nested dict abandons the aligned table for stacked blocks.
+
+    Regression for the ``system status`` rendering: a row whose ``config`` cell
+    is itself a dict would otherwise be ``str()``-ified into a one-line Python
+    repr that blows out the column width and wraps onto adjacent rows.
+    """
+    rows = [
+        {
+            "name": "prod",
+            "liveness_status": "OFFLINE",
+            "config": {"host": "h", "port": 8123},
+        }
+    ]
+    out = format_output(rows, output="human")
+    lines = out.splitlines()
+    assert lines[0] == "- name: prod"
+    assert "  liveness_status: OFFLINE" in lines
+    assert "  config:" in lines
+    assert "    host: h" in lines
+    assert "    port: 8123" in lines
+
+
+def test_human_format_list_of_dicts_with_nested_list_cell_uses_stacked_blocks() -> None:
+    """A row carrying a non-empty list cell also triggers stacked blocks."""
+    rows = [{"name": "prod", "tags": ["a", "b"]}]
+    out = format_output(rows, output="human")
+    lines = out.splitlines()
+    assert lines[0] == "- name: prod"
+    assert "  tags:" in lines
+    assert "    - a" in lines
+    assert "    - b" in lines
+
+
+def test_human_format_list_with_empty_row_among_complex_rows_does_not_crash() -> None:
+    """An empty-dict row mixed with a complex row renders an empty block, not a crash.
+
+    ``_format_dict({})`` is the empty string, so ``"".splitlines()`` is ``[]``;
+    the renderer must not raise on the head/rest unpack of that block.
+    """
+    rows = [{}, {"x": [1, 2]}]
+    out = format_output(rows, output="human")
+    lines = out.splitlines()
+    assert lines[0] == "- "
+    assert "- x:" in lines
 
 
 def test_human_format_list_of_dicts_handles_ragged_rows() -> None:

@@ -15,7 +15,6 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
-from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import CorePlusQueryConfig, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools.shared import (
@@ -31,6 +30,7 @@ from deephaven_mcp.resource_manager import (
     EnterpriseSessionManager,
     EnterpriseSessionRegistry,
     InitializationPhase,
+    ResourceLivenessStatus,
     SystemType,
     least_advanced_phase,
 )
@@ -41,6 +41,33 @@ from deephaven_mcp.sessions import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Probe-supplied detail strings that carry no actionable information.
+# When the probe falls back to one of these and the registry recorded an
+# init error, we prefer the init error's exception type as the
+# liveness_detail so the table column tells the user *why*.
+_UNINFORMATIVE_LIVENESS_DETAILS = frozenset({"No item cached"})
+
+# Cap the in-table short-reason string. Init-error type names are short
+# in practice (~30 chars) but a fallback raw string could be arbitrary.
+_SHORT_REASON_MAX_LEN = 60
+
+
+def _short_reason(error_string: str) -> str:
+    """Extract a compact, table-friendly reason from an init-error string.
+
+    Enterprise discovery records init errors as ``f"{type(exc).__name__}: {exc}"``
+    (see ``resource_manager/_registry_enterprise.py``), so the prefix
+    before the first ``": "`` is the exception class name — exactly the
+    kubectl-style short code we want in the ``liveness_detail`` column.
+    When the input doesn't follow that convention, the original string is
+    returned (truncated) so the column is still populated.
+    """
+    head, sep, _ = error_string.partition(": ")
+    short = head if sep else error_string
+    if len(short) > _SHORT_REASON_MAX_LEN:
+        short = short[: _SHORT_REASON_MAX_LEN - 1] + "\u2026"
+    return short
+
 
 async def _collect_one_enterprise_system_status(
     context: Context, system: str, attempt_to_connect: bool
@@ -50,9 +77,19 @@ async def _collect_one_enterprise_system_status(
     Returns a 3-tuple ``(system_info, init_errors, init_phase)``. The
     caller (:func:`enterprise_systems_status`) merges these across all
     requested systems.
+
+    ``liveness_detail`` precedence:
+
+    * If the probe returned an actionable message (anything other than
+      the cached-mode ``"No item cached"`` sentinel), that wins — it's
+      the most recent live signal.
+    * Otherwise, when the registry recorded an init error for this
+      system, the joined exception-type prefix(es) of those errors
+      populate ``liveness_detail`` so the column carries *why* the
+      system is non-ONLINE. The full message remains in
+      ``partial_result.errors``.
     """
     session_registry = get_enterprise_registry(context, system)
-    multi_config = get_multi_config(context)
     snapshot = await session_registry.get_all()
     factory_manager = session_registry.factory_manager
     status_enum, liveness_detail = await factory_manager.liveness_status(
@@ -60,21 +97,31 @@ async def _collect_one_enterprise_system_status(
     )
     is_alive = await factory_manager.is_alive()
 
-    if multi_config.enterprise is None or system not in multi_config.enterprise.systems:
-        raise InvalidSessionNameError(
-            f"Enterprise system {system!r} is not configured."
+    init_errors = snapshot.initialization_errors
+    probe_is_uninformative = (
+        liveness_detail is None or liveness_detail in _UNINFORMATIVE_LIVENESS_DETAILS
+    )
+    # Only promote a stale init error onto the row when the system is
+    # actually non-ONLINE — an ONLINE system that has since recovered
+    # shouldn't carry a historical error reason in its table cell.
+    if (
+        init_errors
+        and probe_is_uninformative
+        and status_enum is not ResourceLivenessStatus.ONLINE
+    ):
+        liveness_detail = ", ".join(
+            _short_reason(msg) for _, msg in sorted(init_errors.items())
         )
-    redacted_config = dump_redacted(multi_config.enterprise.systems[system])
 
     system_info: dict[str, object] = {
         "name": session_registry.system_name,
+        "type": "enterprise",
         "liveness_status": status_enum.name,
         "is_alive": is_alive,
-        "config": redacted_config,
     }
     if liveness_detail is not None:
         system_info["liveness_detail"] = liveness_detail
-    return system_info, snapshot.initialization_errors, snapshot.initialization_phase
+    return system_info, init_errors, snapshot.initialization_phase
 
 
 async def enterprise_systems_status(
@@ -82,12 +129,14 @@ async def enterprise_systems_status(
     system: str | None = None,
     attempt_to_connect: bool = False,
 ) -> dict:
-    """MCP Tool: Get the status and configuration details of this enterprise system.
+    """MCP Tool: Report health for the configured Enterprise (Core+) systems.
 
-    This tool provides comprehensive status information about the single enterprise system managed by
-    this MCP server instance. It returns detailed health status using the ResourceLivenessStatus
-    classification system, along with explanatory details and configuration information (with sensitive
-    fields redacted for security).
+    Returns a compact per-system health record (name, type, liveness_status,
+    is_alive, optional liveness_detail) for each configured Enterprise system —
+    the runtime ``.status``, not the static ``.spec``. Use ``list_systems`` to
+    enumerate configured systems and the configuration tools (``dh-mcp config
+    show`` on the CLI) to inspect their declared settings; this tool
+    deliberately does not duplicate that data.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -122,7 +171,8 @@ async def enterprise_systems_status(
     - Use attempt_to_connect=True to actively verify system connectivity
     - Check 'systems' array in response for individual system status
     - Use each system's 'liveness_detail' field for troubleshooting connection issues
-    - Configuration details are included but sensitive fields are redacted
+    - This tool does not return configuration; pair with 'list_systems' (and the
+      CLI's 'dh-mcp config show') if you need the declared settings of a system
     - If 'partial_result' is present, this report may be incomplete: check its 'phase'
       ('loading'/'partial' → discovery still running, retry later; 'failed' → report)
       and 'errors' for which enterprise systems could not be reached
@@ -141,10 +191,16 @@ async def enterprise_systems_status(
             - 'success' (bool): True if retrieval succeeded, False otherwise.
             - 'systems' (list[dict]): List of system info dicts. Each contains:
                 - 'name' (str): System name identifier
+                - 'type' (str): Always 'enterprise' (parallels the 'type' field
+                    returned by 'list_systems' so the two outputs can be joined).
                 - 'liveness_status' (str): ResourceLivenessStatus ("ONLINE", "OFFLINE", "UNAUTHORIZED", "MISCONFIGURED", "UNKNOWN")
-                - 'liveness_detail' (str, optional): Explanation message for the status, useful for troubleshooting
+                - 'liveness_detail' (str, optional): Short reason for the status, useful for troubleshooting.
+                    When a connectivity probe ran (``attempt_to_connect=True``), this carries the probe's
+                    own message. Otherwise, when the registry recorded a discovery-time error for this
+                    system, it carries the exception-type prefix(es) of those errors (e.g.
+                    ``"DeephavenConnectionError"``) — a compact kubectl-style reason code. The full
+                    error message remains in ``partial_result.errors``.
                 - 'is_alive' (bool): Simple boolean indicating if the system is responsive
-                - 'config' (dict): System configuration with sensitive fields redacted
             - 'partial_result' (dict, optional): Present only when this report may be
                 incomplete — enterprise session discovery is still in progress or some
                 systems failed. Contains:
@@ -153,8 +209,8 @@ async def enterprise_systems_status(
                     to retry (still loading) or report (failed).
                 - 'detail' (str): Human-readable description of why the report is partial.
                 - 'errors' (dict[str, str], optional): Present when one or more enterprise systems
-                    had connection errors during initial discovery. Keys are factory names, values
-                    are error descriptions.
+                    had connection errors during initial discovery. Keys are system names,
+                    values are the error description(s) for that system (multiple sources joined with '; ').
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
 
@@ -164,10 +220,10 @@ async def enterprise_systems_status(
             'systems': [
                 {
                     'name': 'prod-system',
+                    'type': 'enterprise',
                     'liveness_status': 'ONLINE',
                     'liveness_detail': 'Connection established successfully',
                     'is_alive': True,
-                    'config': {'host': 'prod.example.com', 'port': 10000, 'auth_type': 'anonymous'}
                 }
             ]
         }
@@ -178,10 +234,10 @@ async def enterprise_systems_status(
             'systems': [
                 {
                     'name': 'prod-system',
+                    'type': 'enterprise',
                     'liveness_status': 'ONLINE',
                     'liveness_detail': 'Connection established successfully',
                     'is_alive': True,
-                    'config': {'host': 'prod.example.com', 'port': 10000, 'auth_type': 'anonymous'}
                 }
             ],
             'partial_result': {
@@ -229,14 +285,14 @@ async def enterprise_systems_status(
                 context, sys_name, attempt_to_connect
             )
             systems_info.append(system_info)
-            # Single-system queries preserve the legacy un-namespaced
-            # error keys; aggregated calls namespace with the system
-            # name so duplicate source tags don't collide.
-            if len(target_systems) == 1:
-                merged_errors.update(init_errors)
-            else:
-                for source, err in init_errors.items():
-                    merged_errors[f"{sys_name}:{source}"] = err
+            # Always key by system name so the stderr / partial_result
+            # diagnostic attributes each error to a specific system. When
+            # one system reports multiple sources, join them with '; ' so
+            # the row stays a single line.
+            if init_errors:
+                merged_errors[sys_name] = "; ".join(
+                    msg for _, msg in sorted(init_errors.items())
+                )
             phases.append(init_phase)
 
         merged_phase = least_advanced_phase(phases)

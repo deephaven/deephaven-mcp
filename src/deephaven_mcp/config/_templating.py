@@ -118,13 +118,11 @@ def expand_string(
         path: Dotted JSON-path to the value within the source file
             (e.g. ``"credentials.token"``). Included in every error
             message.
-        config_dir: Optional configuration root used to constrain
-            ``${file:PATH}`` resolution. When supplied, the resolved
-            file path must lie inside this directory (after
-            :meth:`Path.resolve`); paths outside the directory are
-            refused. When ``None``, any absolute path is accepted
-            (backward-compatible default for callers that have not
-            yet adopted directory containment).
+        config_dir: Optional base directory for resolving *relative*
+            ``${file:PATH}`` arguments. A relative path is resolved
+            against this directory; an absolute path is used as-is.
+            When ``None``, a relative path is resolved against the
+            process working directory.
 
     Returns:
         The fully-resolved string with every placeholder replaced by
@@ -133,9 +131,8 @@ def expand_string(
     Raises:
         ConfigurationError: If any placeholder kind is unknown, any
             required environment variable is unset/empty, any
-            referenced file cannot be read as UTF-8 text, any
-            referenced file is a symlink, escapes ``config_dir``, or
-            exceeds :data:`_MAX_FILE_TEMPLATE_BYTES`.
+            referenced file cannot be read as UTF-8 text, or exceeds
+            :data:`_MAX_FILE_TEMPLATE_BYTES`.
     """
 
     def _replace(match: re.Match[str]) -> str:
@@ -182,8 +179,8 @@ def expand_tree(
         path: Dotted JSON-path accumulated during recursion. Callers
             typically pass the default (``""``); recursive calls
             extend it with the field name or list index.
-        config_dir: Optional configuration root used to constrain
-            ``${file:PATH}`` resolution. Forwarded to
+        config_dir: Optional base directory for resolving relative
+            ``${file:PATH}`` arguments. Forwarded to
             :func:`expand_string`; see that function for the exact
             semantics.
 
@@ -242,7 +239,7 @@ def _resolve_env(argument: str, *, source: str, path: str) -> str:
     raise ConfigurationError(f"In {source} at {path}: env var {name!r} is not set")
 
 
-def _resolve_file(  # noqa: C901
+def _resolve_file(
     argument: str,
     *,
     source: str,
@@ -252,11 +249,11 @@ def _resolve_file(  # noqa: C901
     """Resolve a single ``${file:...}`` placeholder argument.
 
     Reads up to :data:`_MAX_FILE_TEMPLATE_BYTES` from the file at
-    ``argument`` and returns its UTF-8 decoded contents. Symlinks are
-    refused so an attacker who can write under ``config_dir`` cannot
-    redirect a placeholder to an arbitrary system file. When
-    ``config_dir`` is supplied the resolved path must lie inside that
-    directory; otherwise any absolute path is accepted.
+    ``argument`` and returns its UTF-8 decoded contents. A relative
+    ``argument`` is resolved against ``config_dir`` when supplied
+    (otherwise against the process working directory); an absolute
+    ``argument`` is used as-is. Symlinks are followed (common for
+    system CA bundles such as ``/etc/ssl/cert.pem``).
     """
     if not argument:
         raise ConfigurationError(
@@ -272,28 +269,8 @@ def _resolve_file(  # noqa: C901
         )
 
     file_path = Path(argument)
-
-    if file_path.is_symlink():
-        raise ConfigurationError(
-            f"In {source} at {path}: file {argument!r} is a symlink; "
-            f"symlinks are not permitted in '${{file:...}}' placeholders"
-        )
-
-    if config_dir is not None:
-        try:
-            resolved = file_path.resolve(strict=False)
-            resolved_dir = config_dir.resolve(strict=False)
-        except OSError as exc:
-            raise ConfigurationError(
-                f"In {source} at {path}: cannot resolve file {argument!r}: {exc}"
-            ) from exc
-        try:
-            resolved.relative_to(resolved_dir)
-        except ValueError as exc:
-            raise ConfigurationError(
-                f"In {source} at {path}: file {argument!r} resolves outside "
-                f"the configuration directory {str(resolved_dir)!r}"
-            ) from exc
+    if config_dir is not None and not file_path.is_absolute():
+        file_path = config_dir / file_path
 
     try:
         with open(file_path, "rb") as handle:

@@ -613,12 +613,12 @@ class RegistryCorruptError(DaemonRegistryError):
 
     - ``daemon status`` / ``daemon stop`` / ``daemon restart`` /
       ``daemon start`` surface the error to the operator with a
-      hint pointing at ``dh-mcp daemon reset``.
+      hint pointing at ``dh-mcp daemon repair``.
     - :func:`deephaven_mcp.cli._daemon.get_or_start_daemon` and
       :func:`deephaven_mcp.cli._daemon.poll_for_registry` both
       propagate: auto-recovery is the explicit operator verb
-      ``dh-mcp daemon reset``, not an implicit rename, because a
-      silent quarantine that runs alongside a still-live daemon
+      ``dh-mcp daemon repair``, not an implicit rename, because a
+      silent rename that runs alongside a still-live daemon
       would orphan the loopback port from the CLI's perspective.
     """
 

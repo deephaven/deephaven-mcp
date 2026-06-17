@@ -33,7 +33,7 @@ def test_registry_corrupt_message_contents() -> None:
         RegistryCorruptError("malformed"), retry_command="dh-mcp daemon start"
     )
     assert "malformed" in msg
-    assert "dh-mcp daemon reset" in msg
+    assert "dh-mcp daemon repair" in msg
     assert "Re-run `dh-mcp daemon start`." in msg
 
 

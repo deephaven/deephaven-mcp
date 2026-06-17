@@ -62,7 +62,7 @@ async def test_acquire_forwards_config_and_recovery_hint(tmp_path: Path) -> None
     assert captured["code"] is ErrorCode.DAEMON_NOT_RUNNING
     err = captured["on_corrupt"](RegistryCorruptError("bad json"))  # type: ignore[operator]
     assert err.code is ErrorCode.DAEMON_REGISTRY_CORRUPT
-    assert "dh-mcp daemon reset" in err.message
+    assert "dh-mcp daemon repair" in err.message
     assert "dh-mcp system list" in err.message
 
 
@@ -259,7 +259,7 @@ def test_echo_payload_renders_in_configured_mode(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """echo_payload prints the value via format_output in the runtime's mode."""
-    echo_payload(make_runtime(tmp_path), {"a": 1, "b": 2})
+    echo_payload(make_runtime(tmp_path, output_format="human"), {"a": 1, "b": 2})
     out = capsys.readouterr().out
     assert "a: 1" in out
     assert "b: 2" in out
@@ -269,7 +269,11 @@ def test_echo_payload_forwards_empty_message(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """echo_payload forwards empty_message to format_output for an empty list."""
-    echo_payload(make_runtime(tmp_path), [], empty_message="(nothing here)")
+    echo_payload(
+        make_runtime(tmp_path, output_format="human"),
+        [],
+        empty_message="(nothing here)",
+    )
     assert capsys.readouterr().out.strip() == "(nothing here)"
 
 
@@ -278,7 +282,7 @@ async def test_call_and_echo_fetches_then_prints_whole_payload(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """call_and_echo is call_for_payload composed with echo_payload."""
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     result = CallToolResult(content=[], structuredContent={"success": True, "count": 1})
     with (
         patch.object(_wrapping, "acquire", AsyncMock(return_value=make_entry())),
@@ -328,7 +332,7 @@ async def test_call_and_echo_field_emits_field_and_asserts_call(
 async def test_call_and_echo_field_uses_default_when_field_absent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     result = CallToolResult(content=[], structuredContent={"success": True})
     acq, call = _patched_call(result)
     with acq, call:
@@ -343,7 +347,7 @@ async def test_call_and_echo_field_surfaces_partial_result_with_errors(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A success payload's `partial_result` errors go to stderr, not stdout."""
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     payload = {
         "success": True,
         "sessions": [{"session_id": "community:community:dev"}],
@@ -398,3 +402,104 @@ async def test_call_and_echo_field_surfaces_partial_result_detail_only(
         )
     err = capsys.readouterr().err
     assert "actively running" in err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_suppresses_completed_partial_result_when_opted_out(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With ``reasons_in_rows=True`` a ``phase=='completed'``
+    ``partial_result`` is suppressed entirely — the banner ("had connection
+    issues") would only restate the per-row reasons in ``liveness_detail``."""
+    rt = make_runtime(tmp_path)
+    payload = {
+        "success": True,
+        "systems": [{"name": "prod", "liveness_detail": "DeephavenConnectionError"}],
+        "partial_result": {
+            "phase": "completed",
+            "detail": "Some enterprise systems had connection issues during discovery.",
+            "errors": {"prod": "DeephavenConnectionError: Network is unreachable"},
+        },
+    }
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "enterprise_systems_status",
+            retry_command="dh-mcp system status",
+            arguments={},
+            field="systems",
+            default=[],
+            reasons_in_rows=True,
+        )
+    captured = capsys.readouterr()
+    # Nothing on stderr — the per-row reasons fully cover the COMPLETED case.
+    assert captured.err == ""
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_loading_still_warns_when_opted_out(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``phase=='loading'`` carries a timing signal ("retry in a moment") that
+    rows cannot convey, so the warning still appears even with
+    ``reasons_in_rows=True``."""
+    rt = make_runtime(tmp_path)
+    payload = {
+        "success": True,
+        "systems": [],
+        "partial_result": {
+            "phase": "loading",
+            "detail": "Enterprise session discovery is actively running.",
+        },
+    }
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "enterprise_systems_status",
+            retry_command="dh-mcp system status",
+            arguments={},
+            field="systems",
+            default=[],
+            reasons_in_rows=True,
+        )
+    captured = capsys.readouterr()
+    assert "actively running" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_failed_surfaces_errors_when_reasons_in_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-``completed`` phase still surfaces the per-system ``errors`` map
+    even with ``reasons_in_rows=True`` — the row's ``liveness_detail`` carries
+    only the short reason, so the full message would otherwise be unreachable."""
+    rt = make_runtime(tmp_path)
+    payload = {
+        "success": True,
+        "systems": [{"name": "prod", "liveness_detail": "DeephavenConnectionError"}],
+        "partial_result": {
+            "phase": "failed",
+            "detail": "Enterprise session discovery failed critically.",
+            "errors": {"prod": "DeephavenConnectionError: Network is unreachable"},
+        },
+    }
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "enterprise_systems_status",
+            retry_command="dh-mcp system status",
+            arguments={},
+            field="systems",
+            default=[],
+            reasons_in_rows=True,
+        )
+    captured = capsys.readouterr()
+    # The full per-system message must reach stderr — not just the short
+    # exception type the table cell shows.
+    assert "Network is unreachable" in captured.err

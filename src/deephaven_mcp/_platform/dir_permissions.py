@@ -127,11 +127,12 @@ def harden_private_dir(path: Path) -> None:
       must add an explicit hardening strategy before the code is allowed
       to run on it; silent fallthrough is not acceptable here.
 
-    Used at every site that creates a per-user-private directory in this
+    Used at every site that establishes a per-user-private perimeter in this
     project: the resolved ``runtime_dir`` (in
-    :func:`deephaven_mcp.cli._runtime.load_runtime`) and the ``daemon``
-    subdirectory beneath it (at the daemon entry point and the
-    spawn-coordinator).
+    :func:`deephaven_mcp.cli._runtime.load_runtime` and the systems-server's
+    process lifespan) and the ``daemon`` subdirectory beneath it (at the daemon
+    entry point and the spawn-coordinator, which run in a process that cannot
+    assume the root was already hardened).
 
     Args:
         path (Path): The directory to create and harden. Parent

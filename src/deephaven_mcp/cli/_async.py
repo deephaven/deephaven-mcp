@@ -29,8 +29,31 @@ __all__ = ["run_async"]
 
 import asyncio
 import functools
+import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _cli_loop_exception_handler(
+    _loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+) -> None:
+    """Log loop-level asyncio exceptions at DEBUG instead of ERROR.
+
+    Exceptions raised inside the awaited command coroutine propagate out of
+    :func:`asyncio.run` and are rendered by the CLI's top-level handler. This
+    handler only fires for exceptions the loop surfaces on its own — orphaned
+    background tasks and teardown callbacks (e.g. anyio cancellation races
+    during mcp client shutdown) — which asyncio would otherwise dump as a raw
+    ``ERROR`` traceback to stderr. They are logged at ``DEBUG`` so they stay
+    out of normal output but remain visible under ``-vv``.
+    """
+    message = context.get("message") or "Unhandled exception in event loop"
+    _LOGGER.debug(
+        f"[_async:_cli_loop_exception_handler] {message}",
+        exc_info=context.get("exception"),
+    )
 
 
 def run_async[**P, R](f: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
@@ -59,6 +82,12 @@ def run_async[**P, R](f: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
 
     @functools.wraps(f)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        return asyncio.run(f(*args, **kwargs))
+        async def _run() -> R:
+            asyncio.get_running_loop().set_exception_handler(
+                _cli_loop_exception_handler
+            )
+            return await f(*args, **kwargs)
+
+        return asyncio.run(_run())
 
     return wrapper

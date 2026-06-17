@@ -91,7 +91,10 @@ dh-mcp daemon logs -n 200
 dh-mcp daemon stop
 
 # Discover the full command tree as structured JSON (for AI agents).
-dh-mcp introspect | jq .
+dh-mcp introspect tree | jq .
+
+# Machine-readable description of one command (twin of --help).
+dh-mcp daemon start --introspect
 ```
 
 ## Architecture
@@ -151,10 +154,11 @@ The single load runs in `dh-mcp`'s root callback:
 4. Applies top-level CLI flag overrides (`-o`, `--timeout`,
    `--no-auto-start`) onto `runtime.config.cli`.
 
-The only verbs that bypass the load are help and self-introspection:
+The only invocations that bypass the load are help and self-introspection:
 
 - `dh-mcp --help`, `dh-mcp <noun> --help`, `dh-mcp <noun> <verb> --help` — the help text is rendered without touching configuration so you can navigate the CLI surface against a broken tree.
-- `dh-mcp introspect` — emits the command tree as JSON for agents that need to learn the surface before any config exists.
+- `dh-mcp introspect <verb>` — emits machine-readable metadata as JSON for agents that need to learn the surface before any config exists.
+- `--introspect` at any depth (`dh-mcp --introspect`, `dh-mcp <noun> <verb> --introspect`) — the machine-readable twin of `--help`, likewise rendered without touching configuration.
 
 #### Recovering from a broken configuration
 
@@ -182,7 +186,7 @@ slot in without a breaking schema change.
 
 | Field                | Type    | Default | Notes                                                                       |
 |----------------------|---------|---------|-----------------------------------------------------------------------------|
-| `output.format`      | string  | `human` | One of `human`, `json`, `yaml`. Override per invocation with `-o/--output`. |
+| `output.format`      | string  | `json` | One of `human`, `json`, `yaml`. Machine-first default; set `human` for interactive use. Override per invocation with `-o/--output`. |
 
 #### `daemon.*` — CLI-side daemon lifecycle
 
@@ -268,10 +272,10 @@ verb honors the top-level `-o/--output` flag.
 |------------|-----------------------------------------------------------------------------------------------|
 | `start`    | Idempotently spawn the daemon (or print the existing handle). Reports pid/host/port.          |
 | `stop`     | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                        |
-| `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir. |
+| `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir, plus the always-present `runtime_dir`, `registry_path`, and `log_path`. |
 | `restart`  | `stop` then `start` in one shot; reports the new handle.                                      |
-| `reset`    | Quarantines a corrupt `daemon.json` (renames it to `daemon.json.corrupt-<UTC>`) so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
-| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit). |
+| `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
+| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
 
 ### `dh-mcp tool`
 
@@ -290,7 +294,7 @@ verb honors the top-level `-o/--output` flag.
 Examples:
 
 ```bash
-dh-mcp -o json tool list
+dh-mcp tool list
 dh-mcp tool show sessions_list
 dh-mcp tool call sessions_list --arg type=community
 ```
@@ -350,7 +354,7 @@ plus every configured Enterprise (Core+) system.
 | Verb         | Purpose                                                                                       |
 |--------------|-----------------------------------------------------------------------------------------------|
 | `list`       | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
-| `status`     | Reports Enterprise (Core+) system health (`liveness_status`, `is_alive`, redacted `config`). Wraps `enterprise_systems_status`. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. Exits `3` if the tool reports failure. |
+| `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dh-mcp config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
 | `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
 | `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
 
@@ -368,7 +372,7 @@ Examples:
 
 ```bash
 dh-mcp system list
-dh-mcp -o json system list | jq '.[].name'
+dh-mcp system list | jq '.[].name'
 dh-mcp system status --system prod --connect
 dh-mcp system url prod
 dh-mcp system open prod --print
@@ -471,42 +475,62 @@ dh-mcp pq restart 1234567890 --no-wait
 
 ### `dh-mcp introspect`
 
-Emits the full command tree as a manifest: every command,
-every option (with envvar / choices / defaults), every error code.
-AI agents should prefer this over scraping `--help`. The manifest
-defaults to JSON (so `dh-mcp introspect | jq .` works without `-o`)
-but honors the root `-o/--output` flag and `DH_MCP_OUTPUT` (`json`,
-`yaml`, or `human`).
+Machine-readable CLI metadata for AI-agent self-discovery — prefer it
+over scraping `--help`. There are two complementary ways to reach it:
+the `--introspect` flag for one command in place, and the `introspect`
+group for whole-system views. Both honor the root `-o/--output` flag
+and `DH_MCP_OUTPUT` (`human`, `json`, or `yaml`) and, like every
+command, **default to `json`** — pass `-o human` for terminal-friendly
+output. Both run without a valid configuration tree, so they work even
+when `config validate` fails; that same bypass means they cannot read
+`cli.json`'s `output.format` (use `-o`/`DH_MCP_OUTPUT` instead).
 
-For progressive disclosure, pass an optional `PATH` (one or more
-command-name tokens) to emit just that command's node instead of the
-whole tree:
+#### The `--introspect` flag (twin of `--help`)
+
+Append `--introspect` to any command, at any depth, to emit just that
+command's node — the machine-readable counterpart of `--help`:
 
 ```bash
-dh-mcp introspect daemon          # the daemon group node (its verbs included)
-dh-mcp introspect daemon start    # just the start verb node
+dh-mcp daemon start --introspect    # the start verb node
+dh-mcp daemon --introspect          # the daemon group node (its verbs included)
+dh-mcp --introspect                 # the whole-tree manifest
 ```
 
-The scoped node is byte-identical to the object found at
-`.commands.<path…>` in the unscoped manifest — e.g.
-`dh-mcp introspect daemon start` equals
-`dh-mcp introspect | jq '.commands.daemon.subcommands.start'`. A path
-that does not resolve exits `2` with `command_not_found`.
+A command's node carries its `name`, help text, options and arguments
+(`params`), any `subcommands`, its `output` shape, and which MCP tool it
+`wraps`. Like click's own `--help`, the universal `--help` and
+`--introspect` flags are *not* listed under any command's `params`; the
+whole-tree manifest discloses them once under `universal_options`.
+`dh-mcp --introspect` (on the root) instead emits the whole-tree manifest
+described below.
 
-The two ways of running this command return different information, so do
-not expect the same fields in both:
+#### The `introspect` group
 
-- **Without a command name** (`dh-mcp introspect`), you get the whole
-  CLI: the package `version`, the full list of `commands`, the
-  project-wide `error_codes`, and the other top-level fields.
-- **With a command name** (`dh-mcp introspect daemon start`), you get
-  only that one command's details: its `name`, help text, options and
-  arguments (`params`), any `subcommands`, its `output` shape, and which
-  MCP tool it `wraps` — and nothing else.
+| Verb                 | Output                                                                                  |
+|----------------------|-----------------------------------------------------------------------------------------|
+| `tree`               | The whole-tree manifest: package `version`, the full `commands` tree, `global_options`, `universal_options` (the every-command flags `--help` and `--introspect`), the project-wide `error_codes`, and the other top-level fields. Identical to `dh-mcp --introspect`. |
+| `command PATH...`    | One command's node, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--introspect` to that command. A path that does not resolve exits `2` with `command_not_found`. |
+| `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree`. |
 
-So the project-wide fields like `version` and `error_codes` appear only
-when you run it without a command name. They are not included when you
-ask about a single command.
+```bash
+dh-mcp introspect tree | jq '.commands | keys'
+dh-mcp introspect command daemon start    # == dh-mcp daemon start --introspect
+dh-mcp introspect errors | jq '.[].code'
+```
+
+The `command` node is byte-identical to the object found at
+`.commands.<path…>` in `tree` — e.g. `dh-mcp introspect command daemon
+start` equals `dh-mcp introspect tree | jq
+'.commands.daemon.subcommands.start'`.
+
+The whole-tree fields (`version`, `error_codes`, `universal_options`,
+...) appear only in `tree` (and `dh-mcp --introspect`); a single
+command's node never carries them.
+
+> **Migration:** `dh-mcp introspect` alone is now a command group and
+> lists its verbs (it no longer emits the manifest). Use `dh-mcp
+> introspect tree` (or `dh-mcp --introspect`) for the old whole-tree
+> JSON.
 
 ## Top-level flags
 
@@ -517,23 +541,44 @@ ask about a single command.
 |                     | `DH_MCP_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
 | `-o`, `--output`    | `DH_MCP_OUTPUT`      | One of `human`, `json`, `yaml`. Overrides `cli.json`'s `output.format`.              |
 | `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds`.      |
+| `--introspect`      |                      | Emit the command's manifest node and exit (machine-readable twin of `--help`); available on every command. Rendered in the `-o`/`DH_MCP_OUTPUT` mode, `json` by default. On the root, emits the whole-tree manifest. |
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
 | `--version`         |                      | Print the package version and exit.                                                  |
 
+These flags accept any position on the command line — before the
+noun group, between the noun and the verb, or after the verb.
+For example `dh-mcp -o json config show`, `dh-mcp config -o json
+show`, and `dh-mcp config show -o json` are all equivalent. The
+CLI rewrites argv to lift recognized top-level options to the
+front before `click` parses it. `--help` and `--version` are
+*not* lifted: Click resolves them per-command, so `dh-mcp daemon
+--help` correctly renders the `daemon` group's help (not the
+root's). Use the POSIX `--` sentinel to force a literal token
+later in the command line (everything after `--` is preserved
+verbatim).
+
 ## Output modes
 
 Every verb honors `-o/--output`, selecting how its result is rendered. The mode
 is resolved per invocation: `-o/--output` flag → `DH_MCP_OUTPUT` → `cli.json`'s
-`output.format` (default `human`).
+`output.format` (default `json`). The CLI is **machine-first** (primarily driven
+by AI agents), so the default is `json`; for human-readable output, pass
+`-o human`, set `DH_MCP_OUTPUT=human`, or set `output.format: "human"` in
+`cli.json`. `dh-mcp introspect`, the `--introspect` flag, and error output run
+without the validated config, so they skip the `cli.json` step — use
+`-o`/`DH_MCP_OUTPUT` for those (so `DH_MCP_OUTPUT=human` is the most complete way
+to get human output everywhere).
 
-- `human` (default) — terminal-friendly. Row/tabular data and `tool list` render
-  as aligned, header-topped tables (sized to the terminal width, falling back to
-  80 columns when output is not a TTY); objects render as `key: value` lines;
-  plain lists render one item per line; an empty list renders as `(none)`.
-- `json` — a single document via `json.dumps(..., indent=2, sort_keys=True)`:
+- `json` (default) — a single document via `json.dumps(..., indent=2, sort_keys=True)`:
   indented and key-sorted, so output is stable and diff-/`jq`-friendly.
+- `human` — terminal-friendly. Row/tabular data and `tool list` render
+  as aligned, header-topped tables (sized to the terminal width, falling back to
+  80 columns when output is not a TTY); objects render as an indented tree
+  (nested keys indented two spaces under their parent, scalar leaves as
+  `key: value`, scalar lists as `- item` bullets); plain lists render one item
+  per line; an empty list renders as `(none)`.
 - `yaml` — block style with sorted keys (`yaml.safe_dump`), for `yq` or
   human-readable structured output.
 
@@ -577,21 +622,21 @@ emitted on **stderr** as a structured payload with these keys:
 ```
 
 The `error_code` values are stable across releases. Get the full
-registry programmatically via `dh-mcp introspect` (look under
-`error_codes`). Current set:
+registry programmatically via `dh-mcp introspect errors` (or the
+`error_codes` key of `dh-mcp introspect tree`). Current set:
 
 | `error_code`                  | Meaning                                                            |
 |-------------------------------|--------------------------------------------------------------------|
 | `daemon_startup_timeout`      | Daemon was spawned but did not publish a registry entry in time.   |
 | `daemon_not_running`          | No running daemon was found: either none is registered and `--no-auto-start` was specified, or a command that needs the daemon's files (e.g. `daemon logs`) found none yet. |
 | `daemon_client_error`         | A client-side daemon-management failure (signal denied, etc.).     |
-| `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon reset`. |
-| `daemon_registry_live`        | `dh-mcp daemon reset` refused to quarantine `daemon.json` because a live daemon is still registered; run `dh-mcp daemon stop` first. |
+| `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon repair`. |
+| `daemon_registry_live`        | `dh-mcp daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dh-mcp daemon stop` first. |
 | `mcp_request_failed`          | The MCP transport reported an error (connect, timeout, parse).     |
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
-| `command_not_found`           | `dh-mcp introspect PATH` referenced a command path that does not exist. |
+| `command_not_found`           | `dh-mcp introspect command PATH` referenced a command path that does not exist. |
 | `missing_argument`            | A required positional argument or option was not provided.         |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
@@ -627,13 +672,13 @@ co-existing with a still-live daemon would otherwise produce a
 confusing port-bind timeout. Recovery:
 
 ```bash
-dh-mcp daemon status   # confirm whether a daemon is still running
-dh-mcp daemon stop     # if it is, stop it first
-dh-mcp daemon reset    # quarantine the corrupt file (renames to daemon.json.corrupt-<UTC>)
-dh-mcp daemon start    # fresh spawn
+dh-mcp daemon status    # confirm whether a daemon is still running
+dh-mcp daemon stop      # if it is, stop it first
+dh-mcp daemon repair    # move the corrupt file aside (renames to daemon.json.corrupt-<UTC>)
+dh-mcp daemon start     # fresh spawn
 ```
 
-`daemon reset` refuses to run while a live daemon is still
+`daemon repair` refuses to run while a live daemon is still
 registered (`daemon_registry_live`) so you cannot accidentally
 orphan a running process.
 

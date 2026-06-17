@@ -27,7 +27,7 @@ from deephaven_mcp.config.schema._cli import (
 def test_defaults_empty_object() -> None:
     """A missing or empty cli.json yields an all-defaults model."""
     cfg = CliConfig.model_validate({})
-    assert cfg.output.format == "human"
+    assert cfg.output.format == "json"
     assert cfg.daemon.auto_start is True
     assert cfg.daemon.timeouts.startup_deadline_seconds == 30
     assert cfg.request.timeouts.default_seconds == 60
@@ -36,7 +36,7 @@ def test_defaults_empty_object() -> None:
 def test_defaults_subsections_accept_empty_objects() -> None:
     """Each sub-section must accept ``{}`` as an all-defaults override."""
     cfg = CliConfig.model_validate({"output": {}, "daemon": {}, "request": {}})
-    assert cfg.output.format == "human"
+    assert cfg.output.format == "json"
     assert cfg.daemon.auto_start is True
     assert cfg.daemon.timeouts.startup_deadline_seconds == 30
     assert cfg.request.timeouts.default_seconds == 60
@@ -173,7 +173,7 @@ def test_subsections_are_frozen() -> None:
 
 
 def test_output_config_defaults() -> None:
-    assert OutputConfig().format == "human"
+    assert OutputConfig().format == "json"
 
 
 def test_daemon_config_defaults() -> None:
@@ -218,7 +218,7 @@ async def test_load_cli_empty_file_yields_defaults(tmp_path: Path) -> None:
     (tmp_path / "cli.json").write_text("{}")
     cfg = await load_cli(tmp_path)
     assert isinstance(cfg, CliConfig)
-    assert cfg.output.format == "human"
+    assert cfg.output.format == "json"
     assert cfg.daemon.auto_start is True
     assert cfg.daemon.timeouts.startup_deadline_seconds == 30
     assert cfg.request.timeouts.default_seconds == 60

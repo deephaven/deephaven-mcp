@@ -288,6 +288,7 @@ def test_http_run_daemon_bundles_handle_and_process_name():
     handle = MagicMock()
     plan = http_module._HttpRun(
         multi_config=MagicMock(),
+        runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
         psk="x" * 32,
         bind=bind,
@@ -306,6 +307,7 @@ def test_http_run_default_has_no_daemon():
     bind = http_module._BindSpec(host="127.0.0.1", port=8000, sock=None)
     plan = http_module._HttpRun(
         multi_config=MagicMock(),
+        runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
         psk="x" * 32,
         bind=bind,
@@ -332,7 +334,12 @@ def test_plan_default_resolves_cli_overrides(tmp_path):
     )
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     plan = http_module._plan_default(
-        multi, server_cfg, cli_host="127.0.0.1", cli_port=8765, cli_psk="from-cli"
+        multi,
+        server_cfg,
+        runtime_dir=tmp_path / "runtime",
+        cli_host="127.0.0.1",
+        cli_port=8765,
+        cli_psk="from-cli",
     )
     assert plan.bind.host == "127.0.0.1"
     assert plan.bind.port == 8765
@@ -342,6 +349,7 @@ def test_plan_default_resolves_cli_overrides(tmp_path):
     assert plan.daemon is None
     assert plan.server_name == server_cfg.server_name
     assert plan.multi_config is multi
+    assert plan.runtime_dir == tmp_path / "runtime"
 
 
 def test_plan_default_falls_back_to_server_cfg(tmp_path):
@@ -351,7 +359,12 @@ def test_plan_default_falls_back_to_server_cfg(tmp_path):
     )
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     plan = http_module._plan_default(
-        multi, server_cfg, cli_host=None, cli_port=None, cli_psk=None
+        multi,
+        server_cfg,
+        runtime_dir=tmp_path / "runtime",
+        cli_host=None,
+        cli_port=None,
+        cli_psk=None,
     )
     assert plan.bind.host == "127.0.0.1"
     assert plan.bind.port == 9000
@@ -367,7 +380,12 @@ def test_plan_default_exits_on_non_loopback(tmp_path):
         pytest.raises(SystemExit) as exc_info,
     ):
         http_module._plan_default(
-            multi, server_cfg, cli_host="0.0.0.0", cli_port=None, cli_psk=None
+            multi,
+            server_cfg,
+            runtime_dir=tmp_path / "runtime",
+            cli_host="0.0.0.0",
+            cli_port=None,
+            cli_psk=None,
         )
     assert exc_info.value.code == 2
 
@@ -378,7 +396,12 @@ def test_plan_default_exits_on_missing_psk(tmp_path):
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     with pytest.raises(SystemExit) as exc_info:
         http_module._plan_default(
-            multi, server_cfg, cli_host=None, cli_port=None, cli_psk=None
+            multi,
+            server_cfg,
+            runtime_dir=tmp_path / "runtime",
+            cli_host=None,
+            cli_port=None,
+            cli_psk=None,
         )
     assert exc_info.value.code == 1
 
@@ -395,7 +418,7 @@ def test_plan_daemon_auto_generates_psk(tmp_path):
     server_cfg = ServerConfig()
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     plan = http_module._plan_daemon(
-        multi, server_cfg, runtime_dir_override=tmp_path, cli_psk=None
+        multi, server_cfg, runtime_dir=tmp_path, cli_psk=None
     )
     try:
         assert plan.psk
@@ -413,7 +436,7 @@ def test_plan_daemon_uses_cli_psk_override(tmp_path):
     plan = http_module._plan_daemon(
         multi,
         server_cfg,
-        runtime_dir_override=tmp_path,
+        runtime_dir=tmp_path,
         cli_psk="operator-explicit-secret",
     )
     try:
@@ -433,7 +456,7 @@ def test_plan_daemon_ignores_server_json_psk(tmp_path):
     server_cfg = ServerConfig.model_validate({"psk": "from-server-json"})
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     plan = http_module._plan_daemon(
-        multi, server_cfg, runtime_dir_override=tmp_path, cli_psk=None
+        multi, server_cfg, runtime_dir=tmp_path, cli_psk=None
     )
     try:
         assert plan.psk
@@ -447,7 +470,7 @@ def test_plan_daemon_pre_binds_loopback_socket(tmp_path):
     server_cfg = ServerConfig()
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     plan = http_module._plan_daemon(
-        multi, server_cfg, runtime_dir_override=tmp_path, cli_psk=None
+        multi, server_cfg, runtime_dir=tmp_path, cli_psk=None
     )
     try:
         assert plan.bind.host is None
@@ -469,7 +492,7 @@ def test_plan_daemon_hardens_runtime_dir(tmp_path):
 
     with patch.object(http_module, "harden_private_dir", side_effect=fake_harden):
         plan = http_module._plan_daemon(
-            multi, server_cfg, runtime_dir_override=tmp_path, cli_psk=None
+            multi, server_cfg, runtime_dir=tmp_path, cli_psk=None
         )
     try:
         assert plan.daemon is not None
@@ -485,7 +508,7 @@ def test_plan_daemon_threads_idle_seconds_from_daemon_cfg(tmp_path):
     )
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     plan = http_module._plan_daemon(
-        multi, server_cfg, runtime_dir_override=tmp_path, cli_psk=None
+        multi, server_cfg, runtime_dir=tmp_path, cli_psk=None
     )
     try:
         assert plan.idle_seconds == 1234
@@ -518,6 +541,7 @@ def _operator_plan(*, psk: str = "secret", port: int = 9999) -> "http_module._Ht
     """Build an operator-style ``_HttpRun`` for runner unit tests."""
     return http_module._HttpRun(
         multi_config=MagicMock(),
+        runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
         psk=psk,
         bind=http_module._BindSpec(host="127.0.0.1", port=port, sock=None),
@@ -621,7 +645,7 @@ def _daemon_plan_for_test(
     """
     multi = _multi_config_with(server_cfg, config_dir)
     return http_module._plan_daemon(
-        multi, server_cfg, runtime_dir_override=runtime_dir, cli_psk=None
+        multi, server_cfg, runtime_dir=runtime_dir, cli_psk=None
     )
 
 
@@ -980,8 +1004,9 @@ async def test_install_process_lifespan_wraps_session_manager() -> None:
     captured: dict[str, object] = {}
 
     @contextlib.asynccontextmanager
-    async def _fake_process_lifespan(mc, *, idle, holder):
+    async def _fake_process_lifespan(mc, *, idle, holder, runtime_dir):
         captured["args"] = (mc, idle, holder)
+        captured["runtime_dir"] = runtime_dir
         events.append("proc-enter")
         try:
             yield
@@ -990,7 +1015,11 @@ async def test_install_process_lifespan_wraps_session_manager() -> None:
 
     with patch.object(http_module, "process_lifespan", _fake_process_lifespan):
         http_module._install_process_lifespan(
-            app, multi_config=multi_config, idle=None, holder=holder
+            app,
+            multi_config=multi_config,
+            idle=None,
+            holder=holder,
+            runtime_dir=Path("/tmp/runtime"),
         )
         async with app.router.lifespan_context(app):
             pass
@@ -1010,6 +1039,7 @@ def _operator_run(*, psk: str = "secret") -> "http_module._HttpRun":
     """Build a daemonless ``_HttpRun`` for helper unit tests."""
     return http_module._HttpRun(
         multi_config=MagicMock(config_dir=Path("/tmp/cfg")),
+        runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
         psk=psk,
         bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
@@ -1128,6 +1158,7 @@ def _daemon_publish_plan(handle: DaemonDirectory) -> "http_module._HttpRun":
     """An operator-bound ``_HttpRun`` carrying a daemon handle for publish tests."""
     return http_module._HttpRun(
         multi_config=type("M", (), {"config_dir": Path("/tmp/cfg")})(),
+        runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
         psk="secret",
         bind=http_module._BindSpec(host="127.0.0.1", port=22000, sock=None),
@@ -1186,7 +1217,7 @@ def test_publish_treats_corrupt_existing_entry_as_stale(tmp_path: Path) -> None:
 
     The defensive re-check cannot identity-check a corrupt entry;
     treating it as stale lets the daemon publish over it (the
-    operator has the explicit ``daemon reset`` recovery verb if
+    operator has the explicit ``daemon repair`` recovery verb if
     that is the wrong call).
     """
     dd = DaemonDirectory(tmp_path / "daemon")

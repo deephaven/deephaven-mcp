@@ -15,7 +15,6 @@ from deephaven_mcp._taxonomy import SystemType
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._browser import launch_browser
 from deephaven_mcp.cli._commands._wrapping import (
-    call_and_echo,
     call_and_echo_field,
     echo_payload,
     wrapper_error_codes,
@@ -105,21 +104,37 @@ async def system_list(runtime: Runtime) -> None:
 # ---------------------------------------------------------------------------
 
 _OUTPUT_STATUS = OutputSpec(
-    "object",
+    "list",
     (
+        OutputField("name", "string", "System name."),
         OutputField(
-            "systems",
-            "array",
-            "Per-system status: name, liveness_status, is_alive, config.",
+            "type",
+            "string",
+            "Always 'enterprise'; parallels 'system list' so the two outputs "
+            "can be joined on (name, type).",
         ),
         OutputField(
-            "partial_result",
-            "object",
-            "Present only when the report is incomplete (discovery in progress or "
-            "a system failed): phase, detail, and optional per-system errors.",
+            "liveness_status",
+            "string",
+            "ResourceLivenessStatus: 'ONLINE', 'OFFLINE', 'UNAUTHORIZED', "
+            "'MISCONFIGURED', or 'UNKNOWN'.",
+        ),
+        OutputField("is_alive", "boolean", "True when the system is responsive."),
+        OutputField(
+            "liveness_detail",
+            "string",
+            "Optional short reason for the status. When --connect probed the "
+            "system, this is the probe's own message; otherwise, when "
+            "discovery recorded an error, it is a kubectl-style exception-type "
+            "code (e.g. 'DeephavenConnectionError').",
         ),
     ),
-    note="Enterprise (Core+) only; community systems are not reported.",
+    note=(
+        "Array of per-system status records (Enterprise/Core+ only; community "
+        "systems are not reported). Health only — use 'dh-mcp config show' for "
+        "configuration. When discovery is still running or has failed, a "
+        "phase-summary warning (with per-system details when available) is written to stderr."
+    ),
 )
 
 
@@ -140,7 +155,7 @@ _OUTPUT_STATUS = OutputSpec(
         examples=(
             "$ dh-mcp system status",
             "$ dh-mcp system status --system prod --connect",
-            "$ dh-mcp -o json system status | jq '.systems[].liveness_status'",
+            "$ dh-mcp -o json system status | jq '.[].liveness_status'",
         ),
         see_also=("dh-mcp system list",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -174,11 +189,19 @@ async def system_status(
         arguments["system"] = system
     if attempt_to_connect:
         arguments["attempt_to_connect"] = True
-    await call_and_echo(
+    await call_and_echo_field(
         runtime,
         "enterprise_systems_status",
         retry_command="dh-mcp system status",
         arguments=arguments,
+        field="systems",
+        default=[],
+        # Each row carries its per-system reason via `liveness_detail`, so a
+        # COMPLETED partial_result is suppressed (the "had connection issues"
+        # banner would only restate the table). LOADING/FAILED phases still
+        # warn with the full `errors` map, since the row shows only the short
+        # reason and the full message would otherwise be unreachable.
+        reasons_in_rows=True,
     )
 
 

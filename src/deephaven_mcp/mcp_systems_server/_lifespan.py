@@ -34,10 +34,12 @@ from contextlib import (
     asynccontextmanager,
 )
 from dataclasses import dataclass
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from deephaven_mcp._exceptions import InternalError
+from deephaven_mcp.config import harden_private_dir, instances_dir
 from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.resource_manager import (
     InstanceTracker,
@@ -125,6 +127,7 @@ async def process_lifespan(
     *,
     idle: IdleWatcher | None,
     holder: ProcessResources,
+    runtime_dir: Path,
 ) -> AsyncIterator[LifespanContext]:
     """Build and own the process-scoped systems-server subsystems.
 
@@ -147,23 +150,31 @@ async def process_lifespan(
         holder (ProcessResources): Holder whose ``context`` is set to the
             built :class:`LifespanContext` while active and reset to ``None``
             on exit.
+        runtime_dir (Path): The resolved runtime directory. The instance
+            tracker writes its per-process metadata under
+            :func:`~deephaven_mcp.config.instances_dir` of this directory.
 
     Yields:
         LifespanContext: The process-scoped context, also stored on ``holder``.
     """
     _LOGGER.info("[process_lifespan] Starting process-scoped systems-server resources")
     async with AsyncExitStack() as stack:
-        # 1. Instance tracker. ``unregister`` is best-effort on
-        #    teardown; the log-and-swallow callback ensures a
-        #    tracker failure cannot derail the rest of shutdown.
-        tracker = await InstanceTracker.create_and_register()
+        # 1. Instance tracker. Hardening the runtime root to user-private mode
+        #    here (idempotent; the CLI client also does it before daemon spawn)
+        #    is the single perimeter that protects everything beneath it —
+        #    instance metadata included — in every transport, not just daemon.
+        #    ``unregister`` is best-effort on teardown; the log-and-swallow
+        #    callback ensures a tracker failure cannot derail shutdown.
+        harden_private_dir(runtime_dir)
+        tracker_dir = instances_dir(runtime_dir)
+        tracker = await InstanceTracker.create_and_register(tracker_dir)
         stack.push_async_callback(
             lambda: _log_teardown_failure(
                 tracker.unregister(), label="unregister tracker"
             )
         )
         _LOGGER.info(f"[process_lifespan] Server instance: {tracker.instance_id}")
-        await cleanup_orphaned_resources()
+        await cleanup_orphaned_resources(tracker_dir)
 
         _LOGGER.info(
             "[process_lifespan] Using pre-loaded configuration; "

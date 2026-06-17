@@ -74,6 +74,11 @@ validators:
 | `${env:VAR:-default}`        | Value of `VAR` when set and non-empty, otherwise the literal `default` (which may be empty). |
 | `${file:/absolute/path}`     | UTF-8 contents of the named file, returned verbatim. Error if the file is missing.           |
 
+A `${file:...}` path may be absolute (used as-is, so a system trust
+store such as `/etc/ssl/cert.pem` works) or relative (resolved
+against the configuration directory). Symlinks are followed and the
+file must be UTF-8 and under 1 MiB.
+
 Placeholders may appear anywhere inside a string value (substring
 expansion), but nesting is not supported. Keys are never expanded.
 Errors surface with the source file and JSON path of the offending

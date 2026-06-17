@@ -43,7 +43,7 @@ from deephaven_mcp._logging import (
     setup_signal_handler_logging,
 )
 from deephaven_mcp._monkeypatch import monkeypatch_uvicorn_exception_handling
-from deephaven_mcp.config import DATA_DIR_ENV_VAR
+from deephaven_mcp.config import DATA_DIR_ENV_VAR, resolve_runtime_dir
 from deephaven_mcp.config.schema import ServerConfig
 from deephaven_mcp.config.tree import ConfigTree, ConfigTreeLoader
 
@@ -104,6 +104,7 @@ def _run_stdio(
     server: FastMCP[LifespanContext],
     multi_config: ConfigTree,
     holder: ProcessResources,
+    runtime_dir: Path,
 ) -> None:
     """Run the FastMCP instance under stdio transport.
 
@@ -117,11 +118,15 @@ def _run_stdio(
             :func:`process_lifespan`.
         holder (ProcessResources): Holder shared with the server's
             per-session lifespan; populated by :func:`process_lifespan`.
+        runtime_dir (Path): Resolved runtime directory passed to
+            :func:`process_lifespan` for the instance tracker.
     """
     _LOGGER.info("[mcp_systems_server:_run_stdio] Starting stdio transport")
 
     async def _serve() -> None:
-        async with process_lifespan(multi_config, idle=None, holder=holder):
+        async with process_lifespan(
+            multi_config, idle=None, holder=holder, runtime_dir=runtime_dir
+        ):
             await server.run_stdio_async()
 
     asyncio.run(_serve())
@@ -150,9 +155,10 @@ def _validate_cli_args(
     - **Empty host**: ``--host ""`` is rejected rather than silently falling
       through to the :class:`ServerConfig` default.
 
-    Behavior-neutral combinations are not rejected: ``--runtime-dir`` without
-    ``--daemon``, and HTTP-only flags (``--host`` / ``--port`` / ``--psk``)
-    with ``--transport stdio``, are silently ignored.
+    Behavior-neutral combinations are not rejected: HTTP-only flags
+    (``--host`` / ``--port`` / ``--psk``) with ``--transport stdio`` are
+    silently ignored. ``--runtime-dir`` is honored in every transport, so it
+    needs no validation here.
 
     Args:
         transport (str | None): Value of ``--transport``.
@@ -251,13 +257,15 @@ def _validate_cli_args(
     default=None,
     help=(
         "Override for the runtime directory (where the daemon "
-        "registry, lock, and log live). When unset the server "
-        "defaults to the ``runtime`` subdirectory under "
+        "registry, lock, and log and the per-instance metadata "
+        "live). Honored in every transport, parallel to "
+        "--config-dir. When unset the server defaults to the "
+        "'runtime' subdirectory under "
         f"${DATA_DIR_ENV_VAR} (or the platform default user-data "
         "root, e.g. ~/.deephaven/ai/runtime on POSIX). Bypasses "
         f"${DATA_DIR_ENV_VAR} for the runtime subdir; the env var "
         "still applies to the config subdir unless --config-dir "
-        "also overrides it. Only meaningful under --daemon."
+        "also overrides it."
     ),
 )
 @click.option(
@@ -293,9 +301,10 @@ def _command(
     Sets up logging, validates the flag combination, loads the configuration
     tree, and dispatches to the stdio or HTTP transport. All flags default to
     ``None`` / ``False`` so ``server.json`` provides the effective value per
-    field. ``--config-dir`` is resolved to an absolute path here;
-    ``--runtime-dir`` is only ``expanduser()``-ed (:func:`resolve_runtime_dir`
-    does the rest).
+    field. ``--config-dir`` is resolved to an absolute path here; the runtime
+    directory is resolved once via :func:`resolve_runtime_dir` (honoring
+    ``--runtime-dir``, then ``$DH_MCP_DATA_DIR``, then the platform default)
+    and threaded into every dispatch arm.
     """
     setup_logging()
     setup_global_exception_logging()
@@ -314,6 +323,11 @@ def _command(
     config_dir_resolved = (
         config_dir.expanduser().resolve() if config_dir is not None else None
     )
+
+    # Resolve the runtime directory once for every transport: ``--runtime-dir``
+    # override (if given) → ``$DH_MCP_DATA_DIR`` → platform default. ``None``
+    # selects the env/default path; an explicit path is ``expanduser()``-ed.
+    runtime_dir_resolved = resolve_runtime_dir(runtime_dir)
 
     # Load the entire configuration tree once; CLI flags override the JSON
     # values per-field when supplied.
@@ -336,20 +350,20 @@ def _command(
     if daemon:
         # ``--psk`` is honoured by the daemon planner as a debug override,
         # otherwise the planner auto-generates a fresh PSK.
-        runtime_override = runtime_dir.expanduser() if runtime_dir is not None else None
         plan = _plan_daemon(
             multi_config,
             server_cfg,
-            runtime_dir_override=runtime_override,
+            runtime_dir=runtime_dir_resolved,
             cli_psk=psk,
         )
         _run_http(plan, server, holder)
     elif transport_resolved == "stdio":
-        _run_stdio(server, multi_config, holder)
+        _run_stdio(server, multi_config, holder, runtime_dir=runtime_dir_resolved)
     else:
         plan = _plan_default(
             multi_config,
             server_cfg,
+            runtime_dir=runtime_dir_resolved,
             cli_host=host,
             cli_port=port,
             cli_psk=psk,

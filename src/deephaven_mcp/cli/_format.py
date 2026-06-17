@@ -17,7 +17,13 @@ into ``jq`` / ``yq`` or for programmatic consumption by AI agents.
 
 from __future__ import annotations
 
-__all__ = ["OUTPUT_ENV_VAR", "OUTPUT_MODES", "OutputMode", "format_output"]
+__all__ = [
+    "DEFAULT_OUTPUT_MODE",
+    "OUTPUT_ENV_VAR",
+    "OUTPUT_MODES",
+    "OutputMode",
+    "format_output",
+]
 
 import json
 import shutil
@@ -35,6 +41,16 @@ OUTPUT_MODES: tuple[OutputMode, ...] = get_args(OutputMode)
 
 OUTPUT_ENV_VAR = "DH_MCP_OUTPUT"
 """Environment variable backing the ``-o/--output`` flag."""
+
+DEFAULT_OUTPUT_MODE: OutputMode = "json"
+"""Fallback output mode when none is set via ``-o``, ``DH_MCP_OUTPUT``, or config.
+
+``dh-mcp`` is machine-first (primarily driven by AI agents), so every
+surface defaults to ``json`` — operational commands (through
+``CliConfig.output.format``), the ``introspect`` group / ``--introspect``
+flag, and the error renderer. Humans opt into terminal-friendly output
+with ``-o human``, ``DH_MCP_OUTPUT=human``, or ``output.format`` in
+cli.json. A test pins this equal to ``CliConfig().output.format``."""
 
 
 # ``Any``: renders heterogeneous CLI return values (pydantic models,
@@ -130,7 +146,7 @@ def _format_human(value: Any, *, empty_message: str = "(none)") -> str:
         if all(isinstance(v, Tool) for v in value):
             return _format_tool_list(value)
         if _is_row_list(value):
-            return _format_table(value)
+            return _format_row_list(value)
         return "\n".join(str(v) for v in value)
     if isinstance(value, dict):
         return _format_dict(value)
@@ -140,20 +156,54 @@ def _format_human(value: Any, *, empty_message: str = "(none)") -> str:
 
 
 def _format_dict(value: dict[str, Any]) -> str:
-    """Render a dict as ``key: value`` lines, with row-list values as tables.
+    """Render a dict as an indented ``key: value`` tree.
 
-    A value that is a non-empty list of dicts (e.g. the ``data`` block of a
-    tabular tool result) renders as an indented :func:`_format_table`; every
-    other value renders inline as ``key: value``.
+    Nested structures expand under their key instead of collapsing to a
+    one-line ``str()`` repr: a non-empty list of dicts (e.g. the ``data`` block
+    of a tabular tool result) renders as an indented :func:`_format_row_list`; a
+    non-empty nested dict renders as an indented sub-tree; a non-empty list of
+    scalars renders as indented ``- item`` bullets. Scalars and empty
+    containers render inline as ``key: value``.
     """
     lines: list[str] = []
     for k, v in value.items():
         if _is_row_list(v):
             lines.append(f"{k}:")
-            lines.append(_indent(_format_table(v)))
+            lines.append(_indent(_format_row_list(v)))
+        elif isinstance(v, dict) and v:
+            lines.append(f"{k}:")
+            lines.append(_indent(_format_dict(v)))
+        elif isinstance(v, list) and v:
+            lines.append(f"{k}:")
+            lines.append(_indent("\n".join(f"- {item}" for item in v)))
         else:
             lines.append(f"{k}: {v}")
     return "\n".join(lines)
+
+
+def _row_has_complex_cell(row: dict[str, Any]) -> bool:
+    """Return whether any cell in ``row`` is a non-empty dict or list."""
+    return any(
+        (isinstance(v, dict) and v) or (isinstance(v, list) and v) for v in row.values()
+    )
+
+
+def _format_row_list(rows: list[dict[str, Any]]) -> str:
+    """Render a list of row dicts as an aligned table or stacked blocks.
+
+    When every cell across all rows is scalar, renders the aligned
+    :func:`_format_table`. When any row carries a nested dict or non-empty list,
+    each row instead renders as a ``- key: value`` block via
+    :func:`_format_dict`, with nested structures expanding under their key.
+    """
+    if any(_row_has_complex_cell(row) for row in rows):
+        blocks: list[str] = []
+        for row in rows:
+            rendered = _format_dict(row)
+            head, *rest = rendered.splitlines() or [""]
+            blocks.append("\n".join(["- " + head, *(_indent(line) for line in rest)]))
+        return "\n".join(blocks)
+    return _format_table(rows)
 
 
 def _indent(text: str, prefix: str = "  ") -> str:

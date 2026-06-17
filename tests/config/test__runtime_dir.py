@@ -7,7 +7,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from deephaven_mcp.config._data_root import DATA_DIR_ENV_VAR, _default_data_root
-from deephaven_mcp.config._runtime_dir import daemon_dir, resolve_runtime_dir
+from deephaven_mcp.config._runtime_dir import (
+    daemon_dir,
+    instances_dir,
+    resolve_runtime_dir,
+)
 
 # ---------------------------------------------------------------------------
 # resolve_runtime_dir - precedence
@@ -56,4 +60,20 @@ def test_daemon_dir_appends_daemon_segment(tmp_path: Path) -> None:
 def test_daemon_dir_does_not_create_path(tmp_path: Path) -> None:
     """The helper is path-construction only; it does not touch disk."""
     result = daemon_dir(tmp_path / "nonexistent")
+    assert not result.exists()
+
+
+# ---------------------------------------------------------------------------
+# instances_dir
+# ---------------------------------------------------------------------------
+
+
+def test_instances_dir_appends_instances_segment(tmp_path: Path) -> None:
+    """``instances_dir`` appends an ``instances`` segment to the runtime root."""
+    assert instances_dir(tmp_path) == tmp_path / "instances"
+
+
+def test_instances_dir_does_not_create_path(tmp_path: Path) -> None:
+    """The helper is path-construction only; it does not touch disk."""
+    result = instances_dir(tmp_path / "nonexistent")
     assert not result.exists()

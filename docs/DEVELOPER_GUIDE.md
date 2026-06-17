@@ -309,7 +309,7 @@ port, and config/runtime directories are set by the CLI arguments below.
 | `--host` | HTTP transport bind address. Must be a loopback host (`127.0.0.1`, `::1`, or `localhost`). Ignored under `stdio`. | `127.0.0.1` |
 | `--port` | HTTP transport TCP port (overrides `server.json`'s `port` field). Ignored under `stdio`. | `8000` |
 | `--config-dir` | Override for the `config` subdirectory only. Bypasses `DH_MCP_DATA_DIR` for the config subdir; the env var still applies to the runtime subdir unless `--runtime-dir` also overrides it. | `$DH_MCP_DATA_DIR/config` or platform default |
-| `--runtime-dir` | Override for the `runtime` subdirectory (daemon registry, lock, and log). Bypasses `DH_MCP_DATA_DIR` for the runtime subdir; the env var still applies to the config subdir unless `--config-dir` also overrides it. Only meaningful under `--daemon`. | `$DH_MCP_DATA_DIR/runtime` or platform default |
+| `--runtime-dir` | Override for the `runtime` subdirectory (daemon registry, lock, and log, plus per-instance metadata). Honored in every transport, parallel to `--config-dir`. Bypasses `DH_MCP_DATA_DIR` for the runtime subdir; the env var still applies to the config subdir unless `--config-dir` also overrides it. | `$DH_MCP_DATA_DIR/runtime` or platform default |
 | `-h, --help` | Show help message | - |
 
 > **Note:** Non-loopback `--host` values are rejected at startup — the

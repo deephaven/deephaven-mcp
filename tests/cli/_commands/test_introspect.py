@@ -10,13 +10,12 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from deephaven_mcp.cli._commands.introspect import (
+from deephaven_mcp.cli._errors import CliError, ErrorCode
+from deephaven_mcp.cli._help import (
     _clean_help,
     _resolve_command,
     build_manifest,
-    introspect,
 )
-from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._main import cli
 
 
@@ -74,7 +73,7 @@ def test_manifest_output_is_none_for_group() -> None:
 
 def test_describe_output_handles_none() -> None:
     """A command without an output spec maps to None."""
-    from deephaven_mcp.cli._commands.introspect import _describe_output
+    from deephaven_mcp.cli._help import _describe_output
 
     assert _describe_output(None) is None
 
@@ -156,28 +155,58 @@ def test_build_manifest_lists_every_error_code() -> None:
     assert codes == {ec.value for ec in ErrorCode}
 
 
-def test_introspect_command_emits_json_by_default() -> None:
-    """No ``-o`` flag and no ``DH_MCP_OUTPUT`` -> defaults to JSON."""
+def test_manifest_advertises_universal_flags() -> None:
+    """``universal_options`` discloses the every-command flags (--help, --introspect).
+
+    These are injected via ``get_params`` (not ``params``), so they appear
+    in no command's ``params``; ``universal_options`` is the one place an
+    agent can discover them from structured data.
+    """
+    manifest = build_manifest(cli)
+    opts = {opt for entry in manifest["universal_options"] for opt in entry["opts"]}
+    assert "--help" in opts
+    assert "--introspect" in opts
+
+
+def test_introspect_tree_defaults_to_json() -> None:
+    """No ``-o`` and no ``DH_MCP_OUTPUT`` -> defaults to json, like every command."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["introspect"], standalone_mode=False)
+    result = runner.invoke(cli, ["introspect", "tree"], standalone_mode=False)
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["prog"] == "dh-mcp"
 
 
-def test_introspect_honors_yaml_output_mode() -> None:
+def test_introspect_tree_honors_human_with_flag() -> None:
+    """``-o human`` opts out of the json default into terminal-friendly output."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["-o", "human", "introspect", "tree"], standalone_mode=False
+    )
+    assert result.exit_code == 0
+    # Human output is not JSON; assert it doesn't parse as JSON.
+    try:
+        json.loads(result.output)
+    except json.JSONDecodeError:
+        pass
+    else:  # pragma: no cover - regression guard only
+        raise AssertionError("human output unexpectedly parsed as JSON")
+    assert "dh-mcp" in result.output
+
+
+def test_introspect_tree_honors_yaml_output_mode() -> None:
     """``-o yaml`` now produces a YAML document (previously always JSON)."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["-o", "yaml", "introspect"])
+    result = runner.invoke(cli, ["-o", "yaml", "introspect", "tree"])
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
     assert payload["prog"] == "dh-mcp"
 
 
-def test_introspect_honors_human_output_mode() -> None:
+def test_introspect_tree_honors_human_output_mode() -> None:
     """``-o human`` is supported even though it produces a less useful manifest."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["-o", "human", "introspect"])
+    result = runner.invoke(cli, ["-o", "human", "introspect", "tree"])
     assert result.exit_code == 0
     # Human output is not JSON; assert it doesn't parse as JSON to lock the contract.
     try:
@@ -190,10 +219,10 @@ def test_introspect_honors_human_output_mode() -> None:
     assert "dh-mcp" in result.output
 
 
-def test_introspect_honors_envvar_output_mode() -> None:
+def test_introspect_tree_honors_envvar_output_mode() -> None:
     """``DH_MCP_OUTPUT=yaml`` selects YAML without ``-o``."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["introspect"], env={"DH_MCP_OUTPUT": "yaml"})
+    result = runner.invoke(cli, ["introspect", "tree"], env={"DH_MCP_OUTPUT": "yaml"})
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
     assert payload["prog"] == "dh-mcp"
@@ -208,7 +237,7 @@ def test_describe_command_handles_argument_without_help() -> None:
         """Sample."""
 
     # Direct call to ensure the param-description path tolerates Arguments.
-    from deephaven_mcp.cli._commands.introspect import _describe_command
+    from deephaven_mcp.cli._help import _describe_command
 
     info = _describe_command(sample)
     arg = next(p for p in info["params"] if p["name"] == "name")
@@ -240,10 +269,10 @@ def test_build_manifest_falls_back_to_unknown_version() -> None:
     """When the package metadata lookup fails, the manifest reports ``"unknown"``."""
     from importlib import metadata as importlib_metadata
 
-    from deephaven_mcp.cli._commands import introspect as introspect_mod
+    from deephaven_mcp.cli import _help as help_mod
 
     with patch.object(
-        introspect_mod.metadata,
+        help_mod.metadata,
         "version",
         side_effect=importlib_metadata.PackageNotFoundError(),
     ):
@@ -258,29 +287,27 @@ def test_build_manifest_falls_back_to_unknown_version() -> None:
 
 def test_describe_wraps_none_for_group() -> None:
     """A group is not a HelpfulCommand, so it carries no wraps binding."""
-    from deephaven_mcp.cli._commands.introspect import _describe_wraps
+    from deephaven_mcp.cli._help import _describe_wraps
 
     assert _describe_wraps(click.Group("g")) is None
 
 
 def test_describe_wraps_none_for_plain_command() -> None:
     """A non-HelpfulCommand has no wrapper metadata."""
-    from deephaven_mcp.cli._commands.introspect import _describe_wraps
+    from deephaven_mcp.cli._help import _describe_wraps
 
     assert _describe_wraps(click.Command("c")) is None
 
 
 def test_describe_wraps_none_when_helpful_command_wraps_nothing() -> None:
     """A HelpfulCommand that fronts no tool (daemon/config verb) maps to None."""
-    from deephaven_mcp.cli._commands.introspect import _describe_wraps
-    from deephaven_mcp.cli._help import HelpfulCommand
+    from deephaven_mcp.cli._help import HelpfulCommand, _describe_wraps
 
     assert _describe_wraps(HelpfulCommand("c")) is None
 
 
 def test_describe_wraps_single_tool_has_empty_exemptions() -> None:
-    from deephaven_mcp.cli._commands.introspect import _describe_wraps
-    from deephaven_mcp.cli._help import HelpfulCommand
+    from deephaven_mcp.cli._help import HelpfulCommand, _describe_wraps
 
     assert _describe_wraps(HelpfulCommand("c", wraps_tool="list_systems")) == {
         "tools": ["list_systems"],
@@ -292,8 +319,7 @@ def test_describe_wraps_single_tool_has_empty_exemptions() -> None:
 
 def test_describe_wraps_merges_tools_and_sorts_every_field() -> None:
     """``tools`` is the sorted union of ``wraps_tool`` + ``wraps_tools``."""
-    from deephaven_mcp.cli._commands.introspect import _describe_wraps
-    from deephaven_mcp.cli._help import HelpfulCommand
+    from deephaven_mcp.cli._help import HelpfulCommand, _describe_wraps
 
     cmd = HelpfulCommand(
         "c",
@@ -385,68 +411,252 @@ def test_resolve_command_descend_into_leaf_raises_command_not_found() -> None:
 
 
 # ---------------------------------------------------------------------------
-# introspect command — scoped output
+# introspect command <path> — one command's node
 # ---------------------------------------------------------------------------
 
 
-def test_introspect_scoped_to_noun_matches_manifest_node() -> None:
-    """``introspect daemon`` equals the manifest's ``.commands.daemon`` node."""
+def test_introspect_command_to_noun_matches_manifest_node() -> None:
+    """``introspect command daemon`` equals the ``.commands.daemon`` node."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["introspect", "daemon"], standalone_mode=False)
+    result = runner.invoke(
+        cli, ["introspect", "command", "daemon"], standalone_mode=False
+    )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload == build_manifest(cli)["commands"]["daemon"]
 
 
-def test_introspect_scoped_to_verb_matches_manifest_node() -> None:
-    """``introspect daemon start`` equals the nested ``subcommands`` node.
+def test_introspect_command_to_verb_matches_manifest_node() -> None:
+    """``introspect command daemon start`` equals the nested ``subcommands`` node.
 
     Pins the documented invariant:
-    ``introspect daemon start`` == ``introspect | jq
+    ``introspect command daemon start`` == ``introspect tree -o json | jq
     '.commands.daemon.subcommands.start'``.
     """
     runner = CliRunner()
     result = runner.invoke(
-        cli, ["introspect", "daemon", "start"], standalone_mode=False
+        cli,
+        ["introspect", "command", "daemon", "start"],
+        standalone_mode=False,
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     expected = build_manifest(cli)["commands"]["daemon"]["subcommands"]["start"]
     assert payload == expected
-    # The scoped node carries no top-level manifest keys.
+    # The node carries no top-level manifest keys.
     assert "version" not in payload
     assert "error_codes" not in payload
 
 
-def test_introspect_scoped_unknown_path_exits_2() -> None:
+def test_introspect_command_requires_path() -> None:
+    """``introspect command`` with no PATH is a usage error, not a JSON dump.
+
+    PATH is required, so an empty invocation names the missing argument
+    and exits 2 — consistent with other required-argument commands.
+    """
+    runner = CliRunner()
+    result = runner.invoke(cli, ["introspect", "command"])
+    assert result.exit_code == 2
+    assert "PATH" in result.output
+
+
+def test_introspect_command_unknown_path_exits_2() -> None:
     """A path that does not resolve fails with COMMAND_NOT_FOUND, exit 2."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["introspect", "daemon", "bogus"])
+    result = runner.invoke(cli, ["introspect", "command", "daemon", "bogus"])
     assert result.exit_code == 2
 
 
-def test_introspect_scoped_honors_yaml_output_mode() -> None:
-    """``-o yaml introspect daemon`` renders the scoped node as YAML."""
+def test_introspect_command_honors_yaml_output_mode() -> None:
+    """``-o yaml introspect command daemon`` renders the node as YAML."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["-o", "yaml", "introspect", "daemon"])
+    result = runner.invoke(cli, ["-o", "yaml", "introspect", "command", "daemon"])
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
     assert payload == build_manifest(cli)["commands"]["daemon"]
 
 
-def test_introspect_scoped_bypasses_config_load(tmp_path) -> None:
-    """Scoped introspect works even when the config dir is empty/malformed.
+def test_introspect_command_bypasses_config_load(tmp_path) -> None:
+    """``introspect command`` works even when the config dir is empty/malformed.
 
-    The runtime-load bypass keys on ``invoked_subcommand == "introspect"``;
-    path tokens are introspect's positional argument, so the bypass holds
-    and an agent can learn one subtree before any valid config exists.
+    The runtime-load bypass fires on ``invoked_subcommand == "introspect"``
+    (matched here), as well as on ``--help`` / ``--introspect`` at any
+    depth, so an agent can learn one subtree before any valid config
+    exists.
     """
     runner = CliRunner()
     result = runner.invoke(
         cli,
-        ["--config-dir", str(tmp_path / "nonexistent"), "introspect", "daemon"],
+        [
+            "--config-dir",
+            str(tmp_path / "nonexistent"),
+            "introspect",
+            "command",
+            "daemon",
+        ],
         standalone_mode=False,
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["name"] == "daemon"
+
+
+# ---------------------------------------------------------------------------
+# introspect errors / tree equivalences and bare group
+# ---------------------------------------------------------------------------
+
+
+def test_introspect_errors_matches_manifest_registry() -> None:
+    """``introspect errors`` equals the ``error_codes`` slice of the manifest."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["introspect", "errors"], standalone_mode=False)
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload == build_manifest(cli)["error_codes"]
+    assert {entry["code"] for entry in payload} == {ec.value for ec in ErrorCode}
+
+
+def test_introspect_tree_matches_build_manifest() -> None:
+    """``introspect tree`` equals :func:`build_manifest` for the root."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["introspect", "tree"], standalone_mode=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == build_manifest(cli)
+
+
+def test_bare_introspect_shows_group_help() -> None:
+    """``dh-mcp introspect`` with no verb lists the verbs (like any bare noun)."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["introspect"])
+    # A group with no subcommand: usage error (exit 2) plus the verb listing,
+    # identical to bare ``dh-mcp daemon``.
+    assert result.exit_code == 2
+    for verb in ("tree", "command", "errors"):
+        assert verb in result.output
+
+
+# ---------------------------------------------------------------------------
+# --introspect flag — the universal twin of --help
+# ---------------------------------------------------------------------------
+
+
+def test_introspect_flag_on_root_emits_whole_tree() -> None:
+    """``dh-mcp --introspect`` equals the whole-tree manifest."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--introspect"], standalone_mode=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == build_manifest(cli)
+
+
+def test_introspect_flag_on_leaf_matches_command_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``daemon start --introspect`` equals the ``daemon start`` manifest node.
+
+    The runtime-load bypass inspects ``sys.argv``; ``CliRunner.invoke``
+    does not set it, so the test patches it explicitly (mirroring the
+    ``--help`` path) — otherwise CI without a default config dir fails.
+    """
+    argv = ["daemon", "start", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    runner = CliRunner()
+    result = runner.invoke(cli, argv, standalone_mode=False)
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload == build_manifest(cli)["commands"]["daemon"]["subcommands"]["start"]
+
+
+def test_introspect_flag_on_group_matches_group_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``daemon --introspect`` equals the ``daemon`` group node."""
+    argv = ["daemon", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    runner = CliRunner()
+    result = runner.invoke(cli, argv, standalone_mode=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == build_manifest(cli)["commands"]["daemon"]
+
+
+def test_introspect_flag_equals_command_verb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flag and the ``command`` verb produce byte-identical nodes."""
+    runner = CliRunner()
+    flag_argv = ["tool", "call", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *flag_argv])
+    via_flag = runner.invoke(cli, flag_argv, standalone_mode=False)
+    via_verb = runner.invoke(
+        cli, ["introspect", "command", "tool", "call"], standalone_mode=False
+    )
+    assert via_flag.exit_code == via_verb.exit_code == 0
+    assert json.loads(via_flag.output) == json.loads(via_verb.output)
+
+
+def test_introspect_flag_honors_output_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flag honors the root ``-o`` flag (rendered as YAML here)."""
+    argv = ["-o", "yaml", "daemon", "start", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    runner = CliRunner()
+    result = runner.invoke(cli, argv, standalone_mode=False)
+    assert result.exit_code == 0
+    payload = yaml.safe_load(result.output)
+    assert payload == build_manifest(cli)["commands"]["daemon"]["subcommands"]["start"]
+
+
+def test_introspect_flag_not_hoisted_to_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``config show --introspect`` describes ``config show``, not the root.
+
+    The flag is injected lazily (never in ``cli.params``), so the
+    option-lifter never sees it and cannot hoist it to the root.
+    """
+    argv = ["config", "show", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    runner = CliRunner()
+    result = runner.invoke(cli, argv, standalone_mode=False)
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["name"] == "show"
+    # Not the whole-tree manifest.
+    assert "version" not in payload
+
+
+def test_introspect_flag_bypasses_config_load(tmp_path, monkeypatch) -> None:
+    """``--introspect`` renders even when the config dir is empty/malformed.
+
+    The bypass inspects ``sys.argv``; ``CliRunner.invoke`` does not set
+    it, so the test patches it explicitly (mirroring the ``--help`` path).
+    """
+    argv = ["--config-dir", str(tmp_path / "nonexistent"), "daemon", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    runner = CliRunner()
+    result = runner.invoke(cli, argv, standalone_mode=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output)["name"] == "daemon"
+
+
+def test_introspect_flag_absent_from_manifest_params() -> None:
+    """``--introspect`` is invisible to the manifest, exactly like ``--help``.
+
+    Lazy injection (via ``get_params``) keeps it out of ``cmd.params``,
+    which is what :func:`build_manifest` reads.
+    """
+    manifest = build_manifest(cli)
+
+    def _all_opts(node: dict) -> set[str]:
+        opts: set[str] = set()
+        for param in node.get("params", []):
+            opts.update(param.get("opts", []))
+        for sub in node.get("subcommands", {}).values():
+            opts |= _all_opts(sub)
+        return opts
+
+    seen = {opt for p in manifest["global_options"] for opt in p.get("opts", [])}
+    for node in manifest["commands"].values():
+        seen |= _all_opts(node)
+    assert "--introspect" not in seen
+    assert "--help" not in seen

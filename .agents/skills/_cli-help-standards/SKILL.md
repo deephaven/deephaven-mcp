@@ -14,7 +14,7 @@ The dh-mcp CLI is described by three surfaces that must agree. Help text is plai
 | --- | --- | --- | --- |
 | `docs/CLI.md` | Exhaustive reference | `docs/CLI.md` | `docs-improve` / `docs-accuracy` (`_documentation-roles`) |
 | `--help` text | Self-sufficient per-command help | `cli/_help.py` (`build_help`) | `cli-help-improve` / `cli-help-accuracy` |
-| introspect manifest | Machine surface for agents | `cli/_commands/introspect.py` (`build_manifest`) | `cli-help-improve` / `cli-help-accuracy` |
+| introspect manifest | Machine surface for agents | `cli/_help.py` (`build_manifest`); wired into commands by `cli/_commands/introspect.py` | `cli-help-improve` / `cli-help-accuracy` |
 
 **Consistency rule.** A command's flags, arguments, exit codes, `error_code`s, and output fields must match across all three surfaces. Change one, update the other two in the same edit. The contract tests in `tests/cli/test_help_contract.py` (per-command section coverage, parametrized over the live click tree), `tests/cli/test__help.py` (`build_help` rendering), and `tests/cli/_commands/test_introspect.py` (manifest cleanliness + output schema) pin the `--help`/manifest side; `docs/CLI.md` has no automated check — verify it by hand.
 
@@ -25,14 +25,14 @@ Compose help with `build_help(...)`. Required sections (drop one only when genui
 - **Summary** — one imperative line, ≤ ~70 chars. Click also uses it as the parent group's short help.
 - **Description** — what it does *and* when to use it. State side effects (spawns a daemon, quarantines a file).
 - **Arguments** — every positional argument, with its meaning and a discovery hint. Click renders no help for positional arguments, so the `arguments=` block is the only place a reader learns what `NAME` is and how to find a valid value.
-- **Options** — set `help=` on every `click.option`: state the effect **and the value space** (what to type), never value-blind help that only restates the effect. For a **closed** value set use a `click.Choice` — it validates and self-documents (e.g. `--launch-method`, `--language`). For a **free or dynamic** value, name the form and point to a discovery command (e.g. `--system`: a system name — `community` or a configured Enterprise system; run `dh-mcp system list`). Include decode/repeat rules; set `show_default=True` for options with a default. Click renders the Options table itself.
+- **Options** — set `help=` on every `click.option`: state the effect **and the value space** (what to type), never value-blind help that only restates the effect. For a **closed** value set use a `click.Choice` — it validates and self-documents (e.g. `--launch-method`, `--language`). For a **free or dynamic** value, name the form and point to a discovery command (e.g. `--system`: a system name — `community` or a configured Enterprise system; run `dh-mcp system list`). Include decode/repeat rules; set `show_default=True` for options with a default. Click renders the Options table itself. Root-group options are position-immaterial (any position accepted); subcommand-local options must follow their subcommand; never redeclare a root option on a subcommand. Mechanism: `cli/_main.py` (`_lift_root_options`).
 - **Output** — what the command prints, and the key fields an agent reads under `-o json`. Single-source it (§4).
 - **Examples** — at least one human example and at least one agent example (`-o json … | jq …`).
 - **Exit codes** — the numeric process codes (default set covers `0`/`2`/`3`).
-- **Error codes** — the stable `error_code` strings this command can emit (e.g. `tool_not_found`, `arg_parse_error`). Distinct from numeric exit codes; agents branch on them. A pure discovery command with no `CliError` path (`introspect`) omits this section.
+- **Error codes** — the stable `error_code` strings this command can emit (e.g. `tool_not_found`, `arg_parse_error`). Distinct from numeric exit codes; agents branch on them. A pure discovery command with no `CliError` path (`introspect tree`, `introspect errors`) omits this section.
 - **See also** — related commands and the discovery flow (`tool call` points at `tool list` and `tool show`).
 
-**Group commands**: orient the reader and say when to use which verb. **Root group**: a getting-started workflow plus an explicit pointer to `dh-mcp introspect` for agents.
+**Group commands**: orient the reader and say when to use which verb. **Root group**: a getting-started workflow plus an explicit pointer to `dh-mcp introspect tree` (and the universal `--introspect` flag) for agents.
 
 Canonical implementation: `cli/_commands/tool.py` (`tool_call`, `_OUTPUT_CALL`) is the model command — it exercises every section (Arguments, Output, Examples, See also, Exit codes, Error codes) and the single-source output spec.
 
@@ -47,7 +47,7 @@ help=build_help(
     summary="Invoke a single MCP tool and print its result.",
     description="...",
     arguments=(HelpEntry("NAME", "Tool name. Run 'dh-mcp tool list' to discover names."),),
-    output=OUTPUT_TOOL_CALL,          # see §4
+    output=_OUTPUT_CALL,              # see §4
     examples=("$ dh-mcp tool call session_list", "$ dh-mcp -o json tool call ... | jq ."),
     see_also=("dh-mcp tool list", "dh-mcp tool show NAME"),
     exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -65,7 +65,7 @@ Define each leaf command's output shape once as an `OutputSpec` constant, then r
 - Leaf commands are `HelpfulCommand` instances (carried by `HelpfulGroup.command_class`), which store `output_spec`; introspect reads it and emits `commands[...].output = {mode, fields: [{name, type, help}], note}`.
 - A command that prints free-form or human-only output uses `mode="text"` with an empty `fields` tuple.
 
-Canonical implementation: `cli/_help.py` (`OutputSpec`, `HelpfulGroup`), `cli/_commands/introspect.py` (`_describe_command`).
+Canonical implementation: `cli/_help.py` (`OutputSpec`, `HelpfulGroup`, `build_manifest`, `_describe_command`).
 
 ## 5. Plain text, not reStructuredText
 
@@ -80,5 +80,5 @@ Click rewraps each help paragraph unless it begins with a backspace marker on it
 ## 7. Verify
 
 - `dh-mcp <noun> <verb> --help` renders every required section as a distinct block.
-- `dh-mcp introspect | jq '.commands.<noun>.subcommands.<verb>'` shows `params`, the relevant error codes, and `output`; no `` `` `` and no `\b` anywhere in the manifest.
+- `dh-mcp <noun> <verb> --introspect` (or `dh-mcp introspect tree | jq '.commands.<noun>.subcommands.<verb>'`) shows `params`, the relevant error codes, and `output`; no `` `` `` and no `\b` anywhere in the manifest. Both default to `json` — no `-o json` needed.
 - `uv run pytest tests/cli/test_help_contract.py tests/cli/test__help.py tests/cli/_commands/test_introspect.py` is green.

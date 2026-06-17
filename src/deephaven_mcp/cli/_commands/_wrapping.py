@@ -299,7 +299,12 @@ async def call_and_echo(
     echo_payload(runtime, payload)
 
 
-def _warn_if_incomplete(runtime: Runtime, payload: dict[str, Any]) -> None:
+def _warn_if_incomplete(
+    runtime: Runtime,
+    payload: dict[str, Any],
+    *,
+    reasons_in_rows: bool = False,
+) -> None:
     """Warn on stderr when a successful result is flagged incomplete.
 
     Discovery tools (e.g. ``sessions_list``) attach a ``partial_result`` block
@@ -309,10 +314,27 @@ def _warn_if_incomplete(runtime: Runtime, payload: dict[str, Any]) -> None:
     ``{"phase": <discovery phase>, "detail": <message>, "errors": {<system>:
     <message>}}`` (``errors`` only on failures), and the key is absent when the
     result is complete. A shaping verb prints one field and drops the rest, so
-    this re-emits the block's human-readable ``detail`` as a stderr warning.
+    this re-emits the block's human-readable ``detail`` — and the per-system
+    ``errors`` map — as a stderr warning.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        payload (dict[str, Any]): The full tool response.
+        reasons_in_rows (bool, optional): Set ``True`` when the printed rows
+            already attribute each per-system reason (e.g. ``system status``
+            promotes the exception type into ``liveness_detail``). A
+            ``"completed"`` ``partial_result`` is then suppressed entirely — its
+            phase ``detail`` ("had connection issues") would only restate the
+            table. ``"loading"`` / ``"failed"`` phases still warn and still
+            carry the ``errors`` map, because the rows show only the short
+            reason and the full message would otherwise be unreachable.
     """
     incomplete = payload.get("partial_result")
     if incomplete is None:
+        return
+    if reasons_in_rows and incomplete.get("phase") == "completed":
+        # Reasons are attributed per-row; the only remaining signal would be
+        # the "had connection issues" detail, which restates the table.
         return
     render_warning(
         incomplete["detail"],
@@ -329,6 +351,7 @@ async def call_and_echo_field(
     arguments: dict[str, Any],
     field: str,
     default: Any,
+    reasons_in_rows: bool = False,
 ) -> None:
     """Acquire, invoke ``tool``, surface diagnostics, and print ``payload[field]``.
 
@@ -345,6 +368,10 @@ async def call_and_echo_field(
         arguments (dict[str, Any]): The tool arguments.
         field (str): The payload key to emit on stdout.
         default (Any): The value emitted when ``field`` is absent.
+        reasons_in_rows (bool, optional): Forwarded to
+            :func:`_warn_if_incomplete`. Set ``True`` when the emitted rows
+            already carry per-system error reasons, so a ``"completed"``
+            warning doesn't restate them.
 
     Raises:
         CliError: When the daemon cannot be acquired, the MCP transport
@@ -353,5 +380,5 @@ async def call_and_echo_field(
     payload = await call_for_payload(
         runtime, tool, retry_command=retry_command, arguments=arguments
     )
-    _warn_if_incomplete(runtime, payload)
+    _warn_if_incomplete(runtime, payload, reasons_in_rows=reasons_in_rows)
     echo_payload(runtime, payload.get(field, default))

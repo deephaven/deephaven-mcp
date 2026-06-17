@@ -105,10 +105,11 @@ dh-mcp --config-dir /tmp/test-config --runtime-dir /tmp/test-runtime tool list
 ```
 
 `dh-mcp-systems-server` exposes the same `--config-dir` and
-`--runtime-dir` flags (the CLI passes both during daemon spawn, but
-operators can also use them directly). These flags **bypass**
-`$DH_MCP_DATA_DIR` for the subdirectory they target; the env var
-still applies to whichever subdirectory was not overridden.
+`--runtime-dir` flags, both honored in every transport (stdio,
+HTTP, and daemon); the `dh-mcp` CLI also passes them when spawning
+the daemon. These flags **bypass** `$DH_MCP_DATA_DIR` for the
+subdirectory they target; the env var still applies to whichever
+subdirectory was not overridden.
 
 ## CLI (`dh-mcp`)
 

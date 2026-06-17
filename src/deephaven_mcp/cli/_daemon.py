@@ -284,7 +284,7 @@ async def get_or_start_daemon(
         RegistryCorruptError: When ``daemon.json`` exists but cannot
             be parsed. Propagated unchanged to the command layer,
             which translates to ``CliError(DAEMON_REGISTRY_CORRUPT)``
-            with a recovery hint pointing at ``dh-mcp daemon reset``.
+            with a recovery hint pointing at ``dh-mcp daemon repair``.
     """
     entry = ctx.directory.read_entry()
     if entry is not None and entry.is_live():

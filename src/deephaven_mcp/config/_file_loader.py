@@ -51,15 +51,13 @@ async def load_config_from_file(
 
     Args:
         config_path (str): Path to the configuration file.
-        config_dir (Path | None): Optional audited configuration
-            directory used to constrain ``${file:PATH}`` placeholder
-            resolution. When supplied, ``${file:...}`` placeholders
-            must reference files inside the directory; symlinks are
-            refused and a size cap is enforced. When ``None``, the
-            placeholder accepts any absolute path (backward-compatible
-            default); the caller falls back to the parent directory of
+        config_dir (Path | None): Optional base directory against
+            which *relative* ``${file:PATH}`` placeholders are
+            resolved. Absolute placeholder paths are used as-is. In
+            either case a size cap is enforced. When ``None``, the
+            caller falls back to the parent directory of
             ``config_path`` so a freestanding loader call still has a
-            meaningful containment root.
+            sensible base for relative paths.
 
     Returns:
         dict[str, Any]: The parsed and template-expanded file contents

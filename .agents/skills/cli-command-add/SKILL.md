@@ -7,7 +7,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 ## Steps
 
-1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools), `session`/`system` (runtime MCP-tool wrappers), `config` (inspect / validate the configuration tree). Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
+1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools — the raw escape hatch), `session` / `system` / `table` / `script` / `catalog` / `pq` (runtime MCP-tool wrappers — apply `_cli-tool-wrapping`), `config` (inspect / validate the configuration tree). `introspect` is not an add target — it emits machine-readable metadata about the live click tree, not user actions, and new commands appear there automatically. Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
 
 2. **Add the click command.** Copy the decorator stack from the model verb `tool_call` in `cli/_commands/tool.py`: `@<group>.command(name, output_spec=SPEC, help=build_help(...))` → click options/arguments → `@click.pass_obj` (or `@click.pass_context`) → `@run_async` → `async def`. Compose the help with `build_help(...)` from `cli/_help.py` per the `_cli-help-standards` §2 section contract, and define the output shape once as an `OutputSpec` constant passed to both `output_spec=` and `build_help(output=...)` (§4).
 
@@ -33,7 +33,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 7. **Update `docs/CLI.md`.** Add the new verb under the noun's section: synopsis, description, every flag, exit codes, error codes, output fields, at least one runnable example. The three surfaces must agree (`_cli-help-standards` §1 consistency rule). If a new `ErrorCode` was introduced, add it to the `error_code` registry table in the same document. Docs have no automated check — this is the most commonly forgotten step.
 
-8. **Sanity-check the introspect manifest.** `dh-mcp introspect` walks the live click tree, so a newly-registered command appears there automatically. `tests/cli/_commands/test_introspect.py` confirms the noun is wired and reports its top-level metadata. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
+8. **Sanity-check the introspect manifest.** `dh-mcp introspect tree` walks the live click tree, so a newly-registered command appears there automatically. `tests/cli/_commands/test_introspect.py` confirms the noun is wired and reports its top-level metadata. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
 
 9. **Run checks.**
 
@@ -41,7 +41,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
    uv run pytest tests/cli/ -q
    ./bin/precommit.sh
    uv run dh-mcp <noun> <verb> --help    # eyeball the rendered help
-   uv run dh-mcp introspect | jq '.commands.<noun>.subcommands.<verb>'
+   uv run dh-mcp <noun> <verb> --introspect    # machine-readable node (twin of --help)
    ```
 
 ## Anti-patterns
@@ -49,3 +49,4 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 - **Reading `os.environ` directly.** Add `envvar=` to the click option. The only env var the CLI reads outside of click is `DH_MCP_DATA_DIR`, and `_runtime.py` already handles it.
 - **Hand-rolled output formatting.** Always go through `format_output(...)`; otherwise `-o yaml` and the structured-error renderer drift.
 - **Mixing in MCP-server-tool conventions.** This is a CLI command, not an MCP tool. No `register_tools()`, no `Terminology Note`, no `Format Accuracy for AI Agents`. Apply `_mcp-module-organization` only to MCP server tools.
+- **Redeclaring a root option on a subcommand.** The root callback's options (`-o/--output`, `--timeout`, `-v/--verbose`, `-q/--quiet`, `--no-auto-start`, `--config-dir`, `--runtime-dir`) are auto-lifted to the front of argv by `_lift_root_options` (in `cli/_main.py`), so `dh-mcp daemon status -o json` is rewritten to `dh-mcp -o json daemon status` before click parses it. The flag already applies to every subcommand — duplicating it on a subcommand creates a parser collision and breaks the auto-lift. If you add a new root option, `_lift_root_options` picks it up automatically from `cli.params`; if it must *not* be lifted (eager / context-sensitive like `--help` or `--version`), add the explicit exclusion in `_liftable_options` and a regression test in `tests/cli/test__main.py`.
