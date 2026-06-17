@@ -785,9 +785,12 @@ async def test_session_wrapper_verbs_e2e(
         assert {"name": "community", "type": "community"} in systems
 
         # system status → Enterprise-only health; all-community reports none.
+        # The verb emits the `systems` field unwrapped (see
+        # `call_and_echo_field` with `field="systems"`), so the payload is
+        # the list itself, not `{"systems": [...]}`.
         result = run(["system", "status"])
         assert result.returncode == 0, result.stderr
-        assert json.loads(result.stdout)["systems"] == []
+        assert json.loads(result.stdout) == []
 
         # session list → the seeded static session is discoverable.
         result = run(["session", "list"])

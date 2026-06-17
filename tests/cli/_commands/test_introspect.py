@@ -548,31 +548,44 @@ def test_introspect_flag_on_root_emits_whole_tree() -> None:
     assert json.loads(result.output) == build_manifest(cli)
 
 
-def test_introspect_flag_on_leaf_matches_command_node() -> None:
-    """``daemon start --introspect`` equals the ``daemon start`` manifest node."""
+def test_introspect_flag_on_leaf_matches_command_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``daemon start --introspect`` equals the ``daemon start`` manifest node.
+
+    The runtime-load bypass inspects ``sys.argv``; ``CliRunner.invoke``
+    does not set it, so the test patches it explicitly (mirroring the
+    ``--help`` path) — otherwise CI without a default config dir fails.
+    """
+    argv = ["daemon", "start", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     runner = CliRunner()
-    result = runner.invoke(
-        cli, ["daemon", "start", "--introspect"], standalone_mode=False
-    )
+    result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload == build_manifest(cli)["commands"]["daemon"]["subcommands"]["start"]
 
 
-def test_introspect_flag_on_group_matches_group_node() -> None:
+def test_introspect_flag_on_group_matches_group_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``daemon --introspect`` equals the ``daemon`` group node."""
+    argv = ["daemon", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     runner = CliRunner()
-    result = runner.invoke(cli, ["daemon", "--introspect"], standalone_mode=False)
+    result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     assert json.loads(result.output) == build_manifest(cli)["commands"]["daemon"]
 
 
-def test_introspect_flag_equals_command_verb() -> None:
+def test_introspect_flag_equals_command_verb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The flag and the ``command`` verb produce byte-identical nodes."""
     runner = CliRunner()
-    via_flag = runner.invoke(
-        cli, ["tool", "call", "--introspect"], standalone_mode=False
-    )
+    flag_argv = ["tool", "call", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *flag_argv])
+    via_flag = runner.invoke(cli, flag_argv, standalone_mode=False)
     via_verb = runner.invoke(
         cli, ["introspect", "command", "tool", "call"], standalone_mode=False
     )
@@ -580,27 +593,31 @@ def test_introspect_flag_equals_command_verb() -> None:
     assert json.loads(via_flag.output) == json.loads(via_verb.output)
 
 
-def test_introspect_flag_honors_output_mode() -> None:
+def test_introspect_flag_honors_output_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The flag honors the root ``-o`` flag (rendered as YAML here)."""
+    argv = ["-o", "yaml", "daemon", "start", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     runner = CliRunner()
-    result = runner.invoke(
-        cli, ["-o", "yaml", "daemon", "start", "--introspect"], standalone_mode=False
-    )
+    result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
     assert payload == build_manifest(cli)["commands"]["daemon"]["subcommands"]["start"]
 
 
-def test_introspect_flag_not_hoisted_to_root() -> None:
+def test_introspect_flag_not_hoisted_to_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``config show --introspect`` describes ``config show``, not the root.
 
     The flag is injected lazily (never in ``cli.params``), so the
     option-lifter never sees it and cannot hoist it to the root.
     """
+    argv = ["config", "show", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     runner = CliRunner()
-    result = runner.invoke(
-        cli, ["config", "show", "--introspect"], standalone_mode=False
-    )
+    result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["name"] == "show"

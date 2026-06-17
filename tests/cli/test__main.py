@@ -465,13 +465,20 @@ def test_help_runs_without_loading_runtime(
 @pytest.mark.parametrize(
     "args", [["daemon", "start", "--help"], ["-o", "json", "daemon", "start", "--help"]]
 )
-def test_help_is_human_regardless_of_output_mode(args: list[str]) -> None:
+def test_help_is_human_regardless_of_output_mode(
+    args: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``--help`` always renders human help text, even under ``-o json``.
 
     Help goes through click's help formatter, independent of the output-mode
     system, so the JSON default does not turn it into JSON. This locks the
     intended split: ``--help`` is human, ``--introspect`` is the machine twin.
+
+    The runtime-load bypass inspects ``sys.argv``; ``CliRunner.invoke`` does
+    not set it, so the test patches it explicitly so a CI machine without
+    a default config dir doesn't trip ``CONFIG_INVALID`` on the way in.
     """
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *args])
     runner = CliRunner()
     result = runner.invoke(cli, args, standalone_mode=False)
     assert result.exit_code == 0
@@ -877,14 +884,21 @@ def test_main_accepts_output_after_subcommand(capsys) -> None:
     assert payload["stopped"] is False
 
 
-def test_main_help_at_depth_still_routes_to_subcommand(capsys) -> None:
+def test_main_help_at_depth_still_routes_to_subcommand(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``dh-mcp daemon --help`` must keep rendering daemon's help, not root.
 
     ``--help`` is intentionally excluded from the lift set; this test
-    locks that exclusion against future regressions.
+    locks that exclusion against future regressions. The runtime-load
+    bypass inspects ``sys.argv``; ``main(argv=...)`` does not propagate
+    its argument there, so a CI machine without a default config dir
+    would trip ``CONFIG_INVALID`` before help renders — patch it.
     """
+    argv = ["daemon", "--help"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     with pytest.raises(SystemExit) as exc_info:
-        main(["daemon", "--help"])
+        main(argv)
     assert exc_info.value.code == 0
     out = capsys.readouterr().out
     # The daemon group's help lists verbs, including 'repair'; the
