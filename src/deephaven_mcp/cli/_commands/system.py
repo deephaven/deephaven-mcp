@@ -133,8 +133,7 @@ _OUTPUT_STATUS = OutputSpec(
         "Array of per-system status records (Enterprise/Core+ only; community "
         "systems are not reported). Health only — use 'dh-mcp config show' for "
         "configuration. When discovery is still running or has failed, a "
-        "phase-summary warning (no per-system error attribution — that lives "
-        "on each row's liveness_detail) is written to stderr."
+        "phase-summary warning (with per-system details when available) is written to stderr."
     ),
 )
 
