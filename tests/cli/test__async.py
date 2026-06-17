@@ -6,10 +6,21 @@ import asyncio
 import functools
 import inspect
 import logging
+from collections.abc import Iterator
 
 import pytest
 
 from deephaven_mcp.cli._async import _cli_loop_exception_handler, run_async
+
+
+@pytest.fixture
+def loop() -> Iterator[asyncio.AbstractEventLoop]:
+    """A throwaway event loop, closed on teardown."""
+    new_loop = asyncio.new_event_loop()
+    try:
+        yield new_loop
+    finally:
+        new_loop.close()
 
 
 def test_coro_runs_async_function_and_returns_value() -> None:
@@ -82,11 +93,12 @@ def test_coro_installs_loop_exception_handler() -> None:
 
 def test_loop_exception_handler_logs_at_debug(
     caplog: pytest.LogCaptureFixture,
+    loop: asyncio.AbstractEventLoop,
 ) -> None:
     """Loop-level exceptions are logged at DEBUG, not ERROR."""
     with caplog.at_level(logging.DEBUG, logger="deephaven_mcp.cli._async"):
         _cli_loop_exception_handler(
-            asyncio.new_event_loop(),
+            loop,
             {"message": "boom", "exception": ValueError("x")},
         )
     records = [r for r in caplog.records if r.name == "deephaven_mcp.cli._async"]
@@ -97,10 +109,11 @@ def test_loop_exception_handler_logs_at_debug(
 
 def test_loop_exception_handler_default_message(
     caplog: pytest.LogCaptureFixture,
+    loop: asyncio.AbstractEventLoop,
 ) -> None:
     """A context without a message falls back to a default description."""
     with caplog.at_level(logging.DEBUG, logger="deephaven_mcp.cli._async"):
-        _cli_loop_exception_handler(asyncio.new_event_loop(), {})
+        _cli_loop_exception_handler(loop, {})
     records = [r for r in caplog.records if r.name == "deephaven_mcp.cli._async"]
     assert len(records) == 1
     assert "Unhandled exception in event loop" in records[0].getMessage()
