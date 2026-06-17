@@ -197,10 +197,12 @@ async def system_status(
         arguments=arguments,
         field="systems",
         default=[],
-        # Per-system reasons are now in the table via `liveness_detail`,
-        # so the stderr warning omits the `errors` map to avoid duplicating
-        # the per-row attribution. The phase `detail` still warns.
-        include_partial_errors=False,
+        # Each row carries its per-system reason via `liveness_detail`, so a
+        # COMPLETED partial_result is suppressed (the "had connection issues"
+        # banner would only restate the table). LOADING/FAILED phases still
+        # warn with the full `errors` map, since the row shows only the short
+        # reason and the full message would otherwise be unreachable.
+        reasons_in_rows=True,
     )
 
 

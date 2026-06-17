@@ -408,7 +408,7 @@ async def test_call_and_echo_field_surfaces_partial_result_detail_only(
 async def test_call_and_echo_field_suppresses_completed_partial_result_when_opted_out(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """With ``include_partial_errors=False`` a ``phase=='completed'``
+    """With ``reasons_in_rows=True`` a ``phase=='completed'``
     ``partial_result`` is suppressed entirely — the banner ("had connection
     issues") would only restate the per-row reasons in ``liveness_detail``."""
     rt = make_runtime(tmp_path)
@@ -431,7 +431,7 @@ async def test_call_and_echo_field_suppresses_completed_partial_result_when_opte
             arguments={},
             field="systems",
             default=[],
-            include_partial_errors=False,
+            reasons_in_rows=True,
         )
     captured = capsys.readouterr()
     # Nothing on stderr — the per-row reasons fully cover the COMPLETED case.
@@ -444,7 +444,7 @@ async def test_call_and_echo_field_loading_still_warns_when_opted_out(
 ) -> None:
     """``phase=='loading'`` carries a timing signal ("retry in a moment") that
     rows cannot convey, so the warning still appears even with
-    ``include_partial_errors=False``."""
+    ``reasons_in_rows=True``."""
     rt = make_runtime(tmp_path)
     payload = {
         "success": True,
@@ -464,7 +464,42 @@ async def test_call_and_echo_field_loading_still_warns_when_opted_out(
             arguments={},
             field="systems",
             default=[],
-            include_partial_errors=False,
+            reasons_in_rows=True,
         )
     captured = capsys.readouterr()
     assert "actively running" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_failed_surfaces_errors_when_reasons_in_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-``completed`` phase still surfaces the per-system ``errors`` map
+    even with ``reasons_in_rows=True`` — the row's ``liveness_detail`` carries
+    only the short reason, so the full message would otherwise be unreachable."""
+    rt = make_runtime(tmp_path)
+    payload = {
+        "success": True,
+        "systems": [{"name": "prod", "liveness_detail": "DeephavenConnectionError"}],
+        "partial_result": {
+            "phase": "failed",
+            "detail": "Enterprise session discovery failed critically.",
+            "errors": {"prod": "DeephavenConnectionError: Network is unreachable"},
+        },
+    }
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "enterprise_systems_status",
+            retry_command="dh-mcp system status",
+            arguments={},
+            field="systems",
+            default=[],
+            reasons_in_rows=True,
+        )
+    captured = capsys.readouterr()
+    # The full per-system message must reach stderr — not just the short
+    # exception type the table cell shows.
+    assert "Network is unreachable" in captured.err
