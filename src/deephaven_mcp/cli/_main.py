@@ -19,6 +19,7 @@ from __future__ import annotations
 __all__ = ["cli", "main"]
 
 import logging
+import os
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -30,7 +31,7 @@ from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands.catalog import catalog as catalog_group
 from deephaven_mcp.cli._commands.config import config as config_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
-from deephaven_mcp.cli._commands.introspect import introspect as introspect_command
+from deephaven_mcp.cli._commands.introspect import introspect as introspect_group
 from deephaven_mcp.cli._commands.pq import pq as pq_group
 from deephaven_mcp.cli._commands.script import script as script_group
 from deephaven_mcp.cli._commands.session import session as session_group
@@ -38,8 +39,13 @@ from deephaven_mcp.cli._commands.system import system as system_group
 from deephaven_mcp.cli._commands.table import table as table_group
 from deephaven_mcp.cli._commands.tool import tool as tool_group
 from deephaven_mcp.cli._errors import CliError, ErrorCode, render_error
-from deephaven_mcp.cli._format import OUTPUT_ENV_VAR, OUTPUT_MODES, OutputMode
-from deephaven_mcp.cli._help import build_help
+from deephaven_mcp.cli._format import (
+    DEFAULT_OUTPUT_MODE,
+    OUTPUT_ENV_VAR,
+    OUTPUT_MODES,
+    OutputMode,
+)
+from deephaven_mcp.cli._help import HelpfulGroup, build_help
 from deephaven_mcp.cli._runtime import load_runtime
 from deephaven_mcp.config.schema import CliConfig
 
@@ -82,28 +88,53 @@ def _build_cli_overrides(
     return overrides
 
 
-def _is_help_invocation() -> bool:
-    """Return True when ``--help`` or ``-h`` is a real option in ``sys.argv``.
+def _argv_has_option(targets: frozenset[str]) -> bool:
+    """Return True when any spelling in ``targets`` is a real option in argv.
 
-    Used to short-circuit runtime loading: rendering ``--help`` for a
-    subcommand should not require a valid configuration tree.
-
+    Scans ``sys.argv[1:]`` for a bare occurrence of any target spelling.
     Tokens consumed as the value of a value-taking root option
     (``dh-mcp --config-dir --help`` treats ``--help`` as a path) are
-    skipped so the help fast-path only fires for genuine help requests.
+    skipped so the match only fires for a genuine option, not a value
+    that happens to share the spelling.
+
+    Args:
+        targets (frozenset[str]): Option spellings to look for
+            (e.g. ``{"--help", "-h"}``).
+
+    Returns:
+        bool: True when a target spelling appears as a standalone token.
     """
     value_taking = _value_taking_root_options()
     argv = sys.argv[1:]
     i = 0
     while i < len(argv):
         tok = argv[i]
-        if tok in {"--help", "-h"}:
+        if tok in targets:
             return True
         if "=" not in tok and tok in value_taking and i + 1 < len(argv):
             i += 2
             continue
         i += 1
     return False
+
+
+def _is_help_invocation() -> bool:
+    """Return True when ``--help`` or ``-h`` is a real option in ``sys.argv``.
+
+    Used to short-circuit runtime loading: rendering ``--help`` for a
+    subcommand should not require a valid configuration tree.
+    """
+    return _argv_has_option(frozenset({"--help", "-h"}))
+
+
+def _is_introspect_invocation() -> bool:
+    """Return True when ``--introspect`` is a real option in ``sys.argv``.
+
+    The universal ``--introspect`` flag is the machine-readable twin of
+    ``--help`` and likewise renders without a valid configuration tree,
+    so it short-circuits runtime loading wherever it appears.
+    """
+    return _argv_has_option(frozenset({"--introspect"}))
 
 
 def _verbosity_to_level(verbose: int, quiet: bool) -> int:
@@ -117,6 +148,25 @@ def _verbosity_to_level(verbose: int, quiet: bool) -> int:
     return logging.WARNING
 
 
+_NOISY_DEPENDENCY_LOGGERS: tuple[str, ...] = ("mcp", "httpx", "anyio")
+"""Third-party logger names whose routine WARNING records are quieted by default."""
+
+
+def _quiet_dependency_loggers(verbose: int) -> None:
+    """Pin noisy dependency loggers to ERROR unless the user raised verbosity.
+
+    Without ``-v``/``-vv`` (including under ``-q``), each logger named in
+    ``_NOISY_DEPENDENCY_LOGGERS`` is set to ``ERROR`` so library internals a
+    CLI user cannot act on — such as the mcp client's "Session termination
+    failed" notice on teardown — never reach the terminal. With ``-v``/``-vv``
+    the loggers are reset to ``NOTSET`` so they follow the root level the
+    operator chose.
+    """
+    level = logging.NOTSET if verbose else logging.ERROR
+    for name in _NOISY_DEPENDENCY_LOGGERS:
+        logging.getLogger(name).setLevel(level)
+
+
 # ---------------------------------------------------------------------------
 # Root group
 # ---------------------------------------------------------------------------
@@ -124,6 +174,7 @@ def _verbosity_to_level(verbose: int, quiet: bool) -> int:
 
 @click.group(
     name="dh-mcp",
+    cls=HelpfulGroup,
     help=build_help(
         summary=(
             "Local CLI for the Deephaven MCP systems server: manage a "
@@ -143,15 +194,16 @@ def _verbosity_to_level(verbose: int, quiet: bool) -> int:
             "and 'config' to inspect and validate configuration. "
             "Pass --no-auto-start to require an already-running daemon "
             "instead of spawning one. AI agents should run 'dh-mcp "
-            "introspect' for a machine-readable manifest of every command, "
-            "option, and error code rather than scraping --help."
+            "introspect tree' for a machine-readable manifest of every "
+            "command, option, and error code rather than scraping --help, "
+            "or append --introspect to any command for just its node."
         ),
         examples=(
             "$ dh-mcp tool list",
             "$ dh-mcp tool call sessions_list --arg type=community",
             "$ dh-mcp daemon status",
             "$ dh-mcp config validate",
-            "$ dh-mcp introspect | jq '.commands | keys'",
+            "$ dh-mcp introspect tree | jq '.commands | keys'",
         ),
     ),
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -185,6 +237,9 @@ def _verbosity_to_level(verbose: int, quiet: bool) -> int:
     type=click.Choice(OUTPUT_MODES),
     envvar=OUTPUT_ENV_VAR,
     default=None,
+    # Eager so it is resolved before the eager ``--introspect`` callback,
+    # which reads the root output mode (e.g. ``dh-mcp -o json --introspect``).
+    is_eager=True,
     help=(
         "Output format. Takes precedence over the DH_MCP_OUTPUT "
         "environment variable and the 'output.format' setting in cli.json."
@@ -249,14 +304,20 @@ async def cli(
         )
     setup_logging()
     logging.getLogger().setLevel(_verbosity_to_level(verbose, quiet))
+    _quiet_dependency_loggers(verbose)
 
     # ``introspect`` walks the command tree and does not need a
     # validated configuration tree; constructing the runtime would
     # force-load config/server JSON files that may not exist when
     # an agent is just learning the surface. The same reasoning
-    # applies when the operator is asking for ``--help`` at any
-    # depth (``dh-mcp daemon --help``, ``dh-mcp tool call --help``).
-    if ctx.invoked_subcommand == "introspect" or _is_help_invocation():
+    # applies to the ``--introspect`` flag (its machine twin) at any
+    # depth, and to ``--help`` (``dh-mcp daemon --help``, ``dh-mcp tool
+    # call --help``).
+    if (
+        ctx.invoked_subcommand == "introspect"
+        or _is_help_invocation()
+        or _is_introspect_invocation()
+    ):
         ctx.obj = None
         return
 
@@ -283,7 +344,7 @@ cli.add_command(script_group)
 cli.add_command(catalog_group)
 cli.add_command(pq_group)
 cli.add_command(config_group)
-cli.add_command(introspect_command)
+cli.add_command(introspect_group)
 
 
 # ---------------------------------------------------------------------------
@@ -291,20 +352,33 @@ cli.add_command(introspect_command)
 # ---------------------------------------------------------------------------
 
 
-def _output_from_argv(argv: list[str]) -> OutputMode:
-    """Recover the active ``-o/--output`` mode from a raw argv list.
+def _env_output_mode() -> OutputMode | None:
+    """Return ``DH_MCP_OUTPUT`` if it names a valid output mode, else ``None``."""
+    candidate = os.environ.get(OUTPUT_ENV_VAR)
+    if candidate in OUTPUT_MODES:
+        # mypy narrows ``candidate`` to ``OutputMode`` via the runtime
+        # membership check against the ``Literal``-derived tuple.
+        return candidate
+    return None
 
-    Used by the top-level fallback renderer in :func:`main` after
-    ``cli.main`` returned and the live click context is gone. All
-    four argv shapes click accepts are recognized:
+
+def _output_from_argv(argv: list[str]) -> OutputMode:
+    """Recover the active output mode for the fallback error renderer.
+
+    Used by :func:`main` after ``cli.main`` returned and the live click
+    context is gone, so the resolution is reconstructed from the raw
+    argv plus the environment. Precedence mirrors the live path: an
+    explicit ``-o/--output`` flag wins, then ``DH_MCP_OUTPUT``, then
+    :data:`DEFAULT_OUTPUT_MODE`. All four argv shapes click accepts are
+    recognized:
 
     - ``-o human`` (short, separate value)
     - ``--output human`` (long, separate value)
     - ``-o=human`` (short, ``=`` form)
     - ``--output=human`` (long, ``=`` form)
 
-    Falls back to ``"human"`` when no recognized override is found
-    or the supplied value is not a member of :data:`OUTPUT_MODES`.
+    ``cli.json``'s ``output.format`` is not consulted — the config may
+    be the very thing that failed to load.
     """
     it = iter(argv)
     for token in it:
@@ -322,11 +396,11 @@ def _output_from_argv(argv: list[str]) -> OutputMode:
             # the runtime membership check against the
             # ``Literal``-derived tuple — no cast required.
             return candidate
-        # Recognized flag but unknown value — fall through to the
-        # safe default rather than honoring something the parser
-        # would have rejected.
-        return "human"
-    return "human"
+        # Recognized flag but unknown value — click rejected the
+        # invocation; fall through to env / default rather than honor
+        # a value the parser would not accept.
+        break
+    return _env_output_mode() or DEFAULT_OUTPUT_MODE
 
 
 def main(argv: list[str] | None = None) -> None:

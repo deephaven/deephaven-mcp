@@ -7,7 +7,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 ## Steps
 
-1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools), `session`/`system` (runtime MCP-tool wrappers), `config` (inspect / validate the configuration tree). Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
+1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools — the raw escape hatch), `session` / `system` / `table` / `script` / `catalog` / `pq` (runtime MCP-tool wrappers — apply `_cli-tool-wrapping`), `config` (inspect / validate the configuration tree). `introspect` is not an add target — it emits machine-readable metadata about the live click tree, not user actions, and new commands appear there automatically. Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
 
 2. **Add the click command.** Copy the decorator stack from the model verb `tool_call` in `cli/_commands/tool.py`: `@<group>.command(name, output_spec=SPEC, help=build_help(...))` → click options/arguments → `@click.pass_obj` (or `@click.pass_context`) → `@run_async` → `async def`. Compose the help with `build_help(...)` from `cli/_help.py` per the `_cli-help-standards` §2 section contract, and define the output shape once as an `OutputSpec` constant passed to both `output_spec=` and `build_help(output=...)` (§4).
 
@@ -33,7 +33,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 7. **Update `docs/CLI.md`.** Add the new verb under the noun's section: synopsis, description, every flag, exit codes, error codes, output fields, at least one runnable example. The three surfaces must agree (`_cli-help-standards` §1 consistency rule). If a new `ErrorCode` was introduced, add it to the `error_code` registry table in the same document. Docs have no automated check — this is the most commonly forgotten step.
 
-8. **Sanity-check the introspect manifest.** `dh-mcp introspect` walks the live click tree, so a newly-registered command appears there automatically. `tests/cli/_commands/test_introspect.py` confirms the noun is wired and reports its top-level metadata. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
+8. **Sanity-check the introspect manifest.** `dh-mcp introspect tree` walks the live click tree, so a newly-registered command appears there automatically. `tests/cli/_commands/test_introspect.py` confirms the noun is wired and reports its top-level metadata. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
 
 9. **Run checks.**
 
@@ -41,7 +41,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
    uv run pytest tests/cli/ -q
    ./bin/precommit.sh
    uv run dh-mcp <noun> <verb> --help    # eyeball the rendered help
-   uv run dh-mcp introspect | jq '.commands.<noun>.subcommands.<verb>'
+   uv run dh-mcp <noun> <verb> --introspect    # machine-readable node (twin of --help)
    ```
 
 ## Anti-patterns

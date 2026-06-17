@@ -670,7 +670,7 @@ def test_config_invalid_exits_2(tmp_path: Path) -> None:
     reason="dh-mcp entry point not on PATH",
 )
 def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
-    """``introspect`` emits the command manifest without touching config.
+    """``introspect tree`` emits the command manifest without touching config.
 
     The config directory is deliberately left unseeded: introspect
     bypasses the eager config load, so it must still succeed.
@@ -680,7 +680,11 @@ def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
     runtime_dir.mkdir()
     os.chmod(runtime_dir, 0o700)
 
-    result = _run_cli(["introspect"], config_dir=cfg_dir, runtime_dir=runtime_dir)
+    result = _run_cli(
+        ["-o", "json", "introspect", "tree"],
+        config_dir=cfg_dir,
+        runtime_dir=runtime_dir,
+    )
     assert result.returncode == 0, result.stderr
     manifest = json.loads(result.stdout)
     assert "commands" in manifest

@@ -13,8 +13,10 @@ from click.testing import CliRunner
 from deephaven_mcp.cli import _main
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._main import (
+    _NOISY_DEPENDENCY_LOGGERS,
     _argv_command_path,
     _build_cli_overrides,
+    _quiet_dependency_loggers,
     _verbosity_to_level,
     cli,
     main,
@@ -84,7 +86,7 @@ def test_build_cli_overrides_no_auto_start_disables_field() -> None:
     )
     cli_cfg = CliConfig().model_copy(update=out)
     assert cli_cfg.daemon.auto_start is False
-    assert cli_cfg.output.format == "human"
+    assert cli_cfg.output.format == "json"
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +108,42 @@ def test_verbosity_vv_is_debug() -> None:
 
 def test_verbosity_quiet_overrides_verbose() -> None:
     assert _verbosity_to_level(2, True) == logging.ERROR
+
+
+# ---------------------------------------------------------------------------
+# _quiet_dependency_loggers
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _restore_dependency_logger_levels() -> object:
+    """Save and restore the levels of the noisy dependency loggers."""
+    saved = {name: logging.getLogger(name).level for name in _NOISY_DEPENDENCY_LOGGERS}
+    try:
+        yield
+    finally:
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
+
+
+def test_quiet_dependency_loggers_default_pins_error(
+    _restore_dependency_logger_levels: object,
+) -> None:
+    """Without verbosity, each noisy logger is pinned to ERROR."""
+    _quiet_dependency_loggers(0)
+    for name in _NOISY_DEPENDENCY_LOGGERS:
+        assert logging.getLogger(name).level == logging.ERROR
+
+
+def test_quiet_dependency_loggers_verbose_resets_to_notset(
+    _restore_dependency_logger_levels: object,
+) -> None:
+    """With ``-v``/``-vv`` the loggers are reset to NOTSET to follow root."""
+    for name in _NOISY_DEPENDENCY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.ERROR)
+    _quiet_dependency_loggers(1)
+    for name in _NOISY_DEPENDENCY_LOGGERS:
+        assert logging.getLogger(name).level == logging.NOTSET
 
 
 # ---------------------------------------------------------------------------
@@ -142,22 +180,60 @@ def test_output_from_argv_picks_up_explicit_o() -> None:
     assert _output_from_argv(["--output", "yaml", "tool", "list"]) == "yaml"
 
 
-def test_output_from_argv_unknown_value_falls_back_to_human() -> None:
+def test_output_from_argv_unknown_value_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recognized ``-o`` with an invalid value falls through to env/default."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    assert _output_from_argv(["-o", "xml"]) == "human"
+    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    assert _output_from_argv(["-o", "xml"]) == "json"
 
 
-def test_output_from_argv_no_o_falls_back_to_human() -> None:
+def test_output_from_argv_no_o_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from deephaven_mcp.cli._main import _output_from_argv
 
-    assert _output_from_argv(["daemon", "status"]) == "human"
+    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    assert _output_from_argv(["daemon", "status"]) == "json"
 
 
-def test_output_from_argv_o_at_end_with_no_value() -> None:
+def test_output_from_argv_honors_env_when_no_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no ``-o`` in argv, the error path honors ``DH_MCP_OUTPUT``."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    assert _output_from_argv(["-o"]) == "human"
+    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    assert _output_from_argv(["daemon", "status"]) == "json"
+
+
+def test_output_from_argv_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit ``-o`` in argv beats ``DH_MCP_OUTPUT`` on the error path."""
+    from deephaven_mcp.cli._main import _output_from_argv
+
+    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    assert _output_from_argv(["-o", "yaml", "daemon", "status"]) == "yaml"
+
+
+def test_output_from_argv_ignores_invalid_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An invalid ``DH_MCP_OUTPUT`` is ignored, falling back to the default."""
+    from deephaven_mcp.cli._main import _output_from_argv
+
+    monkeypatch.setenv("DH_MCP_OUTPUT", "xml")
+    assert _output_from_argv(["daemon", "status"]) == "json"
+
+
+def test_output_from_argv_o_at_end_with_no_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deephaven_mcp.cli._main import _output_from_argv
+
+    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    assert _output_from_argv(["-o"]) == "json"
 
 
 def test_output_from_argv_long_equals_form() -> None:
@@ -175,12 +251,15 @@ def test_output_from_argv_short_equals_form() -> None:
     assert _output_from_argv(["-o=json"]) == "json"
 
 
-def test_output_from_argv_equals_form_with_unknown_value() -> None:
-    """The ``=`` form with an unrecognized value falls back to ``"human"``."""
+def test_output_from_argv_equals_form_with_unknown_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``=`` form with an unrecognized value falls back to the default."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    assert _output_from_argv(["--output=xml"]) == "human"
-    assert _output_from_argv(["-o=toml"]) == "human"
+    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    assert _output_from_argv(["--output=xml"]) == "json"
+    assert _output_from_argv(["-o=toml"]) == "json"
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +293,35 @@ def test_is_help_invocation_table_driven(
 
     monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     assert _is_help_invocation() is expected
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        # Bare flag.
+        (["--introspect"], True),
+        # Flag appended to a command path.
+        (["daemon", "start", "--introspect"], True),
+        # Flag after a value-taking option whose value is supplied.
+        (["--config-dir", "/tmp", "--introspect"], True),
+        # ``--introspect`` consumed as the value of a value-taking option.
+        (["--config-dir", "--introspect"], False),
+        # ``=``-form value-taking option does not consume the next token.
+        (["--config-dir=/tmp", "--introspect"], True),
+        # No introspect token anywhere.
+        (["daemon", "stop"], False),
+        # Empty argv.
+        ([], False),
+    ],
+)
+def test_is_introspect_invocation_table_driven(
+    argv: list[str], expected: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_is_introspect_invocation`` reads ``sys.argv[1:]``; monkey-patch it."""
+    from deephaven_mcp.cli._main import _is_introspect_invocation
+
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    assert _is_introspect_invocation() is expected
 
 
 # ---------------------------------------------------------------------------
@@ -302,11 +410,35 @@ def test_introspect_runs_without_loading_runtime() -> None:
         "load_runtime",
         AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID)),
     ):
-        result = runner.invoke(cli, ["introspect"], standalone_mode=False)
+        result = runner.invoke(
+            cli, ["-o", "json", "introspect", "tree"], standalone_mode=False
+        )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert "commands" in payload
     assert "daemon" in payload["commands"]
+
+
+def test_introspect_flag_runs_without_loading_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``--introspect`` flag short-circuits ``load_runtime`` too.
+
+    The root callback inspects ``sys.argv``; ``CliRunner.invoke`` does
+    not set it, so the test patches it explicitly (mirroring the
+    ``--help`` path).
+    """
+    argv = ["-o", "json", "daemon", "start", "--introspect"]
+    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    runner = CliRunner()
+    with patch.object(
+        _main,
+        "load_runtime",
+        AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID)),
+    ):
+        result = runner.invoke(cli, argv, standalone_mode=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output)["name"] == "start"
 
 
 def test_help_runs_without_loading_runtime(
@@ -330,19 +462,37 @@ def test_help_runs_without_loading_runtime(
     assert "Usage" in result.output
 
 
+@pytest.mark.parametrize(
+    "args", [["daemon", "start", "--help"], ["-o", "json", "daemon", "start", "--help"]]
+)
+def test_help_is_human_regardless_of_output_mode(args: list[str]) -> None:
+    """``--help`` always renders human help text, even under ``-o json``.
+
+    Help goes through click's help formatter, independent of the output-mode
+    system, so the JSON default does not turn it into JSON. This locks the
+    intended split: ``--help`` is human, ``--introspect`` is the machine twin.
+    """
+    runner = CliRunner()
+    result = runner.invoke(cli, args, standalone_mode=False)
+    assert result.exit_code == 0
+    assert result.output.startswith("Usage:")
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.output)
+
+
 # ---------------------------------------------------------------------------
 # main: configuration error handling
 # ---------------------------------------------------------------------------
 
 
 def test_main_renders_config_error_human(capsys) -> None:
-    """A ``CliError(CONFIG_INVALID)`` from ``load_runtime`` reaches the renderer."""
+    """``-o human`` renders the error as plain text (json is now the default)."""
     fail = AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID))
     with (
         patch.object(_main, "load_runtime", fail),
         pytest.raises(SystemExit) as exc_info,
     ):
-        main(["daemon", "start"])
+        main(["-o", "human", "daemon", "start"])
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
     assert "daemon start: nope" in err
@@ -363,6 +513,22 @@ def test_main_renders_config_error_json(capsys) -> None:
     assert payload["exit_code"] == 2
 
 
+def test_main_renders_config_error_honors_env(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no ``-o`` but ``DH_MCP_OUTPUT=json``, the error renders structured."""
+    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    fail = AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID))
+    with (
+        patch.object(_main, "load_runtime", fail),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main(["daemon", "start"])
+    assert exc_info.value.code == 2
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["error_code"] == ErrorCode.CONFIG_INVALID.value
+
+
 def test_main_returns_zero_on_success(capsys) -> None:
     """Success path: ``main`` exits ``0`` and the callback's output reaches stdout."""
     rt = _runtime()
@@ -379,6 +545,22 @@ def test_main_returns_zero_on_success(capsys) -> None:
     out = capsys.readouterr().out
     payload = json.loads(out)
     assert payload["stopped"] is False
+
+
+def test_main_output_flag_after_introspect_subcommand(capsys) -> None:
+    """``dh-mcp introspect tree -o json`` works end-to-end through ``main()``.
+
+    Exercises the interaction this change relies on: the argv lifter hoists
+    the trailing ``-o json`` to the front, the eager ``-o`` resolves before
+    the introspect verb renders, and the introspect bypass means no config
+    is loaded. (``CliRunner`` does not run the lifter, so this must go
+    through ``main()``.)
+    """
+    with pytest.raises(SystemExit) as exc_info:
+        main(["introspect", "tree", "-o", "json"])
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["prog"] == "dh-mcp"
 
 
 # ---------------------------------------------------------------------------

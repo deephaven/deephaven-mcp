@@ -8,6 +8,7 @@ import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
 from deephaven_mcp.cli._format import (
+    DEFAULT_OUTPUT_MODE,
     OUTPUT_ENV_VAR,
     OUTPUT_MODES,
     _format_tool_list,
@@ -22,6 +23,20 @@ def test_output_env_var_is_the_public_contract_name() -> None:
     breaking change, so it is asserted directly rather than left to behavior.
     """
     assert OUTPUT_ENV_VAR == "DH_MCP_OUTPUT"
+
+
+def test_default_output_mode_matches_config_schema_default() -> None:
+    """The CLI fallback and the ``cli.json`` schema default must not drift.
+
+    Operational commands fall back to ``CliConfig().output.format``;
+    config-independent surfaces (introspect, errors) fall back to
+    ``DEFAULT_OUTPUT_MODE``. They are one conceptual default, pinned equal
+    here without coupling the config layer to the CLI layer by import.
+    """
+    from deephaven_mcp.config.schema import CliConfig
+
+    assert DEFAULT_OUTPUT_MODE == CliConfig().output.format
+    assert DEFAULT_OUTPUT_MODE in OUTPUT_MODES
 
 
 def test_output_modes_are_the_three_supported_values() -> None:

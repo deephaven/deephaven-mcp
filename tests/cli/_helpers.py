@@ -16,16 +16,32 @@ from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
 
-def make_runtime(tmp_path: Path | None = None, **overrides: object) -> Runtime:
+def make_runtime(
+    tmp_path: Path | None = None,
+    *,
+    output_format: str | None = None,
+    **overrides: object,
+) -> Runtime:
     """Construct a :class:`Runtime` populated with safe defaults.
 
     Bypasses the on-disk loader path entirely: the resulting
     :class:`ConfigTree` is hand-built so tests do not need a real
     config directory. Override ``config`` to supply a different
     tree, or ``daemon_dir`` to swap in a custom mock.
+
+    ``output_format`` is a convenience for the common case of pinning the
+    rendered output mode (e.g. ``"human"``): the CLI now defaults to
+    ``json``, so tests asserting human-formatted output must request it
+    explicitly. Ignored when an explicit ``cli_config`` override is given.
     """
     base = tmp_path or Path("/tmp")
-    cli_config = overrides.get("cli_config") or CliConfig()
+    cli_config = overrides.get("cli_config")
+    if cli_config is None:
+        cli_config = (
+            CliConfig(output={"format": output_format})
+            if output_format is not None
+            else CliConfig()
+        )
     config = overrides.get("config") or ConfigTree(
         config_dir=base / "cfg",
         cli=cli_config,  # type: ignore[arg-type]

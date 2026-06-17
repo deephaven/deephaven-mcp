@@ -132,7 +132,8 @@ class ErrorCode(StrEnum):
     )
     COMMAND_NOT_FOUND = (
         "command_not_found",
-        "'dh-mcp introspect PATH' referenced a command path that does not exist.",
+        "'dh-mcp introspect command PATH' referenced a command path that "
+        "does not exist.",
     )
     MISSING_ARGUMENT = (
         "missing_argument",

@@ -3,7 +3,8 @@
 Entry point: :func:`deephaven_mcp.cli._main.main`, bound to the
 ``dh-mcp`` console script in ``pyproject.toml``. A ``click`` noun-verb
 tree with the ``daemon``, ``tool``, and ``config`` noun groups plus the
-``introspect`` meta-command.
+``introspect`` noun group (machine-readable metadata: ``tree`` /
+``command`` / ``errors``).
 
 The CLI manages a per-user local daemon (started on demand from
 ``dh-mcp-systems-server --daemon``) and dispatches MCP tool calls to

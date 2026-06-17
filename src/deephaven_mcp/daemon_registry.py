@@ -393,7 +393,7 @@ class LockedRegistry(AbstractContextManager["LockedRegistry"]):
             # caller's post-condition (file gone after the call) is
             # satisfied; report a no-op quarantine.
             return None
-        _LOGGER.warning(
+        _LOGGER.info(
             f"[daemon_registry:LockedRegistry.quarantine] Quarantined "
             f"corrupt registry to {target}"
         )

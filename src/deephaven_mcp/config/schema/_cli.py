@@ -75,10 +75,12 @@ class OutputConfig(RedactableSchema):
     row/column limits, pager preference, etc.).
     """
 
-    format: Literal["human", "json", "yaml"] = "human"
-    """Default output format. ``"human"`` emits terminal-friendly
-    output; ``"json"`` and ``"yaml"`` emit deterministically sorted
-    structured documents. Overridden by ``-o/--output``."""
+    format: Literal["human", "json", "yaml"] = "json"
+    """Default output format. Defaults to ``"json"`` because the CLI is
+    machine-first (primarily driven by AI agents); ``"yaml"`` also emits
+    a deterministically sorted structured document, and ``"human"`` emits
+    terminal-friendly output for interactive use. Overridden per
+    invocation by ``-o/--output`` or ``DH_MCP_OUTPUT``."""
 
 
 class DaemonTimeouts(RedactableSchema):

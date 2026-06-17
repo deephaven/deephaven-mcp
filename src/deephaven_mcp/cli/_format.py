@@ -17,7 +17,13 @@ into ``jq`` / ``yq`` or for programmatic consumption by AI agents.
 
 from __future__ import annotations
 
-__all__ = ["OUTPUT_ENV_VAR", "OUTPUT_MODES", "OutputMode", "format_output"]
+__all__ = [
+    "DEFAULT_OUTPUT_MODE",
+    "OUTPUT_ENV_VAR",
+    "OUTPUT_MODES",
+    "OutputMode",
+    "format_output",
+]
 
 import json
 import shutil
@@ -35,6 +41,16 @@ OUTPUT_MODES: tuple[OutputMode, ...] = get_args(OutputMode)
 
 OUTPUT_ENV_VAR = "DH_MCP_OUTPUT"
 """Environment variable backing the ``-o/--output`` flag."""
+
+DEFAULT_OUTPUT_MODE: OutputMode = "json"
+"""Fallback output mode when none is set via ``-o``, ``DH_MCP_OUTPUT``, or config.
+
+``dh-mcp`` is machine-first (primarily driven by AI agents), so every
+surface defaults to ``json`` — operational commands (through
+``CliConfig.output.format``), the ``introspect`` group / ``--introspect``
+flag, and the error renderer. Humans opt into terminal-friendly output
+with ``-o human``, ``DH_MCP_OUTPUT=human``, or ``output.format`` in
+cli.json. A test pins this equal to ``CliConfig().output.format``."""
 
 
 # ``Any``: renders heterogeneous CLI return values (pydantic models,

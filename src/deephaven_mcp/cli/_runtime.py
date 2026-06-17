@@ -10,8 +10,8 @@ The single :class:`Runtime` aggregates the resolved paths, the
 validated :class:`ConfigTree`, and the daemon-directory handle.
 :func:`load_runtime` is the only entry point: every subcommand
 either takes a :class:`Runtime` injected by ``click.pass_obj`` or
-the ``--help`` / ``introspect`` paths short-circuit before the load
-runs.
+the ``--help`` / ``--introspect`` / ``introspect`` paths
+short-circuit before the load runs.
 
 Read sites:
 
@@ -24,9 +24,9 @@ Read sites:
 - ``runtime.daemon_dir`` — typed handle to ``runtime_dir/daemon/``.
 
 Recovery from a broken configuration tree happens by editing the
-file the error message points at; ``--help`` and
-``dh-mcp introspect`` continue to work without config because
-:mod:`deephaven_mcp.cli._main` skips the load on those paths.
+file the error message points at; ``--help``, the ``--introspect``
+flag, and ``dh-mcp introspect`` continue to work without config
+because :mod:`deephaven_mcp.cli._main` skips the load on those paths.
 """
 
 from __future__ import annotations
@@ -87,9 +87,9 @@ async def load_runtime(
     is parsed and validated up front. Any malformed file raises
     :class:`CliError(CONFIG_INVALID)`. There is no recovery mode —
     callers that want the CLI usable without a valid configuration
-    must short-circuit *before* calling this function (the
-    ``--help`` and ``introspect`` paths in :mod:`deephaven_mcp.cli._main`
-    are the canonical examples).
+    must short-circuit *before* calling this function (the ``--help``,
+    ``--introspect``, and ``introspect`` paths in
+    :mod:`deephaven_mcp.cli._main` are the canonical examples).
 
     The runtime directory is created if absent and tightened to mode
     ``0o700``; this happens before the configuration audit so a

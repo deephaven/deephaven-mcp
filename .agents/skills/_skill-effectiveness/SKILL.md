@@ -99,7 +99,7 @@ These rules apply equally to:
 
 - `AGENTS.md` bullets (always-on, every-session content; effectiveness is *more* important here because every reader is forced to read it).
 - MCP tool docstrings (consumed by AI agents through `tools/list`).
-- Error-code `help_text` (consumed by agents through structured-error output and `dh-mcp introspect`).
+- Error-code `help_text` (consumed by agents through structured-error output and `dh-mcp introspect errors`).
 - README catalog rows (the second-tier description; agents and humans both read it).
 
 When applying effectiveness rules outside skills, the same checks apply: name the moment, name the verb, prefer examples over abstractions, avoid hedges, ground in real exemplars.

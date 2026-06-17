@@ -259,7 +259,7 @@ def test_echo_payload_renders_in_configured_mode(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """echo_payload prints the value via format_output in the runtime's mode."""
-    echo_payload(make_runtime(tmp_path), {"a": 1, "b": 2})
+    echo_payload(make_runtime(tmp_path, output_format="human"), {"a": 1, "b": 2})
     out = capsys.readouterr().out
     assert "a: 1" in out
     assert "b: 2" in out
@@ -269,7 +269,11 @@ def test_echo_payload_forwards_empty_message(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """echo_payload forwards empty_message to format_output for an empty list."""
-    echo_payload(make_runtime(tmp_path), [], empty_message="(nothing here)")
+    echo_payload(
+        make_runtime(tmp_path, output_format="human"),
+        [],
+        empty_message="(nothing here)",
+    )
     assert capsys.readouterr().out.strip() == "(nothing here)"
 
 
@@ -278,7 +282,7 @@ async def test_call_and_echo_fetches_then_prints_whole_payload(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """call_and_echo is call_for_payload composed with echo_payload."""
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     result = CallToolResult(content=[], structuredContent={"success": True, "count": 1})
     with (
         patch.object(_wrapping, "acquire", AsyncMock(return_value=make_entry())),
@@ -328,7 +332,7 @@ async def test_call_and_echo_field_emits_field_and_asserts_call(
 async def test_call_and_echo_field_uses_default_when_field_absent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     result = CallToolResult(content=[], structuredContent={"success": True})
     acq, call = _patched_call(result)
     with acq, call:
@@ -343,7 +347,7 @@ async def test_call_and_echo_field_surfaces_partial_result_with_errors(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A success payload's `partial_result` errors go to stderr, not stdout."""
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     payload = {
         "success": True,
         "sessions": [{"session_id": "community:community:dev"}],

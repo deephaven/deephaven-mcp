@@ -154,7 +154,7 @@ def test_status_human_renders_as_aligned_table(tmp_path: Path) -> None:
     With ``config`` removed, every cell is scalar, so the renderer takes the
     aligned-table path; no stacked-block fallback for the normal case.
     """
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     acquire_p, call_p = _patch(_result(_STATUS_PAYLOAD))
     with acquire_p, call_p:
         result = _invoke(["system", "status"], rt)

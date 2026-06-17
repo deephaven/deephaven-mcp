@@ -63,7 +63,7 @@ def test_tool_list_hides_private_by_default(tmp_path: Path) -> None:
 
 def test_tool_list_empty_shows_registered_message(tmp_path: Path) -> None:
     """An empty catalog keeps the tool-list-specific wording via empty_message."""
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     fake = AsyncMock()
     fake.__aenter__.return_value = fake
     fake.__aexit__.return_value = None
@@ -160,7 +160,7 @@ def test_tool_show_returns_metadata_in_json(tmp_path: Path) -> None:
 
 
 def test_tool_show_human_output(tmp_path: Path) -> None:
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, output_format="human")
     fake = AsyncMock()
     fake.__aenter__.return_value = fake
     fake.__aexit__.return_value = None

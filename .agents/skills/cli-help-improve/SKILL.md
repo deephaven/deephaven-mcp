@@ -25,7 +25,7 @@ For each command in scope:
 
 ```bash
 dh-mcp <noun> <verb> --help
-dh-mcp introspect | jq '.commands.<noun>.subcommands.<verb>'
+dh-mcp <noun> <verb> --introspect    # or: dh-mcp introspect tree | jq '.commands.<noun>.subcommands.<verb>' — both default to json
 uv run pytest tests/cli/test_help_contract.py tests/cli/test__help.py tests/cli/_commands/test_introspect.py
 ```
 

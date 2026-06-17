@@ -56,8 +56,9 @@ _ALL_IDS = [path for path, _ in _ALL]
 
 # Pure discovery commands have no command-specific failure mode (they
 # cannot raise a CliError), so they document no Error codes section.
-# Every operational command must.
-_NO_ERROR_CODES = {"introspect"}
+# Every operational command must. ``introspect command`` is excluded
+# because it can raise COMMAND_NOT_FOUND for an unresolvable path.
+_NO_ERROR_CODES = {"introspect tree", "introspect errors"}
 
 
 @pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)

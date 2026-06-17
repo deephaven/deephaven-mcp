@@ -108,7 +108,9 @@ def test_list_partial_result_keeps_stdout_clean_under_json(tmp_path: Path) -> No
 
 
 def test_list_partial_result_warns_with_detail_on_stderr(tmp_path: Path) -> None:
-    result, _ = _run(["session", "list"], _LIST_WITH_PARTIAL, tmp_path)
+    # -o human so the partial-result warning renders as readable text (the
+    # default json renders it as a structured stderr object instead).
+    result, _ = _run(["-o", "human", "session", "list"], _LIST_WITH_PARTIAL, tmp_path)
     assert result.exit_code == 0
     assert _SID in result.stdout
     assert result.stderr.startswith("warning: ")
