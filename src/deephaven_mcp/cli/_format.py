@@ -78,7 +78,11 @@ def _coerce_jsonable(value: Any) -> Any:
 # ``Any``: ``value`` is any subcommand return value (tool results,
 # redacted-config dicts, scalars); the render path dispatches on type.
 def format_output(
-    value: Any, *, output: OutputMode, empty_message: str = "(none)"
+    value: Any,
+    *,
+    output: OutputMode,
+    empty_message: str = "(none)",
+    sort_keys: bool = True,
 ) -> str:
     """Render ``value`` according to the requested CLI output mode.
 
@@ -93,6 +97,11 @@ def format_output(
         empty_message (str): Human-mode text for an empty list. Defaults
             to ``"(none)"``; ``json``/``yaml`` modes ignore it and emit
             ``[]``.
+        sort_keys (bool): Whether ``json``/``yaml`` modes sort object keys
+            alphabetically. Defaults to ``True``. Pass ``False`` to emit
+            keys in insertion order, for payloads whose key order is itself
+            meaningful (e.g. most- to least-important first). ``human`` mode
+            always renders in insertion order and ignores this flag.
 
     Returns:
         str: The rendered output, *without* a trailing newline.
@@ -101,10 +110,10 @@ def format_output(
         case "human":
             return _format_human(value, empty_message=empty_message)
         case "json":
-            return json.dumps(_coerce_jsonable(value), indent=2, sort_keys=True)
+            return json.dumps(_coerce_jsonable(value), indent=2, sort_keys=sort_keys)
         case "yaml":
             dumped: str = yaml.safe_dump(
-                _coerce_jsonable(value), sort_keys=True, default_flow_style=False
+                _coerce_jsonable(value), sort_keys=sort_keys, default_flow_style=False
             )
             return dumped.rstrip("\n")
         case _ as unexpected:

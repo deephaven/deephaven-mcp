@@ -270,10 +270,10 @@ verb honors the top-level `-o/--output` flag.
 
 | Verb       | Purpose                                                                                       |
 |------------|-----------------------------------------------------------------------------------------------|
-| `start`    | Idempotently spawn the daemon (or print the existing handle). Reports pid/host/port.          |
+| `start`    | Idempotently spawn the daemon (or report the existing one). Returns the shared `{state, message, daemon, paths}` envelope with `state: "running"`. |
 | `stop`     | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                        |
-| `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir, plus the always-present `runtime_dir`, `registry_path`, and `log_path`. |
-| `restart`  | `stop` then `start` in one shot; reports the new handle.                                      |
+| `status`   | Reports the daemon's `state` (`running`/`stopped`/`crashed`) and a human `message`. Includes a `daemon` object (pid, host, port, started_at, created_at_ns, redacted psk) **only when running**, and always includes `paths` (config, runtime, registry, log). Read-only: a `crashed` entry is reported, not cleaned up — use `start` or `repair`. Exits 0 in all three states. |
+| `restart`  | `stop` then `start` in one shot; returns the same `{state, message, daemon, paths}` envelope as `start`. |
 | `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
 | `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
 

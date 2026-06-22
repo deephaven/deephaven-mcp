@@ -253,7 +253,11 @@ async def call_for_payload(
 
 
 def echo_payload(
-    runtime: Runtime, value: Any, *, empty_message: str = "(none)"
+    runtime: Runtime,
+    value: Any,
+    *,
+    empty_message: str = "(none)",
+    sort_keys: bool = True,
 ) -> None:
     """Render ``value`` in the runtime's output mode and print it.
 
@@ -265,10 +269,17 @@ def echo_payload(
         value (Any): The value to render (a payload dict, a shaped list, etc.).
         empty_message (str): Human-mode text for an empty list, forwarded to
             :func:`~deephaven_mcp.cli._format.format_output`.
+        sort_keys (bool): Whether ``json``/``yaml`` modes sort object keys
+            alphabetically. Defaults to ``True``. Pass ``False`` for payloads
+            whose key order is meaningful, forwarded to
+            :func:`~deephaven_mcp.cli._format.format_output`.
     """
     click.echo(
         format_output(
-            value, output=runtime.config.cli.output.format, empty_message=empty_message
+            value,
+            output=runtime.config.cli.output.format,
+            empty_message=empty_message,
+            sort_keys=sort_keys,
         )
     )
 

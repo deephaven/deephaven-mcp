@@ -277,6 +277,25 @@ def test_echo_payload_forwards_empty_message(
     assert capsys.readouterr().out.strip() == "(nothing here)"
 
 
+def test_echo_payload_forwards_sort_keys(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """echo_payload forwards sort_keys to format_output.
+
+    The default sorts object keys alphabetically; ``sort_keys=False`` preserves
+    insertion order, which the daemon-reporting commands rely on.
+    """
+    rt = make_runtime(tmp_path, output_format="json")
+
+    echo_payload(rt, {"b": 1, "a": 2})
+    sorted_out = capsys.readouterr().out
+    assert sorted_out.index('"a"') < sorted_out.index('"b"')
+
+    echo_payload(rt, {"b": 1, "a": 2}, sort_keys=False)
+    insertion_out = capsys.readouterr().out
+    assert insertion_out.index('"b"') < insertion_out.index('"a"')
+
+
 @pytest.mark.asyncio
 async def test_call_and_echo_fetches_then_prints_whole_payload(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
