@@ -201,13 +201,6 @@ class CliError(click.ClickException):
     active output mode before exiting with ``exit_code``.
     """
 
-    exit_code: int
-    """Process exit code, taken from the bound :class:`ErrorCode`.
-
-    Annotated as an instance attribute to override the class-level
-    ``exit_code`` declared by :class:`click.ClickException`.
-    """
-
     def __init__(self, message: str, *, code: ErrorCode) -> None:
         """Capture the message and the stable code.
 
@@ -218,7 +211,9 @@ class CliError(click.ClickException):
         """
         super().__init__(message)
         self.code = code
-        self.exit_code = code.exit_code
+        # click declares ``exit_code`` as a class variable; shadowing it
+        # per-instance is intentional and what click reads at exit time.
+        self.exit_code = code.exit_code  # type: ignore[misc]
 
     def format_message(self) -> str:
         """Return the plain message; ``human`` mode prints this verbatim."""
