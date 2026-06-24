@@ -396,20 +396,22 @@ class MultiSystemRegistry:
     def _route(
         self, qualified_session_id: QualifiedSessionId
     ) -> MutableSessionRegistry:
-        """Parse ``qualified_session_id`` and return the child registry that owns it.
+        """Return the child registry that owns ``qualified_session_id``.
 
         Args:
-            qualified_session_id (str): A fully qualified session identifier.
+            qualified_session_id (QualifiedSessionId): An already-parsed,
+                fully qualified session identifier.
 
         Returns:
             MutableSessionRegistry: The community or enterprise child
                 that ``qualified_session_id`` routes to.
 
         Raises:
-            InvalidSessionNameError: If ``qualified_session_id`` is malformed, its
-                type is unknown, no community child is configured (for
-                community ids), or no enterprise child has the named
+            InvalidSessionNameError: If no community child is configured
+                (for community ids), or no enterprise child has the named
                 system (for enterprise ids).
+            InternalError: If ``qualified_session_id.system_type`` is a
+                :class:`SystemType` member this dispatch does not handle.
         """
         system = qualified_session_id.system_name
 

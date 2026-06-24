@@ -947,7 +947,7 @@ async def session_community_create(
         - Invalid parameters: "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
         - Unsupported language: "Unsupported programming_language: '{language}'. Must be 'Python' or 'Groovy'"
         - Invalid config language: "Invalid programming_language in config: '{language}'. Must be 'Python' or 'Groovy'"
-        - Display-name conflict: "A community session named '{name}' already exists (session_id='community:community:<session_name>')"
+        - Display-name conflict: "A community session named '{name}' already exists"
         - Startup timeout: "Session failed to start within {timeout} seconds"
 
     Note:

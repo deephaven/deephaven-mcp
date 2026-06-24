@@ -33,7 +33,7 @@ _RESOURCE_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 """Regex defining the resource-name rule.
 
 Allowed: ASCII alphanumerics plus ``_``, ``.``, ``-``. First character must be
-alphanumeric (no leading dash or dot). Empty strings are rejected. Display
+alphanumeric (no leading dash, dot, or underscore). Empty strings are rejected. Display
 names (e.g. enterprise PQ names from the DHE controller) are NOT subject to
 this rule; they travel through verbatim.
 """
@@ -54,13 +54,14 @@ def validate_resource_name(value: str, *, field: str) -> str:
         str: The validated ``value``.
 
     Raises:
-        InvalidSessionNameError: When ``value`` is empty or contains any
-            character outside ``[A-Za-z0-9_.-]`` or starts with ``-`` or ``.``.
+        InvalidSessionNameError: When ``value`` is empty, contains any
+            character outside ``[A-Za-z0-9_.-]``, or does not start with an
+            alphanumeric (a leading ``-``, ``.``, or ``_`` is rejected).
     """
     if not value:
         raise InvalidSessionNameError(
             f"{field} must be a non-empty string of "
-            f"[A-Za-z0-9_.-] (no leading dash or dot); got empty string"
+            f"[A-Za-z0-9_.-] starting with a letter or digit; got empty string"
         )
     if not _RESOURCE_NAME_PATTERN.match(value):
         bad_chars = sorted({ch for ch in value if not re.match(r"[A-Za-z0-9_.-]", ch)})
@@ -73,6 +74,6 @@ def validate_resource_name(value: str, *, field: str) -> str:
             detail = f"must not start with {value[0]!r}"
         raise InvalidSessionNameError(
             f"{field} {value!r}: {detail} "
-            f"(allowed: [A-Za-z0-9_.-], no leading dash or dot)"
+            f"(allowed: [A-Za-z0-9_.-], must start with a letter or digit)"
         )
     return value
