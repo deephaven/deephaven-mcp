@@ -7,7 +7,7 @@ Provides common helpers used across the MCP tool modules:
   :func:`get_multi_config`, :func:`get_community_settings`,
   :func:`get_enterprise_settings`, :func:`get_community_registry`,
   :func:`get_enterprise_registry`.
-- ID parsers: :func:`parse_session_id`, :func:`parse_pq_id`.
+- ID parsers: :func:`parse_pq_id` (use :meth:`QualifiedSessionId.from_str` directly for session ids).
 - Session retrieval: :func:`get_session_from_context`,
   :func:`get_enterprise_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
@@ -49,17 +49,16 @@ from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.formatters import format_table_data
 from deephaven_mcp.mcp_systems_server._lifespan import LifespanContext
 from deephaven_mcp.resource_manager import (
-    BaseItemManager,
     CommunitySessionRegistry,
     EnterpriseSessionRegistry,
     InitializationPhase,
     MultiSystemRegistry,
+    QualifiedSessionId,
     SystemType,
 )
 
 __all__ = [
     "ParsedPqId",
-    "ParsedSessionId",
     "build_table_data_response",
     "check_response_size",
     "check_session_limit",
@@ -77,7 +76,6 @@ __all__ = [
     "get_response_limits",
     "get_session_from_context",
     "parse_pq_id",
-    "parse_session_id",
     "redact_json_sensitive_fields",
     "resolve_pq_ids_to_single_system",
 ]
@@ -308,31 +306,6 @@ def get_enterprise_registry(context: Context, system: str) -> EnterpriseSessionR
 # ---------------------------------------------------------------------------
 
 
-class ParsedSessionId(NamedTuple):
-    """Structured result of :func:`parse_session_id`.
-
-    Backward compatibility: as a :class:`typing.NamedTuple`, this type
-    also unpacks positionally as a 3-tuple
-    ``(system_type, system_name, name)``, so existing call sites that
-    use tuple-style unpacking continue to work without modification.
-
-    Attributes:
-        system_type (SystemType): :data:`SystemType.COMMUNITY` or
-            :data:`SystemType.ENTERPRISE`.
-        system_name (str): The middle segment of the identifier — for
-            community sessions this is always the literal ``"community"``
-            (the umbrella system name; the static-vs-dynamic distinction
-            lives on the manager's :attr:`origin` field, not in the id);
-            for enterprise sessions it is the ``system_name`` of the
-            configured enterprise system.
-        name (str): The session-local name (last segment).
-    """
-
-    system_type: SystemType
-    system_name: str
-    name: str
-
-
 class ParsedPqId(NamedTuple):
     """Structured result of :func:`parse_pq_id`.
 
@@ -347,42 +320,6 @@ class ParsedPqId(NamedTuple):
 
     system_name: str
     serial: int
-
-
-def parse_session_id(session_id: str) -> ParsedSessionId:
-    """Parse a fully qualified session identifier.
-
-    Args:
-        session_id (str): A session id of the form
-            ``"<type>:<system>:<name>"`` produced by
-            :meth:`BaseItemManager.make_full_name`.
-
-    Returns:
-        ParsedSessionId: ``(system_type, system_name, name)``.
-            ``system_type`` is the enum value rather than the raw
-            string so callers can compare against
-            :data:`SystemType.COMMUNITY` / :data:`SystemType.ENTERPRISE`
-            without re-parsing. ``system_name`` is the system identifier
-            (the literal ``"community"`` for community sessions, or the
-            enterprise ``system_name`` for enterprise sessions) — i.e.
-            the value as enumerated by the ``list_systems`` MCP tool.
-            The result also unpacks as a plain 3-tuple for callers using
-            positional unpacking.
-
-    Raises:
-        InvalidSessionNameError: If ``session_id`` does not match the
-            expected three-segment shape, or if ``<type>`` is not a
-            known :class:`SystemType` value.
-    """
-    type_str, system, name = BaseItemManager.parse_full_name(session_id)
-    try:
-        system_type = SystemType(type_str)
-    except ValueError as exc:
-        raise InvalidSessionNameError(
-            f"Session id {session_id!r} has unsupported type {type_str!r}; "
-            f"expected one of {[t.value for t in SystemType]}."
-        ) from exc
-    return ParsedSessionId(system_type=system_type, system_name=system, name=name)
 
 
 def parse_pq_id(pq_id: str) -> ParsedPqId:
@@ -508,7 +445,7 @@ async def get_session_from_context(
         f"[mcp_systems_server:{function_name}] Retrieving session manager "
         f"for '{session_id}'"
     )
-    session_manager = await registry.get(session_id)
+    session_manager = await registry.get(QualifiedSessionId.from_str(session_id))
 
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Establishing session "
@@ -584,17 +521,17 @@ def get_response_limits(context: Context, session_id: str) -> ResponseLimits:
             fully qualified session identifier.
         InternalError: If the section that owns ``session_id`` has no
             configuration loaded (a tool was registered without its
-            underlying configuration block), or if ``parsed.system_type``
+            underlying configuration block), or if ``qsid.system_type``
             is not a known :class:`SystemType` member (indicates the
             enum gained a value the router has not been taught about).
     """
-    parsed = parse_session_id(session_id)
-    if parsed.system_type is SystemType.ENTERPRISE:
+    qsid = QualifiedSessionId.from_str(session_id)
+    if qsid.system_type is SystemType.ENTERPRISE:
         return get_enterprise_settings(context).response_limits
-    if parsed.system_type is SystemType.COMMUNITY:
+    if qsid.system_type is SystemType.COMMUNITY:
         return get_community_settings(context).response_limits
     raise InternalError(
-        f"[get_response_limits] Unhandled SystemType {parsed.system_type!r}; "
+        f"[get_response_limits] Unhandled SystemType {qsid.system_type!r}; "
         f"this router must be extended whenever SystemType gains a member."
     )
 

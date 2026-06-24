@@ -92,7 +92,6 @@ from deephaven_mcp._exceptions import (
     AuthenticationError,
     ConfigurationError,
     DeephavenConnectionError,
-    InvalidSessionNameError,
     SessionCreationError,
 )
 from deephaven_mcp._taxonomy import SessionOrigin, SystemType
@@ -110,6 +109,7 @@ from ._launcher import (
     DockerLaunchedSession,
     PythonLaunchedSession,
 )
+from ._session_id import QualifiedSessionId, SessionId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -339,92 +339,11 @@ class BaseItemManager[T: AsyncClosable](ABC):
     would fail.
     """
 
-    @staticmethod
-    def make_full_name(system_type: "SystemType", system: str, name: str) -> str:
-        """Construct the canonical full name identifier for managed resources.
-
-        This utility method creates standardized, unique identifiers for managed resources
-        by combining the system type, source, and name into a colon-separated string.
-        These identifiers are used throughout the system for resource identification,
-        registry keys, logging, and debugging.
-
-        Identifier Format:
-            The format follows the pattern: "system_type:source:name"
-            - system_type: "community" or "enterprise"
-            - source: Configuration source (file path, URL, config key, etc.)
-            - name: Unique name within the source context
-
-        Consistency:
-            This method should be used for ALL resource identifier construction to
-            ensure consistency across registries, logging, and other subsystems.
-            Using this method prevents identifier format inconsistencies.
-
-        Args:
-            system_type (SystemType): The Deephaven deployment type (COMMUNITY or ENTERPRISE).
-                Determines which client libraries and authentication mechanisms are used.
-            source (str): The configuration source identifier that groups related resources.
-                Examples: "config.yaml", "https://api.example.com/config", "env-vars"
-            name (str): The unique name of the specific resource within its source context.
-                Must be unique within the same system_type and source combination.
-
-        Returns:
-            str: A colon-separated identifier string in the exact format
-                "system_type:source:name". This string is safe for use as
-                dictionary keys, file names, and logging contexts.
-
-        Example:
-            ```python
-            # Create identifier for a community session
-            full_name = BaseItemManager.make_full_name(
-                SystemType.COMMUNITY, "local-config.yaml", "worker-1"
-            )
-            # Result: "community:local-config.yaml:worker-1"
-
-            # Create identifier for an enterprise factory
-            full_name = BaseItemManager.make_full_name(
-                SystemType.ENTERPRISE, "prod-env", "factory-east-1"
-            )
-            # Result: "enterprise:prod-env:factory-east-1"
-            ```
-        """
-        return f"{system_type.value}:{system}:{name}"
-
-    @staticmethod
-    def parse_full_name(full_name: str) -> tuple[str, str, str]:
-        """Parse a full name identifier into its components.
-
-        This method is the inverse of make_full_name() and parses identifiers
-        created by that method back into their constituent parts.
-
-        Args:
-            full_name: Full name in format "system_type:source:name"
-
-        Returns:
-            tuple[str, str, str]: (system_type, source, name)
-
-        Raises:
-            InvalidSessionNameError: If full_name is not in the expected format
-
-        Example:
-            ```python
-            system_type, source, name = BaseItemManager.parse_full_name(
-                "enterprise:prod-env:session-1"
-            )
-            # Result: ("enterprise", "prod-env", "session-1")
-            ```
-        """
-        parts = full_name.split(":", 2)
-        if len(parts) != 3 or not all(part for part in parts):
-            raise InvalidSessionNameError(
-                f"Invalid full_name format: '{full_name}'. "
-                f"Expected format: 'system_type:source:name'"
-            )
-        return parts[0], parts[1], parts[2]
-
     def __init__(
         self,
         system_type: SystemType,
         system: str,
+        session_id: SessionId,
         name: str,
     ):
         """Initialize the resource manager with identification metadata and internal state.
@@ -435,7 +354,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
         but the actual managed resource won't be created until first access.
 
         Initialization Process:
-            1. Store identification metadata (system_type, source, name)
+            1. Store identification metadata (system_type, system, name)
             2. Initialize empty resource cache (lazy loading)
             3. Create asyncio.Lock for thread safety
             4. Generate canonical full name identifier
@@ -511,14 +430,16 @@ class BaseItemManager[T: AsyncClosable](ABC):
         """
         self._system_type = system_type
         self._system = system
+        self._session_id: SessionId = session_id
         self._name = name
         self._item_cache: T | None = None
         self._last_accessed: float | None = None
         self._lock = asyncio.Lock()
 
-        full_name = self.make_full_name(system_type, system, name)
+        qualified_session_id = QualifiedSessionId(system_type, system, session_id)
         _LOGGER.info(
-            f"[{self.__class__.__name__}] Initialized manager for '{full_name}'"
+            f"[{self.__class__.__name__}] Initialized manager for "
+            f"'{qualified_session_id}' (display name {name!r})"
         )
 
     async def maybe_close_if_idle(self, timeout_seconds: float, now: float) -> bool:
@@ -575,7 +496,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
 
         _LOGGER.info(
             f"[{self.__class__.__name__}] Closing idle item for "
-            f"'{self.full_name}' (idle for {idle_for:.1f}s)"
+            f"'{self.qualified_session_id}' (idle for {idle_for:.1f}s)"
         )
         await self.close()
         return True
@@ -602,7 +523,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
         except Exception as e:
             _LOGGER.warning(
                 f"[{self.__class__.__name__}] Error closing item for "
-                f"'{self.full_name}': {e}"
+                f"'{self.qualified_session_id}': {e}"
             )
 
     @abstractmethod
@@ -787,15 +708,17 @@ class BaseItemManager[T: AsyncClosable](ABC):
 
     @property
     def name(self) -> str:
-        """The unique name of this manager instance within its source context.
+        """The unique name of this manager instance within its ``(system_type, system)``.
 
         This property provides the specific name that uniquely identifies this
-        manager among other managers from the same source. It's used for
-        identification, logging, debugging, and creating fully qualified identifiers.
+        manager among other managers in the same ``(system_type, system)``
+        namespace. It's used for identification, logging, debugging, and
+        creating fully qualified identifiers.
 
         Uniqueness Scope:
-            The name must be unique within the combination of system_type and source,
-            but can be reused across different sources or system types.
+            The name must be unique within the combination of ``system_type``
+            and ``system``, but can be reused across different systems or
+            system types.
 
         Common Naming Patterns:
             - Service names: "worker-1", "api-server", "data-processor"
@@ -804,7 +727,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
 
         Usage:
             Names are used to:
-            - Create unique full identifiers via make_full_name()
+            - Create unique full identifiers via QualifiedSessionId()
             - Provide specific context in logging messages
             - Enable targeted resource management operations
             - Support debugging and monitoring of specific instances
@@ -815,85 +738,34 @@ class BaseItemManager[T: AsyncClosable](ABC):
         return self._name
 
     @property
-    def full_name(self) -> str:
-        """The fully qualified, globally unique identifier for this manager.
+    def session_id(self) -> SessionId:
+        """This manager's :class:`SessionId`.
 
-        This property provides a canonical identifier that uniquely identifies this
-        manager instance across the entire system by combining the system type,
-        source, and name into a colon-separated string. These identifiers are used
-        extensively for logging, debugging, registry keys, and system-wide identification.
-
-        Identifier Format:
-            The format follows the standard pattern: "system_type:source:name"
-            Examples:
-            - "community:community:worker-1"
-            - "enterprise:production-env:api-server"
-            - "community:local-dev:analytics-session"
-
-        Global Uniqueness:
-            The full name is guaranteed to be unique across all managers in the system,
-            as long as the combination of (system_type, source, name) is unique.
-            This enables safe use as dictionary keys, file names, and identifiers.
-
-        Usage Contexts:
-            - **Logging**: Provides clear context in log messages
-            - **Registry Keys**: Used as unique keys in manager registries
-            - **Debugging**: Helps identify specific manager instances
-            - **Monitoring**: Enables tracking of individual manager metrics
-            - **Configuration**: Maps to specific configuration sections
-
-        Implementation:
-            This property delegates to the static make_full_name() method to ensure
-            consistency across all identifier creation in the system.
+        For enterprise sessions, this is the DHE controller's
+        :class:`~deephaven_mcp.client.CorePlusQuerySerial` rendered as a
+        decimal string (via :meth:`SessionId.from_int`). For community
+        sessions, this is the session name itself.
 
         Returns:
-            str: A colon-separated identifier string in the exact format
-                "system_type:source:name" that uniquely identifies this manager
-                across the entire system.
-
-        Example:
-            ```python
-            manager = CommunitySessionManager(
-                SystemType.COMMUNITY, "config.yaml", "worker-1"
-            )
-            print(manager.full_name)  # "community:community:worker-1"
-            ```
-
-        See Also:
-            make_full_name(): The static method that implements the identifier format
+            SessionId: The session id.
         """
-        return self.make_full_name(self.system_type, self.system, self.name)
+        return self._session_id
 
     @property
-    def split_name(self) -> tuple[str, str, str]:
-        """Split this manager's full name into its constituent components.
+    def qualified_session_id(self) -> QualifiedSessionId:
+        """The fully qualified, globally unique identifier for this manager.
 
-        This property provides convenient access to the individual components
-        that make up this manager's full_name identifier.
+        Format: ``"<system_type>:<system>:<session_id>"`` where ``session_id``
+        is the manager's :class:`SessionId`. Examples:
+
+        - ``"community:community:my_worker"``
+        - ``"enterprise:prod:42"``
 
         Returns:
-            tuple[str, str, str]: (system_type, system, name) components
-
-        Example:
-            ```python
-            def creation_func(source: str, name: str):
-                # Session creation logic
-                pass
-
-            manager = EnterpriseSessionManager(
-                source="prod-env",
-                name="session-1",
-                creation_function=creation_func
-            )
-            system_type, source, name = manager.split_name
-            # Result: ("enterprise", "prod-env", "session-1")
-            ```
-
-        See Also:
-            full_name: The combined identifier string
-            parse_full_name(): Static method for parsing arbitrary full names
+            QualifiedSessionId: A validated colon-separated identifier suitable
+                for use as a dictionary key and a stable, shell-safe handle.
         """
-        return self.system_type.value, self.system, self.name
+        return QualifiedSessionId(self.system_type, self.system, self.session_id)
 
     async def _get_unlocked(self) -> T:
         """Get the managed resource without acquiring the synchronization lock.
@@ -956,18 +828,18 @@ class BaseItemManager[T: AsyncClosable](ABC):
         """
         if self._item_cache:
             _LOGGER.debug(
-                f"[{self.__class__.__name__}] Cache hit for '{self.full_name}'"
+                f"[{self.__class__.__name__}] Cache hit for '{self.qualified_session_id}'"
             )
             self._last_accessed = time.monotonic()
             return self._item_cache
 
         _LOGGER.info(
-            f"[{self.__class__.__name__}] Cache miss - creating new item for '{self.full_name}'..."
+            f"[{self.__class__.__name__}] Cache miss - creating new item for '{self.qualified_session_id}'..."
         )
         self._item_cache = await self._create_item()
         self._last_accessed = time.monotonic()
         _LOGGER.info(
-            f"[{self.__class__.__name__}] Successfully created and cached new item for '{self.full_name}'"
+            f"[{self.__class__.__name__}] Successfully created and cached new item for '{self.qualified_session_id}'"
         )
         return self._item_cache
 
@@ -1043,12 +915,12 @@ class BaseItemManager[T: AsyncClosable](ABC):
             close(): Clean up and invalidate the cached resource
         """
         _LOGGER.debug(
-            f"[{self.__class__.__name__}] Getting managed item for '{self.full_name}'"
+            f"[{self.__class__.__name__}] Getting managed item for '{self.qualified_session_id}'"
         )
         async with self._lock:
             result = await self._get_unlocked()
             _LOGGER.debug(
-                f"[{self.__class__.__name__}] Successfully retrieved managed item for '{self.full_name}'"
+                f"[{self.__class__.__name__}] Successfully retrieved managed item for '{self.qualified_session_id}'"
             )
             return result
 
@@ -1170,7 +1042,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
                 return (ResourceLivenessStatus.MISCONFIGURED, str(e))
         except Exception as e:
             _LOGGER.warning(
-                f"[{self.__class__.__name__}] Liveness check failed for {self.full_name}: {e}"
+                f"[{self.__class__.__name__}] Liveness check failed for {self.qualified_session_id}: {e}"
             )
             return (ResourceLivenessStatus.UNKNOWN, str(e))
 
@@ -1245,7 +1117,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
                 while True:
                     status, detail = await manager.liveness_status()
                     if status != ResourceLivenessStatus.ONLINE:
-                        alert_ops_team(f"Resource {manager.full_name}: {status.name} - {detail}")
+                        alert_ops_team(f"Resource {manager.qualified_session_id}: {status.name} - {detail}")
                     await asyncio.sleep(30)
             ```
 
@@ -1270,7 +1142,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
             - Debug-level entry/exit logging for performance monitoring
             - Info-level result logging with mode and status details
             - Warning-level error logging handled by internal methods
-            - All logs include manager class name and full_name for context
+            - All logs include manager class name and qualified_session_id for context
 
         See Also:
             ResourceLivenessStatus: Enum defining possible status return values
@@ -1280,14 +1152,14 @@ class BaseItemManager[T: AsyncClosable](ABC):
         """
         mode = "provisioning" if ensure_item else "cached-only"
         _LOGGER.debug(
-            f"[{self.__class__.__name__}] Checking liveness status ({mode} mode) for '{self.full_name}'"
+            f"[{self.__class__.__name__}] Checking liveness status ({mode} mode) for '{self.qualified_session_id}'"
         )
 
         async with self._lock:
             status, detail = await self._liveness_status_unlocked(ensure_item)
             detail_suffix = f" ({detail})" if detail else ""
             _LOGGER.info(
-                f"[{self.__class__.__name__}] Liveness check ({mode} mode) for '{self.full_name}': {status.value}{detail_suffix}"
+                f"[{self.__class__.__name__}] Liveness check ({mode} mode) for '{self.qualified_session_id}': {status.value}{detail_suffix}"
             )
             return status, detail
 
@@ -1366,7 +1238,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
                 # Use resource...
             else:
                 # Handle unhealthy resource
-                logger.warning(f"Resource {manager.full_name} is not alive")
+                logger.warning(f"Resource {manager.qualified_session_id} is not alive")
 
             # Conditional resource cleanup
             if await manager.is_alive():
@@ -1429,7 +1301,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
         Idempotent: safe to call multiple times.  Never raises.
         """
         _LOGGER.debug(
-            f"[{self.__class__.__name__}] Starting close operation for '{self.full_name}'"
+            f"[{self.__class__.__name__}] Starting close operation for '{self.qualified_session_id}'"
         )
 
         async with self._lock:
@@ -1439,14 +1311,16 @@ class BaseItemManager[T: AsyncClosable](ABC):
 
         if item_to_close is None:
             _LOGGER.debug(
-                f"[{self.__class__.__name__}] No cached item to close for '{self.full_name}'"
+                f"[{self.__class__.__name__}] No cached item to close for '{self.qualified_session_id}'"
             )
             return
 
-        _LOGGER.info(f"[{self.__class__.__name__}] Closing item for '{self.full_name}'")
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Closing item for '{self.qualified_session_id}'"
+        )
         await self._close_captured_item(item_to_close)
         _LOGGER.debug(
-            f"[{self.__class__.__name__}] Close operation complete for '{self.full_name}'"
+            f"[{self.__class__.__name__}] Close operation complete for '{self.qualified_session_id}'"
         )
 
 
@@ -1537,7 +1411,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         async def monitor_session(manager):
             status, detail = await manager.liveness_status()
             if status != ResourceLivenessStatus.ONLINE:
-                alert_operations(f"Session {manager.full_name}: {detail}")
+                alert_operations(f"Session {manager.qualified_session_id}: {detail}")
         ```
 
     Performance Characteristics:
@@ -1571,6 +1445,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
 
     def __init__(
         self,
+        session_id: SessionId,
         name: str,
         session_config: CommunitySessionConfig,
         origin: SessionOrigin,
@@ -1587,8 +1462,8 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
             The manager is configured with:
             - **system_type**: Set to SystemType.COMMUNITY for Community deployments
             - **system**: Always ``"community"`` (the umbrella system name); the static-vs-dynamic distinction lives in :attr:`origin`, not in the id
-            - **name**: The unique identifier for this specific manager instance
-            - **full_name**: Computed as ``"community:community:{name}"`` for global uniqueness
+            - **name**: The display name for this specific manager instance
+            - **qualified_session_id**: Computed as ``"community:community:<name>"`` — the community :class:`SessionId` is just the session name itself
 
         Configuration Storage:
             The provided session declaration is stored internally and used
@@ -1646,7 +1521,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
 
         Args:
             name: Unique identifier for this manager instance within its registry.
-                Used for logging, debugging, and creating the full_name identifier.
+                Used for logging, debugging, and creating the qualified_session_id identifier.
                 Should be a descriptive name like "worker-1", "main-session", etc.
             session_config: Validated
                 :class:`~deephaven_mcp.sessions.CommunitySessionConfig`
@@ -1669,6 +1544,7 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         super().__init__(
             system_type=SystemType.COMMUNITY,
             system=SystemType.COMMUNITY.value,
+            session_id=session_id,
             name=name,
         )
         self._origin = origin
@@ -1684,6 +1560,25 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         sessions created at runtime via ``session_community_create``.
         """
         return self._origin
+
+    @property
+    def session_config(self) -> CommunitySessionConfig:
+        """The :class:`CommunitySessionConfig` declaration backing this manager.
+
+        Describes how to connect to the community session this manager
+        wraps (host, port, authentication, TLS, etc.). The value is the
+        same instance passed to the constructor and never mutated after
+        construction.
+
+        Source by :attr:`origin`:
+
+        - ``SessionOrigin.STATIC``: loaded by the registry from a
+          ``community/sessions/<name>.json`` file at startup.
+        - ``SessionOrigin.DYNAMIC``: built at runtime by
+          ``session_community_create`` to point at the worker recorded
+          in :attr:`DynamicCommunitySessionManager.launched_session`.
+        """
+        return self._session_config
 
     @override
     async def _create_item(self) -> CoreSession:
@@ -1759,14 +1654,14 @@ class CommunitySessionManager(BaseItemManager[CoreSession]):
         """
         try:
             _LOGGER.info(
-                f"[{self.__class__.__name__}] Creating community session for {self.full_name}"
+                f"[{self.__class__.__name__}] Creating community session for {self.qualified_session_id}"
             )
             return await CoreSession.from_session_config(
                 self._session_config, self._timeouts
             )
         except Exception as e:
             _LOGGER.error(
-                f"[{self.__class__.__name__}] Failed to create community session for {self.full_name}: {e}"
+                f"[{self.__class__.__name__}] Failed to create community session for {self.qualified_session_id}: {e}"
             )
             raise SessionCreationError(
                 f"Failed to create session for community worker {self._name}: {e}"
@@ -1875,7 +1770,7 @@ class StaticCommunitySessionManager(CommunitySessionManager):
         - **Origin**: Automatically set to ``SessionOrigin.STATIC`` to distinguish from dynamic sessions
         - **Server Lifecycle**: Does NOT manage server startup/shutdown (server must exist)
         - **Configuration**: Loaded from per-session files under the resolved configuration directory's ``community/sessions/`` subtree
-        - **Full Name Format**: ``"community:community:{name}"`` (the middle segment is the umbrella system name; the static/dynamic distinction lives in :attr:`origin`, not in the id)
+        - **Full Name Format**: ``"community:community:<name>"`` — the community :class:`SessionId` is just the session name itself (the middle segment is the umbrella system name; the static/dynamic distinction lives in :attr:`origin`, not in the id)
 
     Usage:
         Typically created by CommunitySessionRegistry when loading configuration:
@@ -1895,6 +1790,7 @@ class StaticCommunitySessionManager(CommunitySessionManager):
     @override
     def __init__(
         self,
+        session_id: SessionId,
         name: str,
         session_config: CommunitySessionConfig,
         timeouts: CommunityClientTimeouts,
@@ -1902,23 +1798,27 @@ class StaticCommunitySessionManager(CommunitySessionManager):
         """Initialize a StaticCommunitySessionManager for a configuration-based session.
 
         Args:
-            name (str): Unique identifier for this manager instance within the registry.
-                Used to construct full_name as ``"community:community:{name}"``.
-                The static-vs-dynamic distinction lives in :attr:`origin`, not in the id.
-            session_config (CommunitySessionConfig): Validated session
-                declaration (host, port, credentials, etc.).
+            name (str): The display name of this session (filename stem of the
+                ``community/sessions/<name>.json`` file). Travels through to the
+                user as metadata; does not appear in :attr:`qualified_session_id`.
+            session_config (CommunitySessionConfig): Validated session declaration.
             timeouts (CommunityClientTimeouts): Community client-layer timeout
-                configuration forwarded to
-                :meth:`CoreSession.from_session_config` when the
-                underlying session is lazily created.
+                configuration.
+            session_id (SessionId): The session's :class:`SessionId`.
+                For community sessions this is just ``SessionId(name)``;
+                the registry constructs it and passes it through.
 
         Note:
-            The origin parameter is automatically set to ``SessionOrigin.STATIC``
-            - callers do not need to specify it. This distinguishes static
-            sessions from dynamic ones.
+            The origin parameter is automatically set to ``SessionOrigin.STATIC``.
         """
         # Static community session: declared in community/sessions/*.json.
-        super().__init__(name, session_config, SessionOrigin.STATIC, timeouts)
+        super().__init__(
+            session_id,
+            name,
+            session_config,
+            SessionOrigin.STATIC,
+            timeouts,
+        )
 
 
 class DynamicCommunitySessionManager(CommunitySessionManager):
@@ -1932,7 +1832,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         - **Origin**: Automatically set to ``SessionOrigin.DYNAMIC`` to distinguish from static sessions
         - **Server Lifecycle**: DOES manage server startup/shutdown (via LaunchedSession)
         - **Launch Methods**: Supports Docker containers or Python-based deephaven-server
-        - **Full Name Format**: ``"community:community:{name}"`` (the middle segment is the umbrella system name; the static/dynamic distinction lives in :attr:`origin`, not in the id)
+        - **Full Name Format**: ``"community:community:<name>"`` — the community :class:`SessionId` is just the session name itself (the middle segment is the umbrella system name; the static/dynamic distinction lives in :attr:`origin`, not in the id)
         - **Created By**: MCP tools like session_community_create
 
     Additional Properties:
@@ -1995,6 +1895,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     @override
     def __init__(
         self,
+        session_id: SessionId,
         name: str,
         session_config: CommunitySessionConfig,
         launched_session: DockerLaunchedSession | PythonLaunchedSession,
@@ -2003,24 +1904,29 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         """Initialize a DynamicCommunitySessionManager for a runtime-created session.
 
         Args:
-            name (str): Unique identifier for this manager instance within the registry.
-                Used to construct full_name as ``"community:community:{name}"``.
-                The static-vs-dynamic distinction lives in :attr:`origin`, not in the id.
-            session_config (CommunitySessionConfig): Validated session
-                declaration whose ``host`` / ``port`` / ``credentials``
-                match the launched session.
-            launched_session (DockerLaunchedSession | PythonLaunchedSession): The launched
-                session that provides server lifecycle management.
+            name (str): User-supplied display name for this session.
+                Travels through as metadata; does not appear in :attr:`qualified_session_id`.
+            session_config (CommunitySessionConfig): Validated session declaration
+                matching ``launched_session``.
+            launched_session (DockerLaunchedSession | PythonLaunchedSession): The
+                launched worker this manager wraps.
+            timeouts (CommunityClientTimeouts): Community client-layer timeouts.
+            session_id (SessionId): The session's :class:`SessionId`.
+                For community sessions this is just ``SessionId(name)``;
+                the registry constructs it and passes it through.
 
         Note:
-            The origin parameter is automatically set to ``SessionOrigin.DYNAMIC``
-            - callers do not need to specify it. This distinguishes dynamic
-            sessions from static ones and enables proper cleanup and
-            validation in deletion operations.
+            The origin parameter is automatically set to ``SessionOrigin.DYNAMIC``.
         """
         # Dynamic community session: created at runtime via
         # session_community_create.
-        super().__init__(name, session_config, SessionOrigin.DYNAMIC, timeouts)
+        super().__init__(
+            session_id,
+            name,
+            session_config,
+            SessionOrigin.DYNAMIC,
+            timeouts,
+        )
         self.launched_session = launched_session
         self._is_stopped: bool = False
 
@@ -2052,7 +1958,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         """
         if self._is_stopped:
             raise SessionCreationError(
-                f"Cannot create session for '{self.full_name}': "
+                f"Cannot create session for '{self.qualified_session_id}': "
                 f"the dynamic session has been stopped."
             )
         return await super()._create_item()
@@ -2082,7 +1988,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         """
         if self._is_stopped:
             raise SessionCreationError(
-                f"Cannot return session for '{self.full_name}': "
+                f"Cannot return session for '{self.qualified_session_id}': "
                 f"the dynamic session has been stopped."
             )
         return await super()._get_unlocked()
@@ -2164,7 +2070,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         Errors during cleanup are logged but don't prevent the cleanup from completing.
         """
         _LOGGER.info(
-            f"[DynamicCommunitySessionManager] Closing dynamic session '{self.full_name}'"
+            f"[DynamicCommunitySessionManager] Closing dynamic session '{self.qualified_session_id}'"
         )
 
         # Single critical section: capture, clear, flip together.  Any
@@ -2187,17 +2093,17 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         try:
             _LOGGER.debug(
                 f"[DynamicCommunitySessionManager] Stopping {self.launch_method} "
-                f"session '{self.full_name}'"
+                f"session '{self.qualified_session_id}'"
             )
             await self.launched_session.stop()
             _LOGGER.info(
                 f"[DynamicCommunitySessionManager] Successfully stopped {self.launch_method} "
-                f"session '{self.full_name}'"
+                f"session '{self.qualified_session_id}'"
             )
         except Exception as e:
             _LOGGER.error(
                 f"[DynamicCommunitySessionManager] Error stopping {self.launch_method} "
-                f"session '{self.full_name}': {e}",
+                f"session '{self.qualified_session_id}': {e}",
                 exc_info=True,
             )
 
@@ -2212,7 +2118,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
             Use session_community_credentials MCP tool if credentials are needed.
         """
         base_dict = {
-            "session_id": self.full_name,
+            "session_id": self.qualified_session_id,
             "session_type": "COMMUNITY",
             "source": "dynamic",
             "name": self._name,
@@ -2310,7 +2216,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         async def monitor_enterprise_session(manager):
             status, detail = await manager.liveness_status(ensure_item=True)
             if status != ResourceLivenessStatus.ONLINE:
-                alert_enterprise_ops(f"Enterprise session {manager.full_name}: {detail}")
+                alert_enterprise_ops(f"Enterprise session {manager.qualified_session_id}: {detail}")
         ```
 
     Performance Characteristics:
@@ -2366,6 +2272,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
     def __init__(
         self,
         system: str,
+        session_id: SessionId,
         name: str,
         creation_function: Callable[[str, str], Awaitable["CorePlusSession"]],
     ):
@@ -2379,9 +2286,9 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         Manager Identity:
             The manager is configured with:
             - **system_type**: Set to SystemType.ENTERPRISE for Enterprise deployments
-            - **source**: The configuration source identifier provided by caller
-            - **name**: The unique identifier for this specific manager instance
-            - **full_name**: Computed as "{system_type}:{source}:{name}" for global uniqueness
+            - **system**: The enterprise system_name (the configured DHE system this manager belongs to)
+            - **name**: The display name for this specific manager instance (typically the PQ display name)
+            - **qualified_session_id**: Computed as ``"enterprise:<system>:<session_id>"`` where ``session_id`` is the controller-assigned PQ serial
 
         Function-Based Creation:
             Unlike CommunitySessionManager's config-dict approach, this manager uses
@@ -2445,17 +2352,20 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             - **Thread-safe**: Manager can be safely used from multiple asyncio tasks
 
         Args:
-            source: Configuration source identifier that will be passed to the creation
-                function. This can be any string that helps the creation function locate
-                or identify the appropriate configuration (e.g., "enterprise-config",
-                "/path/to/config", "vault://secrets/sessions", "database://session-configs").
-            name: Unique identifier for this manager instance within its registry.
-                Used for logging, debugging, and creating the full_name identifier.
-                Also passed to creation function for session identification.
+            system: The enterprise ``system_name`` this manager belongs to.
+                Used as the middle segment of :attr:`qualified_session_id` and passed
+                to ``creation_function`` as its first positional argument
+                (which receives it under the historical parameter name
+                ``source``).
+            name: Display name for this manager instance (e.g., the PQ
+                display name). Used for logging and debugging; does not
+                appear in :attr:`qualified_session_id`. Also passed to
+                ``creation_function`` as its second positional argument.
             creation_function: Async callable that creates CorePlusSession instances.
-                Must take (source: str, name: str) parameters and return CorePlusSession.
+                Must take ``(source: str, name: str)`` parameters and return CorePlusSession.
                 Should handle all aspects of session creation including authentication,
                 configuration retrieval, and connection establishment.
+            session_id: The session's :class:`SessionId` (the controller-assigned PQ serial).
 
         Thread Safety:
             This constructor is thread-safe and can be called from any asyncio task.
@@ -2470,6 +2380,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         super().__init__(
             system_type=SystemType.ENTERPRISE,
             system=system,
+            session_id=session_id,
             name=name,
         )
         self._creation_function = creation_function
@@ -2515,12 +2426,12 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         """
         try:
             _LOGGER.info(
-                f"[{self.__class__.__name__}] Creating enterprise session for {self.full_name} using creation function"
+                f"[{self.__class__.__name__}] Creating enterprise session for {self.qualified_session_id} using creation function"
             )
             return await self._creation_function(self._system, self._name)
         except Exception as e:
             _LOGGER.error(
-                f"[{self.__class__.__name__}] Failed to create enterprise session for {self.full_name}: {e}"
+                f"[{self.__class__.__name__}] Failed to create enterprise session for {self.qualified_session_id}: {e}"
             )
             raise SessionCreationError(
                 f"Failed to create enterprise session for {self._name}: {e}"
@@ -2728,7 +2639,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         async def monitor_factory_health(manager):
             status, detail = await manager.liveness_status(ensure_item=True)
             if status != ResourceLivenessStatus.ONLINE:
-                alert_ops(f"Factory {manager.full_name} health issue: {detail}")
+                alert_ops(f"Factory {manager.qualified_session_id} health issue: {detail}")
         ```
 
     Performance Characteristics:
@@ -2805,9 +2716,10 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         Manager Identity and Configuration:
             The manager is configured with:
             - **system_type**: Set to SystemType.ENTERPRISE for Enterprise factory management
-            - **source**: Set to "factory" to indicate this manages factory instances
-            - **name**: The unique identifier for this specific factory manager instance
-            - **full_name**: Computed as "enterprise:factory:{name}" for global uniqueness
+            - **system**: The enterprise ``system_name`` passed as ``name`` to the constructor
+            - **name**: Set to the sentinel ``"factory"``
+            - **session_id**: Set to the sentinel :class:`SessionId` ``0``
+            - **qualified_session_id**: Computed as ``"enterprise:<system>:0"``; factories are filtered out of session listings by ``isinstance`` against :class:`CorePlusSessionFactoryManager`, so this sentinel never collides with a real PQ serial in user-visible output
             - **system_config**: Typed :class:`EnterpriseSystemConfig` declaration
               (connection URL, timeouts, etc.).
             - **creds**: Authentication material, passed separately from
@@ -2860,7 +2772,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             async def monitor_factory():
                 status, detail = await manager.liveness_status(ensure_item=True)
                 if status != ResourceLivenessStatus.ONLINE:
-                    alert_ops(f"Factory {manager.full_name} issue: {detail}")
+                    alert_ops(f"Factory {manager.qualified_session_id} issue: {detail}")
             ```
 
         Configuration Validation Strategy:
@@ -2880,7 +2792,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         Args:
             name: Unique identifier for this factory manager instance. Used for logging,
-                debugging, registry management, and creating the full_name identifier.
+                debugging, registry management, and creating the qualified_session_id identifier.
                 Should be descriptive and unique within its registry context
                 (e.g., "prod-factory", "dev-east-factory", "test-factory").
             system_config: Validated
@@ -2910,12 +2822,16 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         """
         # The factory belongs to the enterprise system identified by ``name``
         # (the system_name); we record that as ``system`` and use a sentinel
-        # ``"factory"`` as the manager's own ``name``. Factories are not
-        # listed alongside sessions; the listing filter uses ``isinstance``
-        # against :class:`CorePlusSessionFactoryManager` to drop them.
+        # ``"factory"`` as the manager's own ``name`` plus a synthetic
+        # ``session_id`` of 0. Factories are not listed alongside sessions;
+        # the listing filter uses ``isinstance`` against
+        # :class:`CorePlusSessionFactoryManager` to drop them, so the
+        # synthetic id never collides with a real PQ serial in user-visible
+        # output.
         super().__init__(
             system_type=SystemType.ENTERPRISE,
             system=name,
+            session_id=SessionId.from_int(0),
             name="factory",
         )
         self._system_config = system_config
@@ -2979,7 +2895,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         timeout = self._timeouts.session_connect_timeout_seconds
 
         _LOGGER.debug(
-            f"[{self.__class__.__name__}] Creating enterprise factory for '{self.full_name}' (timeout: {timeout}s)"
+            f"[{self.__class__.__name__}] Creating enterprise factory for '{self.qualified_session_id}' (timeout: {timeout}s)"
         )
 
         # Wrap factory creation with timeout to prevent hanging on unreachable systems
@@ -2991,12 +2907,12 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 timeout=timeout,
             )
             _LOGGER.info(
-                f"[{self.__class__.__name__}] Successfully created enterprise factory for '{self.full_name}'"
+                f"[{self.__class__.__name__}] Successfully created enterprise factory for '{self.qualified_session_id}'"
             )
             return factory
         except TimeoutError as e:
             _LOGGER.error(
-                f"[{self.__class__.__name__}] Connection to enterprise system '{self.full_name}' timed out after {timeout} seconds. "
+                f"[{self.__class__.__name__}] Connection to enterprise system '{self.qualified_session_id}' timed out after {timeout} seconds. "
                 f"Increase enterprise/settings.json: timeouts.client.session_connect_timeout_seconds."
             )
             raise DeephavenConnectionError(
@@ -3093,7 +3009,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             # Regular health checking
             status, detail = await manager.liveness_status()
             if status != ResourceLivenessStatus.ONLINE:
-                logger.warning(f"Factory {manager.full_name} health issue: {detail}")
+                logger.warning(f"Factory {manager.qualified_session_id} health issue: {detail}")
             ```
 
             **Pre-Session Creation Verification**:
@@ -3110,7 +3026,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             ```python
             # Verify factory state during cleanup
             if await manager.is_alive():
-                logger.info(f"Factory {manager.full_name} responsive during cleanup")
+                logger.info(f"Factory {manager.qualified_session_id} responsive during cleanup")
             await manager.close()  # Safe cleanup
             ```
 

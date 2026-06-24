@@ -421,8 +421,8 @@ dh-mcp script pip-list community:community:dev
 | `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 
 ```bash
-dh-mcp catalog tables enterprise:prod:rpt
-dh-mcp catalog sample enterprise:prod:rpt Market Trades --max-rows 20
+dh-mcp catalog tables enterprise:prod:42
+dh-mcp catalog sample enterprise:prod:42 Market Trades --max-rows 20
 ```
 
 ### `dh-mcp pq`

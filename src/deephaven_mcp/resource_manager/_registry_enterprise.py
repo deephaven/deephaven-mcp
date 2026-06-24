@@ -61,6 +61,7 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp.client import (
     CorePlusControllerClient,
+    CorePlusQuerySerial,
     CorePlusSession,
     EnterpriseClientTimeouts,
 )
@@ -77,6 +78,7 @@ from ._registry import (
     MutableSessionRegistry,
     RegistrySnapshot,
 )
+from ._session_id import QualifiedSessionId, SessionId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -109,12 +111,13 @@ class _FactoryQueryResult:
         new_client (CorePlusControllerClient): The live client used for this
             query — either the cached client (if ping succeeded) or a freshly
             created one (if the cached client was dead or absent).
-        query_names (set[str]): Names of all persistent queries currently
-            reported by the controller.
+        query_map (dict[CorePlusQuerySerial, str]): Mapping from PQ serial to
+            display name for every persistent query currently reported by the
+            controller.
     """
 
     new_client: CorePlusControllerClient
-    query_names: set[str]
+    query_map: dict[CorePlusQuerySerial, str]
 
 
 @dataclass
@@ -194,15 +197,15 @@ async def _fetch_factory_pqs(
 
         _LOGGER.debug("[_fetch_factory_pqs] calling map()")
         t0 = time.monotonic()
-        query_map = await client.map()
+        raw_map = await client.map()
         _LOGGER.debug(
-            f"[_fetch_factory_pqs] map() returned {len(query_map)} entries in {time.monotonic()-t0:.2f}s"
+            f"[_fetch_factory_pqs] map() returned {len(raw_map)} entries in {time.monotonic()-t0:.2f}s"
         )
-        query_names = {info.config.pb.name for info in query_map.values()}
-        _LOGGER.debug(f"[_fetch_factory_pqs] {len(query_names)} PQs")
+        query_map = {serial: info.config.pb.name for serial, info in raw_map.items()}
+        _LOGGER.debug(f"[_fetch_factory_pqs] {len(query_map)} PQs")
         return _FactoryQueryResult(
             new_client=client,
-            query_names=query_names,
+            query_map=query_map,
         )
 
     except Exception as e:
@@ -234,7 +237,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     @staticmethod
     def _make_enterprise_session_manager(
         factory: CorePlusSessionFactoryManager,
-        session_name: str,
+        serial: CorePlusQuerySerial,
+        display_name: str,
         system_name: str,
     ) -> EnterpriseSessionManager:
         """Create an ``EnterpriseSessionManager`` that lazily connects to a PQ.
@@ -242,21 +246,27 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         Args:
             factory (CorePlusSessionFactoryManager): Factory manager used to
                 obtain a connected factory instance.
-            session_name (str): PQ name to connect to.
-            system_name (str): Enterprise system name used as the session source.
+            serial (CorePlusQuerySerial): PQ serial assigned by the controller;
+                becomes the manager's :class:`SessionId`.
+            display_name (str): PQ display name from the controller. Travels
+                through as :attr:`BaseItemManager.name` for human output and
+                does not participate in the id.
+            system_name (str): Enterprise system name; becomes the system
+                segment of the manager's :attr:`qualified_session_id`.
 
         Returns:
             An ``EnterpriseSessionManager`` whose creation function calls
-            ``factory.get()`` then ``connect_to_persistent_query(session_name)``.
+            ``factory.get()`` then ``connect_to_persistent_query(serial=serial)``.
         """
 
         async def creation_function(source: str, name: str) -> CorePlusSession:
             factory_instance = await factory.get()
-            return await factory_instance.connect_to_persistent_query(name)
+            return await factory_instance.connect_to_persistent_query(serial=serial)
 
         return EnterpriseSessionManager(
             system=system_name,
-            name=session_name,
+            session_id=SessionId.from_int(serial),
+            name=display_name,
             creation_function=creation_function,
         )
 
@@ -270,7 +280,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         Args:
             system_config (EnterpriseSystemConfig): A validated enterprise
                 system declaration. The registry stores three fields
-                directly: the system name (used as the source segment
+                directly: the system name (used as the system segment
                 in session IDs), the typed system config (forwarded to
                 :class:`CorePlusSessionFactoryManager`), and the
                 pre-resolved credentials (also forwarded to the factory
@@ -303,8 +313,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         """Return the enterprise system name.
 
         This value comes from the ``system_name`` field in the DHE system config and
-        appears as the source segment in all enterprise session identifiers
-        (e.g. ``"enterprise:<system_name>:<pq-name>"``).
+        appears as the system segment in all enterprise session identifiers
+        (e.g. ``"enterprise:<system_name>:<session_id>"`` where ``session_id`` is
+        the controller-assigned PQ serial).
 
         Returns:
             str: The configured system name.
@@ -426,7 +437,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             self._added_session_ids.clear()
             self._phase = InitializationPhase.NOT_STARTED
             self._error = None
-            items_to_close = list(self._items.values())
+            items_to_close = dict(self._items)
             self._items.clear()
 
         # Step 6: close items outside the lock via the inherited hook.
@@ -456,7 +467,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             await self._sync_enterprise_sessions()
 
     @override
-    async def get(self, name: str) -> BaseItemManager:
+    async def get(self, name: QualifiedSessionId) -> BaseItemManager:
         """Return the session manager for *name*, refreshing enterprise data if needed.
 
         Triggers an on-demand refresh before looking up the item once initial
@@ -551,7 +562,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 await manager.close()
             except Exception as e:
                 _LOGGER.warning(
-                    f"[{self.__class__.__name__}] error closing stale session '{manager.full_name}': {e}"
+                    f"[{self.__class__.__name__}] error closing stale session '{manager.qualified_session_id}': {e}"
                 )
 
     async def _snapshot_factory_state(self) -> _FactorySnapshot | None:
@@ -608,7 +619,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             return []
         raise InternalError(f"Unexpected result type {type(result).__name__!r}")
 
-    def _remove_sessions_by_keys(self, keys: set[str]) -> list[BaseItemManager]:
+    def _remove_sessions_by_keys(
+        self, keys: set[QualifiedSessionId]
+    ) -> list[BaseItemManager]:
         """Remove a specific set of session keys from ``_items``.
 
         Synchronous — no ``await``.  Must be called under ``self._lock``.
@@ -670,30 +683,38 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         self._controller_client = result.new_client
 
         existing_keys = set(self._items.keys())
-        controller_keys = {
-            BaseItemManager.make_full_name(SystemType.ENTERPRISE, self._system_name, n)
-            for n in result.query_names
+        # Map controller serial -> full registry key for the live PQ set.
+        controller_key_by_serial: dict[CorePlusQuerySerial, QualifiedSessionId] = {
+            serial: QualifiedSessionId(
+                SystemType.ENTERPRISE, self._system_name, SessionId.from_int(serial)
+            )
+            for serial in result.query_map
         }
+        controller_keys = set(controller_key_by_serial.values())
 
-        keys_to_add = controller_keys - existing_keys
         keys_to_remove = existing_keys - controller_keys
+        serials_to_add = [
+            serial
+            for serial, key in controller_key_by_serial.items()
+            if key not in existing_keys
+        ]
 
-        for full_key in keys_to_add:
-            _, _, session_name = BaseItemManager.parse_full_name(full_key)
+        for serial in serials_to_add:
+            display_name = result.query_map[serial]
             # Always a new manager instance — never reuse an existing one
             # (see method docstring invariant).
             mgr = self._make_enterprise_session_manager(
-                factory_manager, session_name, self._system_name
+                factory_manager, serial, display_name, self._system_name
             )
-            self._items[mgr.full_name] = mgr
+            self._items[mgr.qualified_session_id] = mgr
 
         managers_to_close = self._remove_sessions_by_keys(keys_to_remove)
 
         self._error = None
 
-        if keys_to_add:
+        if serials_to_add:
             _LOGGER.debug(
-                f"[{self.__class__.__name__}] added {len(keys_to_add)} sessions"
+                f"[{self.__class__.__name__}] added {len(serials_to_add)} sessions"
             )
         if keys_to_remove:
             _LOGGER.debug(
@@ -768,7 +789,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     # Private — error message helper
     # ------------------------------------------------------------------
 
-    def _build_not_found_message(self, name: str) -> str:
+    def _build_not_found_message(self, name: QualifiedSessionId) -> str:
         """Build a ``RegistryItemNotFoundError`` message with context.
 
         Must be called while holding ``self._lock``.

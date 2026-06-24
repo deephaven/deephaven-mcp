@@ -19,6 +19,7 @@ from deephaven_mcp.resource_manager._registry import (
     BaseRegistry,
     MutableSessionRegistry,
 )
+from deephaven_mcp.resource_manager._session_id import SessionId
 
 
 class _StubItem:
@@ -29,11 +30,26 @@ class _StubItem:
         self.closed = True
 
 
+def _session_id_for(name: str) -> SessionId:
+    """Return a stable :class:`SessionId` derived from ``name``.
+
+    Community convention: the SessionId is just the session name, so
+    ``qualified_session_id`` is stable per ``name`` and distinct across distinct
+    names — exactly what these tests need.
+    """
+    return SessionId(name)
+
+
 class _StubStaticManager(BaseItemManager[_StubItem]):
     """``evicts_on_idle = False``."""
 
     def __init__(self, name: str):
-        super().__init__(SystemType.COMMUNITY, "test", name)
+        super().__init__(
+            SystemType.COMMUNITY,
+            "test",
+            _session_id_for(name),
+            name,
+        )
         self.create_count = 0
 
     @override
@@ -77,13 +93,13 @@ async def test_sweep_once_skips_fresh_items():
     await reg.initialize()
     try:
         mgr = _StubStaticManager("fresh")
-        reg._items[mgr.full_name] = mgr
+        reg._items[mgr.qualified_session_id] = mgr
         await mgr.get()
 
         evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=3600.0))
         await evictor._sweep_once()
         assert mgr._item_cache is not None
-        assert mgr.full_name in reg._items
+        assert mgr.qualified_session_id in reg._items
     finally:
         await reg.close()
 
@@ -94,7 +110,7 @@ async def test_sweep_once_closes_idle_keep_in_registry():
     await reg.initialize()
     try:
         mgr = _StubStaticManager("idle")
-        reg._items[mgr.full_name] = mgr
+        reg._items[mgr.qualified_session_id] = mgr
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 
@@ -102,7 +118,7 @@ async def test_sweep_once_closes_idle_keep_in_registry():
         await evictor._sweep_once()
         assert mgr._item_cache is None
         # Non-evicting items stay in the registry for lazy reconnect.
-        assert mgr.full_name in reg._items
+        assert mgr.qualified_session_id in reg._items
     finally:
         await reg.close()
 
@@ -113,16 +129,16 @@ async def test_sweep_once_removes_evicts_on_idle():
     await reg.initialize()
     try:
         mgr = _StubDynamicManager("dyn")
-        reg._items[mgr.full_name] = mgr
-        reg._added_session_ids.add(mgr.full_name)
+        reg._items[mgr.qualified_session_id] = mgr
+        reg._added_session_ids.add(mgr.qualified_session_id)
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 
         evictor = Evictor(reg, EvictionTimeouts(session_idle_timeout_seconds=0.01))
         await evictor._sweep_once()
-        assert mgr.full_name not in reg._items
+        assert mgr.qualified_session_id not in reg._items
         # Added-session tracking is freed too (via _on_removed hook).
-        assert mgr.full_name not in reg._added_session_ids
+        assert mgr.qualified_session_id not in reg._added_session_ids
     finally:
         await reg.close()
 
@@ -134,8 +150,8 @@ async def test_sweep_once_identity_checked_drop_protects_same_key_re_add():
     await reg.initialize()
     try:
         old = _StubDynamicManager("dyn")
-        reg._items[old.full_name] = old
-        reg._added_session_ids.add(old.full_name)
+        reg._items[old.qualified_session_id] = old
+        reg._added_session_ids.add(old.qualified_session_id)
         await old.get()
         old._last_accessed = time.monotonic() - 1000.0
 
@@ -154,14 +170,14 @@ async def test_sweep_once_identity_checked_drop_protects_same_key_re_add():
 
         # Re-add under same key with a fresh identity.
         fresh = _StubDynamicManager("dyn")
-        reg._items[fresh.full_name] = fresh
-        reg._added_session_ids.add(fresh.full_name)
+        reg._items[fresh.qualified_session_id] = fresh
+        reg._added_session_ids.add(fresh.qualified_session_id)
 
         # Now drop using the OLD identity — should NOT remove the fresh one.
-        removed = await reg.remove(old.full_name, expected=old)
+        removed = await reg.remove(old.qualified_session_id, expected=old)
         assert removed is None  # identity check failed, nothing removed
-        assert reg._items.get(fresh.full_name) is fresh
-        assert fresh.full_name in reg._added_session_ids
+        assert reg._items.get(fresh.qualified_session_id) is fresh
+        assert fresh.qualified_session_id in reg._added_session_ids
     finally:
         await reg.close()
 
@@ -173,8 +189,8 @@ async def test_sweep_once_logs_and_continues_on_per_item_error(caplog):
     try:
         raising = _StubStaticManager("raises")
         ok = _StubStaticManager("ok")
-        reg._items[raising.full_name] = raising
-        reg._items[ok.full_name] = ok
+        reg._items[raising.qualified_session_id] = raising
+        reg._items[ok.qualified_session_id] = ok
         await raising.get()
         await ok.get()
         raising._last_accessed = time.monotonic() - 1000.0
@@ -530,8 +546,8 @@ async def test_sweep_once_logs_and_continues_on_registry_remove_error(caplog):
     await reg.initialize()
     try:
         mgr = _StubDynamicManager("dyn-remove-raises")
-        reg._items[mgr.full_name] = mgr
-        reg._added_session_ids.add(mgr.full_name)
+        reg._items[mgr.qualified_session_id] = mgr
+        reg._added_session_ids.add(mgr.qualified_session_id)
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 
@@ -552,8 +568,8 @@ async def test_sweep_once_logs_and_continues_on_registry_remove_error(caplog):
         )
     finally:
         # Restore for clean teardown.
-        reg._items.pop("community:test:dyn-remove-raises", None)
-        reg._added_session_ids.discard("community:test:dyn-remove-raises")
+        reg._items.pop(mgr.qualified_session_id, None)
+        reg._added_session_ids.discard(mgr.qualified_session_id)
         await reg.close()
 
 
@@ -564,8 +580,8 @@ async def test_sweep_once_logs_at_debug_when_registry_remove_returns_none(caplog
     await reg.initialize()
     try:
         mgr = _StubDynamicManager("dyn-remove-none")
-        reg._items[mgr.full_name] = mgr
-        reg._added_session_ids.add(mgr.full_name)
+        reg._items[mgr.qualified_session_id] = mgr
+        reg._added_session_ids.add(mgr.qualified_session_id)
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 
@@ -585,8 +601,8 @@ async def test_sweep_once_logs_at_debug_when_registry_remove_returns_none(caplog
             for r in caplog.records
         )
     finally:
-        reg._items.pop("community:test:dyn-remove-none", None)
-        reg._added_session_ids.discard("community:test:dyn-remove-none")
+        reg._items.pop(mgr.qualified_session_id, None)
+        reg._added_session_ids.discard(mgr.qualified_session_id)
         await reg.close()
 
 
@@ -603,10 +619,10 @@ async def test_base_registry_on_removed_default_is_no_op():
     await reg.initialize()
     try:
         mgr = _StubStaticManager("plain")
-        reg._items[mgr.full_name] = mgr
-        removed = await reg.remove(mgr.full_name)
+        reg._items[mgr.qualified_session_id] = mgr
+        removed = await reg.remove(mgr.qualified_session_id)
         assert removed is mgr
-        assert mgr.full_name not in reg._items
+        assert mgr.qualified_session_id not in reg._items
     finally:
         await reg.close()
 
@@ -626,7 +642,7 @@ async def test_sweep_once_uses_snapshot_items_not_get_all():
     await reg.initialize()
     try:
         mgr = _StubStaticManager("idle-snap")
-        reg._items[mgr.full_name] = mgr
+        reg._items[mgr.qualified_session_id] = mgr
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 
@@ -667,7 +683,7 @@ async def test_sweep_once_does_not_invoke_enterprise_refresh_path():
     await reg.initialize()
     try:
         mgr = _StubStaticManager("idle-sync")
-        reg._items[mgr.full_name] = mgr
+        reg._items[mgr.qualified_session_id] = mgr
         await mgr.get()
         mgr._last_accessed = time.monotonic() - 1000.0
 

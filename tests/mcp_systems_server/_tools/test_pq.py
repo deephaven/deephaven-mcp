@@ -799,7 +799,7 @@ async def test_pq_start_partial_failure():
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "RUNNING"
     assert result["results"][0]["state_category"] == "ACTIVE"
-    assert result["results"][0]["session_id"] == "enterprise:system:analytics"
+    assert result["results"][0]["session_id"] == "enterprise:system:12345"
     assert result["results"][0]["error"] is None
     assert result["results"][1]["success"] is False
     assert result["results"][1]["name"] is None
@@ -1617,7 +1617,7 @@ async def test_pq_list_success():
     assert pq1["is_scheduled"] is False
     assert pq1["num_failures"] == 0
     assert "session_id" in pq1  # Running PQ should have session_id
-    assert pq1["session_id"] == "enterprise:system:analytics"  # session_id uses name
+    assert pq1["session_id"] == "enterprise:system:12345"  # session_id uses name
 
     # Verify trimmed response does NOT include full config/state_details/replicas/spares
     assert "config" not in pq1
@@ -1731,7 +1731,7 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
     assert result["name"] == "analytics"
     assert result["state"] == "RUNNING"
     assert "session_id" in result
-    assert result["session_id"] == "enterprise:system:analytics"
+    assert result["session_id"] == "enterprise:system:12345"
 
     # Verify comprehensive config fields from PersistentQueryConfigMessage
     config = result["config"]
@@ -3358,7 +3358,7 @@ async def test_pq_start_success():
     assert result["results"][0]["success"] is True
     assert result["results"][0]["name"] == "analytics"
     assert result["results"][0]["state"] == "RUNNING"
-    assert result["results"][0]["session_id"] == "enterprise:system:analytics"
+    assert result["results"][0]["session_id"] == "enterprise:system:12345"
     assert result["results"][0]["error"] is None
     assert result["summary"]["total"] == 1
     assert result["summary"]["succeeded"] == 1

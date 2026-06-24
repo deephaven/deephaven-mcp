@@ -4,7 +4,7 @@ Covers the helpers used by every tool:
 
 - Lifespan-context accessors (``get_lifespan_context``, ``get_registry``,
   ``get_multi_config``, ``get_community_registry``, ``get_enterprise_registry``).
-- Identifier parsers (``parse_session_id``, ``parse_pq_id``).
+- Identifier parser (``parse_pq_id``).
 - Session retrieval (``get_session_from_context``, ``get_enterprise_session``).
 - Response shapers / size guards (``error_response``, ``check_response_size``,
   ``format_meta_table_result``, ``build_table_data_response``).
@@ -213,30 +213,6 @@ def test_get_enterprise_registry_unknown_system_raises():
 
 
 @pytest.mark.parametrize(
-    "session_id,expected",
-    [
-        ("community:community:local", (SystemType.COMMUNITY, "community", "local")),
-        (
-            "enterprise:prod:my-pq",
-            (SystemType.ENTERPRISE, "prod", "my-pq"),
-        ),
-    ],
-)
-def test_parse_session_id_valid(session_id, expected):
-    assert shared.parse_session_id(session_id) == expected
-
-
-def test_parse_session_id_unknown_type_raises():
-    with pytest.raises(InvalidSessionNameError, match="unsupported type"):
-        shared.parse_session_id("warp:source:name")
-
-
-def test_parse_session_id_malformed_raises():
-    with pytest.raises(InvalidSessionNameError):
-        shared.parse_session_id("not-a-real-id")
-
-
-@pytest.mark.parametrize(
     "pq_id,expected",
     [
         ("prod:0", ("prod", 0)),
@@ -270,17 +246,6 @@ def test_parse_pq_id_non_integer_serial_raises():
 def test_parse_pq_id_negative_serial_raises():
     with pytest.raises(InvalidSessionNameError, match="negative serial"):
         shared.parse_pq_id("prod:-1")
-
-
-def test_parse_session_id_returns_named_tuple():
-    """Result also exposes attribute access and is a ParsedSessionId."""
-    parsed = shared.parse_session_id("community:community:foo")
-    assert isinstance(parsed, shared.ParsedSessionId)
-    assert parsed.system_name == "community"
-    assert parsed.name == "foo"
-    # Tuple unpacking still works.
-    a, b, c = parsed
-    assert (b, c) == ("community", "foo")
 
 
 def test_parse_pq_id_returns_named_tuple():
@@ -330,11 +295,13 @@ async def test_get_session_from_context_returns_session():
 
     ctx = _ctx(registry=registry)
     out = await shared.get_session_from_context(
-        "toolname", ctx, "community:community:s"
+        "toolname", ctx, "community:community:1"
     )
 
     assert out is expected_session
-    registry.get.assert_awaited_once_with("community:community:s")
+    registry.get.assert_awaited_once_with(
+        shared.QualifiedSessionId.from_str("community:community:1")
+    )
 
 
 @pytest.mark.asyncio
@@ -344,7 +311,7 @@ async def test_get_enterprise_session_success():
     registry = MagicMock(get=AsyncMock(return_value=manager))
 
     ctx = _ctx(registry=registry)
-    sess, err = await shared.get_enterprise_session("tool", ctx, "enterprise:prod:s")
+    sess, err = await shared.get_enterprise_session("tool", ctx, "enterprise:prod:1")
     assert sess is enterprise_session
     assert err is None
 
@@ -357,7 +324,7 @@ async def test_get_enterprise_session_rejects_non_enterprise():
 
     ctx = _ctx(registry=registry)
     sess, err = await shared.get_enterprise_session(
-        "tool", ctx, "community:community:s"
+        "tool", ctx, "community:community:1"
     )
     assert sess is None
     assert err is not None
@@ -370,9 +337,7 @@ async def test_get_enterprise_session_propagates_lookup_error():
     registry = MagicMock(get=AsyncMock(side_effect=RuntimeError("nope")))
     ctx = _ctx(registry=registry)
 
-    sess, err = await shared.get_enterprise_session(
-        "tool", ctx, "enterprise:prod:missing"
-    )
+    sess, err = await shared.get_enterprise_session("tool", ctx, "enterprise:prod:999")
     assert sess is None
     assert err is not None
     assert "Failed to get session" in err["error"]
@@ -420,9 +385,7 @@ def test_get_response_limits_routes_to_enterprise():
     multi_config.community = MagicMock()
     multi_config.community.settings.response_limits = community_limits
     ctx = _ctx(multi_config=multi_config)
-    assert (
-        shared.get_response_limits(ctx, "enterprise:prod:session1") is enterprise_limits
-    )
+    assert shared.get_response_limits(ctx, "enterprise:prod:42") is enterprise_limits
 
 
 def test_get_response_limits_routes_to_community():
@@ -435,29 +398,25 @@ def test_get_response_limits_routes_to_community():
     multi_config.community = MagicMock()
     multi_config.community.settings.response_limits = community_limits
     ctx = _ctx(multi_config=multi_config)
-    assert (
-        shared.get_response_limits(ctx, "community:community:session1")
-        is community_limits
-    )
+    assert shared.get_response_limits(ctx, "community:community:42") is community_limits
 
 
 def test_get_response_limits_raises_on_unhandled_system_type(monkeypatch):
-    """If parsed.system_type is not a known SystemType member, the router raises InternalError.
+    """If ``qsid.system_type`` is not a known SystemType member, the router raises InternalError.
 
     Required by ``feedback_no_asserts_in_production``: every defensive
     raise in production code must have a unit test that triggers it.
     Future-proofs the router against ``SystemType`` gaining a new
     member that the routing code hasn't been taught about.
-    """
-    from deephaven_mcp.mcp_systems_server._tools.shared import ParsedSessionId
 
-    sentinel_system_type = "unhandled-future-type"
-    fake_parsed = ParsedSessionId(
-        system_type=sentinel_system_type,  # type: ignore[arg-type]
-        system_name="x",
-        name="y",
-    )
-    monkeypatch.setattr(shared, "parse_session_id", lambda _sid: fake_parsed)
+    Implementation note: a real :class:`QualifiedSessionId` cannot carry
+    an unknown ``system_type`` because its constructors validate the
+    enum membership. To exercise the defensive branch we hand-build a
+    valid instance and overwrite its slot.
+    """
+    qsid = shared.QualifiedSessionId.from_str("community:community:9")
+    object.__setattr__(qsid, "system_type", "unhandled-future-type")
+    monkeypatch.setattr(shared.QualifiedSessionId, "from_str", lambda _sid: qsid)
 
     ctx = _ctx(multi_config=MagicMock())
     with pytest.raises(InternalError, match="Unhandled SystemType"):

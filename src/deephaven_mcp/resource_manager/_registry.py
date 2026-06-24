@@ -39,7 +39,6 @@ from typing import override
 
 from deephaven_mcp._exceptions import (
     InternalError,
-    InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
 
@@ -48,6 +47,7 @@ from ._manager import (
     BaseItemManager,
     SystemType,
 )
+from ._session_id import QualifiedSessionId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -102,19 +102,19 @@ class RegistrySnapshot[T: AsyncClosable]:
             Empty dict means no errors.
     """
 
-    items: dict[str, T]
+    items: dict[QualifiedSessionId, T]
     initialization_phase: InitializationPhase
     initialization_errors: dict[str, str]
 
     @classmethod
-    def simple(cls, items: dict[str, T]) -> "RegistrySnapshot[T]":
+    def simple(cls, items: dict[QualifiedSessionId, T]) -> "RegistrySnapshot[T]":
         """Create a snapshot for a registry that loads synchronously.
 
         For registries that are always fully available after ``initialize()``
         completes (no background work, no per-source errors).
 
         Args:
-            items (dict[str, T]): Copy of the registry items dictionary.
+            items (dict[QualifiedSessionId, T]): Copy of the registry items dictionary.
 
         Returns:
             A snapshot with phase COMPLETED and no initialization errors.
@@ -128,7 +128,7 @@ class RegistrySnapshot[T: AsyncClosable]:
     @classmethod
     def with_initialization(
         cls,
-        items: dict[str, T],
+        items: dict[QualifiedSessionId, T],
         phase: InitializationPhase,
         errors: dict[str, str],
     ) -> "RegistrySnapshot[T]":
@@ -138,7 +138,7 @@ class RegistrySnapshot[T: AsyncClosable]:
         returns and track per-source errors during that process.
 
         Args:
-            items (dict[str, T]): Copy of the registry items dictionary.
+            items (dict[QualifiedSessionId, T]): Copy of the registry items dictionary.
             phase (InitializationPhase): Current initialization lifecycle phase.
             errors (dict[str, str]): Per-source error descriptions recorded during initialization.
 
@@ -155,7 +155,7 @@ class RegistrySnapshot[T: AsyncClosable]:
 class BaseRegistry[T: AsyncClosable](abc.ABC):
     """Generic, async, coroutine-safe abstract base class for a named item registry.
 
-    Manages a ``dict[str, T]`` of async-closable items.  Subclasses implement
+    Manages a ``dict[QualifiedSessionId, T]`` of async-closable items.  Subclasses implement
     ``_load_items`` to populate the dict at initialization time; this class
     handles locking, idempotent initialization, retrieval, removal, and
     shutdown.
@@ -171,7 +171,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
 
     def __init__(self) -> None:
         """Set up internal state.  ``await initialize()`` must be called before use."""
-        self._items: dict[str, T] = {}
+        self._items: dict[QualifiedSessionId, T] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
         _LOGGER.info(
@@ -220,11 +220,11 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
                 f"[{self.__class__.__name__}] initialized with {len(self._items)} items"
             )
 
-    async def get(self, name: str) -> T:
+    async def get(self, name: QualifiedSessionId) -> T:
         """Retrieve an item by name.
 
         Args:
-            name (str): Key of the item to retrieve.
+            name (QualifiedSessionId): Key of the item to retrieve.
 
         Returns:
             The item registered under *name*.
@@ -268,7 +268,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
             # Return a copy to avoid external modification
             return RegistrySnapshot.simple(items=self._items.copy())
 
-    async def snapshot_items(self) -> dict[str, T]:
+    async def snapshot_items(self) -> dict[QualifiedSessionId, T]:
         """Return a fresh copy of ``_items`` under ``self._lock`` with no side effects.
 
         Cheap-snapshot path: never triggers a refresh, never performs
@@ -280,7 +280,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
         path.
 
         Returns:
-            dict[str, T]: A new dict containing the current items.
+            dict[QualifiedSessionId, T]: A new dict containing the current items.
                 Mutating the returned dict does not affect the registry.
 
         Raises:
@@ -290,7 +290,9 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
             self._check_initialized()
             return dict(self._items)
 
-    async def remove(self, name: str, *, expected: T | None = None) -> T | None:
+    async def remove(
+        self, name: QualifiedSessionId, *, expected: T | None = None
+    ) -> T | None:
         """Remove and return the item registered under ``name``.
 
         Symmetric public verb to :meth:`get`.  Used by both routine
@@ -306,7 +308,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
         which is invoked under ``self._lock`` immediately after the pop.
 
         Args:
-            name (str): Key of the item to remove.
+            name (QualifiedSessionId): Key of the item to remove.
             expected (T | None): If non-``None``, only remove when the
                 current entry is exactly this identity.
 
@@ -330,7 +332,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
             _LOGGER.debug(f"[{self.__class__.__name__}] removed item '{name}'")
             return removed
 
-    def _on_removed(self, _name: str) -> None:
+    def _on_removed(self, _name: QualifiedSessionId) -> None:
         """Subclass hook invoked under ``self._lock`` after :meth:`remove` pops an item.
 
         Default is a no-op.  Subclasses that maintain additional tracking
@@ -342,24 +344,25 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
         """
         return None
 
-    async def _close_items(self, items: list[T]) -> None:
-        """Close a list of managed items, logging any errors.
+    async def _close_items(self, items: dict[QualifiedSessionId, T]) -> None:
+        """Close a mapping of managed items, logging any errors.
 
         Called outside ``self._lock`` so that network I/O during close does not
         block other coroutines.  Subclasses may override this to add extra
         teardown steps alongside item closing.
 
         Args:
-            items (list[T]): Items to close.  Each is closed in sequence; errors are
-                logged and do not abort the remaining closures.
+            items (dict[QualifiedSessionId, T]): Items to close, keyed by their
+                qualified session id.  Each is closed in sequence; errors are
+                logged (with the key for identification) and do not abort the
+                remaining closures.
         """
-        for item in items:
+        for qsid, item in items.items():
             try:
                 await item.close()
             except Exception as e:
                 _LOGGER.error(
-                    f"[{self.__class__.__name__}] error closing item"
-                    f" '{getattr(item, 'full_name', repr(item))}': {e}"
+                    f"[{self.__class__.__name__}] error closing item" f" '{qsid}': {e}"
                 )
 
     async def close(self) -> None:
@@ -379,7 +382,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
             start_time = time.monotonic()
             _LOGGER.info(f"[{self.__class__.__name__}] closing all items...")
             num_items = len(self._items)
-            items_to_close = list(self._items.values())
+            items_to_close = dict(self._items)
             self._items.clear()
             self._initialized = False
 
@@ -409,10 +412,10 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
     def __init__(self) -> None:
         """Initialize the registry.  Call ``await initialize()`` before use."""
         super().__init__()
-        self._added_session_ids: set[str] = set()
+        self._added_session_ids: set[QualifiedSessionId] = set()
 
     @override
-    def _on_removed(self, name: str) -> None:
+    def _on_removed(self, name: QualifiedSessionId) -> None:
         """Discard the removed key from the added-session tracking set.
 
         Frees the corresponding ``max_concurrent_sessions`` slot — see
@@ -442,21 +445,31 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
         """Add a dynamically created session to the registry and mark it as added.
 
         Args:
-            manager (BaseItemManager): Session manager to add.  Its ``full_name`` must not already
+            manager (BaseItemManager): Session manager to add.  Its ``qualified_session_id`` must not already
                 exist in the registry.
 
         Raises:
-            ValueError: If a session with the same ``full_name`` already exists.
+            ValueError: If a session with the same ``qualified_session_id`` already exists.
             InternalError: If the registry has not been initialized.
         """
         async with self._lock:
-            self._check_initialized()
-            session_id = manager.full_name
-            if session_id in self._items:
-                raise ValueError(f"Session '{session_id}' already exists in registry")
-            self._items[session_id] = manager
-            self._added_session_ids.add(session_id)
-            _LOGGER.debug(f"[{self.__class__.__name__}] added session '{session_id}'")
+            self._add_session_locked(manager)
+
+    def _add_session_locked(self, manager: BaseItemManager) -> None:
+        """Add a session to ``self._items``. Caller must hold ``self._lock``.
+
+        Exists so subclasses that need to combine the add with other
+        atomic checks (e.g. display-name uniqueness) can do everything
+        under a single lock acquisition without reentering ``add_session``
+        (``asyncio.Lock`` is not reentrant).
+        """
+        self._check_initialized()
+        session_id = manager.qualified_session_id
+        if session_id in self._items:
+            raise ValueError(f"Session '{session_id}' already exists in registry")
+        self._items[session_id] = manager
+        self._added_session_ids.add(session_id)
+        _LOGGER.debug(f"[{self.__class__.__name__}] added session '{session_id}'")
 
     async def count_added_sessions(
         self, system_type: SystemType, system_name: str
@@ -474,22 +487,15 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
             int: Count of matching dynamically added sessions still in the registry.
 
         Raises:
-            InternalError: If the registry has not been initialized, or if a malformed
-                session ID is found in the internal tracking set.
+            InternalError: If the registry has not been initialized.
         """
         async with self._lock:
             self._check_initialized()
             count = 0
             for sid in self._added_session_ids:
-                try:
-                    s_type, s_system, _ = BaseItemManager.parse_full_name(sid)
-                except InvalidSessionNameError as e:
-                    raise InternalError(
-                        f"Malformed session ID {sid!r} found in _added_session_ids: {e}"
-                    ) from e
                 if (
-                    s_type == system_type.value
-                    and s_system == system_name
+                    sid.system_type is system_type
+                    and sid.system_name == system_name
                     and sid in self._items
                 ):
                     count += 1

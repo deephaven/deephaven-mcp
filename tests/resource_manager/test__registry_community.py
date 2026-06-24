@@ -18,10 +18,22 @@ from deephaven_mcp._exceptions import (
 from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.resource_manager import (
     CommunitySessionRegistry,
+    QualifiedSessionId,
+    SessionId,
     StaticCommunitySessionManager,
+    SystemType,
 )
 from deephaven_mcp.resource_manager._registry import MutableSessionRegistry
 from deephaven_mcp.sessions import CommunitySessionConfig
+
+
+def _full(name: str) -> QualifiedSessionId:
+    """Return the full registry key for a community session named ``name``.
+
+    The community :class:`SessionId` is the session name itself, so the
+    full identifier is ``community:community:<name>``.
+    """
+    return QualifiedSessionId(SystemType.COMMUNITY, "community", SessionId(name))
 
 
 def _session_configs() -> dict[str, CommunitySessionConfig]:
@@ -75,11 +87,9 @@ async def test_initialize_populates_managers(
     await registry.initialize()
     assert registry._initialized
     assert len(registry._items) == 2
-    assert "community:community:worker1" in registry._items
-    assert "community:community:worker2" in registry._items
-    assert isinstance(
-        registry._items["community:community:worker1"], StaticCommunitySessionManager
-    )
+    assert _full("worker1") in registry._items
+    assert _full("worker2") in registry._items
+    assert isinstance(registry._items[_full("worker1")], StaticCommunitySessionManager)
 
 
 @pytest.mark.asyncio
@@ -108,7 +118,7 @@ async def test_methods_raise_before_initialize(
 ) -> None:
     """get() and close() raise InternalError when called before initialize()."""
     with pytest.raises(InternalError, match="CommunitySessionRegistry not initialized"):
-        await registry.get("community:community:worker1")
+        await registry.get(_full("worker1"))
     with pytest.raises(InternalError, match="CommunitySessionRegistry not initialized"):
         await registry.close()
 
@@ -120,7 +130,7 @@ async def test_methods_raise_before_initialize(
 async def test_get_returns_manager(registry: CommunitySessionRegistry) -> None:
     """get() returns the StaticCommunitySessionManager for a known full name."""
     await registry.initialize()
-    mgr = await registry.get("community:community:worker1")
+    mgr = await registry.get(_full("worker1"))
     assert isinstance(mgr, StaticCommunitySessionManager)
     assert mgr._name == "worker1"
 
@@ -144,8 +154,8 @@ async def test_close_invokes_each_manager(registry: CommunitySessionRegistry) ->
     """close() awaits close() on every managed item and resets state."""
     await registry.initialize()
 
-    mgr1 = registry._items["community:community:worker1"]
-    mgr2 = registry._items["community:community:worker2"]
+    mgr1 = registry._items[_full("worker1")]
+    mgr2 = registry._items[_full("worker2")]
     mgr1.close = AsyncMock()
     mgr2.close = AsyncMock()
 
@@ -172,7 +182,7 @@ async def test_get_session_from_manager(registry: CommunitySessionRegistry) -> N
         "deephaven_mcp.resource_manager._manager.CommunitySessionManager.get",
         new=AsyncMock(return_value=mock_session),
     ) as mock_manager_get:
-        mgr = await registry.get("community:community:worker1")
+        mgr = await registry.get(_full("worker1"))
         session = await mgr.get()
 
     assert session is mock_session
@@ -190,7 +200,7 @@ async def test_get_session_propagates_creation_error(
         "deephaven_mcp.resource_manager._manager.CommunitySessionManager.get",
         side_effect=SessionCreationError("Failed to connect"),
     ):
-        mgr = await registry.get("community:community:worker1")
+        mgr = await registry.get(_full("worker1"))
         with pytest.raises(SessionCreationError, match="Failed to connect"):
             await mgr.get()
 
@@ -237,7 +247,53 @@ async def test_add_dynamic_session_uses_registry_timeouts() -> None:
 
     assert isinstance(manager, DynamicCommunitySessionManager)
     snapshot = await reg.get_all()
-    assert manager.full_name in snapshot.items
+    assert manager.qualified_session_id in snapshot.items
     # The dynamic manager carries the registry's exact timeouts instance,
     # not a separately-fetched copy.
     assert manager._timeouts is registry_timeouts
+
+
+@pytest.mark.asyncio
+async def test_add_dynamic_session_rejects_duplicate_display_name() -> None:
+    """A second add with the same display name must be rejected atomically.
+
+    The community :class:`SessionId` is the session name itself, so two
+    same-named adds produce the same ``qualified_session_id`` and the second is
+    rejected by the registry's duplicate-name guard.
+    """
+    from unittest.mock import MagicMock
+
+    from deephaven_mcp.resource_manager import DockerLaunchedSession
+
+    reg = CommunitySessionRegistry({}, timeouts=CommunityClientTimeouts())
+    await reg.initialize()
+
+    session_config = CommunitySessionConfig.model_validate(
+        {
+            "name": "dup",
+            "host": "localhost",
+            "port": 10000,
+            "auth": {"credentials": {"type": "anonymous"}},
+        }
+    )
+    launched = MagicMock(spec=DockerLaunchedSession)
+    launched.port = 10000
+    launched.launch_method = "docker"
+
+    first = await reg.add_dynamic_session(
+        name="dup",
+        session_config=session_config,
+        launched_session=launched,
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        await reg.add_dynamic_session(
+            name="dup",
+            session_config=session_config,
+            launched_session=launched,
+        )
+
+    # First session is still registered; no partial-failure damage.
+    snapshot = await reg.get_all()
+    assert first.qualified_session_id in snapshot.items
+    assert len(snapshot.items) == 1

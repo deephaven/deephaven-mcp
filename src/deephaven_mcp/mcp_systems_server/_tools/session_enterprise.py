@@ -23,14 +23,14 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     format_partial_result,
     get_enterprise_registry,
     get_multi_config,
-    parse_session_id,
 )
 from deephaven_mcp.resource_manager import (
-    BaseItemManager,
     EnterpriseSessionManager,
     EnterpriseSessionRegistry,
     InitializationPhase,
+    QualifiedSessionId,
     ResourceLivenessStatus,
+    SessionId,
     SystemType,
     least_advanced_phase,
 )
@@ -405,7 +405,7 @@ async def _check_session_id_available(
         dict | None: Error response dict if session exists, None if available
     """
     try:
-        await session_registry.get(session_id)
+        await session_registry.get(QualifiedSessionId.from_str(session_id))
         # If we got here, session already exists
         error_msg = f"Session '{session_id}' already exists"
         _LOGGER.error(f"[mcp_systems_server:_check_session_id_available] {error_msg}")
@@ -614,15 +614,6 @@ async def session_enterprise_create(
         # Generate session name if not provided
         session_name = _generate_session_name_if_none(system_config, session_name)
 
-        # Create session ID and check for conflicts
-        session_id = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, system_name, session_name
-        )
-        id_err = await _check_session_id_available(session_registry, session_id)
-        if id_err:
-            result.update(id_err)
-            return result
-
         # Resolve configuration parameters (defaults guaranteed by config validation)
         defaults = session_creation_config.defaults
         resolved_config = _resolve_session_parameters(
@@ -685,16 +676,22 @@ async def session_enterprise_create(
             session_arguments=resolved_config["session_arguments"],
         )
 
+        # The SessionId is the controller-assigned PQ serial, obtained
+        # from the newly-created session itself.
+        new_info = await session.pqinfo()
+        serial = int(new_info.config.pb.serial)
+
         # Create an EnterpriseSessionManager and add to registry
         async def creation_function(source: str, name: str) -> CorePlusSession:
             return session
 
         enterprise_session_manager = EnterpriseSessionManager(
             system=system_name,
+            session_id=SessionId.from_int(serial),
             name=session_name,
             creation_function=creation_function,
         )
-        session_id = enterprise_session_manager.full_name
+        session_id = str(enterprise_session_manager.qualified_session_id)
 
         # Add to session registry
         await session_registry.add_session(enterprise_session_manager)
@@ -880,9 +877,9 @@ async def session_enterprise_delete(
         - Use with caution in production environments
     """
     result: dict[str, object] = {"success": False}
-    session_name = (
-        session_id  # fallback for outer except; overwritten after parse_full_name
-    )
+    # Display name is unknown until we look up the manager; the session_id
+    # itself is the most informative fallback for the outer exception handler.
+    session_display_name: str = session_id
     system_name: str = (
         ""  # fallback for outer except; overwritten after registry lookup
     )
@@ -890,7 +887,7 @@ async def session_enterprise_delete(
     try:
         # Parse session_id to determine which enterprise system it belongs to.
         try:
-            system_type, source, session_name = parse_session_id(session_id)
+            qsid = QualifiedSessionId.from_str(session_id)
         except InvalidSessionNameError as e:
             error_msg = f"Invalid session_id format: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
@@ -898,10 +895,10 @@ async def session_enterprise_delete(
             result["isError"] = True
             return result
 
-        if system_type != SystemType.ENTERPRISE:
+        if qsid.system_type is not SystemType.ENTERPRISE:
             error_msg = (
                 f"Session '{session_id}' is not an enterprise session "
-                f"(type: '{system_type.value}')"
+                f"(type: '{qsid.system_type.value}')"
             )
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
@@ -910,14 +907,14 @@ async def session_enterprise_delete(
 
         # Get session registry for the system named in the id.
         try:
-            session_registry = get_enterprise_registry(context, source)
+            session_registry = get_enterprise_registry(context, qsid.system_name)
         except InvalidSessionNameError as e:
             error_msg = str(e)
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
-        system_name = source
+        system_name = qsid.system_name
         _LOGGER.info(
             f"[mcp_systems_server:session_enterprise_delete] Invoked: "
             f"system_name={system_name!r}, session_id={session_id!r}"
@@ -929,7 +926,7 @@ async def session_enterprise_delete(
 
         # Check if session exists in registry
         try:
-            session_manager = await session_registry.get(session_id)
+            session_manager = await session_registry.get(qsid)
         except RegistryItemNotFoundError as e:
             error_msg = f"Session '{session_id}' not found: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
@@ -944,6 +941,11 @@ async def session_enterprise_delete(
             result["error"] = error_msg
             result["isError"] = True
             return result
+
+        # Capture the display name from the manager (the original PQ name
+        # from the DHE controller, untouched by id-format rules) so that
+        # logs and the success payload remain human-meaningful.
+        session_display_name = session_manager.name
 
         _LOGGER.debug(
             f"[mcp_systems_server:session_enterprise_delete] Found enterprise session manager for '{session_id}'"
@@ -966,7 +968,7 @@ async def session_enterprise_delete(
 
         # Remove from session registry
         try:
-            removed_manager = await session_registry.remove(session_id)
+            removed_manager = await session_registry.remove(qsid)
             if removed_manager is None:
                 error_msg = (
                     f"Session '{session_id}' was not found in registry during removal"
@@ -988,7 +990,8 @@ async def session_enterprise_delete(
 
         _LOGGER.info(
             f"[mcp_systems_server:session_enterprise_delete] Successfully deleted session "
-            f"'{session_name}' from system '{system_name}' (session ID: '{session_id}')"
+            f"'{session_display_name}' from system '{system_name}' "
+            f"(session ID: '{session_id}')"
         )
 
         result.update(
@@ -996,18 +999,19 @@ async def session_enterprise_delete(
                 "success": True,
                 "session_id": session_id,
                 "system_name": system_name,
-                "session_name": session_name,
+                "session_name": session_display_name,
             }
         )
 
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:session_enterprise_delete] Failed to delete session "
-            f"'{session_name}' from system '{system_name}': {e!r}",
+            f"'{session_display_name}' from system '{system_name}': {e!r}",
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to delete enterprise session '{session_name}' from system '{system_name}': {type(e).__name__}: {e}"
+            f"Failed to delete enterprise session '{session_display_name}' "
+            f"from system '{system_name}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
 

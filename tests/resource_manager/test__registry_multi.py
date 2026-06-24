@@ -20,6 +20,7 @@ from deephaven_mcp.config.schema import (
     CommunityTimeouts,
     EnterpriseTimeouts,
 )
+from deephaven_mcp.resource_manager import QualifiedSessionId
 from deephaven_mcp.resource_manager._registry import (
     InitializationPhase,
     MutableSessionRegistry,
@@ -29,6 +30,11 @@ from deephaven_mcp.resource_manager._registry_multi import (
     MultiSystemRegistry,
     least_advanced_phase,
 )
+
+
+def _qsid(s: str) -> QualifiedSessionId:
+    return QualifiedSessionId.from_str(s)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -381,9 +387,9 @@ async def test_get_routes_community() -> None:
     registry = _build_registry(community_child=community, enterprise_children=None)
     await registry.initialize()
 
-    result = await registry.get("community:community:foo")
+    result = await registry.get(_qsid("community:community:42"))
 
-    community.get.assert_awaited_once_with("community:community:foo")
+    community.get.assert_awaited_once_with(_qsid("community:community:42"))
     assert result is sentinel
 
 
@@ -399,9 +405,9 @@ async def test_get_routes_enterprise_by_system_name() -> None:
     )
     await registry.initialize()
 
-    result = await registry.get("enterprise:staging:my-pq")
+    result = await registry.get(_qsid("enterprise:staging:1"))
 
-    staging.get.assert_awaited_once_with("enterprise:staging:my-pq")
+    staging.get.assert_awaited_once_with(_qsid("enterprise:staging:1"))
     prod.get.assert_not_called()
     assert result is sentinel
 
@@ -411,7 +417,7 @@ async def test_get_before_initialize_raises_internal_error() -> None:
     community = _make_child("community")
     registry = _build_registry(community_child=community, enterprise_children=None)
     with pytest.raises(InternalError):
-        await registry.get("community:community:foo")
+        await registry.get(_qsid("community:community:42"))
 
 
 @pytest.mark.asyncio
@@ -423,7 +429,7 @@ async def test_get_for_unconfigured_community_raises() -> None:
     )
     await registry.initialize()
     with pytest.raises(InvalidSessionNameError) as exc_info:
-        await registry.get("community:community:foo")
+        await registry.get(_qsid("community:community:42"))
     assert "community system" in str(exc_info.value)
 
 
@@ -436,7 +442,7 @@ async def test_get_for_unknown_enterprise_system_raises() -> None:
     )
     await registry.initialize()
     with pytest.raises(InvalidSessionNameError) as exc_info:
-        await registry.get("enterprise:staging:my-pq")
+        await registry.get(_qsid("enterprise:staging:1"))
     assert "'staging'" in str(exc_info.value)
     assert "['prod']" in str(exc_info.value)
 
@@ -447,8 +453,34 @@ async def test_get_with_unsupported_type_raises() -> None:
     registry = _build_registry(community_child=community, enterprise_children=None)
     await registry.initialize()
     with pytest.raises(InvalidSessionNameError) as exc_info:
-        await registry.get("docs:central:tool")
-    assert "unsupported type" in str(exc_info.value)
+        await registry.get(_qsid("docs:central:1"))
+    # QualifiedSessionId.from_str validates the system_type segment up front,
+    # so the error names the offending segment and the allowed values.
+    msg = str(exc_info.value)
+    assert "docs" in msg
+    assert "system_type" in msg
+
+
+@pytest.mark.asyncio
+async def test_route_unhandled_system_type_raises_internal_error() -> None:
+    """``_route``'s defensive ``case _`` branch raises ``InternalError``.
+
+    Required by ``feedback_no_asserts_in_production``: every defensive
+    raise in production code must have a unit test that triggers it. A
+    real :class:`QualifiedSessionId` cannot carry an unknown
+    ``system_type`` (its constructors validate the enum), so we
+    hand-build a valid instance and overwrite its slot to exercise the
+    branch.
+    """
+    community = _make_child("community")
+    registry = _build_registry(community_child=community, enterprise_children=None)
+    await registry.initialize()
+
+    qsid = _qsid("community:community:1")
+    object.__setattr__(qsid, "system_type", "unhandled-future-type")
+
+    with pytest.raises(InternalError, match="unhandled"):
+        await registry.get(qsid)
 
 
 # ---------------------------------------------------------------------------
@@ -466,12 +498,12 @@ async def test_get_all_merges_items_and_namespaces_errors() -> None:
     prod_mgr = MagicMock(name="prod-mgr")
 
     community.get_all.return_value = RegistrySnapshot.with_initialization(
-        items={"community:community:a": community_mgr},
+        items={"community:community:7": community_mgr},
         phase=InitializationPhase.COMPLETED,
         errors={"config": "community-error"},
     )
     prod.get_all.return_value = RegistrySnapshot.with_initialization(
-        items={"enterprise:prod:p1": prod_mgr},
+        items={"enterprise:prod:11": prod_mgr},
         phase=InitializationPhase.LOADING,
         errors={"prod": "prod-error"},
     )
@@ -490,8 +522,8 @@ async def test_get_all_merges_items_and_namespaces_errors() -> None:
     snapshot = await registry.get_all()
 
     assert snapshot.items == {
-        "community:community:a": community_mgr,
-        "enterprise:prod:p1": prod_mgr,
+        "community:community:7": community_mgr,
+        "enterprise:prod:11": prod_mgr,
     }
     # FAILED has the lowest configured order so a single failed child wins
     # over any sibling that is still loading or already completed.

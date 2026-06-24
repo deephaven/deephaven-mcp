@@ -37,6 +37,7 @@ from deephaven_mcp.client import EnterpriseClientTimeouts
 from deephaven_mcp.resource_manager import (
     EnterpriseSessionRegistry,
     InitializationPhase,
+    QualifiedSessionId,
     RegistrySnapshot,
 )
 from deephaven_mcp.resource_manager._manager import (
@@ -117,12 +118,17 @@ def _make_initialized_registry() -> EnterpriseSessionRegistry:
     return registry
 
 
-def _make_mock_manager(full_name: str) -> MagicMock:
-    """Return a BaseItemManager mock with the given full_name."""
+def _make_mock_manager(qualified_session_id: str) -> MagicMock:
+    """Return a BaseItemManager mock with the given qualified_session_id."""
     mgr = MagicMock(spec=BaseItemManager)
-    mgr.full_name = full_name
+    mgr.qualified_session_id = QualifiedSessionId.from_str(qualified_session_id)
     mgr.close = AsyncMock()
     return mgr
+
+
+def _qsid(s: str) -> QualifiedSessionId:
+    """Test helper — wire-form to typed key."""
+    return QualifiedSessionId.from_str(s)
 
 
 def _make_factory_snapshot(client=None) -> _FactorySnapshot:
@@ -167,7 +173,7 @@ async def test_fetch_factory_pqs_no_cached_client_success():
 
     assert isinstance(result, _FactoryQueryResult)
     assert result.new_client is mock_client
-    assert result.query_names == {"pq1", "pq2"}
+    assert result.query_map == {"q1": "pq1", "q2": "pq2"}
 
 
 @pytest.mark.asyncio
@@ -188,7 +194,7 @@ async def test_fetch_factory_pqs_cached_client_ping_ok():
     assert isinstance(result, _FactoryQueryResult)
     # When ping ok, we reuse the cached client and return it as new_client
     assert result.new_client is mock_client
-    assert result.query_names == {"mypq"}
+    assert result.query_map == {"q1": "mypq"}
     # factory_manager.get should NOT have been called
     snapshot.factory_manager.get.assert_not_called()
 
@@ -215,7 +221,7 @@ async def test_fetch_factory_pqs_cached_client_ping_returns_false():
 
     assert isinstance(result, _FactoryQueryResult)
     assert result.new_client is mock_new_client
-    assert result.query_names == {"fresh-pq"}
+    assert result.query_map == {"q1": "fresh-pq"}
     snapshot.factory_manager.get.assert_awaited_once()
 
 
@@ -241,7 +247,7 @@ async def test_fetch_factory_pqs_cached_client_ping_raises():
 
     assert isinstance(result, _FactoryQueryResult)
     assert result.new_client is mock_new_client
-    assert result.query_names == {"recovered-pq"}
+    assert result.query_map == {"q1": "recovered-pq"}
 
 
 @pytest.mark.asyncio
@@ -324,21 +330,23 @@ async def test_fetch_factory_pqs_map_raises_using_cached_client():
 
 
 def test_make_enterprise_session_manager_returns_enterprise_session_manager():
-    """Creates an EnterpriseSessionManager with source=system_name, name=session_name."""
+    """Creates an EnterpriseSessionManager with system=system_name, name=display_name, session_id=serial."""
     mock_factory = MagicMock(spec=CorePlusSessionFactoryManager)
 
     manager = EnterpriseSessionRegistry._make_enterprise_session_manager(
-        mock_factory, "my-pq", _TEST_SYSTEM_NAME
+        mock_factory, 42, "my-pq", _TEST_SYSTEM_NAME
     )
 
     assert isinstance(manager, EnterpriseSessionManager)
     assert manager.system == _TEST_SYSTEM_NAME
     assert manager.name == "my-pq"
+    assert manager.session_id == "42"
+    assert str(manager.qualified_session_id) == f"enterprise:{_TEST_SYSTEM_NAME}:42"
 
 
 @pytest.mark.asyncio
 async def test_make_enterprise_session_manager_creation_function_calls_connect():
-    """The creation_function calls factory.get() then connect_to_persistent_query(name)."""
+    """The creation_function calls factory.get() then connect_to_persistent_query(serial=serial)."""
     mock_session = MagicMock()
     mock_factory_instance = AsyncMock()
     mock_factory_instance.connect_to_persistent_query = AsyncMock(
@@ -349,16 +357,14 @@ async def test_make_enterprise_session_manager_creation_function_calls_connect()
     mock_factory.get = AsyncMock(return_value=mock_factory_instance)
 
     manager = EnterpriseSessionRegistry._make_enterprise_session_manager(
-        mock_factory, "pq-test", _TEST_SYSTEM_NAME
+        mock_factory, 7, "pq-test", _TEST_SYSTEM_NAME
     )
 
     # The creation_function is stored in manager._creation_function
     result = await manager._creation_function(_TEST_SYSTEM_NAME, "pq-test")
 
     mock_factory.get.assert_awaited_once()
-    mock_factory_instance.connect_to_persistent_query.assert_awaited_once_with(
-        "pq-test"
-    )
+    mock_factory_instance.connect_to_persistent_query.assert_awaited_once_with(serial=7)
     assert result is mock_session
 
 
@@ -877,7 +883,7 @@ async def test_snapshot_factory_state_returns_none_when_factory_none():
 def test_apply_result_success_calls_apply_factory_success():
     """_apply_result delegates to _apply_factory_success for _FactoryQueryResult."""
     registry = _make_initialized_registry()
-    result = _FactoryQueryResult(new_client=MagicMock(), query_names={"pq1"})
+    result = _FactoryQueryResult(new_client=MagicMock(), query_map={1: "pq1"})
     factory_manager = registry._factory_manager
 
     with patch.object(
@@ -925,21 +931,19 @@ def test_apply_result_unexpected_type_raises():
 def test_items_keys_used_directly_for_reconciliation():
     """_apply_factory_success uses set(_items.keys()) — all items are reconciled."""
     registry = _make_initialized_registry()
-    registry._items[f"enterprise:{_TEST_SYSTEM_NAME}:pq1"] = _make_mock_manager(
-        f"enterprise:{_TEST_SYSTEM_NAME}:pq1"
-    )
-    registry._items[f"enterprise:{_TEST_SYSTEM_NAME}:pq2"] = _make_mock_manager(
-        f"enterprise:{_TEST_SYSTEM_NAME}:pq2"
-    )
+    key1 = _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:1")
+    key2 = _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:2")
+    registry._items[key1] = _make_mock_manager(str(key1))
+    registry._items[key2] = _make_mock_manager(str(key2))
 
     # Controller reports only pq1 — pq2 is stale and should be removed.
-    result = _FactoryQueryResult(new_client=MagicMock(), query_names={"pq1"})
+    result = _FactoryQueryResult(new_client=MagicMock(), query_map={1: "pq1"})
     managers_to_close = registry._apply_factory_success(
         result, registry._factory_manager
     )
 
-    assert f"enterprise:{_TEST_SYSTEM_NAME}:pq1" in registry._items
-    assert f"enterprise:{_TEST_SYSTEM_NAME}:pq2" not in registry._items
+    assert key1 in registry._items
+    assert key2 not in registry._items
     assert len(managers_to_close) == 1
 
 
@@ -1000,20 +1004,20 @@ def test_apply_factory_success_adds_new_pqs():
 
     mock_factory = registry._factory_manager
     new_client = MagicMock()
-    result = _FactoryQueryResult(new_client=new_client, query_names={"pq1", "pq2"})
+    result = _FactoryQueryResult(new_client=new_client, query_map={1: "pq1", 2: "pq2"})
 
     with patch.object(
         EnterpriseSessionRegistry,
         "_make_enterprise_session_manager",
-        side_effect=lambda factory, name, system_name: _make_mock_manager(
-            f"enterprise:{system_name}:{name}"
+        side_effect=lambda factory, serial, display_name, system_name: _make_mock_manager(
+            f"enterprise:{system_name}:{serial}"
         ),
     ):
         managers_to_close = registry._apply_factory_success(result, mock_factory)
 
     assert registry._controller_client is new_client
-    assert f"enterprise:{_TEST_SYSTEM_NAME}:pq1" in registry._items
-    assert f"enterprise:{_TEST_SYSTEM_NAME}:pq2" in registry._items
+    assert _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:1") in registry._items
+    assert _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:2") in registry._items
     assert managers_to_close == []
 
 
@@ -1025,8 +1029,8 @@ def test_apply_factory_success_removes_stale_pqs():
 
     mock_factory = registry._factory_manager
     new_client = MagicMock()
-    # Controller reports empty set — stale-pq should be removed
-    result = _FactoryQueryResult(new_client=new_client, query_names=set())
+    # Controller reports empty map — stale-pq should be removed
+    result = _FactoryQueryResult(new_client=new_client, query_map={})
 
     managers_to_close = registry._apply_factory_success(result, mock_factory)
 
@@ -1041,7 +1045,7 @@ def test_apply_factory_success_clears_error():
     registry._items.clear()
 
     mock_factory = registry._factory_manager
-    result = _FactoryQueryResult(new_client=MagicMock(), query_names=set())
+    result = _FactoryQueryResult(new_client=MagicMock(), query_map={})
 
     registry._apply_factory_success(result, mock_factory)
 
@@ -1051,13 +1055,13 @@ def test_apply_factory_success_clears_error():
 def test_apply_factory_success_noop_when_unchanged():
     """_apply_factory_success is a no-op when controller matches current state."""
     registry = _make_initialized_registry()
-    key = f"enterprise:{_TEST_SYSTEM_NAME}:existing"
-    existing_mgr = _make_mock_manager(key)
+    key = _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:7")
+    existing_mgr = _make_mock_manager(str(key))
     registry._items[key] = existing_mgr
 
     mock_factory = registry._factory_manager
     new_client = MagicMock()
-    result = _FactoryQueryResult(new_client=new_client, query_names={"existing"})
+    result = _FactoryQueryResult(new_client=new_client, query_map={7: "existing"})
 
     managers_to_close = registry._apply_factory_success(result, mock_factory)
 
@@ -1278,7 +1282,7 @@ def test_build_not_found_message_with_error():
 
 
 def test_build_not_found_message_malformed_name_no_raise():
-    """Malformed name does NOT raise — _build_not_found_message never calls parse_full_name."""
+    """Malformed name does NOT raise — _build_not_found_message never parses the id."""
     registry = _make_initialized_registry()
     registry._phase = InitializationPhase.COMPLETED
 
@@ -1324,7 +1328,7 @@ def test_apply_factory_success_removes_keys_not_reported_by_controller():
     registry._added_session_ids.add(stale_dynamic_key)
 
     mock_factory = registry._factory_manager
-    result = _FactoryQueryResult(new_client=MagicMock(), query_names=set())
+    result = _FactoryQueryResult(new_client=MagicMock(), query_map={})
 
     managers_to_close = registry._apply_factory_success(result, mock_factory)
 
@@ -1341,11 +1345,14 @@ def test_apply_factory_success_removes_keys_not_reported_by_controller():
 def test_apply_factory_success_adds_keys_reported_by_controller():
     """A controller refresh adds any new session the controller reports."""
     registry = _make_initialized_registry()
+    new_pq_serial = 42
     new_pq_name = "new-pq"
-    new_key = f"enterprise:{_TEST_SYSTEM_NAME}:{new_pq_name}"
+    new_key = _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:{new_pq_serial}")
 
     mock_factory = registry._factory_manager
-    result = _FactoryQueryResult(new_client=MagicMock(), query_names={new_pq_name})
+    result = _FactoryQueryResult(
+        new_client=MagicMock(), query_map={new_pq_serial: new_pq_name}
+    )
 
     managers_to_close = registry._apply_factory_success(result, mock_factory)
 
@@ -1399,7 +1406,7 @@ async def test_sync_enterprise_sessions_dropping_known_session_removes_it():
     with patch(
         "deephaven_mcp.resource_manager._registry_enterprise._fetch_factory_pqs",
         new=AsyncMock(
-            return_value=_FactoryQueryResult(new_client=MagicMock(), query_names=set())
+            return_value=_FactoryQueryResult(new_client=MagicMock(), query_map={})
         ),
     ):
         await registry._sync_enterprise_sessions()
@@ -1413,10 +1420,10 @@ async def test_sync_enterprise_sessions_controller_error_preserves_all_state():
     every session in place. The error is recorded for diagnostics.
     """
     registry = _make_initialized_registry()
-    controller_key = f"enterprise:{_TEST_SYSTEM_NAME}:controller-pq"
-    dynamic_key = f"enterprise:{_TEST_SYSTEM_NAME}:dynamic-pq"
-    controller_mgr = _make_mock_manager(controller_key)
-    dynamic_mgr = _make_mock_manager(dynamic_key)
+    controller_key = _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:controller-pq")
+    dynamic_key = _qsid(f"enterprise:{_TEST_SYSTEM_NAME}:dynamic-pq")
+    controller_mgr = _make_mock_manager(str(controller_key))
+    dynamic_mgr = _make_mock_manager(str(dynamic_key))
     registry._items[controller_key] = controller_mgr
     await registry.add_session(dynamic_mgr)
 

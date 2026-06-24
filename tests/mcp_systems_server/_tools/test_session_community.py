@@ -37,7 +37,9 @@ from deephaven_mcp.resource_manager import (
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
     PythonLaunchedSession,
+    QualifiedSessionId,
     ResourceLivenessStatus,
+    SessionId,
     SessionOrigin,
     StaticCommunitySessionManager,
     SystemType,
@@ -69,7 +71,10 @@ async def test_session_community_create_success():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -120,7 +125,7 @@ async def test_session_community_create_success():
 
         # Verify success
         assert result["success"] is True
-        assert result["session_id"] == "community:community:test-session"
+        assert result["session_id"] == "community:community:1"
         assert result["session_name"] == "test-session"
         assert result["port"] == 10000
         assert "connection_url" in result
@@ -184,7 +189,10 @@ async def test_session_community_create_sessions_disabled():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -235,7 +243,7 @@ async def test_session_community_create_sessions_disabled():
 
         # Should succeed - limit is disabled so no limit check
         assert result["success"] is True
-        assert result["session_id"] == "community:community:test-session"
+        assert result["session_id"] == "community:community:1"
         # count_added_sessions should NOT have been called since limit is disabled
         mock_session_registry.count_added_sessions.assert_not_called()
 
@@ -300,6 +308,7 @@ async def test_session_community_create_launch_failure():
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -362,12 +371,44 @@ async def test_session_community_delete_no_community_returns_clean_error():
         ),
     ):
         result = await session_community_delete(
-            context, session_id="community:community:test-session"
+            context, session_id="community:community:1"
         )
 
     assert result["success"] is False
     assert result["isError"] is True
     assert "Community" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_invalid_session_name_returns_error():
+    """An ill-formed ``session_name`` is rejected before any registry or
+    process work.
+
+    The early ``validate_resource_name`` guard exists because the name
+    doubles as a Docker container name, Python process tag, and the
+    hash input for the :class:`SessionId`; any character outside
+    ``[A-Za-z0-9_.-]`` would break at least one of those downstream
+    surfaces. This test pins the guard so it cannot regress to a
+    silent late failure.
+    """
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_create(
+        context, session_name="bad name with spaces"
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "session_name" in result["error"]
+    # Guard fires before we touch the registry.
+    mock_session_registry.add_dynamic_session.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -382,8 +423,8 @@ async def test_session_community_delete_success():
 
     # Create a mock dynamic session manager
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:community:test-session"
-    mock_manager._name = "test-session"
+    mock_manager.qualified_session_id = "community:community:1"
+    mock_manager.name = "test-session"
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
@@ -403,12 +444,12 @@ async def test_session_community_delete_success():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:test-session",
+        session_id="community:community:1",
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "community:community:test-session"
+    assert result["session_id"] == "community:community:1"
     assert result["session_name"] == "test-session"
 
     # Verify session was closed and removed
@@ -429,8 +470,8 @@ async def test_session_community_delete_python_session():
 
     # Create a mock python-launched session manager
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:community:python-session"
-    mock_manager._name = "python-session"
+    mock_manager.qualified_session_id = "community:community:2"
+    mock_manager.name = "python-session"
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
@@ -450,12 +491,12 @@ async def test_session_community_delete_python_session():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:python-session",
+        session_id="community:community:2",
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "community:community:python-session"
+    assert result["session_id"] == "community:community:2"
 
     # Verify untrack_python_process was called (line 4197)
     mock_instance_tracker.untrack_python_process.assert_called_once_with(
@@ -487,7 +528,7 @@ async def test_session_community_delete_not_found():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:nonexistent",
+        session_id="community:community:999",
     )
 
     # Verify error
@@ -507,7 +548,7 @@ async def test_session_community_delete_not_dynamic():
     # against :class:`CommunitySessionManager` succeeds.
     mock_manager = MagicMock()
     mock_manager.__class__ = StaticCommunitySessionManager
-    mock_manager.full_name = "community:community:test-session"
+    mock_manager.qualified_session_id = "community:community:1"
     mock_manager.system_type = SystemType.COMMUNITY
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.STATIC
@@ -523,7 +564,7 @@ async def test_session_community_delete_not_dynamic():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:test-session",
+        session_id="community:community:1",
     )
 
     assert result["success"] is False
@@ -950,7 +991,7 @@ async def test_session_community_delete_validates_origin():
     # patched so the production ``isinstance`` narrowing succeeds.
     mock_manager = MagicMock()
     mock_manager.__class__ = StaticCommunitySessionManager
-    mock_manager.full_name = "community:community:local"
+    mock_manager.qualified_session_id = "community:community:10"
     mock_manager.system_type = SystemType.COMMUNITY
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.STATIC
@@ -966,7 +1007,7 @@ async def test_session_community_delete_validates_origin():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:local",
+        session_id="community:community:10",
     )
 
     assert result["success"] is False
@@ -986,7 +1027,7 @@ async def test_session_community_delete_allows_dynamic_sessions():
     # against :class:`CommunitySessionManager` succeeds.
     mock_dynamic_manager = MagicMock()
     mock_dynamic_manager.__class__ = DynamicCommunitySessionManager
-    mock_dynamic_manager.full_name = "community:community:test-session"
+    mock_dynamic_manager.qualified_session_id = "community:community:1"
     mock_dynamic_manager.system_type = SystemType.COMMUNITY
     mock_dynamic_manager.system = "community"  # community umbrella
     mock_dynamic_manager.origin = SessionOrigin.DYNAMIC
@@ -1006,17 +1047,17 @@ async def test_session_community_delete_allows_dynamic_sessions():
     # Delete dynamic session using full session_id
     result = await session_community_delete(
         context,
-        session_id="community:community:test-session",
+        session_id="community:community:1",
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "community:community:test-session"
+    assert result["session_id"] == "community:community:1"
 
     # Verify close and remove were called
     mock_dynamic_manager.close.assert_called_once()
     mock_session_registry.remove.assert_called_once_with(
-        "community:community:test-session"
+        QualifiedSessionId.from_str("community:community:1")
     )
 
 
@@ -1026,7 +1067,7 @@ async def test_session_community_delete_close_failure_continues():
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:community:close-fail"
+    mock_manager.qualified_session_id = "community:community:11"
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
@@ -1045,12 +1086,12 @@ async def test_session_community_delete_close_failure_continues():
     )
 
     result = await session_community_delete(
-        context, session_id="community:community:close-fail"
+        context, session_id="community:community:11"
     )
 
     # Should succeed despite close failure
     assert result["success"] is True
-    assert result["session_id"] == "community:community:close-fail"
+    assert result["session_id"] == "community:community:11"
     mock_session_registry.remove.assert_called_once()
 
 
@@ -1060,7 +1101,7 @@ async def test_session_community_delete_removal_missing_in_registry():
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:community:ghost"
+    mock_manager.qualified_session_id = "community:community:12"
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
@@ -1079,7 +1120,7 @@ async def test_session_community_delete_removal_missing_in_registry():
     )
 
     result = await session_community_delete(
-        context, session_id="community:community:ghost"
+        context, session_id="community:community:12"
     )
 
     assert result["success"] is True
@@ -1091,7 +1132,7 @@ async def test_session_community_delete_registry_remove_raises():
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:community:boom"
+    mock_manager.qualified_session_id = "community:community:13"
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
@@ -1112,7 +1153,7 @@ async def test_session_community_delete_registry_remove_raises():
     )
 
     result = await session_community_delete(
-        context, session_id="community:community:boom"
+        context, session_id="community:community:13"
     )
 
     assert result["success"] is False
@@ -1125,7 +1166,7 @@ async def test_session_community_delete_outer_exception():
     """session_community_delete outer except handler fires when unexpected error occurs."""
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:community:unexpected"
+    mock_manager.qualified_session_id = "community:community:14"
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.DYNAMIC
     mock_manager.system_type = SystemType.COMMUNITY
@@ -1155,7 +1196,7 @@ async def test_session_community_delete_outer_exception():
         side_effect=info_side_effect,
     ):
         result = await session_community_delete(
-            context, session_id="community:community:unexpected"
+            context, session_id="community:community:14"
         )
 
     assert result["success"] is False
@@ -1197,7 +1238,7 @@ async def test_session_community_delete_wrong_system_type():
         }
     )
 
-    result = await session_community_delete(context, session_id="enterprise:prod:s1")
+    result = await session_community_delete(context, session_id="enterprise:prod:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1226,7 +1267,10 @@ async def test_session_community_create_explicit_docker_image():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -1303,7 +1347,10 @@ async def test_session_community_create_groovy_programming_language():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -1427,7 +1474,10 @@ async def test_session_community_create_groovy_from_config_defaults():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -1541,7 +1591,7 @@ async def test_session_community_credentials_disabled_by_default():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:test-session"
+        context, session_id="community:community:1"
     )
 
     assert result["success"] is False
@@ -1575,7 +1625,7 @@ async def test_session_community_credentials_explicit_none():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:test-session"
+        context, session_id="community:community:1"
     )
 
     assert result["success"] is False
@@ -1615,6 +1665,7 @@ async def test_session_community_credentials_dynamic_success():
         session_config=stub_session_config(),
         launched_session=mock_launched_session,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -1627,7 +1678,7 @@ async def test_session_community_credentials_dynamic_success():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:test-session"
+        context, session_id="community:community:1"
     )
 
     assert result["success"] is True
@@ -1670,6 +1721,7 @@ async def test_session_community_credentials_anonymous_auth():
         session_config=stub_session_config(),
         launched_session=mock_launched_session,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -1682,7 +1734,7 @@ async def test_session_community_credentials_anonymous_auth():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:test-session"
+        context, session_id="community:community:1"
     )
 
     assert result["success"] is True
@@ -1711,7 +1763,7 @@ async def test_session_community_credentials_no_config():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:test-session"
+        context, session_id="community:community:1"
     )
 
     assert result["success"] is False
@@ -1746,12 +1798,12 @@ async def test_session_community_credentials_session_not_found():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:nonexistent"
+        context, session_id="community:community:999"
     )
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Session 'community:community:nonexistent' not found" in result["error"]
+    assert "Session 'community:community:999' not found" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -1816,6 +1868,7 @@ async def test_session_community_credentials_static_session():
         name="local-dev",
         session_config=session_config,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -1828,7 +1881,7 @@ async def test_session_community_credentials_static_session():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:local-dev"
+        context, session_id="community:community:100"
     )
 
     assert result["success"] is True
@@ -1869,6 +1922,7 @@ async def test_session_community_credentials_static_session_anonymous():
         name="local-dev-anon",
         session_config=session_config,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -1881,7 +1935,7 @@ async def test_session_community_credentials_static_session_anonymous():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:local-dev-anon"
+        context, session_id="community:community:101"
     )
 
     assert result["success"] is True
@@ -1911,10 +1965,10 @@ async def test_register_session_manager_custom_auth_handler():
 
     mock_registry = MagicMock(spec=CommunitySessionRegistry)
     mock_registry.add_dynamic_session = AsyncMock()
+    mock_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
 
     await _register_session_manager(
         session_name="custom-session",
-        session_id="community:community:custom-session",
         port=10000,
         programming_language="Python",
         resolved_auth_type="com.example.CustomAuthHandler",
@@ -1943,10 +1997,10 @@ async def test_register_session_manager_anonymous_auth():
     mock_launched = MagicMock(spec=DockerLaunchedSession)
     mock_registry = MagicMock(spec=CommunitySessionRegistry)
     mock_registry.add_dynamic_session = AsyncMock()
+    mock_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
 
     await _register_session_manager(
         session_name="anon-session",
-        session_id="community:community:anon-session",
         port=10000,
         programming_language="Python",
         resolved_auth_type="Anonymous",
@@ -1991,6 +2045,7 @@ async def test_session_community_credentials_static_session_custom_token():
         name="custom-session",
         session_config=session_config,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
     mock_session_registry.get = AsyncMock(return_value=manager)
 
@@ -2042,6 +2097,7 @@ async def test_session_community_credentials_static_session_unsupported_creds():
         name="pw-session",
         session_config=session_config,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
     mock_session_registry.get = AsyncMock(return_value=manager)
 
@@ -2119,7 +2175,7 @@ async def test_session_community_credentials_exception_handling():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:test-session"
+        context, session_id="community:community:1"
     )
 
     assert result["success"] is False
@@ -2149,6 +2205,7 @@ async def test_session_community_credentials_dynamic_only_denies_static():
         name="local-dev",
         session_config=stub_session_config(name="local-dev"),
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -2161,7 +2218,7 @@ async def test_session_community_credentials_dynamic_only_denies_static():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:local-dev"
+        context, session_id="community:community:100"
     )
 
     assert result["success"] is False
@@ -2200,6 +2257,7 @@ async def test_session_community_credentials_static_only_denies_dynamic():
         session_config=stub_session_config(),
         launched_session=mock_launched_session,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
 
     mock_session_registry.get = AsyncMock(return_value=manager)
@@ -2212,7 +2270,7 @@ async def test_session_community_credentials_static_only_denies_dynamic():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:test-session"
+        context, session_id="community:community:1"
     )
 
     assert result["success"] is False
@@ -2249,6 +2307,7 @@ async def test_session_community_credentials_all_allows_both():
         name="local-dev",
         session_config=session_config,
         timeouts=CommunityClientTimeouts(),
+        session_id=SessionId.from_int(0),
     )
 
     mock_session_registry.get = AsyncMock(return_value=static_manager)
@@ -2261,7 +2320,7 @@ async def test_session_community_credentials_all_allows_both():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:local-dev"
+        context, session_id="community:community:100"
     )
 
     assert result["success"] is True
@@ -2386,7 +2445,10 @@ async def test_session_community_create_groovy_programming_language_in_config():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -2409,7 +2471,7 @@ async def test_session_community_create_groovy_programming_language_in_config():
         nonlocal captured_config
         captured_config = session_config
         manager = MagicMock()
-        manager.full_name = f"community:community:{name}"
+        manager.qualified_session_id = f"community:community:{name}"
         return manager
 
     mock_session_registry.add_dynamic_session = AsyncMock(
@@ -2488,7 +2550,10 @@ async def test_session_community_create_python_programming_language_in_config():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -2510,7 +2575,7 @@ async def test_session_community_create_python_programming_language_in_config():
         nonlocal captured_config
         captured_config = session_config
         manager = MagicMock()
-        manager.full_name = f"community:community:{name}"
+        manager.qualified_session_id = f"community:community:{name}"
         return manager
 
     mock_session_registry.add_dynamic_session = AsyncMock(
@@ -2577,7 +2642,10 @@ async def test_session_community_create_default_programming_language_in_config()
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
-    mock_session_registry.add_dynamic_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -2599,7 +2667,7 @@ async def test_session_community_create_default_programming_language_in_config()
         nonlocal captured_config
         captured_config = session_config
         manager = MagicMock()
-        manager.full_name = f"community:community:{name}"
+        manager.qualified_session_id = f"community:community:{name}"
         return manager
 
     mock_session_registry.add_dynamic_session = AsyncMock(

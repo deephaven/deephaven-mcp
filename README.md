@@ -1015,10 +1015,11 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Check that the MCP server process has read permissions for every file under the configuration directory
 
 - **Session ID Format Issues:**
-  - Use the correct format: `{type}:{system}:{session_name}`
-  - Examples: `community:community:my_session`, `enterprise:prod:analytics`
+  - Use the correct format: `{type}:{system}:{session_id}`
+  - Community: `community:community:<session_name>` (the `SessionId` is the session name itself, e.g. `community:community:my_session`)
+  - Enterprise: `enterprise:<system_name>:<pq_serial>` (the `SessionId` is the PQ serial as a decimal string, e.g. `enterprise:prod:42`); use `pq_name_to_id` to resolve a PQ name to its serial
   - PQ ids use the simpler form `<system>:<serial>` (e.g. `prod:42`) and route to the right enterprise system automatically
-  - Avoid special characters or spaces in session names
+  - Avoid special characters or spaces in session names (the community session name must match `[A-Za-z0-9][A-Za-z0-9_.-]*` since it doubles as the `SessionId`)
 
 - **Authentication Problems:**
   - **Community sessions:** Verify connection URLs and the `auth.credentials` block — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)

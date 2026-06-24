@@ -10,7 +10,11 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 import pytest
 
 from deephaven_mcp import client
-from deephaven_mcp._exceptions import InternalError, SessionCreationError
+from deephaven_mcp._exceptions import (
+    InternalError,
+    InvalidSessionNameError,
+    SessionCreationError,
+)
 from deephaven_mcp.client import (
     CommunityClientTimeouts,
     CorePlusSession,
@@ -25,6 +29,7 @@ from deephaven_mcp.resource_manager import (
     EnterpriseSessionManager,
     PythonLaunchedSession,
     ResourceLivenessStatus,
+    SessionId,
     SystemType,
 )
 from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
@@ -88,8 +93,15 @@ class MockSyncItem:
 class ConcreteItemManager(BaseItemManager[MockItem]):
     """A concrete implementation of BaseItemManager for testing."""
 
-    def __init__(self, system_type: SystemType, system: str, name: str):
-        super().__init__(system_type, system, name)
+    def __init__(
+        self,
+        system_type: SystemType,
+        system: str,
+        name: str,
+        *,
+        session_id: int = 0,
+    ):
+        super().__init__(system_type, system, SessionId.from_int(session_id), name)
         self._create_item_mock = AsyncMock(return_value=MockItem())
 
     async def _create_item(self) -> MockItem:
@@ -115,11 +127,13 @@ async def test_properties():
         system_type=SystemType.COMMUNITY,
         system="test_source",
         name="test_manager",
+        session_id=42,
     )
     assert manager.name == "test_manager"
     assert manager.system_type == SystemType.COMMUNITY
     assert manager.system == "test_source"
-    assert manager.full_name == "community:test_source:test_manager"
+    assert manager.session_id == "42"
+    assert str(manager.qualified_session_id) == "community:test_source:42"
     # Base manager no longer carries origin/kind; those live on subclasses.
     assert not hasattr(manager, "origin")
     assert not hasattr(manager, "kind")
@@ -233,7 +247,7 @@ async def test_close_handles_sync_method_gracefully():
 
     class ConcreteSyncItemManager(BaseItemManager[MockSyncItem]):
         def __init__(self, system_type: SystemType, system: str, name: str):
-            super().__init__(system_type, system, name)
+            super().__init__(system_type, system, SessionId.from_int(0), name)
             self._create_item_mock = AsyncMock(return_value=MockSyncItem())
 
         async def _create_item(self) -> MockSyncItem:
@@ -291,7 +305,7 @@ async def test_liveness_status_unlocked_exceptions(monkeypatch):
         async def _get_unlocked(self):
             return MockItem()
 
-    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    manager = DummyManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
     # Patch _get_unlocked to raise AuthenticationError
     monkeypatch.setattr(
         manager, "_get_unlocked", AsyncMock(side_effect=AuthenticationError("authfail"))
@@ -349,7 +363,7 @@ async def test_liveness_status_logs_and_modes(caplog):
         async def _get_unlocked(self):
             return MockItem()
 
-    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    manager = DummyManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
     # Mode: ensure_item=True
     with caplog.at_level("INFO"):
         status, detail = await manager.liveness_status(ensure_item=True)
@@ -381,7 +395,7 @@ async def test_close_swallows_item_close_exception(caplog):
         async def _check_liveness(self, item):
             return (ResourceLivenessStatus.ONLINE, None)
 
-    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    manager = DummyManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
     item = MockItem()
     manager._item_cache = item
     item.close = AsyncMock(side_effect=Exception("close failed"))
@@ -395,7 +409,7 @@ async def test_close_swallows_item_close_exception(caplog):
     assert any(
         r.levelname == "WARNING"
         and "Error closing item" in r.getMessage()
-        and "community:src:nm" in r.getMessage()
+        and "community:src:1" in r.getMessage()
         for r in caplog.records
     )
 
@@ -406,16 +420,34 @@ async def test_static_community_session_manager_has_correct_source():
     from deephaven_mcp.resource_manager import StaticCommunitySessionManager, SystemType
 
     manager = StaticCommunitySessionManager(
-        "test-session",
-        _stub_session_config(name="test-session"),
+        name="test-session",
+        session_id=SessionId.from_int(123),
+        session_config=_stub_session_config(name="test-session"),
         timeouts=CommunityClientTimeouts(),
     )
 
     assert manager.system == "community"
     assert manager.origin.value == "static"
     assert manager.system_type == SystemType.COMMUNITY
-    assert manager.full_name == "community:community:test-session"
+    assert manager.session_id == "123"
+    assert str(manager.qualified_session_id) == "community:community:123"
     assert manager.name == "test-session"
+
+
+@pytest.mark.asyncio
+async def test_community_session_manager_session_config_property_returns_construction_argument():
+    """CommunitySessionManager.session_config returns the typed declaration passed at construction."""
+    from deephaven_mcp.resource_manager import StaticCommunitySessionManager
+
+    cfg = _stub_session_config(name="cfg-prop")
+    manager = StaticCommunitySessionManager(
+        name="cfg-prop",
+        session_id=SessionId.from_int(456),
+        session_config=cfg,
+        timeouts=CommunityClientTimeouts(),
+    )
+
+    assert manager.session_config is cfg
 
 
 @pytest.mark.asyncio
@@ -424,7 +456,10 @@ async def test_community_session_manager_check_liveness_offline(monkeypatch):
     from deephaven_mcp.resource_manager import StaticCommunitySessionManager
 
     mgr = StaticCommunitySessionManager(
-        "test", _stub_session_config(name="test"), timeouts=CommunityClientTimeouts()
+        name="test",
+        session_id=SessionId.from_int(7),
+        session_config=_stub_session_config(name="test"),
+        timeouts=CommunityClientTimeouts(),
     )
     mock_session = Mock()
     mock_session.is_alive = AsyncMock(return_value=False)
@@ -439,7 +474,7 @@ async def test_enterprise_session_manager_check_liveness_offline(monkeypatch):
     async def dummy_creation(source, name):
         return Mock()
 
-    mgr = EnterpriseSessionManager("src", "nm", dummy_creation)
+    mgr = EnterpriseSessionManager("src", SessionId.from_int(11), "nm", dummy_creation)
     mock_session = Mock()
     mock_session.is_alive = AsyncMock(return_value=False)
     result = await mgr._check_liveness(mock_session)
@@ -458,7 +493,7 @@ async def test_get_raises_if_create_item_fails(monkeypatch):
         async def _check_liveness(self, item):
             return (ResourceLivenessStatus.ONLINE, None)
 
-    manager = DummyManager(SystemType.COMMUNITY, "src", "nm")
+    manager = DummyManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
     with pytest.raises(RuntimeError, match="fail-create"):
         await manager.get()
 
@@ -478,6 +513,7 @@ class TestCommunitySessionManager:
             name="test_community",
             session_config=session_config,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(1),
         )
         session = await manager._create_item()
         mock_from_session_config.assert_awaited_once_with(
@@ -496,6 +532,7 @@ class TestCommunitySessionManager:
             name="test_community",
             session_config=_stub_session_config(name="test_community"),
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(2),
         )
         with pytest.raises(SessionCreationError, match="Connection failed"):
             await manager._create_item()
@@ -509,6 +546,7 @@ class TestCommunitySessionManager:
             name="test_community",
             session_config=_stub_session_config(name="test_community"),
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(3),
         )
         mock_session = AsyncMock()
         mock_session.is_alive.return_value = True
@@ -521,132 +559,6 @@ class TestEnterpriseSessionManager:
     """Tests for the EnterpriseSessionManager class."""
 
 
-def test_make_full_name_static():
-    """Directly test BaseItemManager.make_full_name static method."""
-    from deephaven_mcp.resource_manager import BaseItemManager, SystemType
-
-    assert (
-        BaseItemManager.make_full_name(SystemType.ENTERPRISE, "factoryA", "sess42")
-        == "enterprise:factoryA:sess42"
-    )
-    assert (
-        BaseItemManager.make_full_name(SystemType.COMMUNITY, "sourceX", "foo")
-        == "community:sourceX:foo"
-    )
-
-
-def test_parse_full_name_static():
-    """Directly test BaseItemManager.parse_full_name static method."""
-    from deephaven_mcp.resource_manager import BaseItemManager
-
-    # Test valid enterprise session ID
-    system_type, source, name = BaseItemManager.parse_full_name(
-        "enterprise:factoryA:sess42"
-    )
-    assert system_type == "enterprise"
-    assert source == "factoryA"
-    assert name == "sess42"
-
-    # Test valid community session ID
-    system_type, source, name = BaseItemManager.parse_full_name("community:sourceX:foo")
-    assert system_type == "community"
-    assert source == "sourceX"
-    assert name == "foo"
-
-    # Test session ID with colons in the name (should be handled correctly)
-    system_type, source, name = BaseItemManager.parse_full_name(
-        "enterprise:prod:session:with:colons"
-    )
-    assert system_type == "enterprise"
-    assert source == "prod"
-    assert name == "session:with:colons"
-
-    # Test session ID with special characters
-    system_type, source, name = BaseItemManager.parse_full_name(
-        "community:config-file.yaml:worker-1"
-    )
-    assert system_type == "community"
-    assert source == "config-file.yaml"
-    assert name == "worker-1"
-
-
-def test_parse_full_name_invalid_formats():
-    """Test BaseItemManager.parse_full_name with invalid formats."""
-    from deephaven_mcp.resource_manager import BaseItemManager
-
-    # Test empty string
-    with pytest.raises(ValueError, match="Invalid full_name format"):
-        BaseItemManager.parse_full_name("")
-
-    # Test single component
-    with pytest.raises(ValueError, match="Invalid full_name format"):
-        BaseItemManager.parse_full_name("enterprise")
-
-    # Test two components (missing name)
-    with pytest.raises(ValueError, match="Invalid full_name format"):
-        BaseItemManager.parse_full_name("enterprise:system")
-
-    # Test no colons
-    with pytest.raises(ValueError, match="Invalid full_name format"):
-        BaseItemManager.parse_full_name("invalid-format")
-
-    # Test starts with colon
-    with pytest.raises(ValueError, match="Invalid full_name format"):
-        BaseItemManager.parse_full_name(":enterprise:system")
-
-    # Test ends with colon but missing components
-    with pytest.raises(ValueError, match="Invalid full_name format"):
-        BaseItemManager.parse_full_name("enterprise:")
-
-
-def test_make_and_parse_full_name_roundtrip():
-    """Test that make_full_name and parse_full_name are perfect inverses."""
-    from deephaven_mcp.resource_manager import BaseItemManager, SystemType
-
-    # Test enterprise roundtrip
-    original_enterprise = (SystemType.ENTERPRISE, "prod-system", "analytics-session")
-    full_name = BaseItemManager.make_full_name(*original_enterprise)
-    parsed = BaseItemManager.parse_full_name(full_name)
-    assert parsed == ("enterprise", "prod-system", "analytics-session")
-
-    # Test community roundtrip
-    original_community = (SystemType.COMMUNITY, "local-config.yaml", "worker-1")
-    full_name = BaseItemManager.make_full_name(*original_community)
-    parsed = BaseItemManager.parse_full_name(full_name)
-    assert parsed == ("community", "local-config.yaml", "worker-1")
-
-    # Test with special characters
-    original_special = (SystemType.ENTERPRISE, "test-env_v2", "session-name_123")
-    full_name = BaseItemManager.make_full_name(*original_special)
-    parsed = BaseItemManager.parse_full_name(full_name)
-    assert parsed == ("enterprise", "test-env_v2", "session-name_123")
-
-
-def test_split_name_property():
-    """Test BaseItemManager.split_name property."""
-    from deephaven_mcp.resource_manager import SystemType
-
-    # Test enterprise manager split_name
-    manager = ConcreteItemManager(SystemType.ENTERPRISE, "prod-env", "session-1")
-    system_type, source, name = manager.split_name
-    assert system_type == "enterprise"
-    assert source == "prod-env"
-    assert name == "session-1"
-
-    # Test community manager split_name
-    manager = ConcreteItemManager(SystemType.COMMUNITY, "config.yaml", "worker-1")
-    system_type, source, name = manager.split_name
-    assert system_type == "community"
-    assert source == "config.yaml"
-    assert name == "worker-1"
-
-    # Test that split_name matches full_name parsing
-    manager = ConcreteItemManager(SystemType.ENTERPRISE, "test-system", "analytics")
-    split_components = manager.split_name
-    parsed_components = manager.parse_full_name(manager.full_name)
-    assert split_components == parsed_components
-
-
 def test_enterprise_session_manager_constructor():
     """Explicitly test the constructor for coverage (lines 519-520)."""
     from deephaven_mcp.resource_manager import EnterpriseSessionManager
@@ -654,12 +566,14 @@ def test_enterprise_session_manager_constructor():
     def dummy_creation(source, name):
         pass
 
-    mgr = EnterpriseSessionManager("src", "nm", dummy_creation)
+    mgr = EnterpriseSessionManager("src", SessionId.from_int(42), "nm", dummy_creation)
     assert mgr._creation_function is dummy_creation
     assert mgr.system == "src"
     # Enterprise session managers never carry an ``origin``.
     assert not hasattr(mgr, "origin")
     assert mgr.name == "nm"
+    assert mgr.session_id == "42"
+    assert str(mgr.qualified_session_id) == "enterprise:src:42"
     assert mgr.system_type.value == "enterprise"
 
 
@@ -671,7 +585,7 @@ async def test_create_item_success_covers_try():
     async def creation(source, name):
         return mock_session
 
-    mgr = EnterpriseSessionManager("src", "nm", creation)
+    mgr = EnterpriseSessionManager("src", SessionId.from_int(1), "nm", creation)
     result = await mgr._create_item()
     assert result is mock_session
 
@@ -683,7 +597,7 @@ async def test_create_item_exception_covers_except():
     async def creation(source, name):
         raise RuntimeError("fail")
 
-    mgr = EnterpriseSessionManager("src", "nm", creation)
+    mgr = EnterpriseSessionManager("src", SessionId.from_int(2), "nm", creation)
     with pytest.raises(
         SessionCreationError, match="Failed to create enterprise session for nm: fail"
     ):
@@ -693,7 +607,7 @@ async def test_create_item_exception_covers_except():
 @pytest.mark.asyncio
 async def test_check_liveness_covers_return():
     """Covers line 559: return await item.is_alive()."""
-    mgr = EnterpriseSessionManager("src", "nm", AsyncMock())
+    mgr = EnterpriseSessionManager("src", SessionId.from_int(3), "nm", AsyncMock())
     mock_session = AsyncMock()
     mock_session.is_alive = AsyncMock(return_value=True)
     result = await mgr._check_liveness(mock_session)
@@ -703,7 +617,7 @@ async def test_check_liveness_covers_return():
 @pytest.mark.asyncio
 async def test_check_liveness_exception():
     """Covers that _check_liveness lets exceptions propagate (handled by liveness_status)."""
-    mgr = EnterpriseSessionManager("src", "nm", AsyncMock())
+    mgr = EnterpriseSessionManager("src", SessionId.from_int(4), "nm", AsyncMock())
     mock_session = AsyncMock()
     mock_session.is_alive = AsyncMock(side_effect=Exception("fail"))
 
@@ -718,7 +632,10 @@ async def test_check_liveness_exception():
         mock_creation_function = AsyncMock(return_value=mock_session)
 
         manager = EnterpriseSessionManager(
-            "test_source", "test_session", mock_creation_function
+            "test_source",
+            SessionId.from_int(10),
+            "test_session",
+            mock_creation_function,
         )
 
         result = await manager._create_item()
@@ -732,7 +649,10 @@ async def test_check_liveness_exception():
         mock_creation_function = AsyncMock(side_effect=Exception("Creation failed"))
 
         manager = EnterpriseSessionManager(
-            "test_source", "test_session", mock_creation_function
+            "test_source",
+            SessionId.from_int(11),
+            "test_session",
+            mock_creation_function,
         )
 
         with pytest.raises(
@@ -751,7 +671,10 @@ async def test_check_liveness_exception():
         mock_creation_function = AsyncMock(return_value=mock_session)
 
         manager = EnterpriseSessionManager(
-            "test_source", "test_session", mock_creation_function
+            "test_source",
+            SessionId.from_int(12),
+            "test_session",
+            mock_creation_function,
         )
 
         result = await manager.get()
@@ -765,7 +688,10 @@ async def test_check_liveness_exception():
         # Create a manager with a mock creation function
         mock_creation_function = AsyncMock()
         manager = EnterpriseSessionManager(
-            "test_source", "test_session", mock_creation_function
+            "test_source",
+            SessionId.from_int(13),
+            "test_session",
+            mock_creation_function,
         )
         mock_session = AsyncMock()
 
@@ -786,7 +712,10 @@ async def test_check_liveness_exception():
         # Create a manager with a mock creation function
         mock_creation_function = AsyncMock()
         manager = EnterpriseSessionManager(
-            "test_source", "test_session", mock_creation_function
+            "test_source",
+            SessionId.from_int(14),
+            "test_session",
+            mock_creation_function,
         )
 
         # Test with a mock session where is_alive returns True
@@ -950,6 +879,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         assert manager.launched_session == launched_session
@@ -971,6 +901,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         result = manager.to_dict()
@@ -1001,6 +932,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         result = manager.to_dict()
@@ -1025,6 +957,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         result = manager.to_dict()
@@ -1048,6 +981,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         result = manager.to_dict()
@@ -1072,6 +1006,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         cached_session = MagicMock()
@@ -1107,6 +1042,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         cached_session = MagicMock()
@@ -1145,6 +1081,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         cached_session = MagicMock()
@@ -1183,6 +1120,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         assert manager.connection_url == "http://testhost:10000"
@@ -1216,6 +1154,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         cached_session = MagicMock()
@@ -1254,6 +1193,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         cached_session = MagicMock()
@@ -1285,6 +1225,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         gate = asyncio.Event()
@@ -1348,6 +1289,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         # Patch the parent _create_item to a fast no-op so the first
@@ -1394,6 +1336,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
         manager._is_stopped = True
 
@@ -1416,6 +1359,7 @@ class TestDynamicCommunitySessionManager:
             session_config=_stub_session_config(),
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
         )
 
         assert manager.process_id is None
@@ -1448,8 +1392,10 @@ class _StubStaticManager(BaseItemManager[_StubItem]):
     non-evicting managers reconnect lazily after an idle close.
     """
 
-    def __init__(self, name: str):
-        super().__init__(SystemType.COMMUNITY, "test", name)
+    def __init__(self, name: str, *, session_id: int = 0):
+        super().__init__(
+            SystemType.COMMUNITY, "test", SessionId.from_int(session_id), name
+        )
         self.create_count = 0
         self.extra_close_count = 0
 

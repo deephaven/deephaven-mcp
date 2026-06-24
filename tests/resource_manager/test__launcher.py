@@ -1370,7 +1370,10 @@ class TestDynamicManagerEdgeCases:
 
     def test_to_dict_with_container_id(self):
         """Test to_dict includes container_id for docker sessions."""
-        from deephaven_mcp.resource_manager import DynamicCommunitySessionManager
+        from deephaven_mcp.resource_manager import (
+            DynamicCommunitySessionManager,
+            SessionId,
+        )
 
         launched_session = DockerLaunchedSession(
             host="localhost",
@@ -1391,6 +1394,7 @@ class TestDynamicManagerEdgeCases:
         )
 
         manager = DynamicCommunitySessionManager(
+            session_id=SessionId.from_int(0),
             name="test-session",
             session_config=session_config,
             launched_session=launched_session,

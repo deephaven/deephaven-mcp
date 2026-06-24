@@ -26,6 +26,7 @@ from deephaven_mcp.resource_manager import (
     CommunitySessionManager,
     CorePlusSessionFactoryManager,
     DynamicCommunitySessionManager,
+    QualifiedSessionId,
     SessionOrigin,
     SystemType,
 )
@@ -91,7 +92,7 @@ def _validate_sessions_list_filters(
 
 
 def _build_sessions_list_row(
-    fq_name: str,
+    fq_name: QualifiedSessionId,
     mgr: BaseItemManager,
     *,
     type: str | None,
@@ -126,7 +127,7 @@ def _build_sessions_list_row(
             return None
 
         return {
-            "session_id": fq_name,
+            "session_id": str(fq_name),
             "type": row_type,
             "system": row_system,
             "origin": row_origin,
@@ -137,7 +138,7 @@ def _build_sessions_list_row(
             f"[mcp_systems_server:sessions_list] Could not process session "
             f"'{fq_name}': {e!r}"
         )
-        return {"session_id": fq_name, "error": str(e)}
+        return {"session_id": str(fq_name), "error": str(e)}
 
 
 async def sessions_list(
@@ -542,7 +543,7 @@ async def session_details(
         )
         try:
             _t0 = time.monotonic()
-            mgr = await session_registry.get(session_id)
+            mgr = await session_registry.get(QualifiedSessionId.from_str(session_id))
             _LOGGER.debug(
                 f"[mcp_systems_server:session_details] Retrieved session manager for '{session_id}' in {time.monotonic() - _t0:.2f}s"
             )

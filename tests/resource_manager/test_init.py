@@ -44,6 +44,8 @@ def test_imports_and_all():
         "generate_auth_token",
         "InstanceTracker",
         "cleanup_orphaned_resources",
+        "SessionId",
+        "QualifiedSessionId",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)
 

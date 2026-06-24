@@ -17,6 +17,7 @@ from deephaven_mcp._exceptions import (
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
     InitializationPhase,
+    QualifiedSessionId,
     RegistrySnapshot,
     SystemType,
 )
@@ -24,6 +25,12 @@ from deephaven_mcp.resource_manager._registry import (
     BaseRegistry,
     MutableSessionRegistry,
 )
+
+
+def _qsid(s: str) -> QualifiedSessionId:
+    """Test helper — wire-form to typed key, matches what production code does."""
+    return QualifiedSessionId.from_str(s)
+
 
 # --- RegistrySnapshot Tests ---
 
@@ -129,8 +136,8 @@ class ConcreteRegistry(BaseRegistry[MockItem]):
             items
             if items is not None
             else {
-                "item1": {"name": "alpha"},
-                "item2": {"name": "beta"},
+                _qsid("community:community:item1"): {"name": "alpha"},
+                _qsid("community:community:item2"): {"name": "beta"},
             }
         )
 
@@ -158,8 +165,8 @@ async def test_initialize(registry):
     await registry.initialize()
     assert registry._initialized
     assert len(registry._items) == 2
-    assert "item1" in registry._items
-    assert registry._items["item1"].name == "alpha"
+    assert _qsid("community:community:item1") in registry._items
+    assert registry._items[_qsid("community:community:item1")].name == "alpha"
 
     # Test idempotency
     await registry.initialize()
@@ -170,7 +177,7 @@ async def test_initialize(registry):
 async def test_methods_raise_before_initialize(registry):
     """Test that get() and close() raise InternalError before initialization."""
     with pytest.raises(InternalError, match="ConcreteRegistry not initialized"):
-        await registry.get("item1")
+        await registry.get(_qsid("community:community:item1"))
 
     with pytest.raises(InternalError, match="ConcreteRegistry not initialized"):
         await registry.close()
@@ -180,7 +187,7 @@ async def test_methods_raise_before_initialize(registry):
 async def test_get_returns_item(registry):
     """Test that get() returns the correct item after initialization."""
     await registry.initialize()
-    item = await registry.get("item1")
+    item = await registry.get(_qsid("community:community:item1"))
     assert isinstance(item, MockItem)
     assert item.name == "alpha"
 
@@ -216,10 +223,10 @@ async def test_get_all_returns_snapshot(registry):
     assert snapshot.initialization_phase == InitializationPhase.COMPLETED
     assert snapshot.initialization_errors == {}
     assert len(snapshot.items) == 2
-    assert "item1" in snapshot.items
-    assert "item2" in snapshot.items
-    assert snapshot.items["item1"].name == "alpha"
-    assert snapshot.items["item2"].name == "beta"
+    assert _qsid("community:community:item1") in snapshot.items
+    assert _qsid("community:community:item2") in snapshot.items
+    assert snapshot.items[_qsid("community:community:item1")].name == "alpha"
+    assert snapshot.items[_qsid("community:community:item2")].name == "beta"
 
 
 @pytest.mark.asyncio
@@ -282,12 +289,12 @@ async def test_snapshot_items_is_independent_copy(registry):
 
     snapshot = await registry.snapshot_items()
     snapshot["bogus"] = MockItem("bogus")
-    snapshot.pop("item1", None)
+    snapshot.pop(_qsid("community:community:item1"), None)
 
     # Registry untouched.
     fresh = await registry.snapshot_items()
     assert "bogus" not in fresh
-    assert "item1" in fresh
+    assert _qsid("community:community:item1") in fresh
 
 
 @pytest.mark.asyncio
@@ -312,8 +319,8 @@ async def test_close_calls_close_on_items(registry):
     """Test that close() calls the close() method on all managed items."""
     await registry.initialize()
 
-    item1 = await registry.get("item1")
-    item2 = await registry.get("item2")
+    item1 = await registry.get(_qsid("community:community:item1"))
+    item2 = await registry.get(_qsid("community:community:item2"))
 
     await registry.close()
 
@@ -330,8 +337,8 @@ async def test_close_logs_error_when_item_close_raises(registry):
     """close() logs errors from item.close() but continues closing remaining items."""
     await registry.initialize()
 
-    item1 = await registry.get("item1")
-    item2 = await registry.get("item2")
+    item1 = await registry.get(_qsid("community:community:item1"))
+    item2 = await registry.get(_qsid("community:community:item2"))
     item1.close = AsyncMock(side_effect=RuntimeError("network error"))
     item2.close = AsyncMock()
 
@@ -362,11 +369,11 @@ def _make_initialized_mutable_registry() -> _MutableRegistryImpl:
     return registry
 
 
-def _make_mock_manager(full_name: str) -> MagicMock:
-    """Return a BaseItemManager mock with the given full_name and correct system_type/source/name."""
-    parts = full_name.split(":")
+def _make_mock_manager(qualified_session_id: str) -> MagicMock:
+    """Return a BaseItemManager mock with the given qualified_session_id and correct system_type/source/name."""
+    parts = qualified_session_id.split(":")
     mgr = MagicMock(spec=BaseItemManager)
-    mgr.full_name = full_name
+    mgr.qualified_session_id = _qsid(qualified_session_id)
     mgr.close = AsyncMock()
     mgr.system_type = MagicMock()
     mgr.system_type.value = parts[0] if len(parts) >= 1 else "community"
@@ -390,9 +397,9 @@ def test_mutable_registry_is_base_registry():
 async def test_mutable_registry_close_clears_added_session_ids():
     """close() clears _added_session_ids so the registry is clean for reuse."""
     registry = _make_initialized_mutable_registry()
-    mgr = _make_mock_manager("community:default:s1")
-    registry._items["community:default:s1"] = mgr
-    registry._added_session_ids = {"community:default:s1"}
+    mgr = _make_mock_manager("community:default:1")
+    registry._items[_qsid("community:default:1")] = mgr
+    registry._added_session_ids = {_qsid("community:default:1")}
 
     await registry.close()
 
@@ -404,20 +411,20 @@ async def test_mutable_registry_close_clears_added_session_ids():
 async def test_mutable_registry_add_session_success():
     """add_session() stores manager and tracks its id."""
     registry = _make_initialized_mutable_registry()
-    mgr = _make_mock_manager("community:default:mysession")
+    mgr = _make_mock_manager("community:default:11")
 
     await registry.add_session(mgr)
 
-    assert "community:default:mysession" in registry._items
-    assert "community:default:mysession" in registry._added_session_ids
+    assert _qsid("community:default:11") in registry._items
+    assert _qsid("community:default:11") in registry._added_session_ids
 
 
 @pytest.mark.asyncio
 async def test_mutable_registry_add_session_duplicate_raises():
     """add_session() raises ValueError if session already exists."""
     registry = _make_initialized_mutable_registry()
-    mgr = _make_mock_manager("community:default:dup")
-    registry._items["community:default:dup"] = mgr
+    mgr = _make_mock_manager("community:default:12")
+    registry._items[_qsid("community:default:12")] = mgr
 
     with pytest.raises(ValueError, match="already exists"):
         await registry.add_session(mgr)
@@ -427,7 +434,7 @@ async def test_mutable_registry_add_session_duplicate_raises():
 async def test_mutable_registry_add_session_not_initialized_raises():
     """add_session() raises InternalError if registry not initialized."""
     registry = _MutableRegistryImpl()  # not initialized
-    mgr = _make_mock_manager("community:default:s")
+    mgr = _make_mock_manager("community:default:15")
 
     with pytest.raises(InternalError):
         await registry.add_session(mgr)
@@ -437,15 +444,15 @@ async def test_mutable_registry_add_session_not_initialized_raises():
 async def test_mutable_registry_remove_success():
     """remove() removes and returns the manager, discards tracking id."""
     registry = _make_initialized_mutable_registry()
-    mgr = _make_mock_manager("community:default:tosremove")
-    registry._items["community:default:tosremove"] = mgr
-    registry._added_session_ids.add("community:default:tosremove")
+    mgr = _make_mock_manager("community:default:13")
+    registry._items[_qsid("community:default:13")] = mgr
+    registry._added_session_ids.add(_qsid("community:default:13"))
 
-    result = await registry.remove("community:default:tosremove")
+    result = await registry.remove(_qsid("community:default:13"))
 
     assert result is mgr
-    assert "community:default:tosremove" not in registry._items
-    assert "community:default:tosremove" not in registry._added_session_ids
+    assert _qsid("community:default:13") not in registry._items
+    assert _qsid("community:default:13") not in registry._added_session_ids
 
 
 @pytest.mark.asyncio
@@ -453,7 +460,7 @@ async def test_mutable_registry_remove_not_found_returns_none():
     """remove() returns None for a non-existent session (idempotent)."""
     registry = _make_initialized_mutable_registry()
 
-    result = await registry.remove("community:default:ghost")
+    result = await registry.remove(_qsid("community:default:14"))
     assert result is None
 
 
@@ -463,7 +470,7 @@ async def test_mutable_registry_remove_not_initialized_raises():
     registry = _MutableRegistryImpl()
 
     with pytest.raises(InternalError):
-        await registry.remove("community:default:s")
+        await registry.remove(_qsid("community:default:15"))
 
 
 @pytest.mark.asyncio
@@ -480,17 +487,17 @@ async def test_mutable_registry_count_added_sessions_counts_correctly():
     """count_added_sessions() counts matching sessions that are still in _items."""
     registry = _make_initialized_mutable_registry()
 
-    mgr1 = _make_mock_manager("community:default:s1")
-    mgr2 = _make_mock_manager("community:default:s2")
-    mgr3 = _make_mock_manager("community:other:s3")
+    mgr1 = _make_mock_manager("community:default:1")
+    mgr2 = _make_mock_manager("community:default:2")
+    mgr3 = _make_mock_manager("community:other:3")
 
-    registry._items["community:default:s1"] = mgr1
-    registry._items["community:default:s2"] = mgr2
-    registry._items["community:other:s3"] = mgr3
+    registry._items[_qsid("community:default:1")] = mgr1
+    registry._items[_qsid("community:default:2")] = mgr2
+    registry._items[_qsid("community:other:3")] = mgr3
     registry._added_session_ids = {
-        "community:default:s1",
-        "community:default:s2",
-        "community:other:s3",
+        _qsid("community:default:1"),
+        _qsid("community:default:2"),
+        _qsid("community:other:3"),
     }
 
     assert await registry.count_added_sessions(SystemType.COMMUNITY, "default") == 2
@@ -502,9 +509,12 @@ async def test_mutable_registry_count_added_sessions_excludes_removed():
     """count_added_sessions() does not count sessions removed from _items."""
     registry = _make_initialized_mutable_registry()
 
-    mgr = _make_mock_manager("community:default:s1")
-    registry._items["community:default:s1"] = mgr
-    registry._added_session_ids = {"community:default:s1", "community:default:s2"}
+    mgr = _make_mock_manager("community:default:1")
+    registry._items[_qsid("community:default:1")] = mgr
+    registry._added_session_ids = {
+        _qsid("community:default:1"),
+        _qsid("community:default:2"),
+    }
     # s2 is tracked but not in _items (removed without cleanup)
 
     count = await registry.count_added_sessions(SystemType.COMMUNITY, "default")
@@ -517,14 +527,4 @@ async def test_mutable_registry_count_added_sessions_not_initialized_raises():
     registry = _MutableRegistryImpl()
 
     with pytest.raises(InternalError):
-        await registry.count_added_sessions(SystemType.COMMUNITY, "default")
-
-
-@pytest.mark.asyncio
-async def test_mutable_registry_count_added_sessions_malformed_id_raises():
-    """count_added_sessions() raises InternalError for malformed IDs in _added_session_ids."""
-    registry = _make_initialized_mutable_registry()
-    registry._added_session_ids = {"badkey"}  # no colons — invalid full_name
-
-    with pytest.raises(InternalError, match="Malformed session ID"):
         await registry.count_added_sessions(SystemType.COMMUNITY, "default")
