@@ -1367,15 +1367,17 @@ class SessionManager[T: AsyncClosable](BaseItemManager[T], ABC):
 
         Returns:
             dict[str, Any]: Always ``session_id`` (wire-form string),
-            ``type``, ``system``, ``session_name``, and ``origin``; plus
-            any subclass extras when ``verbose`` is ``True``.
+            ``type``, ``system``, ``origin``, and ``session_name``; plus
+            any subclass extras when ``verbose`` is ``True``. The
+            arbitrary-length ``session_name`` is ordered last so the
+            fixed-width fields align cleanly in tabular human output.
         """
         return {
             "session_id": str(self.qualified_session_id),
             "type": self.system_type.value,
             "system": self.system,
-            "session_name": self.name,
             "origin": self.origin.value,
+            "session_name": self.name,
         }
 
 
