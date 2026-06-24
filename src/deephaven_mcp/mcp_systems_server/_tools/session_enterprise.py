@@ -31,6 +31,7 @@ from deephaven_mcp.resource_manager import (
     QualifiedSessionId,
     ResourceLivenessStatus,
     SessionId,
+    SessionOrigin,
     SystemType,
     least_advanced_phase,
 )
@@ -690,6 +691,7 @@ async def session_enterprise_create(
             session_id=SessionId.from_int(serial),
             name=session_name,
             creation_function=creation_function,
+            origin=SessionOrigin.DYNAMIC,
         )
         session_id = str(enterprise_session_manager.qualified_session_id)
 

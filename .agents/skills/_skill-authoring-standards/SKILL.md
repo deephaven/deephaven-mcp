@@ -148,13 +148,14 @@ When two skills overlap on a topic:
 
 ## 13. Common failure modes
 
-Used by `skill-review` step 5. Drift signals that say a skill needs a structural fix.
+Used by `skill-review`'s structural audit. Drift signals that say a skill needs a structural fix. The list is illustrative, not exhaustive — flag any other signal that the skill's structure is degrading.
 
 - **Composition rot**: skill > 250 lines; parallel sections in two skills; sub-skill with one parent; paraphrase where pointer would suffice.
 - **Wrong prefix**: human-invokable workflow with `_`; context-only reference without `_`.
 - **Multi-concern skill**: two outcomes in one file.
 - **Wall-of-text rule**: multi-part rule that should be sub-bullets.
 - **Stale cross-references**: named sibling does not exist; file pointer does not resolve; "rule #N" pointer does not match current numbering.
+- **Gratuitous cross-reference**: an `Apply X` that the host step or bullet does not need to do its job — added by topical association ("this step mentions output, and X is about output") rather than necessity. The cross-reference analog of decorative prose (`_skill-effectiveness` §6). Count is irrelevant: a parent may cite X at every location that genuinely needs it. **Load-bearing test**: delete the reference and ask whether the host step can still be completed correctly. If yes, it was decoration — remove it. Two common sources: (a) the step reaches X anyway through a sibling it already invokes (e.g. `pydocs-improve` cites X, but its correctness step already chains through `pydocs-accuracy`, which owns X); (b) the step's real task is mechanical and independent of X (e.g. "single-source the OutputSpec constant" does not depend on output-serialization conventions — verifying the field text does, one step later).
 - **Missing README row**: skill on disk, no entry in catalog.
 - **Frontmatter drift**: `name` ≠ directory; description fails `_skill-effectiveness` §1.
 

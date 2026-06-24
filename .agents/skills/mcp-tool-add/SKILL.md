@@ -3,7 +3,7 @@ name: mcp-tool-add
 description: Add a new MCP tool to the systems server — wraps _mcp-module-organization, pydocs-improve, and _logging-standards; prevents the most common bug (forgetting to register the tool)
 ---
 
-Apply the `_mcp-module-organization` skill for module placement and the `pydocs-improve` skill for docstring requirements (Terminology Note + Format Accuracy for AI Agents).
+Apply the `_mcp-module-organization` skill for module placement, the `pydocs-improve` skill for docstring requirements (Terminology Note + Format Accuracy for AI Agents), and the `_output-serialization-conventions` skill for the tool's return payload (every string field's value vocabulary, casing, and known carve-outs).
 
 ## Steps
 

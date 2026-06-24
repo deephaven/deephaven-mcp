@@ -60,7 +60,11 @@ Apply `_python-coding-practices` rule 16 before using version-gated syntax (PEP 
 
 ## Python Code
 
-Before writing or editing Python source under `src/` or `tests/` — including docstring-only edits — load `_python-coding-practices` and apply its rules. The most-violated are rule 12 (docstrings describe *what*, not *why*; no rationale, API-symmetry, or cross-call-site narrative) and rule 14 (every field on a field-bearing value class — a Pydantic schema, `@dataclass`, or `NamedTuple` — carries a per-field PEP 257 trailing docstring, never a class-level `Attributes:` block; see `Runtime` in `cli/_runtime.py`). Enums are different: they bind per-member metadata via `__new__`, not field docstrings — see `ErrorCode` in `cli/_errors.py`.
+Before writing or editing Python source under `src/` or `tests/` — including docstring-only edits — load `_python-coding-practices` and apply its rules. The most-violated are rule 12 (docstrings state *what*, not *why*) and rule 14 (per-field trailing docstrings on value classes, never a class-level `Attributes:` / `Members:` block).
+
+## Output conventions
+
+Apply `_output-serialization-conventions` when authoring or changing any user-facing string field in an MCP tool return or CLI output. The skill owns the value-vocabulary rules, casing rules, known carve-outs, and field-specific exceptions.
 
 ## Build & Distribution
 

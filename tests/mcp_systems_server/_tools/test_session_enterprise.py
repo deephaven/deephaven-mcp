@@ -39,6 +39,7 @@ from deephaven_mcp.resource_manager import (
     QualifiedSessionId,
     RegistrySnapshot,
     ResourceLivenessStatus,
+    SessionOrigin,
     SystemType,
 )
 
@@ -1181,6 +1182,7 @@ async def test_session_enterprise_create_success_with_defaults():
     call_args = mock_registry.add_session.call_args
     session_manager = call_args[0][0]  # Manager is the only argument
     assert str(session_manager.qualified_session_id) == "enterprise:system:1"
+    assert session_manager.origin is SessionOrigin.DYNAMIC
 
 
 @pytest.mark.asyncio

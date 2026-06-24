@@ -44,7 +44,7 @@ from deephaven_mcp._exceptions import (
 
 from ._manager import (
     AsyncClosable,
-    BaseItemManager,
+    SessionManager,
     SystemType,
 )
 from ._session_id import QualifiedSessionId
@@ -393,7 +393,7 @@ class BaseRegistry[T: AsyncClosable](abc.ABC):
         )
 
 
-class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
+class MutableSessionRegistry(BaseRegistry[SessionManager]):
     """Abstract registry that supports dynamic mutation after initialization.
 
     Extends ``BaseRegistry`` with ``_added_session_ids`` and two mutation
@@ -441,11 +441,11 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
         # any concurrent mutation call from entering after this point.
         self._added_session_ids.clear()
 
-    async def add_session(self, manager: BaseItemManager) -> None:
+    async def add_session(self, manager: SessionManager) -> None:
         """Add a dynamically created session to the registry and mark it as added.
 
         Args:
-            manager (BaseItemManager): Session manager to add.  Its ``qualified_session_id`` must not already
+            manager (SessionManager): Session manager to add.  Its ``qualified_session_id`` must not already
                 exist in the registry.
 
         Raises:
@@ -455,7 +455,7 @@ class MutableSessionRegistry(BaseRegistry[BaseItemManager]):
         async with self._lock:
             self._add_session_locked(manager)
 
-    def _add_session_locked(self, manager: BaseItemManager) -> None:
+    def _add_session_locked(self, manager: SessionManager) -> None:
         """Add a session to ``self._items``. Caller must hold ``self._lock``.
 
         Exists so subclasses that need to combine the add with other

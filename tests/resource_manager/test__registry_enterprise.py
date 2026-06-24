@@ -32,6 +32,7 @@ from deephaven_mcp._exceptions import (
     InternalError,
     RegistryItemNotFoundError,
 )
+from deephaven_mcp._taxonomy import SessionOrigin
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import EnterpriseClientTimeouts
 from deephaven_mcp.resource_manager import (
@@ -342,6 +343,7 @@ def test_make_enterprise_session_manager_returns_enterprise_session_manager():
     assert manager.name == "my-pq"
     assert manager.session_id == "42"
     assert str(manager.qualified_session_id) == f"enterprise:{_TEST_SYSTEM_NAME}:42"
+    assert manager.origin is SessionOrigin.DISCOVERED
 
 
 @pytest.mark.asyncio

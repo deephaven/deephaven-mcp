@@ -24,6 +24,7 @@ Conventions:
 | `_logging-standards` | Logger instantiation, `[module:function] Action: details` message format, log levels, sensitive-data rules, redaction-aware Pydantic model logging. |
 | `_markdown-documentation-standards` | Markdown formatting: JSON/JSON5 code block requirements, placeholder formatting, headings, links, tables, prose conventions. |
 | `_mcp-module-organization` | Module placement and design patterns for MCP tool modules under `src/deephaven_mcp/mcp_systems_server/_tools/`. |
+| `_output-serialization-conventions` | Project conventions for serializing values into user-facing output (MCP tool return dicts and CLI output fields). The hub where output-value rules accrete — currently enum-value casing. |
 | `_project-reference` | High-level project map: architecture, server entry points and ports, config layout, code-quality check commands, test clients. |
 | `_python-coding-practices` | Project-wide Python style and conventions (private-symbol access, MCP-tool docstring rules, f-strings, `Any`/`hasattr` policy, etc.). |
 | `_skill-authoring-standards` | Structural standards for skill files: composition hierarchy, frontmatter contract, `_`-prefix rule for human-invocability, body shape, length budgets, lifecycle, precedence. |

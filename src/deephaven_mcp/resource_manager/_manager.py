@@ -187,42 +187,16 @@ class AsyncClosable(Protocol):
 
 
 class ResourceLivenessStatus(enum.Enum):
-    """Enum representing the health and availability status of managed resources.
+    """Health and availability status of a managed resource.
 
-    This enum provides a standardized way to categorize the operational status of
-    Deephaven sessions, factories, and other managed resources. It enables consistent
-    status reporting across different resource types and helps with automated
-    decision-making in resource management workflows.
-
-    Status Categories:
-        The enum covers the full spectrum of resource states from healthy operation
-        to various failure modes, allowing precise classification of issues for
-        debugging and monitoring purposes.
-
-    Usage Context:
-        This enum is returned by liveness_status() methods across all resource managers
-        and is used by registries to make decisions about resource cleanup, replacement,
-        or continued use.
-
-    Values:
-        ONLINE: Resource is healthy, responsive, and ready for operational use.
-            Indicates successful connectivity and passing health checks.
-
-        OFFLINE: Resource is unavailable, unresponsive, or has failed health checks.
-            May indicate network issues, service downtime, or resource termination.
-
-        UNAUTHORIZED: Resource access failed due to authentication or authorization issues.
-            Indicates invalid credentials, expired tokens, or insufficient permissions.
-
-        MISCONFIGURED: Resource cannot be used due to invalid or incomplete configuration.
-            Indicates configuration errors, missing parameters, or incompatible settings.
-
-        UNKNOWN: Resource status could not be determined due to unexpected errors.
-            Indicates exceptions during status checking that prevent classification.
+    Returned by ``liveness_status()`` methods across all resource
+    managers and consumed by registries to decide on resource cleanup,
+    replacement, or continued use.
 
     String Representation:
-        The enum provides lowercase string representations via __str__() for logging
-        and display purposes (e.g., "online", "offline", "unauthorized").
+        ``__str__()`` returns the uppercase member name (e.g.
+        ``"ONLINE"``, ``"OFFLINE"``) for logging and tool-response
+        payloads.
 
     Example:
         ```python
@@ -237,10 +211,27 @@ class ResourceLivenessStatus(enum.Enum):
     """
 
     ONLINE = 1
+    """Resource is healthy, responsive, and ready for operational
+    use. Successful connectivity and passing health checks."""
+
     OFFLINE = 2
+    """Resource is unavailable, unresponsive, or has failed health
+    checks. Indicates network issues, service downtime, or resource
+    termination."""
+
     UNAUTHORIZED = 3
+    """Resource access failed due to authentication or authorization
+    issues. Invalid credentials, expired tokens, or insufficient
+    permissions."""
+
     MISCONFIGURED = 4
+    """Resource cannot be used due to invalid or incomplete
+    configuration. Configuration errors, missing parameters, or
+    incompatible settings."""
+
     UNKNOWN = 5
+    """Resource status could not be determined due to unexpected
+    errors during status checking."""
 
     def __str__(self) -> str:
         """Return the uppercase name of the resource liveness status."""
@@ -379,12 +370,17 @@ class BaseItemManager[T: AsyncClosable](ABC):
         Classification metadata that is not common to every manager kind
         lives on the relevant subclass instead of this base:
 
-        - ``origin`` (``SessionOrigin.STATIC`` vs ``SessionOrigin.DYNAMIC``) is a
-          community-session-only concept and lives on
-          :class:`CommunitySessionManager`.
+        - ``origin`` (``SessionOrigin.STATIC`` / ``DYNAMIC`` /
+          ``DISCOVERED``) lives on :class:`SessionManager`, the
+          intermediate abstract base shared by
+          :class:`CommunitySessionManager` and
+          :class:`EnterpriseSessionManager`; the factory manager has
+          no ``origin``.
         - Session-vs-factory disambiguation is expressed by the class
-          hierarchy itself (see :class:`CorePlusSessionFactoryManager`);
-          callers that need to filter factories use ``isinstance``.
+          hierarchy: every session manager extends :class:`SessionManager`;
+          :class:`CorePlusSessionFactoryManager` does not. Callers that
+          need to filter factories narrow to :class:`SessionManager`
+          with ``isinstance``.
 
         State invariants:
             All three mutable state slots below are read and written only
@@ -1324,7 +1320,66 @@ class BaseItemManager[T: AsyncClosable](ABC):
         )
 
 
-class CommunitySessionManager(BaseItemManager[CoreSession]):
+class SessionManager[T: AsyncClosable](BaseItemManager[T], ABC):
+    """Intermediate abstract base for resource managers that wrap a live session.
+
+    Distinguishes session-bearing managers (community + enterprise) from
+    factory managers (:class:`CorePlusSessionFactoryManager`). Every
+    concrete session manager carries an :attr:`origin` describing how
+    the session came to be known to MCP; factory managers do not.
+
+    Call sites that need to operate on "any session manager regardless
+    of community/enterprise" should narrow to this class with
+    ``isinstance(mgr, SessionManager)`` rather than enumerating the
+    concrete subclasses. mypy will then recognize :attr:`origin` as
+    available.
+    """
+
+    @property
+    @abstractmethod
+    def origin(self) -> SessionOrigin:
+        """How this session came to be known to MCP.
+
+        See :class:`SessionOrigin` for the value semantics.
+        """
+
+    def to_dict(self, *, verbose: bool = False) -> dict[str, Any]:
+        """Serialize this session manager to a dictionary.
+
+        Returns the identity fields shared by every session manager,
+        read from the manager's own state with no network I/O. This is
+        the single serialization source consumed by both the
+        ``session_details`` and ``sessions_list`` MCP tools; it is
+        uniform across community and enterprise sessions.
+
+        ``verbose=True`` additionally includes any launch-specific or
+        otherwise detail-level extras a manager exposes (e.g. connection
+        URL and port for a dynamically-launched session). Most managers
+        expose none and serialize identically regardless of ``verbose``;
+        subclasses with extras override this method.
+
+        Enum-valued fields follow the project output-serialization
+        conventions (categorical labels emit ``.value``).
+
+        Args:
+            verbose (bool): Include detail-level extras when ``True``.
+                Defaults to ``False`` (compact identity only).
+
+        Returns:
+            dict[str, Any]: Always ``session_id`` (wire-form string),
+            ``type``, ``system``, ``session_name``, and ``origin``; plus
+            any subclass extras when ``verbose`` is ``True``.
+        """
+        return {
+            "session_id": str(self.qualified_session_id),
+            "type": self.system_type.value,
+            "system": self.system,
+            "session_name": self.name,
+            "origin": self.origin.value,
+        }
+
+
+class CommunitySessionManager(SessionManager[CoreSession]):
     """Manages the complete lifecycle of a Deephaven Community session.
 
     This specialized resource manager handles the creation, caching, health monitoring,
@@ -2107,21 +2162,49 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
                 exc_info=True,
             )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert session information to a dictionary for API responses.
+    def to_dict(self, *, verbose: bool = False) -> dict[str, Any]:
+        """Serialize this dynamic session manager to a dictionary.
+
+        Extends :meth:`SessionManager.to_dict` with the launch-specific
+        connection details (see :meth:`_connection_details`) when
+        ``verbose`` is ``True``. With ``verbose=False`` the result is the
+        compact common identity, identical to the base implementation —
+        so ``sessions_list`` rows stay uniform.
+
+        Args:
+            verbose (bool): Include launch-specific connection details
+                when ``True``. Defaults to ``False``.
 
         Returns:
-            dict[str, Any]: Session information including connection details.
+            dict[str, Any]: The common identity, plus the
+            :meth:`_connection_details` fields when ``verbose`` is
+            ``True``.
+        """
+        result = super().to_dict(verbose=verbose)
+        if verbose:
+            result.update(self._connection_details())
+        return result
+
+    def _connection_details(self) -> dict[str, Any]:
+        """Serialize this dynamic session's launch-specific connection details.
+
+        Returns the fields unique to a dynamically-launched community
+        session — how and where it was launched. These are distinct
+        from the common identity in :meth:`SessionManager.to_dict` and
+        are surfaced only by the verbose serialization that the
+        ``session_details`` MCP tool consumes.
 
         Note:
-            Does NOT include connection_url_with_auth or auth_token for security.
-            Use session_community_credentials MCP tool if credentials are needed.
+            Excludes connection_url_with_auth and auth_token for
+            security; use the session_community_credentials MCP tool
+            when credentials are needed.
+
+        Returns:
+            dict[str, Any]: ``connection_url``, ``auth_type``,
+            ``launch_method``, ``port``, and one of ``container_id`` /
+            ``process_id`` depending on the launch method.
         """
-        base_dict = {
-            "session_id": self.qualified_session_id,
-            "session_type": "COMMUNITY",
-            "source": "dynamic",
-            "name": self._name,
+        details: dict[str, Any] = {
             "connection_url": self.connection_url,
             "auth_type": self.launched_session.auth_type.upper(),  # "PSK" or "ANONYMOUS"
             "launch_method": self.launch_method,
@@ -2130,14 +2213,14 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
 
         # Add launch-method-specific details
         if self.launch_method == "docker":
-            base_dict["container_id"] = self.container_id
+            details["container_id"] = self.container_id
         elif self.launch_method == "python":
-            base_dict["process_id"] = self.process_id
+            details["process_id"] = self.process_id
 
-        return base_dict
+        return details
 
 
-class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
+class EnterpriseSessionManager(SessionManager[CorePlusSession]):
     """Manages the complete lifecycle of a Deephaven Enterprise session with customizable creation.
 
     This specialized resource manager handles CorePlusSession instances for Deephaven Enterprise
@@ -2275,6 +2358,7 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
         session_id: SessionId,
         name: str,
         creation_function: Callable[[str, str], Awaitable["CorePlusSession"]],
+        origin: SessionOrigin,
     ):
         """Initialize a new Enterprise session manager with injectable creation logic.
 
@@ -2366,6 +2450,13 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
                 Should handle all aspects of session creation including authentication,
                 configuration retrieval, and connection establishment.
             session_id: The session's :class:`SessionId` (the controller-assigned PQ serial).
+            origin: Where this session came from.
+                ``SessionOrigin.DYNAMIC`` for enterprise sessions created at
+                runtime via ``session_enterprise_create``;
+                ``SessionOrigin.DISCOVERED`` for persistent queries surfaced
+                from the DHE controller. ``SessionOrigin.STATIC`` is reserved
+                for a future enterprise-config mechanism and is not produced
+                by any current code path.
 
         Thread Safety:
             This constructor is thread-safe and can be called from any asyncio task.
@@ -2384,6 +2475,18 @@ class EnterpriseSessionManager(BaseItemManager[CorePlusSession]):
             name=name,
         )
         self._creation_function = creation_function
+        self._origin = origin
+
+    @property
+    def origin(self) -> SessionOrigin:
+        """How this enterprise session came to be known to MCP.
+
+        ``SessionOrigin.DYNAMIC`` for enterprise sessions created at
+        runtime via ``session_enterprise_create``;
+        ``SessionOrigin.DISCOVERED`` for persistent queries surfaced
+        from the DHE controller.
+        """
+        return self._origin
 
     @override
     async def _create_item(self) -> CorePlusSession:
@@ -2719,7 +2822,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             - **system**: The enterprise ``system_name`` passed as ``name`` to the constructor
             - **name**: Set to the sentinel ``"factory"``
             - **session_id**: Set to the sentinel :class:`SessionId` ``0``
-            - **qualified_session_id**: Computed as ``"enterprise:<system>:0"``; factories are filtered out of session listings by ``isinstance`` against :class:`CorePlusSessionFactoryManager`, so this sentinel never collides with a real PQ serial in user-visible output
+            - **qualified_session_id**: Computed as ``"enterprise:<system>:0"``; factories are filtered out of session listings by narrowing to :class:`SessionManager` (which this class deliberately does *not* extend), so this sentinel never collides with a real PQ serial in user-visible output
             - **system_config**: Typed :class:`EnterpriseSystemConfig` declaration
               (connection URL, timeouts, etc.).
             - **creds**: Authentication material, passed separately from

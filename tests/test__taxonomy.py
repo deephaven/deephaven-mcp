@@ -88,16 +88,19 @@ def test_system_type_construction_from_string() -> None:
 def test_origin_values() -> None:
     assert SessionOrigin.STATIC.value == "static"
     assert SessionOrigin.DYNAMIC.value == "dynamic"
+    assert SessionOrigin.DISCOVERED.value == "discovered"
 
 
 def test_origin_str_equality_with_lowercase_value() -> None:
     assert SessionOrigin.STATIC == "static"
     assert SessionOrigin.DYNAMIC == "dynamic"
+    assert SessionOrigin.DISCOVERED == "discovered"
 
 
 def test_origin_serializes_as_lowercase_value() -> None:
     assert json.dumps(SessionOrigin.STATIC) == '"static"'
     assert json.dumps(SessionOrigin.DYNAMIC) == '"dynamic"'
+    assert json.dumps(SessionOrigin.DISCOVERED) == '"discovered"'
 
 
 # ---------------------------------------------------------------------------

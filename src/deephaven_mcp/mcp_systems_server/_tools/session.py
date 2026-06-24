@@ -23,10 +23,8 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 )
 from deephaven_mcp.resource_manager import (
     BaseItemManager,
-    CommunitySessionManager,
-    CorePlusSessionFactoryManager,
-    DynamicCommunitySessionManager,
     QualifiedSessionId,
+    SessionManager,
     SessionOrigin,
     SystemType,
 )
@@ -46,26 +44,15 @@ def _validate_sessions_list_filters(
     Returns ``None`` when all filters are acceptable, or a standard
     error-response dict when any filter is invalid or self-inconsistent.
     """
-    if type is not None and type not in (
-        SystemType.COMMUNITY.value,
-        SystemType.ENTERPRISE.value,
-    ):
+    if type is not None and type not in SystemType:
         return error_response(
             f"Invalid type {type!r}; expected one of "
-            f"{[SystemType.COMMUNITY.value, SystemType.ENTERPRISE.value]}."
+            f"{[member.value for member in SystemType]}."
         )
-    if origin is not None and origin not in (
-        SessionOrigin.STATIC.value,
-        SessionOrigin.DYNAMIC.value,
-    ):
+    if origin is not None and origin not in SessionOrigin:
         return error_response(
             f"Invalid origin {origin!r}; expected one of "
-            f"{[SessionOrigin.STATIC.value, SessionOrigin.DYNAMIC.value]}."
-        )
-    if origin is not None and type == SystemType.ENTERPRISE.value:
-        return error_response(
-            "origin filter is meaningful only for community sessions; "
-            "remove origin or set type='community'."
+            f"{[member.value for member in SessionOrigin]}."
         )
     if system is None:
         return None
@@ -91,54 +78,25 @@ def _validate_sessions_list_filters(
     return None
 
 
-def _build_sessions_list_row(
-    fq_name: QualifiedSessionId,
-    mgr: BaseItemManager,
+def _session_matches_filters(
+    mgr: SessionManager,
     *,
     type: str | None,
     system: str | None,
     origin: str | None,
-) -> dict[str, object] | None:
-    """Project one registry entry into a ``sessions_list`` result row.
+) -> bool:
+    """Whether a session manager satisfies the active ``sessions_list`` filters.
 
-    Returns ``None`` to drop the entry (factory-kind manager or filter
-    miss). Returns a row with an ``error`` key when metadata extraction
-    fails for an individual session, so callers can surface partial
-    failures alongside successful rows.
+    Each ``None`` filter matches everything; otherwise the manager's
+    corresponding identity attribute must equal the requested value.
+    Filtering reads the manager's typed attributes directly rather than
+    its serialized row, keeping filtering independent of serialization.
     """
-    try:
-        # Factories are internal; never list them as sessions. The class
-        # hierarchy itself encodes session-vs-factory.
-        if isinstance(mgr, CorePlusSessionFactoryManager):
-            return None
-        row_type = mgr.system_type.value
-        row_system = mgr.system
-        # ``origin`` is community-session-only; enterprise sessions report
-        # ``None`` in the listing row.
-        row_origin = (
-            mgr.origin.value if isinstance(mgr, CommunitySessionManager) else None
-        )
-
-        if type is not None and row_type != type:
-            return None
-        if system is not None and row_system != system:
-            return None
-        if origin is not None and row_origin != origin:
-            return None
-
-        return {
-            "session_id": str(fq_name),
-            "type": row_type,
-            "system": row_system,
-            "origin": row_origin,
-            "session_name": mgr.name,
-        }
-    except Exception as e:
-        _LOGGER.warning(
-            f"[mcp_systems_server:sessions_list] Could not process session "
-            f"'{fq_name}': {e!r}"
-        )
-        return {"session_id": str(fq_name), "error": str(e)}
+    return (
+        (type is None or mgr.system_type.value == type)
+        and (system is None or mgr.system == system)
+        and (origin is None or mgr.origin.value == origin)
+    )
 
 
 async def sessions_list(
@@ -185,13 +143,17 @@ async def sessions_list(
             umbrella, or any configured enterprise ``system_name``. Exact
             and case-sensitive. ``None`` (default) keeps every system.
             A value not in ``list_systems`` yields an error response.
-        origin (str | None): Optional filter on how a community session
-            was created. One of ``"static"`` (declared in
-            ``community/sessions/*.json``) or ``"dynamic"`` (created at
-            runtime via ``session_community_create``). Only meaningful
-            for community sessions; combining ``origin`` with
-            ``type="enterprise"`` yields an error response. ``None``
-            (default) keeps every origin.
+        origin (str | None): Optional filter on how the session came
+            to be known to MCP. One of:
+              - ``"static"`` — declared in configuration at startup
+                (community sessions from ``community/sessions/*.json``).
+              - ``"dynamic"`` — created at runtime by an MCP tool
+                (``session_community_create`` for community,
+                ``session_enterprise_create`` for enterprise).
+              - ``"discovered"`` — pre-existing on the source system
+                and surfaced to MCP (enterprise persistent queries
+                read from the DHE controller).
+            ``None`` (default) keeps every origin.
 
     Returns:
         dict: Structured result object with keys:
@@ -203,8 +165,11 @@ async def sessions_list(
                 - 'type' (str): ``"community"`` or ``"enterprise"``.
                 - 'system' (str): The system identifier (matches
                   ``list_systems``).
-                - 'origin' (str | None): ``"static"`` or ``"dynamic"`` for
-                  community sessions; ``None`` for enterprise sessions.
+                - 'origin' (str | None): ``"static"``, ``"dynamic"``, or
+                  ``"discovered"`` describing how the session came to be
+                  known to MCP (see the ``origin`` argument for the full
+                  definition). ``None`` only for a future manager kind
+                  that has not yet been classified.
                 - 'session_name' (str): Session name within the system.
             - 'partial_result' (dict, optional): Present only when this list may be
                 incomplete — enterprise session discovery is still in progress or some
@@ -227,7 +192,7 @@ async def sessions_list(
                     'session_id': 'enterprise:prod-system:my-session',
                     'type': 'enterprise',
                     'system': 'prod-system',
-                    'origin': None,
+                    'origin': 'discovered',
                     'session_name': 'my-session',
                 },
                 {
@@ -266,7 +231,8 @@ async def sessions_list(
         - Invalid filter value: returns error response naming the bad argument and the allowed values.
         - Context access errors: Returns error if session_registry cannot be accessed from context.
         - Registry operation errors: Returns error if session_registry.get_all() fails.
-        - Session processing errors: A row with ``error`` key replaces a session whose metadata could not be extracted.
+        - Session serialization errors: a failure projecting any one session aborts the
+          whole call with an error response (rows are uniform; there is no per-row error sentinel).
     """
     _LOGGER.info(
         f"[mcp_systems_server:sessions_list] Invoked: type={type!r} "
@@ -297,13 +263,14 @@ async def sessions_list(
                 f"{snapshot.initialization_errors}"
             )
 
-        results: list[dict[str, object]] = []
-        for fq_name, mgr in snapshot.items.items():
-            row = _build_sessions_list_row(
-                fq_name, mgr, type=type, system=system, origin=origin
-            )
-            if row is not None:
-                results.append(row)
+        # The registry holds only session managers; each serializes its
+        # own uniform identity row, and the optional filters match against
+        # the manager's typed attributes.
+        results: list[dict[str, object]] = [
+            mgr.to_dict()
+            for mgr in snapshot.items.values()
+            if _session_matches_filters(mgr, type=type, system=system, origin=origin)
+        ]
 
         response: dict[str, object] = {"success": True, "sessions": results}
 
@@ -503,7 +470,7 @@ async def session_details(
                 - session_id (fully qualified session name)
                 - type ("community" or "enterprise")
                 - system (matches list_systems names)
-                - origin ("static" / "dynamic" for community; null for enterprise)
+                - origin ("static" / "dynamic" / "discovered"; null only for a manager kind not yet classified)
                 - session_name (session name)
                 - available (bool): Whether the session is available
                 - liveness_status (str): Status classification ("ONLINE", "OFFLINE", etc.)
@@ -559,15 +526,15 @@ async def session_details(
             _LOGGER.debug(
                 f"[mcp_systems_server:session_details] Extracting metadata for session '{session_id}'"
             )
-            system_type_str = mgr.system_type.value
-            mgr_system = mgr.system
-            mgr_origin = (
-                mgr.origin.value if isinstance(mgr, CommunitySessionManager) else None
-            )
-            session_name = mgr.name
+            # ``session_registry.get(...)`` returns a ``SessionManager``,
+            # so the manager serializes itself — common identity plus any
+            # detail-level extras (e.g. dynamic connection details). The
+            # caller layers on the runtime facts it queries below.
+            session_info: dict[str, object] = mgr.to_dict(verbose=True)
             _LOGGER.debug(
                 f"[mcp_systems_server:session_details] Session '{session_id}' metadata: "
-                f"type={system_type_str}, system={mgr_system}, origin={mgr_origin}, name={session_name}"
+                f"type={session_info['type']}, system={session_info['system']}, "
+                f"origin={session_info['origin']}, name={session_info['session_name']}"
             )
 
             # Get liveness status and availability
@@ -606,13 +573,12 @@ async def session_details(
                 f"[mcp_systems_server:session_details] Completed property retrieval for session '{session_id}'"
             )
 
-            # Build session info dictionary with all potential fields
-            session_info_with_nones = {
-                "session_id": session_id,
-                "type": system_type_str,
-                "system": mgr_system,
-                "origin": mgr_origin,
-                "session_name": session_name,
+            # The runtime facts are queried from the live session, not
+            # read from manager state, so they are the caller's
+            # responsibility. They are the only nullable source here —
+            # the manager serialization above never yields None — so
+            # None-filtering is scoped to just these.
+            runtime_facts = {
                 "available": available,
                 "liveness_status": liveness_status,
                 "liveness_detail": liveness_detail,
@@ -621,27 +587,9 @@ async def session_details(
                 "deephaven_community_version": community_version,
                 "deephaven_enterprise_version": enterprise_version,
             }
-
-            # Add dynamic session information if applicable
-            # Check if this is a manager type that provides additional session details
-            if isinstance(mgr, DynamicCommunitySessionManager):
-                try:
-                    dynamic_info = mgr.to_dict()
-                    # Merge all fields from to_dict() into session_info
-                    # This automatically includes any new fields added to to_dict() in the future
-                    session_info_with_nones.update(dynamic_info)
-                    _LOGGER.debug(
-                        f"[mcp_systems_server:session_details] Added dynamic session info for '{session_id}'"
-                    )
-                except Exception as e:
-                    _LOGGER.warning(
-                        f"[mcp_systems_server:session_details] Could not retrieve dynamic session info for '{session_id}': {e}"
-                    )
-
-            # Filter out None values
-            session_info = {
-                k: v for k, v in session_info_with_nones.items() if v is not None
-            }
+            session_info.update(
+                {k: v for k, v in runtime_facts.items() if v is not None}
+            )
             _LOGGER.debug(
                 f"[mcp_systems_server:session_details] Built session info for '{session_id}' with {len(session_info)} fields"
             )

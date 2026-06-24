@@ -27,5 +27,6 @@ Perform a comprehensive review of the specified Python file as it currently exis
         - That each re-export is the same object as the internal definition (`pkg.X is _module.X`).
         - That no `_`-prefixed names leak into the public surface.
     - **Canonical implementations**: `tests/config/schema/test_init.py`, `tests/config/test_init.py`, `tests/auth/middleware/test_init.py`.
+13. **Output serialization**: For any user-facing payload built in this file (MCP tool return dict or CLI `OutputSpec` field), apply `_output-serialization-conventions` to every string field — value vocabulary, casing, and known carve-outs.
 
 Do not remove TODOs without a very good reason.

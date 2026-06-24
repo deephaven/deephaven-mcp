@@ -59,6 +59,7 @@ from deephaven_mcp._exceptions import (
     InternalError,
     RegistryItemNotFoundError,
 )
+from deephaven_mcp._taxonomy import SessionOrigin
 from deephaven_mcp.client import (
     CorePlusControllerClient,
     CorePlusQuerySerial,
@@ -71,6 +72,7 @@ from ._manager import (
     BaseItemManager,
     CorePlusSessionFactoryManager,
     EnterpriseSessionManager,
+    SessionManager,
     SystemType,
 )
 from ._registry import (
@@ -268,6 +270,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             session_id=SessionId.from_int(serial),
             name=display_name,
             creation_function=creation_function,
+            origin=SessionOrigin.DISCOVERED,
         )
 
     def __init__(
@@ -467,7 +470,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             await self._sync_enterprise_sessions()
 
     @override
-    async def get(self, name: QualifiedSessionId) -> BaseItemManager:
+    async def get(self, name: QualifiedSessionId) -> SessionManager:
         """Return the session manager for *name*, refreshing enterprise data if needed.
 
         Triggers an on-demand refresh before looking up the item once initial
@@ -479,7 +482,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 format (e.g. ``"enterprise:system:my-pq"``).
 
         Returns:
-            BaseItemManager: The session manager for *name*.
+            SessionManager: The session manager for *name*.
 
         Raises:
             InternalError: If the registry has not been initialized.
@@ -501,11 +504,11 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             return self._items[name]
 
     @override
-    async def get_all(self) -> RegistrySnapshot[BaseItemManager]:
+    async def get_all(self) -> RegistrySnapshot[SessionManager]:
         """Return an atomic snapshot of all sessions, refreshing enterprise data if needed.
 
         Returns:
-            RegistrySnapshot[BaseItemManager]: Snapshot containing ``items``,
+            RegistrySnapshot[SessionManager]: Snapshot containing ``items``,
                 ``initialization_phase``, and ``initialization_errors``.
 
         Raises:

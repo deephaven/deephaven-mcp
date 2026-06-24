@@ -45,7 +45,7 @@ from deephaven_mcp.client._timeouts import (
 )
 from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
 
-from ._manager import BaseItemManager
+from ._manager import SessionManager
 from ._registry import (
     InitializationPhase,
     MutableSessionRegistry,
@@ -312,7 +312,7 @@ class MultiSystemRegistry:
     # Cross-system reads
     # ------------------------------------------------------------------
 
-    async def get(self, name: QualifiedSessionId) -> BaseItemManager:
+    async def get(self, name: QualifiedSessionId) -> SessionManager:
         """Route a session lookup to the child that owns ``name``.
 
         Args:
@@ -320,7 +320,7 @@ class MultiSystemRegistry:
                 ``"<type>:<source>:<sub_name>"`` form.
 
         Returns:
-            BaseItemManager: The session manager registered under
+            SessionManager: The session manager registered under
                 ``name`` in the routed child.
 
         Raises:
@@ -334,11 +334,11 @@ class MultiSystemRegistry:
         self._check_initialized()
         return await self._route(name).get(name)
 
-    async def get_all(self) -> RegistrySnapshot[BaseItemManager]:
+    async def get_all(self) -> RegistrySnapshot[SessionManager]:
         """Return a merged snapshot across every child registry.
 
         Returns:
-            RegistrySnapshot[BaseItemManager]: Items from every child
+            RegistrySnapshot[SessionManager]: Items from every child
                 merged into one mapping. The merged
                 ``initialization_phase`` is the *least advanced* phase
                 across children (e.g. one child still in ``LOADING``
@@ -351,7 +351,7 @@ class MultiSystemRegistry:
             InternalError: If this registry has not been initialized.
         """
         self._check_initialized()
-        merged_items: dict[QualifiedSessionId, BaseItemManager] = {}
+        merged_items: dict[QualifiedSessionId, SessionManager] = {}
         merged_errors: dict[str, str] = {}
         phases: list[InitializationPhase] = []
 

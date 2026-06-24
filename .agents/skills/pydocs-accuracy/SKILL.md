@@ -11,7 +11,7 @@ For the specified file or function, verify that all docstrings are factually acc
 
 - Description matches what the function actually does
 - `Args` section matches actual parameter names, types, and behavior
-- `Returns` section matches what the function actually returns
+- `Returns` section matches what the function actually returns — including the value vocabulary of any documented string field (apply `_output-serialization-conventions`); if the docstring lists possible values, they must match what the code emits
 - `Raises` section lists only exceptions the function actually raises
 - No documented behavior that the code no longer implements
 

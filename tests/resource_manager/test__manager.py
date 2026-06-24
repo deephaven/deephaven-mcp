@@ -30,6 +30,7 @@ from deephaven_mcp.resource_manager import (
     PythonLaunchedSession,
     ResourceLivenessStatus,
     SessionId,
+    SessionOrigin,
     SystemType,
 )
 from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
@@ -474,7 +475,13 @@ async def test_enterprise_session_manager_check_liveness_offline(monkeypatch):
     async def dummy_creation(source, name):
         return Mock()
 
-    mgr = EnterpriseSessionManager("src", SessionId.from_int(11), "nm", dummy_creation)
+    mgr = EnterpriseSessionManager(
+        "src",
+        SessionId.from_int(11),
+        "nm",
+        dummy_creation,
+        SessionOrigin.DISCOVERED,
+    )
     mock_session = Mock()
     mock_session.is_alive = AsyncMock(return_value=False)
     result = await mgr._check_liveness(mock_session)
@@ -566,11 +573,17 @@ def test_enterprise_session_manager_constructor():
     def dummy_creation(source, name):
         pass
 
-    mgr = EnterpriseSessionManager("src", SessionId.from_int(42), "nm", dummy_creation)
+    mgr = EnterpriseSessionManager(
+        "src",
+        SessionId.from_int(42),
+        "nm",
+        dummy_creation,
+        SessionOrigin.DISCOVERED,
+    )
     assert mgr._creation_function is dummy_creation
     assert mgr.system == "src"
-    # Enterprise session managers never carry an ``origin``.
-    assert not hasattr(mgr, "origin")
+    # Enterprise session managers carry an ``origin`` (DYNAMIC or DISCOVERED).
+    assert mgr.origin is SessionOrigin.DISCOVERED
     assert mgr.name == "nm"
     assert mgr.session_id == "42"
     assert str(mgr.qualified_session_id) == "enterprise:src:42"
@@ -585,7 +598,13 @@ async def test_create_item_success_covers_try():
     async def creation(source, name):
         return mock_session
 
-    mgr = EnterpriseSessionManager("src", SessionId.from_int(1), "nm", creation)
+    mgr = EnterpriseSessionManager(
+        "src",
+        SessionId.from_int(1),
+        "nm",
+        creation,
+        SessionOrigin.DISCOVERED,
+    )
     result = await mgr._create_item()
     assert result is mock_session
 
@@ -597,7 +616,13 @@ async def test_create_item_exception_covers_except():
     async def creation(source, name):
         raise RuntimeError("fail")
 
-    mgr = EnterpriseSessionManager("src", SessionId.from_int(2), "nm", creation)
+    mgr = EnterpriseSessionManager(
+        "src",
+        SessionId.from_int(2),
+        "nm",
+        creation,
+        SessionOrigin.DISCOVERED,
+    )
     with pytest.raises(
         SessionCreationError, match="Failed to create enterprise session for nm: fail"
     ):
@@ -607,7 +632,13 @@ async def test_create_item_exception_covers_except():
 @pytest.mark.asyncio
 async def test_check_liveness_covers_return():
     """Covers line 559: return await item.is_alive()."""
-    mgr = EnterpriseSessionManager("src", SessionId.from_int(3), "nm", AsyncMock())
+    mgr = EnterpriseSessionManager(
+        "src",
+        SessionId.from_int(3),
+        "nm",
+        AsyncMock(),
+        SessionOrigin.DISCOVERED,
+    )
     mock_session = AsyncMock()
     mock_session.is_alive = AsyncMock(return_value=True)
     result = await mgr._check_liveness(mock_session)
@@ -617,7 +648,13 @@ async def test_check_liveness_covers_return():
 @pytest.mark.asyncio
 async def test_check_liveness_exception():
     """Covers that _check_liveness lets exceptions propagate (handled by liveness_status)."""
-    mgr = EnterpriseSessionManager("src", SessionId.from_int(4), "nm", AsyncMock())
+    mgr = EnterpriseSessionManager(
+        "src",
+        SessionId.from_int(4),
+        "nm",
+        AsyncMock(),
+        SessionOrigin.DISCOVERED,
+    )
     mock_session = AsyncMock()
     mock_session.is_alive = AsyncMock(side_effect=Exception("fail"))
 
@@ -636,6 +673,7 @@ async def test_check_liveness_exception():
             SessionId.from_int(10),
             "test_session",
             mock_creation_function,
+            SessionOrigin.DISCOVERED,
         )
 
         result = await manager._create_item()
@@ -653,6 +691,7 @@ async def test_check_liveness_exception():
             SessionId.from_int(11),
             "test_session",
             mock_creation_function,
+            SessionOrigin.DISCOVERED,
         )
 
         with pytest.raises(
@@ -675,6 +714,7 @@ async def test_check_liveness_exception():
             SessionId.from_int(12),
             "test_session",
             mock_creation_function,
+            SessionOrigin.DISCOVERED,
         )
 
         result = await manager.get()
@@ -692,6 +732,7 @@ async def test_check_liveness_exception():
             SessionId.from_int(13),
             "test_session",
             mock_creation_function,
+            SessionOrigin.DISCOVERED,
         )
         mock_session = AsyncMock()
 
@@ -716,6 +757,7 @@ async def test_check_liveness_exception():
             SessionId.from_int(14),
             "test_session",
             mock_creation_function,
+            SessionOrigin.DISCOVERED,
         )
 
         # Test with a mock session where is_alive returns True
@@ -885,8 +927,8 @@ class TestDynamicCommunitySessionManager:
         assert manager.launched_session == launched_session
         assert manager.launched_session.auth_token == "test-token"
 
-    def test_to_dict_returns_session_info_docker(self):
-        """Test that to_dict returns comprehensive session information for Docker."""
+    def test_to_dict_verbose_docker(self):
+        """Test that to_dict(verbose=True) returns the launch-specific fields for Docker."""
         launched_session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -894,7 +936,6 @@ class TestDynamicCommunitySessionManager:
             auth_token="test-token",
             container_id="test_container",
         )
-        config = {"host": "localhost", "port": 10000, "auth_type": "PSK"}
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
@@ -904,18 +945,22 @@ class TestDynamicCommunitySessionManager:
             session_id=SessionId.from_int(0),
         )
 
-        result = manager.to_dict()
+        result = manager.to_dict(verbose=True)
 
+        # Common identity is always present.
+        assert result["session_id"] == str(manager.qualified_session_id)
+        assert result["session_name"] == "test-session"
+        # Launch-specific connection details are added when verbose.
         assert result["connection_url"] == "http://localhost:10000"
-        # Note: connection_url_with_auth removed from to_dict() for security
+        # connection_url_with_auth is excluded for security
         assert result["port"] == 10000
         assert result["container_id"] == "test_container"
         assert "process_id" not in result
         assert result["auth_type"] == "PSK"
         assert result["launch_method"] == "docker"
 
-    def test_to_dict_with_pip_process(self):
-        """Test that to_dict correctly identifies pip launch method."""
+    def test_to_dict_verbose_pip_process(self):
+        """Test that to_dict(verbose=True) correctly identifies the pip launch method."""
         mock_process = MagicMock()
         mock_process.pid = 12345
         launched_session = PythonLaunchedSession(
@@ -925,7 +970,6 @@ class TestDynamicCommunitySessionManager:
             auth_token=None,
             process=mock_process,
         )
-        config = {"host": "localhost", "port": 10000}
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
@@ -935,14 +979,14 @@ class TestDynamicCommunitySessionManager:
             session_id=SessionId.from_int(0),
         )
 
-        result = manager.to_dict()
+        result = manager.to_dict(verbose=True)
 
         assert result["launch_method"] == "python"
         assert result["process_id"] == 12345
         assert "container_id" not in result
 
-    def test_to_dict_without_auth_token(self):
-        """Test that to_dict handles missing auth token."""
+    def test_to_dict_verbose_without_auth_token(self):
+        """Test that to_dict(verbose=True) handles a missing auth token."""
         launched_session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -950,7 +994,6 @@ class TestDynamicCommunitySessionManager:
             auth_token=None,
             container_id="test_container",
         )
-        config = {"host": "localhost", "port": 10000}
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
@@ -960,13 +1003,13 @@ class TestDynamicCommunitySessionManager:
             session_id=SessionId.from_int(0),
         )
 
-        result = manager.to_dict()
+        result = manager.to_dict(verbose=True)
 
         assert result["connection_url"] == "http://localhost:10000"
-        # Note: connection_url_with_auth removed from to_dict() for security
+        # connection_url_with_auth is excluded for security
 
-    def test_to_dict_with_anonymous_auth(self):
-        """Test that to_dict handles Anonymous auth type."""
+    def test_to_dict_verbose_anonymous_auth(self):
+        """Test that to_dict(verbose=True) handles the Anonymous auth type."""
         launched_session = DockerLaunchedSession(
             host="localhost",
             port=10000,
@@ -974,7 +1017,28 @@ class TestDynamicCommunitySessionManager:
             auth_token=None,
             container_id="test_container",
         )
-        config = {"host": "localhost", "port": 10000, "auth_type": "Anonymous"}
+
+        manager = DynamicCommunitySessionManager(
+            name="test-session",
+            session_config=_stub_session_config(),
+            launched_session=launched_session,
+            timeouts=CommunityClientTimeouts(),
+            session_id=SessionId.from_int(0),
+        )
+
+        result = manager.to_dict(verbose=True)
+
+        assert result["auth_type"] == "ANONYMOUS"
+
+    def test_to_dict_common_identity(self):
+        """to_dict returns the common session identity, not connection details."""
+        launched_session = DockerLaunchedSession(
+            host="localhost",
+            port=10000,
+            auth_type="psk",
+            auth_token="test-token",
+            container_id="test_container",
+        )
 
         manager = DynamicCommunitySessionManager(
             name="test-session",
@@ -986,8 +1050,21 @@ class TestDynamicCommunitySessionManager:
 
         result = manager.to_dict()
 
-        assert result["auth_type"] == "ANONYMOUS"
-        # Note: connection_url_with_auth removed from to_dict() for security
+        assert result == {
+            "session_id": str(manager.qualified_session_id),
+            "type": manager.system_type.value,
+            "system": manager.system,
+            "session_name": manager.name,
+            "origin": manager.origin.value,
+        }
+        # Compact (default) output excludes connection details.
+        assert "connection_url" not in result
+        assert "port" not in result
+        assert "auth_type" not in result
+        # verbose=True is a strict superset: identity plus connection details.
+        verbose = manager.to_dict(verbose=True)
+        assert verbose.items() >= result.items()
+        assert "connection_url" in verbose
 
     @pytest.mark.asyncio
     async def test_close_success(self):
