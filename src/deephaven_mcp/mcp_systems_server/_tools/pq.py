@@ -54,7 +54,8 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     resolve_pq_ids_to_single_system,
 )
 from deephaven_mcp.resource_manager import (
-    BaseItemManager,
+    QualifiedSessionId,
+    SessionId,
     SystemType,
 )
 
@@ -716,7 +717,7 @@ def _pq_state_category(state_name: str) -> str:
 def _add_session_id_if_running(
     result_dict: dict[str, object],
     status: CorePlusQueryStatus | None,
-    pq_name: str,
+    serial: SessionId,
     system_name: str,
 ) -> None:
     """Add ``session_id`` to ``result_dict`` if the PQ is RUNNING, EXECUTING, or INITIALIZING.
@@ -728,14 +729,16 @@ def _add_session_id_if_running(
     Args:
         result_dict (dict[str, object]): Result dict to mutate in place.
         status (CorePlusQueryStatus | None): Current PQ status. ``None`` is a no-op.
-        pq_name (str): PQ name used to construct the session_id.
-        system_name (str): Enterprise system name used to construct the session_id.
+        serial (SessionId): The controller-assigned PQ serial, which is
+            also the session's :class:`SessionId` (matches the value
+            installed by :class:`EnterpriseSessionRegistry` when the PQ
+            is reported by the controller).
+        system_name (str): Enterprise system name used as the middle
+            segment of the session_id.
     """
     if status is not None and (status.is_running or status.is_initializing):
-        session_id = BaseItemManager.make_full_name(
-            SystemType.ENTERPRISE, system_name, pq_name
-        )
-        result_dict["session_id"] = session_id
+        session_id = QualifiedSessionId(SystemType.ENTERPRISE, system_name, serial)
+        result_dict["session_id"] = str(session_id)
 
 
 async def pq_name_to_id(
@@ -984,8 +987,10 @@ async def pq_list(
                 "num_failures": state_pb.numFailures if state_pb else 0,
             }
 
-            # Add session_id if PQ is running (session_id uses name, not serial)
-            _add_session_id_if_running(pq_data, status_obj, pq_name, system_name)
+            # Add session_id if PQ is running (session_id is the PQ serial).
+            _add_session_id_if_running(
+                pq_data, status_obj, SessionId.from_int(serial), system_name
+            )
 
             pqs.append(pq_data)
 
@@ -1273,8 +1278,10 @@ async def pq_details(
             "spares": _format_pq_states(pq_info.spares),
         }
 
-        # Add session_id if running (session_id uses name, not serial)
-        _add_session_id_if_running(pq_data, status_obj, pq_name, system_name)
+        # Add session_id if running (session_id is the PQ serial).
+        _add_session_id_if_running(
+            pq_data, status_obj, SessionId.from_int(serial), system_name
+        )
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_details] Retrieved details for PQ '{pq_name}' (serial: {serial})"
@@ -2160,8 +2167,10 @@ async def _pq_start_single(
         item_result["state"] = state_name
         item_result["state_category"] = _pq_state_category(state_name)
 
-        # Add session_id if running (session_id uses name, not serial)
-        _add_session_id_if_running(item_result, status_obj, pq_name, system_name)
+        # Add session_id if running (session_id is the PQ serial).
+        _add_session_id_if_running(
+            item_result, status_obj, SessionId.from_int(serial), system_name
+        )
 
         _LOGGER.debug(f"[mcp_systems_server:pq_start] Successfully started PQ {pid}")
 
@@ -2827,9 +2836,9 @@ async def pq_restart(
                 item_result["state"] = state_name
                 item_result["state_category"] = _pq_state_category(state_name)
 
-                # Add session_id if running (session_id uses name, not serial)
+                # Add session_id if running (session_id is the PQ serial).
                 _add_session_id_if_running(
-                    item_result, status_obj, pq_name, system_name
+                    item_result, status_obj, SessionId.from_int(serial), system_name
                 )
 
                 _LOGGER.debug(

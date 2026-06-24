@@ -12,6 +12,7 @@ def test_imports_and_all():
         CorePlusSessionFactoryManager,
         EnterpriseSessionManager,
         EnterpriseSessionRegistry,
+        SessionManager,
     )
 
     # __all__ should be defined and contain all the public symbols
@@ -27,6 +28,7 @@ def test_imports_and_all():
         "MultiSystemRegistry",
         "least_advanced_phase",
         "RegistrySnapshot",
+        "SessionManager",
         "CommunitySessionManager",
         "StaticCommunitySessionManager",
         "DynamicCommunitySessionManager",
@@ -44,11 +46,14 @@ def test_imports_and_all():
         "generate_auth_token",
         "InstanceTracker",
         "cleanup_orphaned_resources",
+        "SessionId",
+        "QualifiedSessionId",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)
 
     # each symbol should be the correct object from the submodules
     assert mod.BaseItemManager is BaseItemManager
+    assert mod.SessionManager is SessionManager
     assert mod.CommunitySessionManager is CommunitySessionManager
     assert mod.EnterpriseSessionManager is EnterpriseSessionManager
     assert mod.CorePlusSessionFactoryManager is CorePlusSessionFactoryManager

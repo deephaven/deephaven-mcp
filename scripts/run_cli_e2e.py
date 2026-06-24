@@ -188,17 +188,19 @@ def _verify_lifecycle(cfg_dir: Path, runtime_dir: Path) -> None:
 
     # Start
     start_payload = _run_json(common, ["daemon", "start"])
-    if start_payload.get("pid", 0) <= 0 or start_payload.get("port", 0) <= 0:
+    start_daemon = start_payload.get("daemon") or {}
+    if start_daemon.get("pid", 0) <= 0 or start_daemon.get("port", 0) <= 0:
         raise RuntimeError(f"`daemon start` returned bad payload: {start_payload}")
     _LOGGER.info(
-        f"daemon started: pid={start_payload['pid']} port={start_payload['port']}"
+        f"daemon started: pid={start_daemon['pid']} port={start_daemon['port']}"
     )
 
     # Status
     status_payload = _run_json(common, ["daemon", "status"])
-    if not status_payload.get("running"):
+    if status_payload.get("state") != "running":
         raise RuntimeError(f"`daemon status` reports not running: {status_payload}")
-    _LOGGER.info(f"daemon status: running on port {status_payload.get('port')}")
+    status_daemon = status_payload.get("daemon") or {}
+    _LOGGER.info(f"daemon status: running on port {status_daemon.get('port')}")
 
     # Tool list
     tools = _run_json(common, ["tool", "list"])
@@ -216,10 +218,11 @@ def _verify_lifecycle(cfg_dir: Path, runtime_dir: Path) -> None:
 
     # Idempotent re-start
     second = _run_json(common, ["daemon", "start"])
-    if second["pid"] != start_payload["pid"]:
+    second_pid = (second.get("daemon") or {}).get("pid")
+    if second_pid != start_daemon["pid"]:
         raise RuntimeError(
             f"second `daemon start` returned a different pid "
-            f"({second['pid']} vs {start_payload['pid']}); spawn was not idempotent."
+            f"({second_pid} vs {start_daemon['pid']}); spawn was not idempotent."
         )
 
     # Stop

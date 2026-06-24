@@ -30,6 +30,7 @@ from deephaven_mcp.resource_manager import (
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
     PythonLaunchedSession,
+    QualifiedSessionId,
     ResourceLivenessStatus,
     SessionOrigin,
     SystemType,
@@ -63,6 +64,10 @@ async def test_session_community_create_with_pip_and_process_id():
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
     mock_session_registry.add_session = AsyncMock()
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:1")
+    )
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -142,6 +147,7 @@ async def test_session_community_create_cleanup_fails_on_timeout():
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get_all = AsyncMock(return_value=MagicMock(items={}))
     mock_session_registry.get = AsyncMock(
         side_effect=RegistryItemNotFoundError("not found")
     )
@@ -204,7 +210,7 @@ async def test_session_community_delete_removal_returns_none():
     mock_launched_session.launch_method = "docker"
 
     mock_manager = MagicMock(spec=DynamicCommunitySessionManager)
-    mock_manager.full_name = "community:community:test-session"
+    mock_manager.qualified_session_id = "community:community:1"
     mock_manager._name = "test-session"
     mock_manager.system = "community"
     mock_manager.origin = SessionOrigin.DYNAMIC
@@ -223,14 +229,12 @@ async def test_session_community_delete_removal_returns_none():
         }
     )
 
-    result = await session_community_delete(
-        context, session_id="community:community:test-session"
-    )
+    result = await session_community_delete(context, session_id="community:community:1")
 
     # Should still succeed even though removal returned None
     assert result["success"] is True
     mock_session_registry.remove.assert_awaited_once_with(
-        "community:community:test-session"
+        QualifiedSessionId.from_str("community:community:1")
     )
 
 
@@ -263,7 +267,10 @@ def test_run_script_reads_script_from_file():
     with patch("aiofiles.open", return_value=DummyFile()):
         result = asyncio.run(
             session_script_run(
-                context, session_id="test_worker", script=None, script_path="dummy.py"
+                context,
+                session_id="community:community:test_worker",
+                script=None,
+                script_path="dummy.py",
             )
         )
         assert result["success"] is True
@@ -297,7 +304,10 @@ async def test_session_script_run_both_script_and_path():
         }
     )
     result = await session_script_run(
-        context, session_id="foo", script="print('hi')", script_path="/tmp/fake.py"
+        context,
+        session_id="community:community:foo",
+        script="print('hi')",
+        script_path="/tmp/fake.py",
     )
     assert result["success"] is True
     assert session.run_script.call_count >= 1
@@ -321,7 +331,9 @@ async def test_session_script_run_missing_session():
             "registry": session_registry,
         }
     )
-    result = await session_script_run(context, session_id=None, script="print('hi')")
+    result = await session_script_run(
+        context, session_id="community:community:missing", script="print('hi')"
+    )
     assert result["success"] is False
     assert result["isError"] is True
     assert "no session" in result["error"]
@@ -349,7 +361,7 @@ async def test_session_script_run_both_none():
             "registry": session_registry,
         }
     )
-    result = await session_script_run(context, session_id="foo")
+    result = await session_script_run(context, session_id="community:community:foo")
     assert result["success"] is False
     assert result["isError"] is True
     assert "Must provide either script or script_path" in result["error"]
@@ -382,10 +394,14 @@ async def test_session_script_run_success():
             "registry": session_registry,
         }
     )
-    result = await session_script_run(context, session_id="worker", script="print(1)")
+    result = await session_script_run(
+        context, session_id="community:community:worker", script="print(1)"
+    )
 
     # Check correct session access pattern
-    session_registry.get.assert_awaited_once_with("worker")
+    session_registry.get.assert_awaited_once_with(
+        QualifiedSessionId.from_str("community:community:worker")
+    )
     mock_session_manager.get.assert_awaited_once()
 
     # Verify results
@@ -405,7 +421,7 @@ async def test_session_script_run_no_script():
             "registry": session_registry,
         }
     )
-    res = await session_script_run(context, session_id="worker")
+    res = await session_script_run(context, session_id="community:community:worker")
 
     # No calls to session_registry should be made since validation fails first
     session_registry.get.assert_not_awaited()
@@ -435,7 +451,7 @@ async def test_session_script_run_neither_script_nor_path():
 
     # Call with neither script nor script_path
     res = await session_script_run(
-        context, session_id="worker", script=None, script_path=None
+        context, session_id="community:community:worker", script=None, script_path=None
     )
 
     # No calls to session_registry should be made since validation fails first
@@ -462,10 +478,14 @@ async def test_session_script_run_session_error():
             "registry": session_registry,
         }
     )
-    res = await session_script_run(context, session_id="worker", script="print(1)")
+    res = await session_script_run(
+        context, session_id="community:community:worker", script="print(1)"
+    )
 
     # Verify the session registry was called with the correct session id
-    session_registry.get.assert_awaited_once_with("worker")
+    session_registry.get.assert_awaited_once_with(
+        QualifiedSessionId.from_str("community:community:worker")
+    )
 
     # Verify error response
     assert res["success"] is False
@@ -517,11 +537,13 @@ async def test_session_script_run_script_path():
             }
         )
         res = await session_script_run(
-            context, session_id="worker", script_path=script_path
+            context, session_id="community:community:worker", script_path=script_path
         )
 
     # Verify session registry was called correctly
-    session_registry.get.assert_awaited_once_with("worker")
+    session_registry.get.assert_awaited_once_with(
+        QualifiedSessionId.from_str("community:community:worker")
+    )
     mock_session_manager.get.assert_awaited_once()
 
     # Verify file open and script execution
@@ -544,7 +566,7 @@ async def test_session_script_run_script_path_none_error():
         }
     )
     res = await session_script_run(
-        context, session_id="worker", script=None, script_path=None
+        context, session_id="community:community:worker", script=None, script_path=None
     )
 
     # Verify the validation error is returned
@@ -597,10 +619,14 @@ async def test_session_pip_list_success():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(context, session_id="test_worker")
+        result = await session_pip_list(
+            context, session_id="community:community:test_worker"
+        )
 
         # Check correct session access pattern
-        mock_session_registry.get.assert_awaited_once_with("test_worker")
+        mock_session_registry.get.assert_awaited_once_with(
+            QualifiedSessionId.from_str("community:community:test_worker")
+        )
         mock_session_manager.get.assert_awaited_once()
 
         # Verify results
@@ -641,14 +667,18 @@ async def test_session_pip_list_empty():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await session_pip_list(context, session_id="test_worker")
+        result = await session_pip_list(
+            context, session_id="community:community:test_worker"
+        )
 
     # Verify results
     assert result["success"] is True
     assert result["result"] == []
 
     # Check correct session access pattern
-    mock_session_registry.get.assert_awaited_once_with("test_worker")
+    mock_session_registry.get.assert_awaited_once_with(
+        QualifiedSessionId.from_str("community:community:test_worker")
+    )
     mock_session_manager.get.assert_awaited_once()
     mock_get_pip_packages_table.assert_awaited_once()
 
@@ -687,7 +717,9 @@ async def test_session_pip_list_malformed_data():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(context, session_id="test_worker")
+        result = await session_pip_list(
+            context, session_id="community:community:test_worker"
+        )
 
     # Verify results
     assert result["success"] is False
@@ -695,7 +727,9 @@ async def test_session_pip_list_malformed_data():
     assert "Malformed package data" in result["error"]
 
     # Check correct session access pattern
-    mock_session_registry.get.assert_awaited_once_with("test_worker")
+    mock_session_registry.get.assert_awaited_once_with(
+        QualifiedSessionId.from_str("community:community:test_worker")
+    )
     mock_session_manager.get.assert_awaited_once()
     mock_get_pip_packages_table.assert_awaited_once()
 
@@ -728,7 +762,9 @@ async def test_session_pip_list_error():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(context, session_id="test_worker")
+        result = await session_pip_list(
+            context, session_id="community:community:test_worker"
+        )
 
         # Verify results
         assert result["success"] is False
@@ -736,7 +772,9 @@ async def test_session_pip_list_error():
         assert "Table error" in result["error"]
 
         # Check correct session access pattern
-        mock_session_registry.get.assert_awaited_once_with("test_worker")
+        mock_session_registry.get.assert_awaited_once_with(
+            QualifiedSessionId.from_str("community:community:test_worker")
+        )
         mock_session_manager.get.assert_awaited_once()
 
 
@@ -760,13 +798,17 @@ async def test_session_pip_list_session_not_found():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(context, session_id="nonexistent_worker")
+        result = await session_pip_list(
+            context, session_id="community:community:nonexistent_worker"
+        )
         assert result["success"] is False
         assert "Worker not found" in result["error"]
         assert result["isError"] is True
 
         # Verify correct session access pattern
-        mock_session_registry.get.assert_awaited_once_with("nonexistent_worker")
+        mock_session_registry.get.assert_awaited_once_with(
+            QualifiedSessionId.from_str("community:community:nonexistent_worker")
+        )
 
 
 def test_register_tools_registers_script_tools():

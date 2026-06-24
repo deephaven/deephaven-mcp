@@ -13,6 +13,7 @@ from __future__ import annotations
 __all__ = ["daemon"]
 
 import asyncio
+from enum import StrEnum
 from pathlib import Path
 
 import click
@@ -23,9 +24,9 @@ from deephaven_mcp.cli._commands._acquire import (
     acquire_daemon,
     registry_corrupt_message,
 )
+from deephaven_mcp.cli._commands._wrapping import echo_payload
 from deephaven_mcp.cli._daemon import DaemonClientError, stop_daemon
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
-from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._help import (
     HelpfulGroup,
     OutputField,
@@ -126,26 +127,137 @@ def daemon() -> None:
     """
 
 
-# Fields emitted by dump_redacted(entry) for the daemon registry entry;
-# shared by start, status, and restart (psk is redacted).
-_ENTRY_FIELDS = (
-    OutputField("pid", "integer", "OS process ID of the daemon."),
-    OutputField("host", "string", "Loopback bind address (127.0.0.1)."),
-    OutputField(
-        "port", "integer", "TCP port the streamable-HTTP transport is bound to."
-    ),
-    OutputField("server_name", "string", "Configured server identifier."),
-    OutputField(
-        "config_dir", "string", "Config directory the daemon was started against."
-    ),
-    OutputField("started_at", "string", "ISO-8601 UTC time the entry was written."),
-    OutputField("psk", "string", "Pre-shared key, redacted to the REDACTED sentinel."),
-    OutputField(
-        "create_time_ns", "integer", "Kernel create-time, paired with pid for liveness."
-    ),
-    OutputField(
-        "process_name", "string", "Expected process-name token used for liveness."
-    ),
+class DaemonState(StrEnum):
+    """The state reported by ``daemon status``, ``start``, and ``restart``."""
+
+    RUNNING = "running"
+    """A live daemon process is registered."""
+    STOPPED = "stopped"
+    """No daemon is registered (never started, or cleanly stopped)."""
+    CRASHED = "crashed"
+    """A registry entry exists but its process is dead (did not exit cleanly)."""
+
+
+def _daemon_payload(entry: DaemonRegistryEntry) -> dict[str, object]:
+    """Return the user-facing view of the live daemon instance.
+
+    Args:
+        entry (DaemonRegistryEntry): The registry entry of the running daemon.
+
+    Returns:
+        dict[str, object]: The daemon's ``pid``, ``host``, ``port``,
+            ``started_at``, ``created_at_ns`` (the kernel create-time), and
+            ``psk`` (redacted to the REDACTED sentinel). ``server_name``,
+            ``config_dir``, and ``process_name`` are not surfaced.
+    """
+    dumped = dump_redacted(entry)
+    return {
+        "pid": dumped["pid"],
+        "host": dumped["host"],
+        "port": dumped["port"],
+        "started_at": dumped["started_at"],
+        "created_at_ns": dumped["create_time_ns"],
+        "psk": dumped["psk"],
+    }
+
+
+def _paths_payload(runtime: Runtime) -> dict[str, str]:
+    """Return the stable filesystem locations the CLI always knows.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+
+    Returns:
+        dict[str, str]: The ``config``, ``runtime``, ``registry``, and ``log``
+            absolute paths, present regardless of whether a daemon is running.
+    """
+    return {
+        "config": str(runtime.config_dir),
+        "runtime": str(runtime.runtime_dir),
+        "registry": str(runtime.daemon_dir.registry_path),
+        "log": str(runtime.daemon_dir.log_path),
+    }
+
+
+def _running_message(entry: DaemonRegistryEntry) -> str:
+    """Return the one-line human summary for a running daemon.
+
+    Args:
+        entry (DaemonRegistryEntry): The registry entry of the running daemon.
+
+    Returns:
+        str: A summary naming the daemon's pid and loopback endpoint.
+    """
+    return f"Daemon running: pid {entry.pid} at {entry.host}:{entry.port}."
+
+
+def _report_envelope(
+    runtime: Runtime,
+    *,
+    state: DaemonState,
+    message: str,
+    entry: DaemonRegistryEntry | None = None,
+) -> dict[str, object]:
+    """Build the ``{state, message, daemon?, paths}`` daemon-report envelope.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        state (DaemonState): The reported state.
+        message (str): The human-readable one-line summary.
+        entry (DaemonRegistryEntry | None): The running daemon's registry entry.
+            When given, a ``daemon`` object is included; when ``None`` (stopped
+            or crashed) the ``daemon`` key is omitted.
+
+    Returns:
+        dict[str, object]: Keys in most- to least-important order: ``state``,
+            ``message``, ``daemon`` (only when ``entry`` is given), ``paths``.
+    """
+    payload: dict[str, object] = {"state": state.value, "message": message}
+    if entry is not None:
+        payload["daemon"] = _daemon_payload(entry)
+    payload["paths"] = _paths_payload(runtime)
+    return payload
+
+
+def _running_payload(runtime: Runtime, entry: DaemonRegistryEntry) -> dict[str, object]:
+    """Return the running-daemon envelope shared by start, status, and restart.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        entry (DaemonRegistryEntry): The registry entry of the running daemon.
+
+    Returns:
+        dict[str, object]: The ``{state, message, daemon, paths}`` envelope with
+            ``state`` ``"running"``.
+    """
+    return _report_envelope(
+        runtime,
+        state=DaemonState.RUNNING,
+        message=_running_message(entry),
+        entry=entry,
+    )
+
+
+# Output fields shared by the daemon-reporting commands (start, status, restart).
+_DAEMON_FIELD = OutputField(
+    "daemon",
+    "object",
+    "The live daemon instance, present only when state is 'running' (omitted "
+    "otherwise): pid, host, port, started_at, created_at_ns, psk (redacted).",
+)
+_PATHS_FIELD = OutputField(
+    "paths",
+    "object",
+    "Stable filesystem locations the CLI always knows, present in every state: "
+    "config, runtime, registry, log.",
+)
+_MESSAGE_FIELD = OutputField("message", "string", "Human-readable one-line summary.")
+# state/message/daemon/paths envelope for start and restart (state always 'running').
+_RUNNING_FIELDS = (
+    OutputField("state", "string", "Always 'running' on success."),
+    _MESSAGE_FIELD,
+    _DAEMON_FIELD,
+    _PATHS_FIELD,
 )
 
 
@@ -154,7 +266,9 @@ _ENTRY_FIELDS = (
 # ---------------------------------------------------------------------------
 
 _OUTPUT_START = OutputSpec(
-    "object", _ENTRY_FIELDS, note="The daemon's registry entry (psk redacted)."
+    "object",
+    _RUNNING_FIELDS,
+    note="The running daemon (psk redacted); 'paths' is always present.",
 )
 
 
@@ -165,15 +279,16 @@ _OUTPUT_START = OutputSpec(
         summary="Start the daemon (idempotent).",
         description=(
             "Spawns the per-user daemon if none is running, then prints its "
-            "registry entry. Re-running against an already-running daemon "
-            "prints the existing entry without spawning a second process. "
-            "Tool commands auto-start the daemon, so explicit start is only "
-            "needed to pre-warm it or inspect the connection details."
+            "state and connection details (host, port, pid). Re-running against "
+            "an already-running daemon prints the existing details without "
+            "spawning a second process. Tool commands auto-start the daemon, so "
+            "explicit start is only needed to pre-warm it or inspect the "
+            "connection details."
         ),
         output=_OUTPUT_START,
         examples=(
             "$ dh-mcp daemon start",
-            "$ dh-mcp -o json daemon start | jq .port",
+            "$ dh-mcp -o json daemon start | jq .daemon.port",
         ),
         see_also=("dh-mcp daemon status", "dh-mcp daemon stop"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
@@ -189,14 +304,7 @@ _OUTPUT_START = OutputSpec(
 async def daemon_start(runtime: Runtime) -> None:
     """Start the daemon (idempotent)."""
     entry = await _acquire_daemon(runtime, verb="start")
-    # ``dump_redacted`` emits the full registry-entry schema with
-    # the PSK replaced by the project ``REDACTED`` sentinel
-    # (:class:`RedactableSchema`). Operators see every field the
-    # daemon advertised, mirroring ``daemon status`` and matching the
-    # project-wide redaction convention used by ``config show`` and
-    # the systems-server enterprise tool.
-    payload = dump_redacted(entry)
-    click.echo(format_output(payload, output=runtime.config.cli.output.format))
+    echo_payload(runtime, _running_payload(runtime, entry), sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +315,7 @@ _OUTPUT_STOP = OutputSpec(
     "object",
     (
         OutputField("stopped", "boolean", "True if a daemon was terminated."),
-        OutputField("message", "string", "Human-readable summary."),
+        _MESSAGE_FIELD,
     ),
 )
 
@@ -238,12 +346,7 @@ async def daemon_stop(runtime: Runtime) -> None:
     """Stop the daemon (idempotent)."""
     terminated = await _release_daemon(runtime, verb="stop")
     msg = "Daemon stopped." if terminated else "No daemon was running."
-    click.echo(
-        format_output(
-            {"stopped": terminated, "message": msg},
-            output=runtime.config.cli.output.format,
-        )
-    )
+    echo_payload(runtime, {"stopped": terminated, "message": msg}, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -253,26 +356,16 @@ async def daemon_stop(runtime: Runtime) -> None:
 _OUTPUT_STATUS = OutputSpec(
     "object",
     (
-        OutputField("running", "boolean", "Whether a live daemon is registered."),
         OutputField(
-            "runtime_dir",
-            "string",
-            "Absolute path to the runtime directory root (holds the daemon subdirectory).",
+            "state", "string", "Daemon state: 'running', 'stopped', or 'crashed'."
         ),
-        OutputField(
-            "registry_path", "string", "Absolute path to the daemon.json registry file."
-        ),
-        OutputField(
-            "log_path",
-            "string",
-            "Absolute path to the daemon.log captured stdout/stderr log (the file may not exist yet).",
-        ),
-        OutputField("stale_pid", "integer", "PID of a dead entry that was cleaned up."),
-        *_ENTRY_FIELDS,
+        _MESSAGE_FIELD,
+        _DAEMON_FIELD,
+        _PATHS_FIELD,
     ),
     note=(
-        "runtime_dir, registry_path, and log_path are always present; when "
-        "running is true, the registry-entry fields are also present."
+        "'daemon' is present only when state is 'running' (omitted otherwise); "
+        "'paths' is always present."
     ),
 )
 
@@ -283,16 +376,18 @@ _OUTPUT_STATUS = OutputSpec(
     help=build_help(
         summary="Report daemon status.",
         description=(
-            "Reads the daemon registry and reports whether a live daemon "
-            "process is registered. Exits 0 regardless: a missing or stale "
-            "registry is reported as 'running: false' so callers branch on "
-            "that field without parsing exit codes. A stale entry (dead pid) "
-            "is cleaned up and its pid reported as stale_pid."
+            "Reads the daemon registry and reports the daemon's state: "
+            "'running' (a live process is registered), 'stopped' (none "
+            "registered), or 'crashed' (a registry entry exists but its process "
+            "is dead). Exits 0 in all three cases so callers branch on the "
+            "'state' field without parsing exit codes. This command is "
+            "read-only: a 'crashed' entry is reported but left in place — run "
+            "'dh-mcp daemon start' or 'dh-mcp daemon repair' to clean it up."
         ),
         output=_OUTPUT_STATUS,
         examples=(
             "$ dh-mcp daemon status",
-            "$ dh-mcp -o json daemon status | jq .running",
+            "$ dh-mcp -o json daemon status | jq .state",
         ),
         see_also=("dh-mcp daemon start", "dh-mcp daemon logs"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
@@ -303,62 +398,38 @@ _OUTPUT_STATUS = OutputSpec(
 @run_async
 async def daemon_status(runtime: Runtime) -> None:
     """Report daemon status."""
-    output = runtime.config.cli.output.format
-    # Always-present daemon-directory locations, independent of running state
-    # so the log/registry paths are discoverable even when the daemon is down.
-    paths = {
-        "runtime_dir": str(runtime.runtime_dir),
-        "registry_path": str(runtime.daemon_dir.registry_path),
-        "log_path": str(runtime.daemon_dir.log_path),
-    }
     try:
         entry = runtime.daemon_dir.read_entry()
     except RegistryCorruptError as exc:
         # Surface as a structured error rather than the misleading
-        # "running: false" we would otherwise emit if we treated a
-        # corrupt file as absent. The operator needs to know the
-        # registry is bad — automatic recovery for ``daemon status``
-        # would silently hide the diagnostic.
+        # "stopped" we would otherwise emit if we treated a corrupt
+        # file as absent. The operator needs to know the registry is
+        # bad — automatic recovery for ``daemon status`` would silently
+        # hide the diagnostic.
         raise CliError(
             _registry_corrupt_message(exc, verb="status"),
             code=ErrorCode.DAEMON_REGISTRY_CORRUPT,
         ) from exc
     if entry is None:
-        click.echo(format_output({"running": False, **paths}, output=output))
-        return
-    if not entry.is_live():
-        # Re-read inside the lock before deleting so we do not blast
-        # a fresh entry that a peer published between the lock-free
-        # read above and the delete.
-        with runtime.daemon_dir.locked() as reg:
-            entry = reg.read()
-            if entry is not None and not entry.is_live():
-                reg.delete()
-                stale_pid = entry.pid
-            else:
-                stale_pid = None
-        if stale_pid is not None:
-            click.echo(
-                format_output(
-                    {"running": False, "stale_pid": stale_pid, **paths}, output=output
-                )
-            )
-            return
-        # The entry vanished or became live during the re-read; fall
-        # through and re-evaluate the entry we now hold.
-        if entry is None:
-            click.echo(format_output({"running": False, **paths}, output=output))
-            return
-
-    # Dump the entry through the project-canonical redact pipeline
-    # so ``datetime`` and ``Path`` round-trip to JSON-safe values
-    # automatically. The ``redact`` context substitutes the
-    # ``REDACTED`` sentinel for the PSK; the field is kept (rather
-    # than popped) to preserve schema honesty for structured-output
-    # consumers.
-    payload = dump_redacted(entry)
-    payload["running"] = True
-    click.echo(format_output({**payload, **paths}, output=output))
+        payload = _report_envelope(
+            runtime, state=DaemonState.STOPPED, message="No daemon is running."
+        )
+    elif entry.is_live():
+        payload = _running_payload(runtime, entry)
+    else:
+        # Read-only: report the dead entry but do not delete or quarantine
+        # it. Cleanup is the job of ``daemon start`` (which auto-handles a
+        # stale entry) and ``daemon repair``.
+        payload = _report_envelope(
+            runtime,
+            state=DaemonState.CRASHED,
+            message=(
+                f"Daemon not running: a previous instance (pid {entry.pid}) "
+                f"exited without cleanup. Run 'dh-mcp daemon start' to clean up "
+                f"and relaunch."
+            ),
+        )
+    echo_payload(runtime, payload, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -367,8 +438,8 @@ async def daemon_status(runtime: Runtime) -> None:
 
 _OUTPUT_RESTART = OutputSpec(
     "object",
-    (OutputField("restarted", "boolean", "Always true on success."), *_ENTRY_FIELDS),
-    note="The new daemon's registry entry (psk redacted).",
+    _RUNNING_FIELDS,
+    note="The restarted daemon (psk redacted); 'paths' is always present.",
 )
 
 
@@ -379,13 +450,13 @@ _OUTPUT_RESTART = OutputSpec(
         summary="Restart the daemon: stop (if running) then start.",
         description=(
             "Equivalent to 'dh-mcp daemon stop' followed by 'dh-mcp daemon "
-            "start', but single-command, and reports the new daemon's "
-            "registry entry on success."
+            "start', but single-command, and reports the new daemon's state "
+            "and connection details on success."
         ),
         output=_OUTPUT_RESTART,
         examples=(
             "$ dh-mcp daemon restart",
-            "$ dh-mcp -o json daemon restart | jq .pid",
+            "$ dh-mcp -o json daemon restart | jq .daemon.pid",
         ),
         see_also=("dh-mcp daemon start", "dh-mcp daemon stop"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
@@ -402,10 +473,7 @@ async def daemon_restart(runtime: Runtime) -> None:
     """Stop (if running) and start the daemon."""
     await _release_daemon(runtime, verb="restart")
     entry = await _acquire_daemon(runtime, verb="restart")
-    # See ``daemon_start`` for the redaction rationale.
-    payload = dump_redacted(entry)
-    payload["restarted"] = True
-    click.echo(format_output(payload, output=runtime.config.cli.output.format))
+    echo_payload(runtime, _running_payload(runtime, entry), sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +532,6 @@ _OUTPUT_REPAIR = OutputSpec(
 @run_async
 async def daemon_repair(runtime: Runtime) -> None:
     """Recover from a corrupt daemon registry file."""
-    output = runtime.config.cli.output.format
     registry_path = runtime.daemon_dir.registry_path
 
     # Hold the registry lock for the entire decision-and-mutate
@@ -472,11 +539,10 @@ async def daemon_repair(runtime: Runtime) -> None:
     # and the rename would otherwise see its entry moved aside.
     with runtime.daemon_dir.locked() as reg:
         if not registry_path.exists():
-            click.echo(
-                format_output(
-                    {"repaired": False, "message": "No registry to repair."},
-                    output=output,
-                )
+            echo_payload(
+                runtime,
+                {"repaired": False, "message": "No registry to repair."},
+                sort_keys=False,
             )
             return
 
@@ -504,18 +570,16 @@ async def daemon_repair(runtime: Runtime) -> None:
         # Race tolerated: an external process (outside the lock
         # protocol) removed the registry between ``exists()`` and
         # the rename. Report as no-op.
-        click.echo(
-            format_output(
-                {"repaired": False, "message": "No registry to repair."},
-                output=output,
-            )
+        echo_payload(
+            runtime,
+            {"repaired": False, "message": "No registry to repair."},
+            sort_keys=False,
         )
         return
-    click.echo(
-        format_output(
-            {"repaired": True, "quarantined_to": str(quarantined)},
-            output=output,
-        )
+    echo_payload(
+        runtime,
+        {"repaired": True, "quarantined_to": str(quarantined)},
+        sort_keys=False,
     )
 
 

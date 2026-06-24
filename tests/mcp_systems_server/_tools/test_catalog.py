@@ -144,10 +144,10 @@ async def test_catalog_tables_success_no_filters():
                 [{"Namespace": "ns1", "TableName": "t1"}],
             )
 
-            result = await catalog_tables_list(context, "enterprise:prod:analytics")
+            result = await catalog_tables_list(context, "enterprise:prod:1")
 
             assert result["success"] is True
-            assert result["session_id"] == "enterprise:prod:analytics"
+            assert result["session_id"] == "enterprise:prod:1"
             assert result["format"] == "json-row"
             assert result["row_count"] == 100
             assert result["is_complete"] is True
@@ -197,7 +197,7 @@ async def test_catalog_tables_success_with_filters():
 
             filters = ["Namespace = `market_data`", "TableName.contains(`price`)"]
             result = await catalog_tables_list(
-                context, "enterprise:prod:analytics", filters=filters
+                context, "enterprise:prod:1", filters=filters
             )
 
             assert result["success"] is True
@@ -246,7 +246,7 @@ async def test_catalog_tables_success_csv_format():
             mock_format.return_value = ("csv", "Namespace\nmarket_data\n")
 
             result = await catalog_tables_list(
-                context, "enterprise:prod:analytics", format="csv"
+                context, "enterprise:prod:1", format="csv"
             )
 
             assert result["success"] is True
@@ -293,7 +293,7 @@ async def test_catalog_tables_incomplete_results():
             mock_format.return_value = ("json-row", [])
 
             result = await catalog_tables_list(
-                context, "enterprise:prod:analytics", max_rows=1000
+                context, "enterprise:prod:1", max_rows=1000
             )
 
             assert result["success"] is True
@@ -327,7 +327,7 @@ async def test_catalog_tables_not_enterprise_session():
             "get_catalog_table only supports enterprise (Core+) sessions"
         )
 
-        result = await catalog_tables_list(context, "community:local:test")
+        result = await catalog_tables_list(context, "community:local:2")
 
         assert result["success"] is False
         assert "enterprise" in result["error"].lower()
@@ -347,7 +347,7 @@ async def test_catalog_tables_session_not_found():
         }
     )
 
-    result = await catalog_tables_list(context, "invalid_session")
+    result = await catalog_tables_list(context, "enterprise:prod:invalid_session")
 
     assert result["success"] is False
     assert "Session not found" in result["error"]
@@ -377,7 +377,7 @@ async def test_catalog_tables_invalid_filter():
         mock_get_catalog.side_effect = RuntimeError("Invalid filter syntax")
 
         result = await catalog_tables_list(
-            context, "enterprise:prod:analytics", filters=["InvalidFilter!!!"]
+            context, "enterprise:prod:1", filters=["InvalidFilter!!!"]
         )
 
         assert result["success"] is False
@@ -418,7 +418,7 @@ async def test_catalog_tables_invalid_format():
             mock_format.side_effect = ValueError("Unsupported format: invalid")
 
             result = await catalog_tables_list(
-                context, "enterprise:prod:analytics", format="invalid"
+                context, "enterprise:prod:1", format="invalid"
             )
 
             assert result["success"] is False
@@ -453,7 +453,7 @@ async def test_catalog_tables_size_limit_exceeded():
     ) as mock_get_catalog:
         mock_get_catalog.return_value = (mock_catalog_table, False)
 
-        result = await catalog_tables_list(context, "enterprise:prod:analytics")
+        result = await catalog_tables_list(context, "enterprise:prod:1")
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
@@ -496,10 +496,10 @@ async def test_catalog_namespaces_success_no_filters():
         ) as mock_format:
             mock_format.return_value = ("json-row", [{"Namespace": "market_data"}])
 
-            result = await catalog_namespaces_list(context, "enterprise:prod:analytics")
+            result = await catalog_namespaces_list(context, "enterprise:prod:1")
 
             assert result["success"] is True
-            assert result["session_id"] == "enterprise:prod:analytics"
+            assert result["session_id"] == "enterprise:prod:1"
             assert result["format"] == "json-row"
             assert result["row_count"] == 25
             assert result["is_complete"] is True
@@ -549,7 +549,7 @@ async def test_catalog_namespaces_success_with_filters():
 
             filters = ["TableName.contains(`daily`)"]
             result = await catalog_namespaces_list(
-                context, "enterprise:prod:analytics", filters=filters
+                context, "enterprise:prod:1", filters=filters
             )
 
             assert result["success"] is True
@@ -598,7 +598,7 @@ async def test_catalog_namespaces_success_csv_format():
             mock_format.return_value = ("csv", "Namespace\nmarket_data\n")
 
             result = await catalog_namespaces_list(
-                context, "enterprise:prod:analytics", format="csv"
+                context, "enterprise:prod:1", format="csv"
             )
 
             assert result["success"] is True
@@ -645,7 +645,7 @@ async def test_catalog_namespaces_incomplete_results():
             mock_format.return_value = ("json-row", [])
 
             result = await catalog_namespaces_list(
-                context, "enterprise:prod:analytics", max_rows=500
+                context, "enterprise:prod:1", max_rows=500
             )
 
             assert result["success"] is True
@@ -679,7 +679,7 @@ async def test_catalog_namespaces_not_enterprise_session():
             "get_catalog_namespaces only supports enterprise (Core+) sessions"
         )
 
-        result = await catalog_namespaces_list(context, "community:local:test")
+        result = await catalog_namespaces_list(context, "community:local:2")
 
         assert result["success"] is False
         assert "enterprise" in result["error"].lower()
@@ -699,7 +699,7 @@ async def test_catalog_namespaces_session_not_found():
         }
     )
 
-    result = await catalog_namespaces_list(context, "invalid_session")
+    result = await catalog_namespaces_list(context, "enterprise:prod:invalid_session")
 
     assert result["success"] is False
     assert "Session not found" in result["error"]
@@ -739,7 +739,7 @@ async def test_catalog_namespaces_invalid_format():
             mock_format.side_effect = ValueError("Unsupported format: invalid")
 
             result = await catalog_namespaces_list(
-                context, "enterprise:prod:analytics", format="invalid"
+                context, "enterprise:prod:1", format="invalid"
             )
 
             assert result["success"] is False
@@ -774,7 +774,7 @@ async def test_catalog_namespaces_size_limit_exceeded():
     ) as mock_get_namespaces:
         mock_get_namespaces.return_value = (namespaces_table_mock, False)
 
-        result = await catalog_namespaces_list(context, "enterprise:prod:analytics")
+        result = await catalog_namespaces_list(context, "enterprise:prod:1")
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
@@ -838,7 +838,7 @@ async def test_catalog_tables_schema_success_with_namespace():
         mock_get_schema.side_effect = mock_get_catalog_meta
 
         result = await catalog_tables_schema(
-            context, "enterprise:prod:analytics", namespace="market_data"
+            context, "enterprise:prod:1", namespace="market_data"
         )
 
     # Verify result
@@ -908,7 +908,7 @@ async def test_catalog_tables_schema_success_with_table_names():
 
         result = await catalog_tables_schema(
             context,
-            "enterprise:prod:analytics",
+            "enterprise:prod:1",
             table_names=["quotes"],  # Only request quotes
         )
 
@@ -971,7 +971,7 @@ async def test_catalog_tables_schema_max_tables_limit():
 
         result = await catalog_tables_schema(
             context,
-            "enterprise:prod:analytics",
+            "enterprise:prod:1",
             max_tables=50,  # Limit to 50
         )
 
@@ -1002,7 +1002,7 @@ async def test_catalog_tables_schema_not_enterprise_session():
     )
 
     result = await catalog_tables_schema(
-        context, "community:local:test", namespace="market_data"
+        context, "community:local:2", namespace="market_data"
     )
 
     # Should fail with error about enterprise-only
@@ -1055,7 +1055,7 @@ async def test_catalog_tables_schema_mixed_success_failure():
         mock_get_catalog.return_value = (mock_catalog_table, True)
         mock_get_schema.side_effect = mock_get_catalog_meta
 
-        result = await catalog_tables_schema(context, "enterprise:prod:analytics")
+        result = await catalog_tables_schema(context, "enterprise:prod:1")
 
     # Overall operation should succeed
     assert result["success"] is True
@@ -1101,7 +1101,7 @@ async def test_catalog_tables_schema_table_names_not_found():
         mock_get_catalog.return_value = (mock_catalog_table, True)
 
         result = await catalog_tables_schema(
-            context, "enterprise:prod:analytics", table_names=["nonexistent"]
+            context, "enterprise:prod:1", table_names=["nonexistent"]
         )
 
     assert result["success"] is True
@@ -1153,7 +1153,7 @@ async def test_catalog_tables_schema_table_names_partial_not_found():
 
         result = await catalog_tables_schema(
             context,
-            "enterprise:prod:analytics",
+            "enterprise:prod:1",
             table_names=["good_table", "missing_table"],
         )
 
@@ -1182,7 +1182,7 @@ async def test_catalog_tables_schema_session_not_found():
         }
     )
 
-    result = await catalog_tables_schema(context, "enterprise:prod:nonexistent")
+    result = await catalog_tables_schema(context, "enterprise:prod:999")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1215,7 +1215,7 @@ async def test_catalog_tables_schema_catalog_retrieval_error():
     ) as mock_get_catalog:
         mock_get_catalog.side_effect = Exception("Catalog access denied")
 
-        result = await catalog_tables_schema(context, "enterprise:prod:analytics")
+        result = await catalog_tables_schema(context, "enterprise:prod:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1267,7 +1267,7 @@ async def test_catalog_tables_schema_with_filters():
 
         result = await catalog_tables_schema(
             context,
-            "enterprise:prod:analytics",
+            "enterprise:prod:1",
             filters=["TableName.contains(`price`)"],
         )
 
@@ -1312,7 +1312,7 @@ async def test_catalog_tables_schema_empty_catalog():
         mock_get_catalog.return_value = (mock_catalog_table, True)
 
         result = await catalog_tables_schema(
-            context, "enterprise:prod:analytics", namespace="nonexistent"
+            context, "enterprise:prod:1", namespace="nonexistent"
         )
 
     assert result["success"] is True
@@ -1403,7 +1403,7 @@ async def test_catalog_table_sample_success():
         mock_get_data.return_value = (mock_arrow_table, True)
 
         result = await catalog_table_sample(
-            context, "enterprise:prod:analytics", "public", "users", max_rows=10
+            context, "enterprise:prod:1", "public", "users", max_rows=10
         )
 
     assert result["success"] is True
@@ -1455,7 +1455,7 @@ async def test_catalog_table_sample_with_format():
 
         result = await catalog_table_sample(
             context,
-            "enterprise:prod:analytics",
+            "enterprise:prod:1",
             "analytics",
             "events",
             max_rows=5,
@@ -1486,9 +1486,7 @@ async def test_catalog_table_sample_not_enterprise_session():
         }
     )
 
-    result = await catalog_table_sample(
-        context, "enterprise:prod:analytics", "public", "users"
-    )
+    result = await catalog_table_sample(context, "enterprise:prod:1", "public", "users")
 
     assert result["success"] is False
     assert "only works with enterprise (Core+) sessions" in result["error"]
@@ -1520,7 +1518,7 @@ async def test_catalog_table_sample_exception():
         mock_get_data.side_effect = Exception("Database connection failed")
 
         result = await catalog_table_sample(
-            context, "enterprise:prod:analytics", "public", "users"
+            context, "enterprise:prod:1", "public", "users"
         )
 
     assert result["success"] is False
@@ -1559,7 +1557,7 @@ async def test_catalog_table_sample_response_too_large():
         mock_get_data.return_value = (mock_arrow_table, True)
 
         result = await catalog_table_sample(
-            context, "enterprise:prod:analytics", "public", "huge_table"
+            context, "enterprise:prod:1", "public", "huge_table"
         )
 
     assert result["success"] is False
@@ -1600,7 +1598,7 @@ async def test_catalog_table_sample_with_explicit_filters():
 
         result = await catalog_table_sample(
             context,
-            "enterprise:prod:analytics",
+            "enterprise:prod:1",
             "DbInternal",
             "ProcessEventLog",
             filters=["Date == `2024-01-15`"],
@@ -1641,7 +1639,7 @@ async def test_catalog_table_sample_empty_filters_skips_autodetect():
 
         await catalog_table_sample(
             context,
-            "enterprise:prod:analytics",
+            "enterprise:prod:1",
             "DbInternal",
             "ProcessEventLog",
             filters=[],

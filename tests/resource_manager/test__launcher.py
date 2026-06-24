@@ -1368,9 +1368,12 @@ class TestPythonLauncherEdgeCases:
 class TestDynamicManagerEdgeCases:
     """Edge case tests for DynamicCommunitySessionManager."""
 
-    def test_to_dict_with_container_id(self):
-        """Test to_dict includes container_id for docker sessions."""
-        from deephaven_mcp.resource_manager import DynamicCommunitySessionManager
+    def test_to_dict_verbose_with_container_id(self):
+        """Test to_dict(verbose=True) includes container_id for docker sessions."""
+        from deephaven_mcp.resource_manager import (
+            DynamicCommunitySessionManager,
+            SessionId,
+        )
 
         launched_session = DockerLaunchedSession(
             host="localhost",
@@ -1391,13 +1394,14 @@ class TestDynamicManagerEdgeCases:
         )
 
         manager = DynamicCommunitySessionManager(
+            session_id=SessionId.from_int(0),
             name="test-session",
             session_config=session_config,
             launched_session=launched_session,
             timeouts=CommunityClientTimeouts(),
         )
 
-        result = manager.to_dict()
+        result = manager.to_dict(verbose=True)
         assert "container_id" in result
         assert result["container_id"] == "test_container"
         assert "process_id" not in result

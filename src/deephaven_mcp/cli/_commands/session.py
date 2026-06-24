@@ -227,9 +227,13 @@ _OUTPUT_LIST = OutputSpec(
 @click.option(
     "--origin",
     "origin",
-    type=click.Choice(["static", "dynamic"]),
+    type=click.Choice(["static", "dynamic", "discovered"]),
     default=None,
-    help="Filter Community sessions by how they were created.",
+    help=(
+        "Filter sessions by how they came to be known to MCP: 'static' "
+        "(declared in config), 'dynamic' (created by an MCP tool), or "
+        "'discovered' (pre-existing on an enterprise system)."
+    ),
 )
 @click.pass_obj
 @run_async

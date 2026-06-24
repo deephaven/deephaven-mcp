@@ -65,6 +65,7 @@ from typing import Any, Literal
 
 from pydantic import field_validator, model_validator
 
+from deephaven_mcp._names import validate_resource_name
 from deephaven_mcp._pydantic import (
     RedactableSchema,
     reconcile_filename_stem,
@@ -118,6 +119,20 @@ class CommunitySessionConfig(RedactableSchema):
     """Pre-resolved outbound bearer credentials parsed from the
     required ``auth.credentials`` block. Hands directly to
     :meth:`deephaven_mcp.client.CoreSession.from_credentials`."""
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        """Reject names that can't round-trip through ``qualified_session_id``.
+
+        The community :class:`SessionId` is the session name itself, so
+        the name must conform to the resource-name character class
+        (ASCII alphanumerics plus ``_``, ``.``, ``-``; starting
+        alphanumeric; non-empty). Catches bad filename stems at
+        config-load time before they reach the registry.
+        """
+        validate_resource_name(value, field="name")
+        return value
 
     @field_validator("programming_language", mode="before")
     @classmethod

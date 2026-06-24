@@ -364,8 +364,8 @@ For enterprise sessions, `source` equals the server's configured `system_name`. 
 
 **Examples**:
 
-- `"community:community:my_session"` - A community session named "my_session" (the middle segment is the umbrella system name; the static-vs-dynamic distinction lives on the manager's `origin` field, not in the id)
-- `"enterprise:prod:analytics_session"` - An enterprise session named "analytics_session" on the `"prod"` enterprise system
+- `"community:community:my_session"` - A community session named `my_session`. The community `SessionId` is the session name itself (the middle segment is the umbrella system name; the static-vs-dynamic distinction lives on the manager's `origin` field, not in the id).
+- `"enterprise:prod:42"` - An enterprise session on the `"prod"` enterprise system whose controller-assigned PQ serial is `42`. The enterprise `SessionId` is the PQ serial rendered as a decimal string; use `pq_name_to_id` to resolve a PQ name to its serial.
 
 **Terminology Clarification**:
 
@@ -417,7 +417,7 @@ automatically on failure, and persist across server restarts.
 - **PQ serial** — the immutable unique identifier for a PQ; prefer it for all operations. A fully qualified `pq_id` has the form `<system>:<serial>`.
 - **PQ name** — a human-readable label that can change, so it is less reliable than the serial. `pq_name_to_id` resolves a name to its canonical `pq_id`.
 - **Status categories** — PQ tools report a `status_category` of `ACTIVE`, `TRANSITIONAL`, `TERMINAL`, or `INVALID` alongside the raw `status`. Branch on the category, never on a specific raw status string (test `status_category == "ACTIVE"`, not `status == "RUNNING"`); the raw vocabulary is large and evolves.
-- **Session integration** — a running PQ exposes a session reachable through the standard session tools via the `session_id` form `enterprise:<system>:<pq_name>` (present only while the PQ is running or initializing).
+- **Session integration** — a running PQ exposes a session reachable through the standard session tools via the `session_id` form `enterprise:<system>:<serial>` (present only while the PQ is running or initializing). The trailing segment is the PQ serial as a decimal string, not the PQ name.
 
 **Typical workflows:**
 

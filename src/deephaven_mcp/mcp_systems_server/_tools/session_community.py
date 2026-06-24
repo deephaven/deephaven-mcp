@@ -17,6 +17,7 @@ from deephaven_mcp._exceptions import (
     InvalidSessionNameError,
     RegistryItemNotFoundError,
 )
+from deephaven_mcp._names import validate_resource_name
 from deephaven_mcp.auth.credentials import (
     AnonymousCredentials,
     CredentialsUnion,
@@ -35,7 +36,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_community_settings,
 )
 from deephaven_mcp.resource_manager import (
-    BaseItemManager,
     CommunitySessionManager,
     CommunitySessionRegistry,
     DockerLaunchedSession,
@@ -43,6 +43,8 @@ from deephaven_mcp.resource_manager import (
     InstanceTracker,
     LaunchedSession,
     PythonLaunchedSession,
+    QualifiedSessionId,
+    SessionId,
     SessionOrigin,
     SystemType,
     find_available_port,
@@ -494,7 +496,6 @@ def _resolve_auth_token(
 
 async def _register_session_manager(
     session_name: str,
-    session_id: str,
     port: int,
     programming_language: str,
     resolved_auth_type: str,
@@ -502,7 +503,7 @@ async def _register_session_manager(
     launched_session: DockerLaunchedSession | PythonLaunchedSession,
     session_registry: CommunitySessionRegistry,
     instance_tracker: InstanceTracker,
-) -> None:
+) -> str:
     """Build a session config and register a dynamic community session.
 
     The registry owns :class:`~deephaven_mcp.client.CommunityTimeouts`
@@ -512,8 +513,6 @@ async def _register_session_manager(
 
     Args:
         session_name (str): Simple session name (not full session_id).
-        session_id (str): Full session identifier in format
-            ``community:community:{session_name}``; used in log lines only.
         port (int): Port number where the session is listening.
         programming_language (str): Programming language for the session
             (``"Python"`` or ``"Groovy"``).
@@ -527,6 +526,10 @@ async def _register_session_manager(
             constructs the manager (using its own timeouts) and stores it.
         instance_tracker (InstanceTracker): Tracker for orphan-process
             cleanup. Python launches are recorded here.
+
+    Returns:
+        str: The canonical ``session_id`` (``"community:community:<session_name>"``)
+            assigned by the registry.
     """
     # Build a typed CommunitySessionConfig describing how to connect to
     # the launched session. Authentication lives entirely inside
@@ -559,12 +562,14 @@ async def _register_session_manager(
         }
     )
 
-    # Registry owns the timeouts and constructs the manager.
-    await session_registry.add_dynamic_session(
+    # Registry owns the timeouts and constructs the manager. The
+    # community SessionId is just ``session_name`` itself.
+    manager = await session_registry.add_dynamic_session(
         name=session_name,
         session_config=session_config,
         launched_session=launched_session,
     )
+    session_id = manager.qualified_session_id
 
     # Track python process if applicable
     if isinstance(launched_session, PythonLaunchedSession):
@@ -575,6 +580,7 @@ async def _register_session_manager(
     _LOGGER.info(
         f"[mcp_systems_server:session_community_create] Successfully created and registered session '{session_id}'"
     )
+    return str(session_id)
 
 
 async def _launch_process_and_wait_for_ready(
@@ -739,6 +745,42 @@ def _log_auto_generated_credentials(
     _LOGGER.warning("=" * 70)
 
 
+async def _check_display_name_conflict_fast(
+    session_registry: CommunitySessionRegistry,
+    session_name: str,
+) -> dict | None:
+    """Fast-fail pre-check for display-name conflicts before launching a worker.
+
+    The community :class:`SessionId` is the session name itself, so the
+    canonical ``qualified_session_id`` is deterministic from ``session_name`` alone.
+    A single ``registry.get`` against that ``qualified_session_id`` catches a
+    duplicate in O(1) without launching anything.
+
+    This is best-effort — ``CommunitySessionRegistry.add_dynamic_session``
+    repeats the check under its lock and is the atomic source of truth.
+
+    Args:
+        session_registry: The community session registry.
+        session_name: The requested display name.
+
+    Returns:
+        Error dict if a same-named session already exists, or ``None``
+        to proceed with creation.
+    """
+    session_id = QualifiedSessionId(
+        SystemType.COMMUNITY,
+        SystemType.COMMUNITY.value,
+        SessionId(session_name),
+    )
+    try:
+        await session_registry.get(session_id)
+    except RegistryItemNotFoundError:
+        return None
+    error_msg = f"A community session named {session_name!r} already exists"
+    _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+    return error_response(error_msg)
+
+
 async def session_community_create(
     context: Context,
     session_name: str,
@@ -785,8 +827,10 @@ async def session_community_create(
 
     Args:
         context (Context): The MCP context object.
-        session_name (str): Unique name for the session. Must not conflict with existing sessions.
-            Will be used to create session_id in format "community:community:{session_name}".
+        session_name (str): Unique display name for the session. Must not conflict with
+            existing session display names. It is also the hash input that the registry
+            uses as the session's :class:`SessionId`. The final ``session_id``
+            returned to the caller has the form ``"community:community:<session_name>"``.
         launch_method (str | None): How to launch the session ("docker" or "python", case-insensitive).
             - "docker": Uses Docker containers (requires Docker daemon running)
             - "python": Uses Python-launched deephaven-server (requires: pip install deephaven-server)
@@ -834,8 +878,8 @@ async def session_community_create(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if creation succeeded, False if error occurred
-            - 'session_id' (str): Full identifier in format "community:community:{session_name}"
-            - 'session_name' (str): Simple name provided by user
+            - 'session_id' (str): Full identifier in format ``"community:community:<session_name>"``.
+            - 'session_name' (str): Display name provided by user
             - 'connection_url' (str): Base HTTP URL without authentication
             - 'auth_type' (str): Normalized authentication type as full class name
                 (e.g., "io.deephaven.authentication.psk.PskAuthenticationHandler", "Anonymous")
@@ -886,7 +930,7 @@ async def session_community_create(
     Validation and Safety:
         - Checks session creation is enabled in configuration
         - Enforces max_concurrent_sessions limit
-        - Validates session name doesn't conflict with existing sessions
+        - Rejects duplicate display names (case-sensitive)
         - Auto-generates secure auth tokens if not provided
         - Waits for session to be ready before returning
         - Logs auth token with WARNING level for user visibility
@@ -903,7 +947,7 @@ async def session_community_create(
         - Invalid parameters: "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
         - Unsupported language: "Unsupported programming_language: '{language}'. Must be 'Python' or 'Groovy'"
         - Invalid config language: "Invalid programming_language in config: '{language}'. Must be 'Python' or 'Groovy'"
-        - Name conflict: "Session 'community:community:{name}' already exists in registry"
+        - Display-name conflict: "A community session named '{name}' already exists"
         - Startup timeout: "Session failed to start within {timeout} seconds"
 
     Note:
@@ -919,6 +963,17 @@ async def session_community_create(
     result: dict[str, object] = {"success": False}
 
     try:
+        # Validate session_name up front: it must be a shell- and id-safe
+        # identifier because it doubles as a Docker container name,
+        # Python process tag, and the hash input for the SessionId.
+        # Any failure here is a user-facing input error and must surface
+        # before we touch the registry or spawn any process.
+        try:
+            validate_resource_name(session_name, field="session_name")
+        except InvalidSessionNameError as e:
+            _LOGGER.error(f"[mcp_systems_server:session_community_create] {e}")
+            return error_response(str(e))
+
         # Get config and session registry
         settings = get_community_settings(context)
         session_registry = get_community_registry(context)
@@ -980,19 +1035,13 @@ async def session_community_create(
         resolved_startup_interval = params["startup_check_interval_seconds"]
         resolved_startup_retries = params["startup_retries"]
 
-        # Check for session name conflicts
-        session_id = BaseItemManager.make_full_name(
-            SystemType.COMMUNITY, SystemType.COMMUNITY.value, session_name
+        # Fast-fail display-name conflict check (best-effort; the atomic
+        # guarantee is in ``add_dynamic_session``).
+        conflict_error = await _check_display_name_conflict_fast(
+            session_registry, session_name
         )
-        try:
-            await session_registry.get(session_id)
-            error_msg = f"Session '{session_id}' already exists in registry"
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            result["error"] = error_msg
-            result["isError"] = True
-            return result
-        except RegistryItemNotFoundError:
-            pass  # Expected — session doesn't exist yet, proceed with creation
+        if conflict_error:
+            return conflict_error
 
         _LOGGER.info(
             f"[mcp_systems_server:session_community_create] Creating session '{session_name}' "
@@ -1025,10 +1074,10 @@ async def session_community_create(
         if launch_error or launched_session is None or port is None:
             return launch_error or error_response("Session launch failed")
 
-        # Create and register session manager
-        await _register_session_manager(
+        # Create and register session manager. The registry assigns the
+        # SessionId; we read the full canonical id back.
+        session_id = await _register_session_manager(
             session_name,
-            session_id,
             port,
             resolved_programming_language,
             resolved_auth_type,
@@ -1074,7 +1123,7 @@ async def session_community_create(
 async def _delete_session_resources(
     session_id: str,
     session_name: str,
-    session_manager: Any,
+    session_manager: CommunitySessionManager,
     session_registry: CommunitySessionRegistry,
     instance_tracker: InstanceTracker,
 ) -> None:
@@ -1092,10 +1141,12 @@ async def _delete_session_resources(
        the exception propagates to the caller.
 
     Args:
-        session_id (str): Full session identifier, e.g. ``"community:community:my-session"``.
-        session_name (str): Simple session name (the last component of ``session_id``),
-            used for Python process untracking.
-        session_manager (Any): The session manager retrieved from the registry.
+        session_id (str): Full session identifier, e.g. ``"community:community:my_worker"``.
+        session_name (str): Display name carried on the manager. For community
+            sessions this equals the trailing segment of ``session_id``. Used for
+            Python process untracking.
+        session_manager (CommunitySessionManager): The session manager retrieved from
+            the registry.
         session_registry (CommunitySessionRegistry): Registry to remove the session from.
         instance_tracker (InstanceTracker): Tracker used to unregister Python processes.
 
@@ -1121,7 +1172,9 @@ async def _delete_session_resources(
         )
         # Continue with removal even if close failed
 
-    removed_manager = await session_registry.remove(session_id)
+    removed_manager = await session_registry.remove(
+        QualifiedSessionId.from_str(session_id)
+    )
     if removed_manager is None:
         _LOGGER.warning(
             f"[mcp_systems_server:session_community_delete] Session '{session_id}' was not found in registry during removal"
@@ -1143,7 +1196,8 @@ async def session_community_delete(
     session from the registry.
 
     Session ID Format:
-        Community session IDs have the format ``"community:community:{session_name}"``.
+        Community session IDs have the format ``"community:community:<session_name>"``
+        — the community :class:`SessionId` is the session name itself.
         Use the ``session_id`` returned by ``session_community_create`` or ``sessions_list``
         verbatim — do not construct or modify it manually.
         Only dynamically created sessions (``origin="dynamic"``) can be deleted; passing
@@ -1171,15 +1225,17 @@ async def session_community_delete(
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): Full session identifier in format ``"community:community:{session_name}"``.
-            Must be a dynamically created session from session_community_create.
-            Static sessions from configuration files cannot be deleted.
+        session_id (str): Full session identifier in format
+            ``"community:community:<session_name>"``. Must be a dynamically created
+            session from ``session_community_create``. Static sessions from configuration
+            files cannot be deleted.
 
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if deletion succeeded, False if error occurred
-            - 'session_id' (str): Full identifier in format "community:community:{session_name}"
-            - 'session_name' (str): Simple name provided by user
+            - 'session_id' (str): Full identifier in format
+                ``"community:community:<session_name>"``.
+            - 'session_name' (str): Display name carried on the manager.
             - 'error' (str, optional): Error message if deletion failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response
 
@@ -1193,7 +1249,7 @@ async def session_community_delete(
         Example Error Response:
         {
             "success": False,
-            "error": "Session 'community:community:nonexistent' not found",
+            "error": "Session 'community:community:my-session' not found",
             "isError": True
         }
 
@@ -1206,10 +1262,10 @@ async def session_community_delete(
         - Provides detailed error messages for troubleshooting
 
     Common Error Scenarios:
-        - Session not found: "Session 'community:community:{name}' not found"
+        - Session not found: "Session '{session_id}' not found"
         - Not a community session: "Session '{session_id}' is not a community session"
         - Not a dynamic session: "Session '{session_id}' is not a dynamically created session (origin: '{origin}'). Only dynamically created sessions can be deleted."
-        - Already deleted: "Session 'community:community:{name}' not found"
+        - Already deleted: "Session '{session_id}' not found"
         - Cleanup failure: "Failed to close session '{session_id}': {error}"
         - Registry removal failure: "Failed to remove session '{session_id}' from registry: {error}"
 
@@ -1224,19 +1280,18 @@ async def session_community_delete(
     )
 
     result: dict[str, object] = {"success": False}
-    session_name = (
-        session_id  # fallback for outer except; overwritten after parse_full_name
-    )
+    # Display name is unknown until we look up the manager; the session_id
+    # itself is the most informative fallback for the outer exception handler.
+    session_name: str = session_id
 
     try:
         # Get session registry
         session_registry = get_community_registry(context)
 
-        # Parse and validate the session_id
+        # Parse and validate the session_id. Wrap once and reuse the typed
+        # value for the registry lookup below.
         try:
-            system_type_str, _system, session_name = BaseItemManager.parse_full_name(
-                session_id
-            )
+            qsid = QualifiedSessionId.from_str(session_id)
         except InvalidSessionNameError as e:
             error_msg = f"Invalid session_id format: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
@@ -1244,8 +1299,8 @@ async def session_community_delete(
             result["isError"] = True
             return result
 
-        if system_type_str != SystemType.COMMUNITY.value:
-            error_msg = f"Session '{session_id}' is not a community session (type: '{system_type_str}')"
+        if qsid.system_type is not SystemType.COMMUNITY:
+            error_msg = f"Session '{session_id}' is not a community session (type: '{qsid.system_type.value}')"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -1257,7 +1312,7 @@ async def session_community_delete(
 
         # Check if session exists in registry
         try:
-            session_manager = await session_registry.get(session_id)
+            session_manager = await session_registry.get(qsid)
         except RegistryItemNotFoundError as e:
             error_msg = f"Session '{session_id}' not found: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
@@ -1286,6 +1341,10 @@ async def session_community_delete(
             result["error"] = error_msg
             result["isError"] = True
             return result
+
+        # Capture the manager's display name for human-facing logs and the
+        # success payload. Reading after the type guard above keeps mypy happy.
+        session_name = session_manager.name
 
         _LOGGER.debug(
             f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{session_id}'"
@@ -1345,13 +1404,7 @@ def _static_credentials_view(
       returns an empty token to avoid leaking secrets; community workers
       do not use these.
     """
-    from deephaven_mcp.auth.credentials import (
-        AnonymousCredentials,
-        CustomTokenCredentials,
-        PSKCredentials,
-    )
-
-    session_cfg = mgr._session_config
+    session_cfg = mgr.session_config
     host = session_cfg.host or ""
     port = session_cfg.port
     scheme = "https" if session_cfg.tls is not None else "http"
@@ -1432,8 +1485,8 @@ async def session_community_credentials(
     Args:
         context (Context): MCP context provided by the MCP framework
         session_id (str): Session ID in the canonical format
-            ``"community:community:{name}"``. Both static (configured)
-            and dynamic (runtime-created) sessions share this prefix; use
+            ``"community:community:<session_name>"``. Both static (configured) and
+            dynamic (runtime-created) sessions share this prefix; use
             ``sessions_list`` and check the ``origin`` field to distinguish
             them when needed.
             Example: ``"community:community:my-session"``
@@ -1509,7 +1562,8 @@ async def session_community_credentials(
         # Validate session_id format - must be a community session
         if not session_id.startswith("community:"):
             return error_response(
-                f"Invalid session_id '{session_id}'. This tool only works for community sessions (format: 'community:community:name')"
+                f"Invalid session_id '{session_id}'. This tool only works for "
+                f"community sessions (format: 'community:community:<session_name>')."
             )
 
         # Check if credential retrieval is disabled globally (mode='none')
@@ -1537,9 +1591,9 @@ async def session_community_credentials(
         session_registry = get_community_registry(context)
 
         try:
-            mgr = await session_registry.get(session_id)
-        except Exception as e:
-            return error_response(f"Session '{session_id}' not found: {str(e)}")
+            mgr = await session_registry.get(QualifiedSessionId.from_str(session_id))
+        except RegistryItemNotFoundError as e:
+            return error_response(f"Session '{session_id}' not found: {e}")
 
         # Verify it's a community session manager
         if not isinstance(mgr, CommunitySessionManager):

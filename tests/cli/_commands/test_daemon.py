@@ -23,7 +23,6 @@ from deephaven_mcp.daemon_registry import DaemonRegistryEntry, RegistryCorruptEr
 
 from .._helpers import (
     fake_load_runtime,
-    locked_session,
     make_entry,
     make_runtime,
 )
@@ -36,11 +35,11 @@ def _invoke(args: list[str], runtime: Runtime):
 
 
 def _expected_paths(rt: Runtime, tmp_path: Path) -> dict[str, str]:
-    """Point the mock daemon_dir at known paths; return the status path fields.
+    """Point the mock daemon_dir at known paths; return the ``paths`` block.
 
-    ``daemon status`` always emits ``runtime_dir``, ``registry_path``, and
-    ``log_path``. ``runtime_dir`` is real on the Runtime built by
-    ``make_runtime``; the registry/log paths come from the (mocked)
+    ``daemon status`` always emits ``config``, ``runtime``, ``registry``, and
+    ``log`` under ``paths``. ``config``/``runtime`` are real on the Runtime
+    built by ``make_runtime``; the registry/log paths come from the (mocked)
     DaemonDirectory, so set them to deterministic values here.
     """
     registry = tmp_path / "rt" / "daemon" / "daemon.json"
@@ -48,9 +47,10 @@ def _expected_paths(rt: Runtime, tmp_path: Path) -> dict[str, str]:
     rt.daemon_dir.registry_path = registry  # type: ignore[union-attr]
     rt.daemon_dir.log_path = log  # type: ignore[union-attr]
     return {
-        "runtime_dir": str(rt.runtime_dir),
-        "registry_path": str(registry),
-        "log_path": str(log),
+        "config": str(rt.config_dir),
+        "runtime": str(rt.runtime_dir),
+        "registry": str(registry),
+        "log": str(log),
     }
 
 
@@ -61,12 +61,17 @@ def _expected_paths(rt: Runtime, tmp_path: Path) -> dict[str, str]:
 
 def test_start_prints_handle(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
+    paths = _expected_paths(rt, tmp_path)
     with patch.object(
         acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
     ):
-        result = _invoke(["daemon", "start"], rt)
+        result = _invoke(["-o", "json", "daemon", "start"], rt)
     assert result.exit_code == 0
-    assert "9999" in result.output
+    payload = json.loads(result.output)
+    assert payload["state"] == "running"
+    assert payload["daemon"]["pid"] == 1
+    assert payload["daemon"]["port"] == 9999
+    assert payload["paths"] == paths
 
 
 def test_start_handles_timeout(tmp_path: Path) -> None:
@@ -125,85 +130,58 @@ def test_stop_client_error_returns_2(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_status_no_registry(tmp_path: Path) -> None:
+def test_status_stopped(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     rt.daemon_dir.read_entry.return_value = None  # type: ignore[union-attr]
     paths = _expected_paths(rt, tmp_path)
     result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"running": False, **paths}
+    assert payload == {
+        "state": "stopped",
+        "message": "No daemon is running.",
+        "paths": paths,
+    }
+    # Keys are emitted in most- to least-important order (sort_keys=False),
+    # not alphabetically — guards the command's sort_keys=False wiring, which
+    # the order-insensitive json.loads comparison above cannot catch.
+    assert (
+        result.output.index('"state"')
+        < result.output.index('"message"')
+        < result.output.index('"paths"')
+    )
 
 
-def test_status_stale_pid(tmp_path: Path) -> None:
-    rt = make_runtime(tmp_path)
-    rt.daemon_dir.read_entry.return_value = make_entry()  # type: ignore[union-attr]
-    reg = locked_session(rt)
-    reg.read.return_value = make_entry()
-    with patch.object(DaemonRegistryEntry, "is_live", return_value=False):
-        result = _invoke(["-o", "json", "daemon", "status"], rt)
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
-    assert payload["running"] is False
-    assert payload["stale_pid"] == 1
-    reg.delete.assert_called_once()
+def test_status_crashed_reports_without_cleanup(tmp_path: Path) -> None:
+    """A dead registry entry reports state 'crashed' and is left in place.
 
-
-def test_status_stale_then_vanished_inside_lock(tmp_path: Path) -> None:
-    """The entry was stale at the lock-free read but gone by the re-read.
-
-    Locks the race-recovery branch in ``daemon_status``: when the
-    re-read inside the registry lock returns ``None`` (a peer
-    cleaned up the stale entry between the two reads), the status
-    command must report ``running=false`` rather than crashing or
-    deleting a non-existent file.
+    ``status`` is read-only: it must not delete or quarantine the stale entry
+    (cleanup is the job of ``daemon start`` / ``daemon repair``), it must not
+    acquire the registry lock, and the dead pid appears in the message.
     """
     rt = make_runtime(tmp_path)
-    # First read (lock-free): stale entry; re-read inside the lock: None.
-    rt.daemon_dir.read_entry.return_value = make_entry()  # type: ignore[union-attr]
-    reg = locked_session(rt)
-    reg.read.return_value = None
+    entry = make_entry()
+    rt.daemon_dir.read_entry.return_value = entry  # type: ignore[union-attr]
     paths = _expected_paths(rt, tmp_path)
     with patch.object(DaemonRegistryEntry, "is_live", return_value=False):
         result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == {"running": False, **paths}
-    reg.delete.assert_not_called()
+    assert payload["state"] == "crashed"
+    assert "daemon" not in payload
+    assert payload["paths"] == paths
+    assert str(entry.pid) in payload["message"]
+    # Read-only: no lock acquired, nothing deleted or quarantined.
+    rt.daemon_dir.locked.assert_not_called()  # type: ignore[union-attr]
 
 
-def test_status_stale_then_live_inside_lock(tmp_path: Path) -> None:
-    """The entry was stale at the lock-free read but live by the re-read.
+def test_status_running_returns_daemon_fields(tmp_path: Path) -> None:
+    """A live registered daemon surfaces the curated instance fields.
 
-    A peer daemon published between the lock-free read and the
-    lock acquisition. The status command must report the live
-    entry rather than deleting it.
-    """
-    rt = make_runtime(tmp_path)
-    fresh = make_entry()
-    rt.daemon_dir.read_entry.return_value = make_entry()  # type: ignore[union-attr]
-    reg = locked_session(rt)
-    reg.read.return_value = fresh
-    # First call (lock-free): not live; second call (inside lock): live.
-    with patch.object(DaemonRegistryEntry, "is_live", side_effect=[False, True]):
-        result = _invoke(["-o", "json", "daemon", "status"], rt)
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
-    assert payload["running"] is True
-    assert payload["pid"] == fresh.pid
-    reg.delete.assert_not_called()
-
-
-def test_status_live_returns_registry_fields(tmp_path: Path) -> None:
-    """A live registered daemon surfaces every contract field.
-
-    The PSK is present in the structured output but replaced with
-    the project's ``REDACTED`` sentinel by
-    :class:`~deephaven_mcp._pydantic.RedactableSchema`. Keeping the
-    field (rather than popping it) preserves schema honesty for
-    structured-output consumers while ensuring the plaintext is
-    structurally unreachable. ``started_at`` and ``config_dir``
-    round-trip to JSON via ``model_dump(mode='json')``.
+    The PSK is present but replaced with the project ``REDACTED`` sentinel;
+    ``server_name`` / ``config_dir`` / ``process_name`` are not surfaced;
+    ``create_time_ns`` is renamed to ``created_at_ns``; ``started_at``
+    round-trips to JSON via ``model_dump(mode='json')``.
     """
     from deephaven_mcp._redaction import REDACTED
 
@@ -216,39 +194,34 @@ def test_status_live_returns_registry_fields(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload == {
-        "running": True,
-        "pid": entry.pid,
-        "create_time_ns": entry.create_time_ns,
-        "process_name": entry.process_name,
-        "host": entry.host,
-        "port": entry.port,
-        "psk": REDACTED,
-        "server_name": entry.server_name,
-        # Pydantic ``mode="json"`` emits the ``Z`` short form for UTC
-        # datetimes (rather than ``+00:00``). Compare via the same
-        # serialization path used by the production code.
-        "started_at": entry.model_dump(mode="json")["started_at"],
-        "config_dir": str(entry.config_dir),
-        **paths,
+        "state": "running",
+        "message": (f"Daemon running: pid {entry.pid} at {entry.host}:{entry.port}."),
+        "daemon": {
+            "pid": entry.pid,
+            "host": entry.host,
+            "port": entry.port,
+            # Pydantic ``mode="json"`` emits the ``Z`` short form for UTC
+            # datetimes; compare via the same serialization path.
+            "started_at": entry.model_dump(mode="json")["started_at"],
+            "created_at_ns": entry.create_time_ns,
+            "psk": REDACTED,
+        },
+        "paths": paths,
     }
-    # Defense-in-depth: the PSK plaintext must never appear anywhere
-    # in the rendered output. The redacted form (``REDACTED``) is
-    # expected and asserted above.
+    # Defense-in-depth: the PSK plaintext must never appear in the output.
     assert entry.psk.get_secret_value() not in result.output
 
 
-def test_status_surfaces_daemon_paths_when_down(tmp_path: Path) -> None:
-    """runtime_dir/registry_path/log_path are reported even with no daemon."""
+def test_status_paths_present_when_down(tmp_path: Path) -> None:
+    """paths (config/runtime/registry/log) is fully populated with no daemon."""
     rt = make_runtime(tmp_path)
     rt.daemon_dir.read_entry.return_value = None  # type: ignore[union-attr]
     paths = _expected_paths(rt, tmp_path)
     result = _invoke(["-o", "json", "daemon", "status"], rt)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["running"] is False
-    assert payload["runtime_dir"] == paths["runtime_dir"]
-    assert payload["registry_path"] == paths["registry_path"]
-    assert payload["log_path"] == paths["log_path"]
+    assert payload["state"] == "stopped"
+    assert payload["paths"] == paths
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +232,7 @@ def test_status_surfaces_daemon_paths_when_down(tmp_path: Path) -> None:
 def test_restart_stops_then_starts(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     handle = make_entry()
+    paths = _expected_paths(rt, tmp_path)
     with (
         patch.object(daemon_mod, "stop_daemon", AsyncMock(return_value=True)) as stop,
         patch.object(
@@ -270,8 +244,9 @@ def test_restart_stops_then_starts(tmp_path: Path) -> None:
     stop.assert_awaited_once()
     start.assert_awaited_once()
     payload = json.loads(result.output)
-    assert payload["restarted"] is True
-    assert payload["pid"] == handle.pid
+    assert payload["state"] == "running"
+    assert payload["daemon"]["pid"] == handle.pid
+    assert payload["paths"] == paths
 
 
 def test_restart_propagates_stop_failure(tmp_path: Path) -> None:

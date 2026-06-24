@@ -259,9 +259,11 @@ async def test_full_daemon_lifecycle(
         )
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
-        assert payload["pid"] > 0
-        assert payload["host"] == "127.0.0.1"
-        assert payload["port"] > 0
+        assert payload["state"] == "running"
+        assert payload["daemon"]["pid"] > 0
+        assert payload["daemon"]["host"] == "127.0.0.1"
+        assert payload["daemon"]["port"] > 0
+        assert payload["paths"]["config"]
 
         # 2) status: confirm the daemon is registered and reachable.
         result = _run_cli(
@@ -269,9 +271,9 @@ async def test_full_daemon_lifecycle(
         )
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
-        assert payload["running"] is True
-        assert payload["pid"] > 0
-        assert payload["port"] > 0
+        assert payload["state"] == "running"
+        assert payload["daemon"]["pid"] > 0
+        assert payload["daemon"]["port"] > 0
 
         # 3) tool list: enumerate registered application tools.
         result = _run_cli(["tool", "list"], config_dir=cfg_dir, runtime_dir=runtime_dir)
@@ -311,7 +313,7 @@ async def test_full_daemon_lifecycle(
         )
         assert result.returncode == 0, result.stderr
         payload2 = json.loads(result.stdout)
-        assert payload2["pid"] == payload["pid"]
+        assert payload2["daemon"]["pid"] == payload["daemon"]["pid"]
 
         # 7) restart: stop + start in one shot; reports the new handle.
         result = _run_cli(
@@ -319,8 +321,8 @@ async def test_full_daemon_lifecycle(
         )
         assert result.returncode == 0, result.stderr
         restart_payload = json.loads(result.stdout)
-        assert restart_payload["restarted"] is True
-        assert restart_payload["pid"] > 0
+        assert restart_payload["state"] == "running"
+        assert restart_payload["daemon"]["pid"] > 0
 
         # 8) logs: raw daemon.log text (not JSON, even under -o json).
         result = _run_cli(
@@ -351,7 +353,7 @@ async def test_full_daemon_lifecycle(
     reason="dh-mcp entry point not on PATH",
 )
 def test_status_when_no_daemon(tmp_path: Path) -> None:
-    """``daemon status`` against an empty runtime dir reports ``running=false``."""
+    """``daemon status`` against an empty runtime dir reports ``state=stopped``."""
     cfg_dir = tmp_path / "cfg"
     runtime_dir = tmp_path / "rt"
     runtime_dir.mkdir()
@@ -378,7 +380,7 @@ def test_status_when_no_daemon(tmp_path: Path) -> None:
     result = _run_cli(["daemon", "status"], config_dir=cfg_dir, runtime_dir=runtime_dir)
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["running"] is False
+    assert payload["state"] == "stopped"
 
 
 def _seed_anonymous_config(cfg_dir: Path) -> None:

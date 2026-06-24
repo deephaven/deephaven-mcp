@@ -270,10 +270,10 @@ verb honors the top-level `-o/--output` flag.
 
 | Verb       | Purpose                                                                                       |
 |------------|-----------------------------------------------------------------------------------------------|
-| `start`    | Idempotently spawn the daemon (or print the existing handle). Reports pid/host/port.          |
+| `start`    | Idempotently spawn the daemon (or report the existing one). Returns the shared `{state, message, daemon, paths}` envelope with `state: "running"`. |
 | `stop`     | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                        |
-| `status`   | Reports whether a daemon is running and surfaces the registered host, port, pid, started_at, server_name, and config_dir, plus the always-present `runtime_dir`, `registry_path`, and `log_path`. |
-| `restart`  | `stop` then `start` in one shot; reports the new handle.                                      |
+| `status`   | Reports the daemon's `state` (`running`/`stopped`/`crashed`) and a human `message`. Includes a `daemon` object (pid, host, port, started_at, created_at_ns, redacted psk) **only when running**, and always includes `paths` (config, runtime, registry, log). Read-only: a `crashed` entry is reported, not cleaned up — use `start` or `repair`. Exits 0 in all three states. |
+| `restart`  | `stop` then `start` in one shot; returns the same `{state, message, daemon, paths}` envelope as `start`. |
 | `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
 | `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
 
@@ -308,7 +308,7 @@ the right backend by the id's prefix; `create` chooses the backend from
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list`                        | Lists sessions (both types) as a JSON array. Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic`. Wraps `sessions_list`. |
+| `list`                        | Lists sessions (both types) as a JSON array. Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. Wraps `sessions_list`. |
 | `show <id>`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
 | `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
 | `delete <id>`                 | Deletes a session, routing by the id prefix. Wraps `session_community_delete` / `session_enterprise_delete`. |
@@ -421,8 +421,8 @@ dh-mcp script pip-list community:community:dev
 | `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 
 ```bash
-dh-mcp catalog tables enterprise:prod:rpt
-dh-mcp catalog sample enterprise:prod:rpt Market Trades --max-rows 20
+dh-mcp catalog tables enterprise:prod:42
+dh-mcp catalog sample enterprise:prod:42 Market Trades --max-rows 20
 ```
 
 ### `dh-mcp pq`

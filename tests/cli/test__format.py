@@ -82,6 +82,30 @@ def test_json_format_dict() -> None:
     assert out.index('"a"') < out.index('"b"')
 
 
+def test_sort_keys_false_preserves_insertion_order() -> None:
+    """``sort_keys=False`` emits keys in insertion order in both json and yaml.
+
+    Backs the daemon-reporting commands, whose ``{state, message, daemon,
+    paths}`` envelope is ordered most- to least-important rather than
+    alphabetically.
+    """
+    payload = {"state": "running", "message": "ok", "daemon": {}, "paths": {}}
+    out_json = format_output(payload, output="json", sort_keys=False)
+    assert (
+        out_json.index('"state"')
+        < out_json.index('"message"')
+        < out_json.index('"daemon"')
+        < out_json.index('"paths"')
+    )
+    out_yaml = format_output(payload, output="yaml", sort_keys=False)
+    assert (
+        out_yaml.index("state")
+        < out_yaml.index("message")
+        < out_yaml.index("daemon")
+        < out_yaml.index("paths")
+    )
+
+
 def test_json_format_pydantic_model() -> None:
     tool = _tool("foo", "bar")
     out = format_output(tool, output="json")

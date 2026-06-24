@@ -90,6 +90,32 @@ def test_programming_language_invalid_value_rejected():
         )
 
 
+def test_name_with_space_rejected():
+    """The community session name doubles as the SessionId; spaces are disallowed."""
+    with pytest.raises(ValidationError, match="name"):
+        CommunitySessionConfig.model_validate(_session_payload(name="has space"))
+
+
+def test_name_with_colon_rejected():
+    """A colon would break ``qualified_session_id`` parsing — must be rejected."""
+    with pytest.raises(ValidationError, match="name"):
+        CommunitySessionConfig.model_validate(_session_payload(name="a:b"))
+
+
+def test_name_with_leading_underscore_rejected():
+    """Resource names must start with an alphanumeric character."""
+    with pytest.raises(ValidationError, match="name"):
+        CommunitySessionConfig.model_validate(_session_payload(name="_leading"))
+
+
+def test_name_with_allowed_punctuation_accepted():
+    """Underscores, dots, and dashes after the first char are fine."""
+    cfg = CommunitySessionConfig.model_validate(
+        _session_payload(name="worker_1.v2-prod")
+    )
+    assert cfg.name == "worker_1.v2-prod"
+
+
 def test_legacy_session_type_rejected():
     """The old ``session_type`` field name is now an unknown field."""
     with pytest.raises(ValidationError, match="Extra inputs"):

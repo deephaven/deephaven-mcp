@@ -3,7 +3,7 @@ name: cli-command-add
 description: Add a new command to the dh-mcp CLI — wraps the click + Pattern B + structured-error + introspect conventions; prevents the most common bugs (calling asyncio.run inline, printing errors to stderr, forgetting to update docs/CLI.md)
 ---
 
-Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` + `CliError` discipline), the `_documentation-roles` skill (`docs/CLI.md` is the single source of truth for the CLI surface), and the `_cli-help-standards` skill (the help-content contract every command's `--help` and the introspect manifest must satisfy). **If the command wraps an MCP tool** (any verb under `session`/`system`/`table`/`script`/`catalog`/`pq`), also apply the `_cli-tool-wrapping` skill — it owns the shared `_wrapping` helpers, the four wrapper categories, the type-scoping rule, and the `wraps_tool` drift contract (step 2's wrapper note has the binding details).
+Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` + `CliError` discipline), the `_documentation-roles` skill (`docs/CLI.md` is the single source of truth for the CLI surface), the `_cli-help-standards` skill (the help-content contract every command's `--help` and the introspect manifest must satisfy), and the `_output-serialization-conventions` skill for the command's output payload (every `OutputField`'s value vocabulary, casing, and known carve-outs). **If the command wraps an MCP tool** (any verb under `session`/`system`/`table`/`script`/`catalog`/`pq`), also apply the `_cli-tool-wrapping` skill — it owns the shared `_wrapping` helpers, the four wrapper categories, the type-scoping rule, and the `wraps_tool` drift contract (step 2's wrapper note has the binding details).
 
 ## Steps
 

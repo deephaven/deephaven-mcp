@@ -40,6 +40,7 @@ If no changeset is specified, default to uncommitted changes.
    - **DRY across files**: Identify any block of substantive logic that appears in two or more changed files; either extract to a shared helper in this changeset or flag for follow-up.
    - **Test coverage of new code paths**: Every new branch, error path, and public function in the changeset has at least one test that exercises it. List by file any new code paths with zero test coverage.
    - **Public-surface contract**: Every new or modified `__all__`, `__init__.py` export, MCP tool registration, CLI command, error code, or config field has its corresponding test pinning the surface (per `tests-improve` step 1 for `__init__.py`; per `mcp-tool-add` step 4 for tool registration; per `cli-command-add` for CLI; per `config-field-add` for config).
+   - **Output-payload consistency across tools/CLI**: When the changeset touches more than one producer of a shared field (e.g., a field appearing in both an MCP tool return and the matching CLI wrapper), the emitted string values must agree exactly. Apply `_output-serialization-conventions`.
    - *...or anything else at the changeset level that looks off — backward compatibility, dependency/lockfile drift, performance regressions, security exposure, documentation that no longer matches the code. This list is illustrative, not exhaustive; trust your judgement.*
 
 Do not remove TODOs without a very good reason.

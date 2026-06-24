@@ -211,7 +211,9 @@ class CliError(click.ClickException):
         """
         super().__init__(message)
         self.code = code
-        self.exit_code = code.exit_code
+        # click declares ``exit_code`` as a class variable; shadowing it
+        # per-instance is intentional and what click reads at exit time.
+        self.exit_code = code.exit_code  # type: ignore[misc]
 
     def format_message(self) -> str:
         """Return the plain message; ``human`` mode prints this verbatim."""

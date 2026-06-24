@@ -13,7 +13,7 @@ Routing rules
 -------------
 
 A fully qualified session identifier has the form ``"<type>:<system>:<name>"``
-(see :meth:`BaseItemManager.parse_full_name`):
+(see :class:`~deephaven_mcp.resource_manager.QualifiedSessionId`):
 
 - ``community:community:<name>`` -> community child registry.
 - ``enterprise:<system_name>:<name>`` -> enterprise child registry whose
@@ -45,7 +45,7 @@ from deephaven_mcp.client._timeouts import (
 )
 from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
 
-from ._manager import BaseItemManager
+from ._manager import SessionManager
 from ._registry import (
     InitializationPhase,
     MutableSessionRegistry,
@@ -53,6 +53,7 @@ from ._registry import (
 )
 from ._registry_community import CommunitySessionRegistry
 from ._registry_enterprise import EnterpriseSessionRegistry
+from ._session_id import QualifiedSessionId
 
 __all__ = ["MultiSystemRegistry", "least_advanced_phase"]
 
@@ -311,7 +312,7 @@ class MultiSystemRegistry:
     # Cross-system reads
     # ------------------------------------------------------------------
 
-    async def get(self, name: str) -> BaseItemManager:
+    async def get(self, name: QualifiedSessionId) -> SessionManager:
         """Route a session lookup to the child that owns ``name``.
 
         Args:
@@ -319,7 +320,7 @@ class MultiSystemRegistry:
                 ``"<type>:<source>:<sub_name>"`` form.
 
         Returns:
-            BaseItemManager: The session manager registered under
+            SessionManager: The session manager registered under
                 ``name`` in the routed child.
 
         Raises:
@@ -333,11 +334,11 @@ class MultiSystemRegistry:
         self._check_initialized()
         return await self._route(name).get(name)
 
-    async def get_all(self) -> RegistrySnapshot[BaseItemManager]:
+    async def get_all(self) -> RegistrySnapshot[SessionManager]:
         """Return a merged snapshot across every child registry.
 
         Returns:
-            RegistrySnapshot[BaseItemManager]: Items from every child
+            RegistrySnapshot[SessionManager]: Items from every child
                 merged into one mapping. The merged
                 ``initialization_phase`` is the *least advanced* phase
                 across children (e.g. one child still in ``LOADING``
@@ -350,7 +351,7 @@ class MultiSystemRegistry:
             InternalError: If this registry has not been initialized.
         """
         self._check_initialized()
-        merged_items: dict[str, BaseItemManager] = {}
+        merged_items: dict[QualifiedSessionId, SessionManager] = {}
         merged_errors: dict[str, str] = {}
         phases: list[InitializationPhase] = []
 
@@ -392,49 +393,58 @@ class MultiSystemRegistry:
         children.extend(self._enterprise.values())
         return children
 
-    def _route(self, full_name: str) -> MutableSessionRegistry:
-        """Parse ``full_name`` and return the child registry that owns it.
+    def _route(
+        self, qualified_session_id: QualifiedSessionId
+    ) -> MutableSessionRegistry:
+        """Return the child registry that owns ``qualified_session_id``.
 
         Args:
-            full_name (str): A fully qualified session identifier.
+            qualified_session_id (QualifiedSessionId): An already-parsed,
+                fully qualified session identifier.
 
         Returns:
             MutableSessionRegistry: The community or enterprise child
-                that ``full_name`` routes to.
+                that ``qualified_session_id`` routes to.
 
         Raises:
-            InvalidSessionNameError: If ``full_name`` is malformed, its
-                type is unknown, no community child is configured (for
-                community ids), or no enterprise child has the named
+            InvalidSessionNameError: If no community child is configured
+                (for community ids), or no enterprise child has the named
                 system (for enterprise ids).
+            InternalError: If ``qualified_session_id.system_type`` is a
+                :class:`SystemType` member this dispatch does not handle.
         """
-        system_type_str, system, _ = BaseItemManager.parse_full_name(full_name)
+        system = qualified_session_id.system_name
 
-        if system_type_str == SystemType.COMMUNITY.value:
-            if self._community is None:
-                raise InvalidSessionNameError(
-                    f"Session id {full_name!r} requests the community system, "
-                    "but no community sessions are configured."
+        match qualified_session_id.system_type:
+            case SystemType.COMMUNITY:
+                if self._community is None:
+                    raise InvalidSessionNameError(
+                        f"Session id {qualified_session_id!r} requests the community system, "
+                        "but no community sessions are configured."
+                    )
+                return self._community
+            case SystemType.ENTERPRISE:
+                registry = self._enterprise.get(system)
+                if registry is None:
+                    known = sorted(self._enterprise.keys())
+                    raise InvalidSessionNameError(
+                        f"Session id {qualified_session_id!r} names enterprise system "
+                        f"{system!r}, which is not configured. Known enterprise "
+                        f"systems: {known}."
+                    )
+                return registry
+            case _ as unexpected:
+                # Statically unreachable: ``SystemType(...)`` above
+                # narrowed to a known member. mypy flags any future
+                # :class:`SystemType` member added without updating
+                # this dispatch; the runtime :class:`InternalError`
+                # is the safety net for that in-project drift.
+                raise InternalError(
+                    f"MultiSystemRegistry._route reached an unhandled "
+                    f"SystemType {unexpected!r} for qualified_session_id "
+                    f"{qualified_session_id!r}; the match dispatch is out of sync "
+                    f"with :class:`SystemType`."
                 )
-            return self._community
-
-        if system_type_str == SystemType.ENTERPRISE.value:
-            registry = self._enterprise.get(system)
-            if registry is None:
-                known = sorted(self._enterprise.keys())
-                raise InvalidSessionNameError(
-                    f"Session id {full_name!r} names enterprise system "
-                    f"{system!r}, which is not configured. Known enterprise "
-                    f"systems: {known}."
-                )
-            return registry
-
-        raise InvalidSessionNameError(
-            f"Session id {full_name!r} has unsupported type "
-            f"{system_type_str!r}; expected "
-            f"{SystemType.COMMUNITY.value!r} or "
-            f"{SystemType.ENTERPRISE.value!r}."
-        )
 
 
 # ---------------------------------------------------------------------------

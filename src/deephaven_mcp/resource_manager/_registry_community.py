@@ -16,6 +16,7 @@ timeouts themselves.
 import logging
 from typing import override
 
+from deephaven_mcp._taxonomy import SystemType
 from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.sessions import CommunitySessionConfig
 
@@ -25,6 +26,7 @@ from ._manager import (
     StaticCommunitySessionManager,
 )
 from ._registry import MutableSessionRegistry
+from ._session_id import QualifiedSessionId, SessionId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,10 +76,14 @@ class CommunitySessionRegistry(MutableSessionRegistry):
                 f"[{self.__class__.__name__}] Loading session configuration "
                 f"for '{session_name}'..."
             )
+            session_id = SessionId(session_name)
             mgr = StaticCommunitySessionManager(
-                session_name, session_config, timeouts=self._timeouts
+                name=session_name,
+                session_id=session_id,
+                session_config=session_config,
+                timeouts=self._timeouts,
             )
-            self._items[mgr.full_name] = mgr
+            self._items[mgr.qualified_session_id] = mgr
 
     async def add_dynamic_session(
         self,
@@ -104,13 +110,30 @@ class CommunitySessionRegistry(MutableSessionRegistry):
         Returns:
             DynamicCommunitySessionManager: The newly-constructed
                 manager after it has been registered. Callers typically
-                read ``.full_name`` for downstream identification.
+                read ``.qualified_session_id`` for downstream identification.
+
+        Raises:
+            ValueError: If a session with the same display ``name``
+                already exists in the registry. The check and the
+                registration both happen under a single lock so two
+                concurrent calls with the same name cannot both succeed.
         """
-        manager = DynamicCommunitySessionManager(
-            name=name,
-            session_config=session_config,
-            launched_session=launched_session,
-            timeouts=self._timeouts,
-        )
-        await self.add_session(manager)
-        return manager
+        async with self._lock:
+            # The community SessionId is just the name itself, so the
+            # full identifier ``session_id`` is deterministic from
+            # ``name``. A direct ``in self._items`` check is the
+            # duplicate guard.
+            session_id = QualifiedSessionId(
+                SystemType.COMMUNITY, SystemType.COMMUNITY.value, SessionId(name)
+            )
+            if session_id in self._items:
+                raise ValueError(f"A community session named {name!r} already exists")
+            manager = DynamicCommunitySessionManager(
+                session_id=SessionId(name),
+                name=name,
+                session_config=session_config,
+                launched_session=launched_session,
+                timeouts=self._timeouts,
+            )
+            self._add_session_locked(manager)
+            return manager
