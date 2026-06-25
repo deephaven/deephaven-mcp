@@ -31,6 +31,11 @@ Wire format (JSON5; ``//`` comments are accepted)::
         },
         "daemon": {
             "auto_start": true,
+            "reuse": {
+                "version": "refuse",        // ignore | warn | restart | refuse
+                "venv": "refuse",
+                "fingerprint": "warn"
+            },
             "timeouts": {
                 "startup_deadline_seconds": 30,
                 "kill_after_seconds": 10
@@ -49,6 +54,8 @@ from __future__ import annotations
 __all__ = [
     "CliConfig",
     "DaemonControlConfig",
+    "DaemonReuseAction",
+    "DaemonReusePolicy",
     "DaemonTimeouts",
     "OutputConfig",
     "RequestConfig",
@@ -57,6 +64,7 @@ __all__ = [
 ]
 
 import logging
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -101,6 +109,79 @@ class DaemonTimeouts(RedactableSchema):
     never reads it."""
 
 
+class DaemonReuseAction(StrEnum):
+    """What the CLI does about a daemon-build difference on one identity field.
+
+    The single source of truth for the action vocabulary: it types the
+    :class:`DaemonReusePolicy` fields (so Pydantic validates ``cli.json``
+    values against it) and is the symbolic constant the CLI's reuse engine
+    branches on. Each member carries its severity rank via the
+    ``(value, severity)`` tuple, ordered least to most severe
+    (``ignore < warn < restart < refuse``); when several identity fields
+    differ, the reuse engine selects the most-severe action by
+    :attr:`severity`. Adding a member without a rank is a ``TypeError`` at
+    class-construction time.
+    """
+
+    IGNORE = ("ignore", 0)
+    """Reuse the running daemon silently."""
+
+    WARN = ("warn", 1)
+    """Reuse the running daemon but emit a warning to stderr."""
+
+    RESTART = ("restart", 2)
+    """Stop the running daemon and spawn a fresh one. Degrades to
+    :attr:`REFUSE` when spawning is not permitted (auto-start disabled)."""
+
+    REFUSE = ("refuse", 3)
+    """Decline to reuse the running daemon and raise an error."""
+
+    severity: int
+
+    def __new__(cls, value: str, severity: int) -> DaemonReuseAction:
+        """Bind the string value and its severity rank together.
+
+        ``StrEnum``'s default ``__new__`` accepts a single string value.
+        Extending it to a ``(value, severity)`` tuple makes severity a
+        first-class attribute; adding a member without a rank fails at
+        class-construction time when this initializer raises ``TypeError``
+        for the missing argument.
+        """
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.severity = severity
+        return member
+
+
+class DaemonReusePolicy(RedactableSchema):
+    """Per-field action when a live daemon is a different build than the CLI.
+
+    On every reuse decision the CLI compares the running daemon's recorded
+    build identity (version + venv + source fingerprint) against its own.
+    Each field below is the action for one differing identity field; when
+    several fields differ the *most severe* action wins, ordered
+    ``ignore < warn < restart < refuse``. ``restart`` degrades to ``refuse``
+    when auto-start is disabled (a restart implies a spawn).
+    """
+
+    version: DaemonReuseAction = DaemonReuseAction.REFUSE
+    """Action when the daemon's ``deephaven-mcp`` package version differs
+    from the CLI's. Defaults to ``refuse``: a different release may carry
+    protocol or behavior drift, so the CLI declines to reuse it."""
+
+    venv: DaemonReuseAction = DaemonReuseAction.REFUSE
+    """Action when the daemon's virtualenv (``sys.prefix``) differs from the
+    CLI's. Defaults to ``refuse``: the venv is the only signal for the
+    surrounding environment (which ``deephaven-server`` is installed, the
+    executable-resolution path), which the source fingerprint cannot see."""
+
+    fingerprint: DaemonReuseAction = DaemonReuseAction.WARN
+    """Action when only the source fingerprint differs (same version and
+    venv) — an in-place code edit. Defaults to ``warn`` so developers iterate
+    without restarting, and so timestamp-only churn (reinstall, restore,
+    ``touch``) never hard-blocks an end user."""
+
+
 class DaemonControlConfig(RedactableSchema):
     """CLI-side daemon lifecycle settings.
 
@@ -115,6 +196,10 @@ class DaemonControlConfig(RedactableSchema):
     subcommands exit with a non-zero status before attempting any
     tool call unless the daemon has been started explicitly via
     ``dh-mcp daemon start``."""
+
+    reuse: DaemonReusePolicy = Field(default_factory=DaemonReusePolicy)
+    """Per-field policy for reusing a daemon that is a different build
+    than the CLI."""
 
     timeouts: DaemonTimeouts = Field(default_factory=DaemonTimeouts)
     """Daemon-lifecycle timeouts."""

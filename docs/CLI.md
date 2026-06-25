@@ -193,8 +193,22 @@ slot in without a breaking schema change.
 | Field                                       | Type    | Default | Notes                                                                          |
 |---------------------------------------------|---------|---------|--------------------------------------------------------------------------------|
 | `daemon.auto_start`                         | bool    | `true`  | When `false`, `dh-mcp` exits if no daemon is running.                          |
+| `daemon.reuse.version`                      | string  | `refuse`| Action when the running daemon's package version differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`. |
+| `daemon.reuse.venv`                         | string  | `refuse`| Action when the daemon's virtualenv (`sys.prefix`) differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`. |
+| `daemon.reuse.fingerprint`                  | string  | `warn`  | Action when only the source fingerprint differs (an in-place code edit at the same version + venv). One of `ignore`, `warn`, `restart`, `refuse`. |
 | `daemon.timeouts.startup_deadline_seconds`  | integer | `30`    | How long the CLI waits for a freshly-spawned daemon to publish its registry.   |
 | `daemon.timeouts.kill_after_seconds`        | integer | `10`    | How long `daemon stop`/`restart` waits after `SIGTERM` before escalating to `SIGKILL`. |
+
+The CLI verifies a running daemon is the *same build* it ships from — not
+merely alive — before reusing it, comparing three identity fields:
+package **version**, **venv** (`sys.prefix`), and a **source fingerprint**
+(a hash of the installed package's `*.py` files). Each differing field
+maps to an action via `daemon.reuse`; when several differ the **most
+severe** action wins, ordered `ignore < warn < restart < refuse`. `restart`
+degrades to `refuse` when `auto_start` is `false` (a restart implies a spawn).
+The defaults refuse on a version or venv change (real drift) and merely warn
+on a fingerprint-only change (an in-place edit), so developers iterate without
+restarting while end users are still protected.
 
 #### `request.*` — outbound MCP requests
 
@@ -211,6 +225,11 @@ Example (JSON5; `//` comments are accepted):
   },
   "daemon": {
     "auto_start": true,
+    "reuse": {
+      "version": "refuse",        // ignore | warn | restart | refuse
+      "venv": "refuse",
+      "fingerprint": "warn"
+    },
     "timeouts": {
       "startup_deadline_seconds": 30,
       "kill_after_seconds": 10
@@ -272,7 +291,7 @@ verb honors the top-level `-o/--output` flag.
 |------------|-----------------------------------------------------------------------------------------------|
 | `start`    | Idempotently spawn the daemon (or report the existing one). Returns the shared `{state, message, daemon, paths}` envelope with `state: "running"`. |
 | `stop`     | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                        |
-| `status`   | Reports the daemon's `state` (`running`/`stopped`/`crashed`) and a human `message`. Includes a `daemon` object (pid, host, port, started_at, created_at_ns, redacted psk) **only when running**, and always includes `paths` (config, runtime, registry, log). Read-only: a `crashed` entry is reported, not cleaned up — use `start` or `repair`. Exits 0 in all three states. |
+| `status`   | Reports the daemon's `state` (`running`/`stopped`/`crashed`) and a human `message`. Includes a `daemon` object — the running daemon's registry entry, redacted: `pid`, `create_time_ns`, `process_name`, `host`, `port`, redacted `psk`, `started_at`, `config_dir`, `server_name`, and a `build_identity` sub-object with `version`, `venv`, `fingerprint` — **only when running**, and always includes `paths` (config, runtime, registry, log). Read-only: a `crashed` entry is reported, not cleaned up — use `start` or `repair`. Exits 0 in all three states. |
 | `restart`  | `stop` then `start` in one shot; returns the same `{state, message, daemon, paths}` envelope as `start`. |
 | `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
 | `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
@@ -632,6 +651,7 @@ registry programmatically via `dh-mcp introspect errors` (or the
 | `daemon_client_error`         | A client-side daemon-management failure (signal denied, etc.).     |
 | `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon repair`. |
 | `daemon_registry_live`        | `dh-mcp daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dh-mcp daemon stop` first. |
+| `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `daemon.reuse` resolved to `refuse`. Run `dh-mcp daemon restart`, or adjust `daemon.reuse` in `cli.json`. |
 | `mcp_request_failed`          | The MCP transport reported an error (connect, timeout, parse).     |
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
@@ -698,6 +718,25 @@ sudo chown -R $USER ~/.deephaven/ai/runtime
 
 You set `daemon.auto_start: false` in `cli.json`. Run `dh-mcp
 daemon start` explicitly, or flip the config back to `true`.
+
+**Build mismatch (`daemon_reuse_refused`).**
+
+A daemon is a persistent process running a specific build of the code; the
+CLI verifies the running daemon matches the build it ships from before
+reusing it. After an upgrade (`pip install -U`), or when a different
+virtualenv's daemon is still running, the CLI refuses (by default) rather
+than silently driving a stale daemon. Replace it:
+
+```bash
+dh-mcp daemon restart   # stop the stale daemon and spawn a fresh one
+```
+
+To relax the policy per field, set `daemon.reuse` in `cli.json`
+(see the `daemon.*` configuration table above). For parallel
+development across multiple checkouts, give each its own daemon by pointing
+`DH_MCP_DATA_DIR` at a per-worktree directory (e.g.
+`export DH_MCP_DATA_DIR="$PWD/.dh-mcp-data"`), so switching checkouts never
+tears down another's daemon.
 
 ## Security model
 

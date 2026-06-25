@@ -63,8 +63,9 @@ async def _acquire_daemon(runtime: Runtime, *, verb: str) -> DaemonRegistryEntry
 
     Raises:
         CliError: Wrapping :class:`DaemonStartupTimeoutError`,
-            :class:`DaemonClientError`, or :class:`RegistryCorruptError`
-            with the corresponding stable :class:`ErrorCode`.
+            :class:`DaemonClientError`, :class:`DaemonReuseRefusedError`, or
+            :class:`RegistryCorruptError` with the corresponding stable
+            :class:`ErrorCode`.
     """
     return await acquire_daemon(
         runtime,
@@ -138,29 +139,6 @@ class DaemonState(StrEnum):
     """A registry entry exists but its process is dead (did not exit cleanly)."""
 
 
-def _daemon_payload(entry: DaemonRegistryEntry) -> dict[str, object]:
-    """Return the user-facing view of the live daemon instance.
-
-    Args:
-        entry (DaemonRegistryEntry): The registry entry of the running daemon.
-
-    Returns:
-        dict[str, object]: The daemon's ``pid``, ``host``, ``port``,
-            ``started_at``, ``created_at_ns`` (the kernel create-time), and
-            ``psk`` (redacted to the REDACTED sentinel). ``server_name``,
-            ``config_dir``, and ``process_name`` are not surfaced.
-    """
-    dumped = dump_redacted(entry)
-    return {
-        "pid": dumped["pid"],
-        "host": dumped["host"],
-        "port": dumped["port"],
-        "started_at": dumped["started_at"],
-        "created_at_ns": dumped["create_time_ns"],
-        "psk": dumped["psk"],
-    }
-
-
 def _paths_payload(runtime: Runtime) -> dict[str, str]:
     """Return the stable filesystem locations the CLI always knows.
 
@@ -211,10 +189,15 @@ def _report_envelope(
     Returns:
         dict[str, object]: Keys in most- to least-important order: ``state``,
             ``message``, ``daemon`` (only when ``entry`` is given), ``paths``.
+            The ``daemon`` value is the registry entry itself, redacted — so
+            ``status`` and ``daemon.json`` never drift and an operator can
+            cross-read them.
     """
     payload: dict[str, object] = {"state": state.value, "message": message}
     if entry is not None:
-        payload["daemon"] = _daemon_payload(entry)
+        # The daemon view is the registry entry verbatim, with the psk masked
+        # to the project REDACTED sentinel by dump_redacted.
+        payload["daemon"] = dump_redacted(entry)
     payload["paths"] = _paths_payload(runtime)
     return payload
 
@@ -242,8 +225,10 @@ def _running_payload(runtime: Runtime, entry: DaemonRegistryEntry) -> dict[str, 
 _DAEMON_FIELD = OutputField(
     "daemon",
     "object",
-    "The live daemon instance, present only when state is 'running' (omitted "
-    "otherwise): pid, host, port, started_at, created_at_ns, psk (redacted).",
+    "The live daemon instance (the redacted registry entry), present only when "
+    "state is 'running' (omitted otherwise): pid, create_time_ns, process_name, "
+    "host, port, psk (redacted), started_at, config_dir, server_name, and "
+    "build_identity (an object with version, venv, fingerprint).",
 )
 _PATHS_FIELD = OutputField(
     "paths",
@@ -296,6 +281,7 @@ _OUTPUT_START = OutputSpec(
             ErrorCode.DAEMON_STARTUP_TIMEOUT,
             ErrorCode.DAEMON_CLIENT_ERROR,
             ErrorCode.DAEMON_REGISTRY_CORRUPT,
+            ErrorCode.DAEMON_REUSE_REFUSED,
         ),
     ),
 )

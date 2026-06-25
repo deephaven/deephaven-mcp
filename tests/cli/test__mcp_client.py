@@ -29,6 +29,11 @@ def _handle() -> DaemonRegistryEntry:
             "started_at": "2024-01-01T00:00:00Z",
             "config_dir": Path("/tmp/cfg"),
             "server_name": "dh-test",
+            "build_identity": {
+                "version": "1.2.3",
+                "venv": "/venv/x",
+                "fingerprint": "f" * 64,
+            },
         }
     )
 

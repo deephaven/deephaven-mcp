@@ -46,17 +46,23 @@ This module owns the contract *both* sides agree on:
   :mod:`deephaven_mcp._exceptions` and re-exported here.
 
 Liveness probing (deciding whether the registered PID is still
-*the* daemon) is the CLI's concern and lives in
-:mod:`deephaven_mcp.cli._daemon` (``is_live_registered_daemon``);
-the underlying PID-reuse-safe primitive lives in
-:mod:`deephaven_mcp._processes` (``ProcessIdentity``). This module
-owns the wire format only.
+*the* daemon) is decided by
+:meth:`DaemonRegistryEntry.is_live`; the underlying PID-reuse-safe
+primitive lives in :mod:`deephaven_mcp._processes`
+(``ProcessIdentity``). This module owns the wire format only.
 
-Schema versioning is intentionally absent: the CLI and daemon ship
-from the same wheel, and any breaking schema change is caught by
-Pydantic validation in :meth:`DaemonDirectory.read_entry`, which
-raises :class:`RegistryCorruptError`. The CLI's recovery path
-then logs and respawns a fresh daemon.
+The entry also carries the daemon's *build identity*
+(:class:`DaemonBuildIdentity` — package version, venv, and a
+source fingerprint) under a required ``build_identity``
+sub-object, so the CLI can verify it is about to reuse a daemon
+running the *same build* it ships from, not merely a live
+process. The compatibility policy (warn / refuse / restart /
+ignore, per identity field) lives in the CLI
+(:mod:`deephaven_mcp.cli._daemon._reuse`); this module owns only the
+recorded identity. A registry missing the ``build_identity`` key,
+like any other schema mismatch, is caught by Pydantic validation in
+:meth:`DaemonDirectory.read_entry`, which raises
+:class:`RegistryCorruptError`.
 
 This module intentionally does **not** contain:
 
@@ -95,14 +101,17 @@ Dependencies:
 from __future__ import annotations
 
 __all__ = [
+    "DaemonBuildIdentity",
     "DaemonDirectory",
     "DaemonRegistryEntry",
     "LockedRegistry",
     "RegistryCorruptError",
 ]
 
+import hashlib
 import json
 import logging
+import sys
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -119,7 +128,8 @@ from deephaven_mcp._platform.fsutil import (
     unlink_with_retry,
 )
 from deephaven_mcp._processes import ProcessIdentity
-from deephaven_mcp._pydantic import RedactableSchema
+from deephaven_mcp._pydantic import RedactableSchema, StrictSchema
+from deephaven_mcp._version import version as _PACKAGE_VERSION
 from deephaven_mcp.config import daemon_dir, harden_private_dir
 
 _LOGGER = logging.getLogger(__name__)
@@ -142,6 +152,82 @@ publishes its entry (or times out); lets a peer CLI detect an in-flight
 spawn and avoid starting a competing daemon."""
 
 
+_PACKAGE_ROOT = Path(__file__).resolve().parent
+"""Filesystem root of the installed ``deephaven_mcp`` package, used as the
+fingerprint walk root."""
+
+
+def _compute_source_fingerprint(package_root: Path = _PACKAGE_ROOT) -> str:
+    """Hash the package's ``*.py`` file stats into a stable fingerprint.
+
+    Walks every ``*.py`` file under ``package_root`` in sorted order and
+    folds each file's POSIX relative path, byte size, and modification
+    time (integer nanoseconds) into a SHA-256 digest. Stat-only: no file
+    contents are read, so the cost is one ``stat`` per file. The digest
+    changes whenever a source file is edited in place, added, removed, or
+    rewritten (e.g. a reinstall that updates mtimes), and is stable across
+    repeated calls against an unchanged install.
+
+    Args:
+        package_root (Path): Directory to walk. Defaults to the installed
+            ``deephaven_mcp`` package root.
+
+    Returns:
+        str: The hex SHA-256 digest of the folded file stats.
+
+    Note:
+        Measured at ~6 ms over ~118 ``*.py`` files, run once per CLI
+        invocation and once per daemon publish — negligible next to Python
+        interpreter startup, so the result is not cached.
+    """
+    hasher = hashlib.sha256()
+    for path in sorted(package_root.rglob("*.py")):
+        try:
+            stat = path.stat()
+        except OSError:
+            # A file racing removal during the walk is skipped rather than
+            # aborting the whole fingerprint.
+            continue
+        rel = path.relative_to(package_root).as_posix()
+        hasher.update(f"{rel}\0{stat.st_size}\0{stat.st_mtime_ns}\0".encode())
+    return hasher.hexdigest()
+
+
+class DaemonBuildIdentity(StrictSchema):
+    """The build a daemon process is running, as a comparable triple.
+
+    The CLI compares the identity it computes for itself
+    (:meth:`current`) against the one a running daemon recorded in
+    ``daemon.json`` (:attr:`DaemonRegistryEntry.build_identity`) to
+    decide whether reusing that daemon is safe. Each field is one
+    independent difference dimension; the CLI's per-field reuse policy
+    (:mod:`deephaven_mcp.cli._daemon._reuse`) maps each to an action.
+    """
+
+    version: str
+    """The ``deephaven-mcp`` package version (``deephaven_mcp.__version__``)."""
+
+    venv: str
+    """The interpreter's ``sys.prefix`` — the virtualenv root. Distinguishes
+    daemons launched from different venvs (the only signal for the
+    *surrounding* environment, e.g. which ``deephaven-server`` is installed,
+    that the source fingerprint cannot see)."""
+
+    fingerprint: str
+    """Hash over the installed ``deephaven_mcp`` package's ``*.py`` file
+    stats (see :func:`_compute_source_fingerprint`). Catches in-place code
+    edits at an unchanged version + venv."""
+
+    @classmethod
+    def current(cls) -> DaemonBuildIdentity:
+        """Return the identity of the currently running interpreter/install."""
+        return cls(
+            version=_PACKAGE_VERSION,
+            venv=sys.prefix,
+            fingerprint=_compute_source_fingerprint(),
+        )
+
+
 class DaemonRegistryEntry(RedactableSchema):
     """Validated wire format of the on-disk ``daemon.json``.
 
@@ -162,9 +248,12 @@ class DaemonRegistryEntry(RedactableSchema):
     process between registry write and registry read)."""
 
     create_time_ns: Annotated[int, Field(gt=0)]
-    """Kernel-reported process creation time in integer nanoseconds.
-    Paired with :attr:`pid` to form a
-    :class:`~deephaven_mcp._processes.ProcessIdentity`."""
+    """Kernel-reported process creation time in integer nanoseconds, sourced
+    from :meth:`psutil.Process.create_time`. Paired with :attr:`pid` to form a
+    :class:`~deephaven_mcp._processes.ProcessIdentity` (which uses the same
+    ``create_time_ns`` name). Distinct from :attr:`started_at`, which is the
+    wall-clock instant the daemon *published* its registry entry; this is the
+    kernel's *process-creation* instant, used for PID-reuse-safe identity."""
 
     process_name: Annotated[str, Field(min_length=1)]
     """Expected process-name token. The CLI's liveness check looks
@@ -203,6 +292,11 @@ class DaemonRegistryEntry(RedactableSchema):
     status`` so the operator can confirm which configured server
     is running. Empty values are rejected because they would
     leave ``daemon status`` output ambiguous."""
+
+    build_identity: DaemonBuildIdentity
+    """The daemon's :class:`DaemonBuildIdentity` (package version, venv,
+    source fingerprint). Required; a registry missing this key fails
+    validation and is surfaced as :class:`RegistryCorruptError`."""
 
     @property
     def identity(self) -> ProcessIdentity:

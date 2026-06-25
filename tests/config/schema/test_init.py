@@ -21,6 +21,8 @@ _EXPECTED_PUBLIC_NAMES = {
     # cli.json
     "CliConfig",
     "DaemonControlConfig",
+    "DaemonReuseAction",
+    "DaemonReusePolicy",
     "DaemonTimeouts",
     "OutputConfig",
     "RequestConfig",

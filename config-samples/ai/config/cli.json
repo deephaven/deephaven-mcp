@@ -4,6 +4,11 @@
   },
   "daemon": {
     "auto_start": true,
+    "reuse": {
+      "version": "refuse",
+      "venv": "refuse",
+      "fingerprint": "warn"
+    },
     "timeouts": {
       "startup_deadline_seconds": 30,
       "kill_after_seconds": 10

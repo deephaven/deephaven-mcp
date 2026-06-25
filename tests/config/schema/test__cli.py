@@ -12,6 +12,8 @@ from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.config.schema._cli import (
     CliConfig,
     DaemonControlConfig,
+    DaemonReuseAction,
+    DaemonReusePolicy,
     DaemonTimeouts,
     OutputConfig,
     RequestConfig,
@@ -181,6 +183,86 @@ def test_daemon_config_defaults() -> None:
     assert cfg.auto_start is True
     assert isinstance(cfg.timeouts, DaemonTimeouts)
     assert cfg.timeouts.startup_deadline_seconds == 30
+    assert isinstance(cfg.reuse, DaemonReusePolicy)
+
+
+# ---------------------------------------------------------------------------
+# DaemonReusePolicy
+# ---------------------------------------------------------------------------
+
+
+def test_reuse_policy_defaults() -> None:
+    """version/venv default to refuse; fingerprint defaults to warn."""
+    policy = DaemonReusePolicy()
+    assert policy.version == "refuse"
+    assert policy.venv == "refuse"
+    assert policy.fingerprint == "warn"
+
+
+def test_reuse_policy_defaults_via_cliconfig() -> None:
+    """The policy is reachable as ``cli.daemon.reuse`` with defaults."""
+    cfg = CliConfig.model_validate({})
+    assert cfg.daemon.reuse.version == "refuse"
+    assert cfg.daemon.reuse.fingerprint == "warn"
+
+
+def test_reuse_policy_accepts_per_field_override() -> None:
+    cfg = CliConfig.model_validate(
+        {
+            "daemon": {
+                "reuse": {
+                    "version": "restart",
+                    "venv": "warn",
+                    "fingerprint": "ignore",
+                }
+            }
+        }
+    )
+    assert cfg.daemon.reuse.version == "restart"
+    assert cfg.daemon.reuse.venv == "warn"
+    assert cfg.daemon.reuse.fingerprint == "ignore"
+
+
+def test_reuse_policy_accepts_empty_object() -> None:
+    """``daemon.reuse: {}`` yields all-defaults for that nested level."""
+    cfg = CliConfig.model_validate({"daemon": {"reuse": {}}})
+    assert cfg.daemon.reuse.version == "refuse"
+
+
+def test_reuse_policy_rejects_invalid_action() -> None:
+    with pytest.raises(ValidationError, match="version"):
+        CliConfig.model_validate({"daemon": {"reuse": {"version": "explode"}}})
+
+
+def test_reuse_policy_rejects_unknown_field() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        CliConfig.model_validate({"daemon": {"reuse": {"python": "refuse"}}})
+
+
+# ---------------------------------------------------------------------------
+# DaemonReuseAction
+# ---------------------------------------------------------------------------
+
+
+def test_reuse_action_string_values() -> None:
+    """Each member's string value is the ``cli.json`` token, not the tuple."""
+    assert DaemonReuseAction.IGNORE == "ignore"
+    assert DaemonReuseAction.WARN == "warn"
+    assert DaemonReuseAction.RESTART == "restart"
+    assert DaemonReuseAction.REFUSE == "refuse"
+
+
+def test_reuse_action_severity_is_strictly_increasing() -> None:
+    """``severity`` ranks the members least to most severe for the reuse engine."""
+    ranks = [
+        DaemonReuseAction.IGNORE.severity,
+        DaemonReuseAction.WARN.severity,
+        DaemonReuseAction.RESTART.severity,
+        DaemonReuseAction.REFUSE.severity,
+    ]
+    assert ranks == sorted(ranks)
+    assert len(set(ranks)) == len(ranks)
+    assert max(DaemonReuseAction, key=lambda a: a.severity) is DaemonReuseAction.REFUSE
 
 
 def test_request_config_defaults() -> None:

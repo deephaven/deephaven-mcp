@@ -68,6 +68,7 @@ __all__ = [
     "RegistryCorruptError",
     # CLI daemon lifecycle exceptions
     "DaemonClientError",
+    "DaemonReuseRefusedError",
     "DaemonStartupTimeoutError",
     "SpawnError",
     # CLI MCP client exceptions
@@ -615,7 +616,7 @@ class RegistryCorruptError(DaemonRegistryError):
       ``daemon start`` surface the error to the operator with a
       hint pointing at ``dh-mcp daemon repair``.
     - :func:`deephaven_mcp.cli._daemon.get_or_start_daemon` and
-      :func:`deephaven_mcp.cli._daemon.poll_for_registry` both
+      :func:`deephaven_mcp.cli._daemon._lifecycle._poll_for_registry` both
       propagate: auto-recovery is the explicit operator verb
       ``dh-mcp daemon repair``, not an implicit rename, because a
       silent rename that runs alongside a still-live daemon
@@ -642,6 +643,35 @@ class DaemonClientError(McpError):
     pass
 
 
+class DaemonReuseRefusedError(McpError):
+    """The running daemon is a different build than the CLI invoking it.
+
+    Raised by :func:`deephaven_mcp.cli._daemon.get_or_start_daemon` when a
+    live daemon's recorded :class:`~deephaven_mcp.daemon_registry.DaemonBuildIdentity`
+    differs from the CLI's own and the resolved per-field reuse policy
+    (:mod:`deephaven_mcp.cli._daemon._reuse`) is ``refuse``. Deliberately a
+    direct :class:`McpError` subclass (not a :class:`DaemonClientError`) so the
+    acquire path can map it to its own ``DAEMON_REUSE_REFUSED`` error code
+    rather than the generic client-error code.
+
+    The differing identity fields are recorded on :attr:`differing` for callers
+    and tests; the message names them with old/new values and points at
+    ``dh-mcp daemon restart``.
+    """
+
+    def __init__(self, message: str, *, differing: tuple[str, ...] = ()) -> None:
+        """Capture the message and the set of differing identity fields.
+
+        Args:
+            message (str): Operator-actionable description naming the
+                differing identity fields and the recovery command.
+            differing (tuple[str, ...]): The identity fields that
+                differed (``"version"``, ``"venv"``, ``"fingerprint"``).
+        """
+        super().__init__(message)
+        self.differing = differing
+
+
 class SpawnError(McpError):
     """Raised for any subprocess-spawn failure during daemon start.
 
@@ -656,7 +686,7 @@ class SpawnError(McpError):
 class DaemonStartupTimeoutError(SpawnError):
     """The daemon did not publish a registry entry before the deadline.
 
-    Raised by :func:`deephaven_mcp.cli._daemon.poll_for_registry`
+    Raised by :func:`deephaven_mcp.cli._daemon._lifecycle._poll_for_registry`
     after waiting ``cli.daemon.timeouts.startup_deadline_seconds``
     for the spawned process to write ``daemon.json``. The original
     spawned process, if any, is *not* terminated by this code: the

@@ -1071,6 +1071,11 @@ def test_publish_daemon_registry_writes_entry(tmp_path: Path) -> None:
         assert entry.port == plan.bind.port
         assert entry.process_name == plan.daemon.process_name
         assert entry.server_name == plan.server_name
+        # The build identity is stamped from the running process so the CLI
+        # can verify it is reusing the same build.
+        from deephaven_mcp.daemon_registry import DaemonBuildIdentity
+
+        assert entry.build_identity == DaemonBuildIdentity.current()
     finally:
         plan.bind.close_unhanded()
 
@@ -1149,6 +1154,11 @@ def _make_live_entry(**overrides: object) -> DaemonRegistryEntry:
         "started_at": datetime(2026, 5, 27, 0, 0, 0, tzinfo=UTC),
         "config_dir": Path("/tmp/cfg"),
         "server_name": "dh-test",
+        "build_identity": {
+            "version": "1.2.3",
+            "venv": "/venv/x",
+            "fingerprint": "f" * 64,
+        },
     }
     defaults.update(overrides)
     return DaemonRegistryEntry.model_validate(defaults)
