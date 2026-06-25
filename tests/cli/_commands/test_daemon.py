@@ -19,7 +19,11 @@ from deephaven_mcp.cli._daemon import (
 )
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
-from deephaven_mcp.daemon_registry import DaemonRegistryEntry, RegistryCorruptError
+from deephaven_mcp.daemon_registry import (
+    DaemonBuildIdentity,
+    DaemonRegistryEntry,
+    RegistryCorruptError,
+)
 
 from .._helpers import (
     fake_load_runtime,
@@ -176,12 +180,12 @@ def test_status_crashed_reports_without_cleanup(tmp_path: Path) -> None:
 
 
 def test_status_running_returns_daemon_fields(tmp_path: Path) -> None:
-    """A live registered daemon surfaces the curated instance fields.
+    """A live registered daemon surfaces the full registry entry, redacted.
 
-    The PSK is present but replaced with the project ``REDACTED`` sentinel;
-    ``server_name`` / ``config_dir`` / ``process_name`` are not surfaced;
-    ``create_time_ns`` is renamed to ``created_at_ns``; ``started_at``
-    round-trips to JSON via ``model_dump(mode='json')``.
+    The ``daemon`` object is the entry the daemon wrote to ``daemon.json`` with
+    no curation — every field is present (so ``status`` and the registry never
+    drift) — except :attr:`DaemonRegistryEntry.psk`, which is replaced with the
+    project ``REDACTED`` sentinel.
     """
     from deephaven_mcp._redaction import REDACTED
 
@@ -198,18 +202,44 @@ def test_status_running_returns_daemon_fields(tmp_path: Path) -> None:
         "message": (f"Daemon running: pid {entry.pid} at {entry.host}:{entry.port}."),
         "daemon": {
             "pid": entry.pid,
+            "create_time_ns": entry.create_time_ns,
+            "process_name": entry.process_name,
             "host": entry.host,
             "port": entry.port,
+            "psk": REDACTED,
             # Pydantic ``mode="json"`` emits the ``Z`` short form for UTC
             # datetimes; compare via the same serialization path.
             "started_at": entry.model_dump(mode="json")["started_at"],
-            "created_at_ns": entry.create_time_ns,
-            "psk": REDACTED,
+            "config_dir": str(entry.config_dir),
+            "server_name": entry.server_name,
+            "build_identity": entry.model_dump(mode="json")["build_identity"],
         },
         "paths": paths,
     }
     # Defense-in-depth: the PSK plaintext must never appear in the output.
     assert entry.psk.get_secret_value() not in result.output
+
+
+def test_status_running_surfaces_build_identity(tmp_path: Path) -> None:
+    """A daemon with a build identity surfaces version/venv/fingerprint."""
+    rt = make_runtime(tmp_path)
+    entry = make_entry().model_copy(
+        update={
+            "build_identity": DaemonBuildIdentity(
+                version="9.9.9", venv="/venv/here", fingerprint="abc123def456"
+            )
+        }
+    )
+    rt.daemon_dir.read_entry.return_value = entry  # type: ignore[union-attr]
+    with patch.object(DaemonRegistryEntry, "is_live", return_value=True):
+        result = _invoke(["-o", "json", "daemon", "status"], rt)
+    assert result.exit_code == 0
+    build_identity = json.loads(result.output)["daemon"]["build_identity"]
+    assert build_identity == {
+        "version": "9.9.9",
+        "venv": "/venv/here",
+        "fingerprint": "abc123def456",
+    }
 
 
 def test_status_paths_present_when_down(tmp_path: Path) -> None:

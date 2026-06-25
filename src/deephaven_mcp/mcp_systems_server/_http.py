@@ -34,7 +34,11 @@ from deephaven_mcp.auth.middleware import PSK_HEADER_NAME, PSKMiddleware
 from deephaven_mcp.config import harden_private_dir
 from deephaven_mcp.config.schema import DaemonProcessConfig, ServerConfig
 from deephaven_mcp.config.tree import ConfigTree
-from deephaven_mcp.daemon_registry import DaemonDirectory, DaemonRegistryEntry
+from deephaven_mcp.daemon_registry import (
+    DaemonBuildIdentity,
+    DaemonDirectory,
+    DaemonRegistryEntry,
+)
 
 from ._idle import ActivityMiddleware, IdleTimer, IdleWatcher
 from ._lifespan import LifespanContext, ProcessResources, process_lifespan
@@ -550,6 +554,7 @@ def _publish_daemon_registry(
         started_at=datetime.now(UTC),
         config_dir=plan.multi_config.config_dir,
         server_name=plan.server_name,
+        build_identity=DaemonBuildIdentity.current(),
     )
     with daemon.handle.locked() as reg:
         # A parseable entry whose recorded identity is still alive is a real

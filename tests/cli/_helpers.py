@@ -120,5 +120,10 @@ def make_entry() -> DaemonRegistryEntry:
             "started_at": datetime(2026, 5, 27, 0, 0, 0, tzinfo=UTC),
             "config_dir": Path("/tmp"),
             "server_name": "dh-test",
+            "build_identity": {
+                "version": "1.2.3",
+                "venv": "/venv/x",
+                "fingerprint": "f" * 64,
+            },
         }
     )

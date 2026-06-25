@@ -7,6 +7,7 @@ from deephaven_mcp._exceptions import (
     DaemonAlreadyPublishedError,
     DaemonClientError,
     DaemonRegistryError,
+    DaemonReuseRefusedError,
     DaemonStartupTimeoutError,
     DeephavenConnectionError,
     EnterpriseNotConfiguredError,
@@ -120,6 +121,7 @@ class TestExceptionParameterized:
                 "registry corrupt",
             ),
             (DaemonClientError, [McpError], "client error"),
+            (DaemonReuseRefusedError, [McpError], "reuse refused"),
             (SpawnError, [McpError], "spawn error"),
             (
                 DaemonStartupTimeoutError,
@@ -143,6 +145,25 @@ class TestExceptionParameterized:
 
         # All exceptions should inherit from Exception
         assert isinstance(exc_info.value, Exception)
+
+
+class TestDaemonReuseRefusedError:
+    """Tests for ``DaemonReuseRefusedError``'s ``differing`` attribute.
+
+    The only exception in the module carrying custom ``__init__`` state, so it
+    gets a focused test beyond the parameterized inheritance check.
+    """
+
+    def test_records_differing_fields(self):
+        """The ``differing`` keyword is stored verbatim on the instance."""
+        exc = DaemonReuseRefusedError("different build", differing=("version", "venv"))
+        assert str(exc) == "different build"
+        assert exc.differing == ("version", "venv")
+
+    def test_differing_defaults_to_empty_tuple(self):
+        """``differing`` defaults to an empty tuple when omitted."""
+        exc = DaemonReuseRefusedError("different build")
+        assert exc.differing == ()
 
 
 # Exception-specific tests can be added here if needed in the future

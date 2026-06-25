@@ -22,10 +22,12 @@ from deephaven_mcp.daemon_registry import (
     _DAEMON_LOG_FILENAME,
     _DAEMON_REGISTRY_FILENAME,
     _DAEMON_STARTING_FILENAME,
+    DaemonBuildIdentity,
     DaemonDirectory,
     DaemonRegistryEntry,
     LockedRegistry,
     RegistryCorruptError,
+    _compute_source_fingerprint,
 )
 
 _PSK_PLAINTEXT = "shhhhhhhhhhhhhhhh"
@@ -47,6 +49,11 @@ def _make_entry(**overrides: Any) -> DaemonRegistryEntry:
         "started_at": datetime(2026, 5, 27, 0, 0, 0, tzinfo=UTC),
         "config_dir": Path("/tmp/cfg"),
         "server_name": "dh-test",
+        "build_identity": {
+            "version": "1.2.3",
+            "venv": "/venv/x",
+            "fingerprint": "f" * 64,
+        },
     }
     defaults.update(overrides)
     return DaemonRegistryEntry.model_validate(defaults)
@@ -136,6 +143,84 @@ def test_entry_is_live_false_when_identity_dead() -> None:
     entry = _make_entry()
     with patch.object(ProcessIdentity, "is_alive", return_value=False):
         assert entry.is_live() is False
+
+
+# ---------------------------------------------------------------------------
+# DaemonBuildIdentity + build_identity
+# ---------------------------------------------------------------------------
+
+
+def test_build_identity_current_populates_all_fields() -> None:
+    """``current()`` returns a fully-populated identity for this process."""
+    import sys
+
+    identity = DaemonBuildIdentity.current()
+    assert identity.version
+    assert identity.venv == sys.prefix
+    assert identity.fingerprint
+    assert identity == DaemonBuildIdentity.current()
+
+
+def test_build_identity_equality_is_all_or_nothing() -> None:
+    """Equality is True only when every field is equal (Pydantic ``==``)."""
+    base = DaemonBuildIdentity(version="1", venv="/v", fingerprint="f")
+    assert base == DaemonBuildIdentity(version="1", venv="/v", fingerprint="f")
+    assert base != DaemonBuildIdentity(version="2", venv="/v", fingerprint="f")
+
+
+def test_source_fingerprint_changes_when_a_file_stat_changes(tmp_path: Path) -> None:
+    """The fingerprint folds file size + mtime, so an edit shifts the digest."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    f = pkg / "mod.py"
+    f.write_text("x = 1\n")
+    first = _compute_source_fingerprint(pkg)
+    assert first == _compute_source_fingerprint(pkg)  # stable across calls
+    # Grow the file (changes both size and mtime).
+    f.write_text("x = 1\ny = 2\n")
+    assert _compute_source_fingerprint(pkg) != first
+
+
+def test_source_fingerprint_skips_unreadable_file(tmp_path: Path) -> None:
+    """A file that raises on ``stat`` is skipped, not fatal to the walk."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "a.py").write_text("a = 1\n")
+
+    real_stat = Path.stat
+
+    def flaky_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self.name == "a.py":
+            raise OSError("vanished")
+        return real_stat(self, *args, **kwargs)
+
+    with patch.object(Path, "stat", flaky_stat):
+        # Does not raise; the unreadable file is simply omitted.
+        assert isinstance(_compute_source_fingerprint(pkg), str)
+
+
+def test_build_identity_round_trips_on_entry() -> None:
+    """The nested identity persists through a JSON round-trip."""
+    entry = _make_entry(
+        build_identity={
+            "version": "1.2.3",
+            "venv": "/venv/x",
+            "fingerprint": "abc123",
+        }
+    )
+    payload = json.dumps(entry.model_dump(mode="json", context={"reveal": True}))
+    rebuilt = DaemonRegistryEntry.model_validate(json.loads(payload))
+    assert rebuilt.build_identity == DaemonBuildIdentity(
+        version="1.2.3", venv="/venv/x", fingerprint="abc123"
+    )
+
+
+def test_build_identity_is_required() -> None:
+    """A payload missing the ``build_identity`` key fails validation."""
+    defaults = _make_entry().model_dump(mode="json", context={"reveal": True})
+    del defaults["build_identity"]
+    with pytest.raises(ValidationError):
+        DaemonRegistryEntry.model_validate(defaults)
 
 
 # ---------------------------------------------------------------------------

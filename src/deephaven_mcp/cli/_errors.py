@@ -113,6 +113,15 @@ class ErrorCode(StrEnum):
             "stop' first to avoid orphaning the running process."
         ),
     )
+    DAEMON_REUSE_REFUSED = (
+        "daemon_reuse_refused",
+        (
+            "The running daemon is a different build than this CLI (its "
+            "version, virtualenv, or source fingerprint differs) and the "
+            "daemon.reuse policy resolved to 'refuse'. Run 'dh-mcp daemon "
+            "restart' to replace it, or adjust daemon.reuse in cli.json."
+        ),
+    )
     MCP_REQUEST_FAILED = (
         "mcp_request_failed",
         "The MCP transport reported an error (connect, timeout, parse).",

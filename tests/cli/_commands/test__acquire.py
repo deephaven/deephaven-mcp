@@ -12,7 +12,11 @@ from deephaven_mcp.cli._commands._acquire import (
     acquire_daemon,
     registry_corrupt_message,
 )
-from deephaven_mcp.cli._daemon import DaemonClientError, DaemonStartupTimeoutError
+from deephaven_mcp.cli._daemon import (
+    DaemonClientError,
+    DaemonReuseRefusedError,
+    DaemonStartupTimeoutError,
+)
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.daemon_registry import RegistryCorruptError
 
@@ -92,6 +96,28 @@ async def test_acquire_daemon_client_error_uses_provided_code(tmp_path: Path) ->
                 on_registry_corrupt=_corrupt_to_error,
             )
     assert excinfo.value.code is ErrorCode.DAEMON_NOT_RUNNING
+
+
+@pytest.mark.asyncio
+async def test_acquire_daemon_maps_build_mismatch(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    with patch.object(
+        acquire_mod,
+        "get_or_start_daemon",
+        AsyncMock(
+            side_effect=DaemonReuseRefusedError(
+                "different build", differing=("version",)
+            )
+        ),
+    ):
+        with pytest.raises(CliError) as excinfo:
+            await acquire_daemon(
+                rt,
+                auto_start=True,
+                client_error_code=ErrorCode.DAEMON_NOT_RUNNING,
+                on_registry_corrupt=_corrupt_to_error,
+            )
+    assert excinfo.value.code is ErrorCode.DAEMON_REUSE_REFUSED
 
 
 @pytest.mark.asyncio

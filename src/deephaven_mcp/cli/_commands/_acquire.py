@@ -1,6 +1,6 @@
 """Daemon acquisition for ``dh-mcp`` command modules.
 
-Adapts the ``cli/_daemon.py`` lifecycle layer for command use: acquire a
+Adapts the ``cli._daemon`` lifecycle layer for command use: acquire a
 running daemon (get-or-start) and translate daemon-lifecycle exceptions into
 :class:`CliError` with stable error codes and an operator recovery hint. The
 error mapping is supplied by the caller, so each command sets its own policy.
@@ -12,13 +12,18 @@ from collections.abc import Callable
 
 from deephaven_mcp.cli._daemon import (
     DaemonClientError,
+    DaemonContext,
+    DaemonReuseRefusedError,
     DaemonStartupTimeoutError,
-    build_daemon_context,
     get_or_start_daemon,
 )
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._runtime import Runtime
-from deephaven_mcp.daemon_registry import DaemonRegistryEntry, RegistryCorruptError
+from deephaven_mcp.daemon_registry import (
+    DaemonBuildIdentity,
+    DaemonRegistryEntry,
+    RegistryCorruptError,
+)
 
 __all__ = ["acquire_daemon", "registry_corrupt_message"]
 
@@ -71,17 +76,25 @@ async def acquire_daemon(
 
     Raises:
         CliError: Wrapping :class:`DaemonStartupTimeoutError`,
-            :class:`DaemonClientError`, or :class:`RegistryCorruptError`.
+            :class:`DaemonClientError`, :class:`DaemonReuseRefusedError`, or
+            :class:`RegistryCorruptError`.
     """
-    ctx = build_daemon_context(runtime)
+    ctx = DaemonContext.from_runtime(runtime)
+    daemon_cfg = runtime.config.cli.daemon
     try:
         return await get_or_start_daemon(
             ctx,
             auto_start=auto_start,
-            startup_deadline_seconds=runtime.config.cli.daemon.timeouts.startup_deadline_seconds,
+            startup_deadline_seconds=daemon_cfg.timeouts.startup_deadline_seconds,
+            expected_identity=DaemonBuildIdentity.current(),
+            reuse_policy=daemon_cfg.reuse,
+            output_mode=runtime.config.cli.output.format,
+            kill_after_seconds=daemon_cfg.timeouts.kill_after_seconds,
         )
     except DaemonStartupTimeoutError as exc:
         raise CliError(str(exc), code=ErrorCode.DAEMON_STARTUP_TIMEOUT) from exc
+    except DaemonReuseRefusedError as exc:
+        raise CliError(str(exc), code=ErrorCode.DAEMON_REUSE_REFUSED) from exc
     except DaemonClientError as exc:
         raise CliError(str(exc), code=client_error_code) from exc
     except RegistryCorruptError as exc:

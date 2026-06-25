@@ -49,6 +49,7 @@ _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
     ErrorCode.DAEMON_NOT_RUNNING,
     ErrorCode.DAEMON_STARTUP_TIMEOUT,
     ErrorCode.DAEMON_REGISTRY_CORRUPT,
+    ErrorCode.DAEMON_REUSE_REFUSED,
     ErrorCode.MCP_REQUEST_FAILED,
 )
 """Error codes the shared acquire + tool-call flow can raise."""

@@ -29,6 +29,8 @@ __all__ = [
     "CommunityTimeouts",
     "DaemonControlConfig",
     "DaemonProcessConfig",
+    "DaemonReuseAction",
+    "DaemonReusePolicy",
     "DaemonTimeouts",
     "DockerImages",
     "DockerLaunchOptions",
@@ -51,6 +53,8 @@ __all__ = [
 from ._cli import (
     CliConfig,
     DaemonControlConfig,
+    DaemonReuseAction,
+    DaemonReusePolicy,
     DaemonTimeouts,
     OutputConfig,
     RequestConfig,
