@@ -698,18 +698,16 @@ def build_table_data_response(
         {"name": field.name, "type": str(field.type)} for field in arrow_table.schema
     ]
     actual_format, formatted_data = format_table_data(arrow_table, format_type=format)
-    response: dict[str, object] = {
-        "success": True,
-        "format": actual_format,
-        "schema": schema,
-        "row_count": len(arrow_table),
-        "is_complete": is_complete,
-        "data": formatted_data,
-    }
+    response: dict[str, object] = {"success": True}
     if namespace is not None:
         response["namespace"] = namespace
     if table_name is not None:
         response["table_name"] = table_name
+    response["row_count"] = len(arrow_table)
+    response["is_complete"] = is_complete
+    response["format"] = actual_format
+    response["schema"] = schema
+    response["data"] = formatted_data
     return response
 
 

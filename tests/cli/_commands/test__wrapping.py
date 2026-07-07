@@ -14,6 +14,7 @@ from deephaven_mcp.cli._commands._wrapping import (
     acquire,
     call_and_echo,
     call_and_echo_field,
+    call_and_echo_table,
     call_for_payload,
     call_tool,
     echo_payload,
@@ -296,6 +297,106 @@ def test_echo_payload_forwards_sort_keys(
     assert insertion_out.index('"b"') < insertion_out.index('"a"')
 
 
+def test_echo_payload_human_exclude_drops_keys_in_human_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """human_exclude drops the named dict keys in human mode."""
+    echo_payload(
+        make_runtime(tmp_path, output_format="human"),
+        {"keep": 1, "drop": 2},
+        human_exclude=("drop",),
+    )
+    out = capsys.readouterr().out
+    assert "keep: 1" in out
+    assert "drop" not in out
+
+
+def test_echo_payload_human_exclude_ignored_in_json_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """human_exclude is a no-op outside human mode; json keeps every key."""
+    echo_payload(
+        make_runtime(tmp_path, output_format="json"),
+        {"keep": 1, "drop": 2},
+        human_exclude=("drop",),
+    )
+    assert json.loads(capsys.readouterr().out) == {"keep": 1, "drop": 2}
+
+
+def test_echo_payload_human_exclude_ignored_for_non_dict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """human_exclude only filters dicts; a list value passes through unchanged."""
+    echo_payload(
+        make_runtime(tmp_path, output_format="human"),
+        ["drop", "keep"],
+        human_exclude=("drop",),
+    )
+    out = capsys.readouterr().out
+    assert "drop" in out
+    assert "keep" in out
+
+
+# ---------------------------------------------------------------------------
+# call_and_echo_table
+# ---------------------------------------------------------------------------
+
+# The tools emit their envelope keys in reading order (identity, summary,
+# format, schema, data); these payloads mirror that so the tests exercise
+# call_and_echo_table's job: preserve that order and drop ``format`` in human.
+_ORDERED_TABLE_PAYLOAD = {
+    "success": True,
+    "namespace": "Correlation",
+    "table_name": "EndOfDay",
+    "row_count": 1,
+    "is_complete": True,
+    "format": "json-row",
+    "schema": [{"name": "c", "type": "int"}],
+    "data": [{"c": 1}],
+}
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_table_drops_format_and_keeps_order_in_human_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """human mode drops the constant format field and preserves reading order."""
+    rt = make_runtime(tmp_path, output_format="human")
+    result = CallToolResult(content=[], structuredContent=dict(_ORDERED_TABLE_PAYLOAD))
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_table(
+            rt,
+            "catalog_table_sample",
+            retry_command="dh-mcp catalog sample",
+            arguments={},
+        )
+    out = capsys.readouterr().out
+    assert "format" not in out
+    assert out.index("namespace") < out.index("row_count") < out.index("data")
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_table_keeps_format_and_order_in_json_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """json mode keeps format and preserves the reading order (sort_keys=False)."""
+    rt = make_runtime(tmp_path, output_format="json")
+    result = CallToolResult(content=[], structuredContent=dict(_ORDERED_TABLE_PAYLOAD))
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_table(
+            rt, "session_table_data", retry_command="dh-mcp table data", arguments={}
+        )
+    raw = capsys.readouterr().out
+    # require_success strips success/isError; format and all data survive.
+    emitted = json.loads(raw)
+    assert emitted["format"] == "json-row"
+    assert emitted["data"] == [{"c": 1}]
+    # sort_keys=False carries the reading order into json, not alphabetical.
+    assert raw.index('"namespace"') < raw.index('"row_count"') < raw.index('"data"')
+
+
 @pytest.mark.asyncio
 async def test_call_and_echo_fetches_then_prints_whole_payload(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -312,6 +413,30 @@ async def test_call_and_echo_fetches_then_prints_whole_payload(
         )
     assert "count: 1" in capsys.readouterr().out
     assert call.await_args.args[2] == "list_systems"
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_forwards_sort_keys_and_human_exclude(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """call_and_echo passes sort_keys and human_exclude through to echo_payload."""
+    rt = make_runtime(tmp_path, output_format="human")
+    result = CallToolResult(
+        content=[], structuredContent={"success": True, "keep": 1, "drop": 2}
+    )
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo(
+            rt,
+            "t",
+            retry_command="dh-mcp x",
+            arguments={},
+            sort_keys=False,
+            human_exclude=("drop",),
+        )
+    out = capsys.readouterr().out
+    assert "keep: 1" in out
+    assert "drop" not in out
 
 
 def _patched_call(result: CallToolResult):

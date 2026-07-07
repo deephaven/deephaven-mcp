@@ -17,6 +17,7 @@ __all__ = [
     "acquire",
     "call_and_echo",
     "call_and_echo_field",
+    "call_and_echo_table",
     "call_for_payload",
     "call_tool",
     "echo_payload",
@@ -27,6 +28,7 @@ __all__ = [
 ]
 
 import json
+from collections.abc import Collection
 from typing import Any
 
 import click
@@ -259,11 +261,12 @@ def echo_payload(
     *,
     empty_message: str = "(none)",
     sort_keys: bool = True,
+    human_exclude: Collection[str] = (),
 ) -> None:
     """Render ``value`` in the runtime's output mode and print it.
 
-    The single place any command reaches into ``runtime.config.cli.output``;
-    presentation is owned by :func:`~deephaven_mcp.cli._format.format_output`.
+    Presentation is owned by :func:`~deephaven_mcp.cli._format.format_output`;
+    this is where most commands read ``runtime.config.cli.output``.
 
     Args:
         runtime (Runtime): The active CLI runtime, for the output mode.
@@ -274,11 +277,18 @@ def echo_payload(
             alphabetically. Defaults to ``True``. Pass ``False`` for payloads
             whose key order is meaningful, forwarded to
             :func:`~deephaven_mcp.cli._format.format_output`.
+        human_exclude (Collection[str]): Keys dropped from a dict ``value`` in
+            ``human`` mode only, for fields that are noise to a terminal reader
+            but meaningful to machine consumers. Ignored in ``json``/``yaml``
+            and for non-dict values. Defaults to ``()`` (drop nothing).
     """
+    output = runtime.config.cli.output.format
+    if human_exclude and output == "human" and isinstance(value, dict):
+        value = {k: v for k, v in value.items() if k not in human_exclude}
     click.echo(
         format_output(
             value,
-            output=runtime.config.cli.output.format,
+            output=output,
             empty_message=empty_message,
             sort_keys=sort_keys,
         )
@@ -286,7 +296,13 @@ def echo_payload(
 
 
 async def call_and_echo(
-    runtime: Runtime, tool: str, *, retry_command: str, arguments: dict[str, Any]
+    runtime: Runtime,
+    tool: str,
+    *,
+    retry_command: str,
+    arguments: dict[str, Any],
+    sort_keys: bool = True,
+    human_exclude: Collection[str] = (),
 ) -> None:
     """Acquire, invoke ``tool``, and print its whole success payload.
 
@@ -300,6 +316,10 @@ async def call_and_echo(
         retry_command (str): The command rendered into the corrupt-registry
             recovery hint.
         arguments (dict[str, Any]): The tool arguments.
+        sort_keys (bool): Forwarded to :func:`echo_payload`. Pass ``False`` for
+            payloads whose key order is meaningful.
+        human_exclude (Collection[str]): Forwarded to :func:`echo_payload`. Keys
+            dropped from a dict payload in ``human`` mode only.
 
     Raises:
         CliError: When the daemon cannot be acquired, the MCP transport
@@ -308,7 +328,41 @@ async def call_and_echo(
     payload = await call_for_payload(
         runtime, tool, retry_command=retry_command, arguments=arguments
     )
-    echo_payload(runtime, payload)
+    echo_payload(runtime, payload, sort_keys=sort_keys, human_exclude=human_exclude)
+
+
+async def call_and_echo_table(
+    runtime: Runtime, tool: str, *, retry_command: str, arguments: dict[str, Any]
+) -> None:
+    """Acquire, invoke a tabular ``tool``, and print its envelope in reading order.
+
+    The tools already emit their envelope keys in reading order (identity,
+    summary, ``format``, schema, data); this echoes them with ``sort_keys=False``
+    so ``json``/``yaml`` preserve that order instead of alphabetizing. In
+    ``human`` mode the ``format`` field is dropped (via ``human_exclude``): it
+    always reports ``json-row`` (the serialization these commands request so the
+    human renderer can re-draw ``data`` as an aligned table), so it is noise to a
+    terminal reader. ``json``/``yaml`` keep ``format`` for machine consumers.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        tool (str): The MCP tool name to invoke.
+        retry_command (str): The command rendered into the corrupt-registry
+            recovery hint.
+        arguments (dict[str, Any]): The tool arguments.
+
+    Raises:
+        CliError: When the daemon cannot be acquired, the MCP transport
+            fails, or the tool reports ``success=False`` (exit 3).
+    """
+    await call_and_echo(
+        runtime,
+        tool,
+        retry_command=retry_command,
+        arguments=arguments,
+        sort_keys=False,
+        human_exclude=("format",),
+    )
 
 
 def _warn_if_incomplete(

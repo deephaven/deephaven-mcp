@@ -468,6 +468,27 @@ def test_build_table_data_response_with_namespace_and_name():
     assert out["is_complete"] is False
 
 
+def test_build_table_data_response_reading_order():
+    """Keys are emitted in reading order: identity, summary, format, schema, data."""
+    out = shared.build_table_data_response(
+        _arrow_table(),
+        is_complete=True,
+        format="json-row",
+        table_name="T",
+        namespace="ns",
+    )
+    assert list(out) == [
+        "success",
+        "namespace",
+        "table_name",
+        "row_count",
+        "is_complete",
+        "format",
+        "schema",
+        "data",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # JSON redaction
 # ---------------------------------------------------------------------------

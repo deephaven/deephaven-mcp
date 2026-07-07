@@ -15,6 +15,7 @@ from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
+    call_and_echo_table,
     wrapper_error_codes,
 )
 from deephaven_mcp.cli._errors import ExitCode
@@ -202,7 +203,7 @@ async def table_data(
     }
     if max_rows is not None:
         arguments["max_rows"] = max_rows
-    await call_and_echo(
+    await call_and_echo_table(
         runtime,
         "session_table_data",
         retry_command="dh-mcp table data",

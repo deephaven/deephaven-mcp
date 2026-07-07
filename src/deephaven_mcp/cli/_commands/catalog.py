@@ -15,7 +15,11 @@ from typing import Any
 import click
 
 from deephaven_mcp.cli._async import run_async
-from deephaven_mcp.cli._commands._wrapping import call_and_echo, wrapper_error_codes
+from deephaven_mcp.cli._commands._wrapping import (
+    call_and_echo,
+    call_and_echo_table,
+    wrapper_error_codes,
+)
 from deephaven_mcp.cli._errors import ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
@@ -175,7 +179,9 @@ async def _run_catalog_query(
         arguments["max_rows"] = max_rows
     if filters:
         arguments["filters"] = list(filters)
-    await call_and_echo(runtime, tool, retry_command=retry_command, arguments=arguments)
+    await call_and_echo_table(
+        runtime, tool, retry_command=retry_command, arguments=arguments
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +326,7 @@ async def catalog_sample(
         arguments["max_rows"] = max_rows
     if filters:
         arguments["filters"] = list(filters)
-    await call_and_echo(
+    await call_and_echo_table(
         runtime,
         "catalog_table_sample",
         retry_command="dh-mcp catalog sample",

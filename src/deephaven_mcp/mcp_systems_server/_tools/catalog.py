@@ -115,9 +115,9 @@ async def _get_catalog_data(
             {
                 "success": True,
                 "session_id": session_id,
-                "format": actual_format,
                 "row_count": row_count,
                 "is_complete": is_complete,
+                "format": actual_format,
                 "columns": columns,
                 "data": formatted_data,
             }
