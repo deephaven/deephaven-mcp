@@ -57,7 +57,13 @@ def _filter_option(f: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 _OUTPUT_TABULAR = OutputSpec(
-    "object", (), note="Tabular result envelope from the tool (columns + rows)."
+    "object",
+    (),
+    note=(
+        "Tabular result envelope from the tool (columns + rows). In -o human, "
+        "the format and columns fields are omitted as noise; -o json / -o yaml "
+        "keep the full envelope."
+    ),
 )
 
 

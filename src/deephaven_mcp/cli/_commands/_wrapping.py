@@ -339,10 +339,14 @@ async def call_and_echo_table(
     The tools already emit their envelope keys in reading order (identity,
     summary, ``format``, schema, data); this echoes them with ``sort_keys=False``
     so ``json``/``yaml`` preserve that order instead of alphabetizing. In
-    ``human`` mode the ``format`` field is dropped (via ``human_exclude``): it
-    always reports ``json-row`` (the serialization these commands request so the
-    human renderer can re-draw ``data`` as an aligned table), so it is noise to a
-    terminal reader. ``json``/``yaml`` keep ``format`` for machine consumers.
+    ``human`` mode two fields are dropped (via ``human_exclude``) as noise to a
+    terminal reader: ``format``, which always reports ``json-row`` (the
+    serialization these commands request so the human renderer can re-draw
+    ``data`` as an aligned table); and ``columns``, the list tools' column
+    definitions, which merely restate the headers of the rendered ``data``
+    table. ``schema`` (the sample/data tools' typed definitions) uses a
+    different key and is left intact. ``json``/``yaml`` keep both fields for
+    machine consumers.
 
     Args:
         runtime (Runtime): The active CLI runtime.
@@ -361,7 +365,7 @@ async def call_and_echo_table(
         retry_command=retry_command,
         arguments=arguments,
         sort_keys=False,
-        human_exclude=("format",),
+        human_exclude=("format", "columns"),
     )
 
 

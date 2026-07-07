@@ -397,6 +397,62 @@ async def test_call_and_echo_table_keeps_format_and_order_in_json_mode(
     assert raw.index('"namespace"') < raw.index('"row_count"') < raw.index('"data"')
 
 
+# The list tools (catalog tables/namespaces) emit a ``columns`` key instead of
+# ``schema``; ``columns`` merely restates the rendered data table's headers.
+_LIST_TABLE_PAYLOAD = {
+    "success": True,
+    "session_id": "enterprise:dev:1",
+    "row_count": 2,
+    "is_complete": True,
+    "format": "json-row",
+    "columns": [{"name": "Namespace", "type": "string"}],
+    "data": [{"Namespace": "Correlation"}, {"Namespace": "Chip"}],
+}
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_table_drops_columns_in_human_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """human mode drops the redundant columns block (and format) for list tools."""
+    rt = make_runtime(tmp_path, output_format="human")
+    result = CallToolResult(content=[], structuredContent=dict(_LIST_TABLE_PAYLOAD))
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_table(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+        )
+    out = capsys.readouterr().out
+    assert "columns" not in out
+    assert "format" not in out
+    # The row-count summary and the data itself remain.
+    assert "row_count" in out
+    assert "Correlation" in out
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_table_keeps_columns_in_json_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """json mode keeps columns for machine consumers."""
+    rt = make_runtime(tmp_path, output_format="json")
+    result = CallToolResult(content=[], structuredContent=dict(_LIST_TABLE_PAYLOAD))
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_table(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+        )
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["columns"] == [{"name": "Namespace", "type": "string"}]
+    assert emitted["format"] == "json-row"
+
+
 @pytest.mark.asyncio
 async def test_call_and_echo_fetches_then_prints_whole_payload(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
