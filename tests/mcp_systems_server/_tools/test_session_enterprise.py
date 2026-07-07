@@ -16,6 +16,7 @@ from conftest import (
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp.client import CorePlusQuerySerial
 from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _SHORT_REASON_MAX_LEN,
     _check_session_id_available,
@@ -353,6 +354,10 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     # Mock remove to return None (simulating session not found in registry)
     mock_registry.remove = AsyncMock(return_value=None)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
 
     context = MockContext(
         {
@@ -366,6 +371,7 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     result = await session_enterprise_delete(context, "enterprise:system:11")
 
     assert result["success"] is True
+    mock_controller.delete_query.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -383,6 +389,10 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     full_id = "enterprise:system:12"
     mock_registry.remove = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
 
     context = MockContext(
         {
@@ -396,7 +406,47 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     result = await session_enterprise_delete(context, "enterprise:system:12")
 
     assert result["success"] is True
+    # The persistent query is deleted on the controller (serial 12)
+    mock_controller.delete_query.assert_awaited_once()
     # Session tracking is now handled internally by the registry
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_delete_pq_deletion_failure():
+    """Controller delete_query failure returns an error and leaves the registry intact."""
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+    mock_config_manager = MagicMock()
+    mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.close = AsyncMock()
+
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_registry.remove = AsyncMock(return_value=mock_session_manager)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock(side_effect=Exception("controller down"))
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_registry,
+        }
+    )
+
+    full_config = {"enterprise": {"systems": enterprise_config}}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    result = await session_enterprise_delete(context, "enterprise:system:15")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Failed to delete persistent query" in result["error"]
+    # On PQ-deletion failure we must NOT remove the session from the registry,
+    # so the caller can retry.
+    mock_registry.remove.assert_not_awaited()
+    mock_session_manager.close.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -416,6 +466,10 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_registry.remove = AsyncMock(side_effect=Exception("Simulated registry error"))
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
 
     context = MockContext(
         {
@@ -446,6 +500,10 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     full_id = "enterprise:system:14"
     mock_registry.remove = AsyncMock(return_value=mock_session_manager)
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
 
     context = MockContext(
         {
@@ -1594,6 +1652,10 @@ async def test_session_enterprise_delete_success():
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_registry.remove = AsyncMock(return_value=mock_session_manager)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
 
     context = MockContext(
         {
@@ -1609,6 +1671,8 @@ async def test_session_enterprise_delete_success():
     assert result["system_name"] == "system"
     assert result["session_name"] == "test-worker"
 
+    # Verify the persistent query was deleted on the controller (serial 1)
+    mock_controller.delete_query.assert_awaited_once_with(CorePlusQuerySerial(1))
     # Verify session was closed and removed
     mock_session_manager.close.assert_called_once()
     # Verify remove was called
@@ -1746,6 +1810,10 @@ async def test_session_enterprise_delete_close_failure_continues():
 
     mock_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_registry.remove = AsyncMock(return_value=mock_session_manager)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
 
     context = MockContext(
         {
@@ -2266,6 +2334,10 @@ async def test_session_enterprise_delete_success_v2():
     mock_session_registry.get = AsyncMock(return_value=mock_session_manager)
     mock_session_manager.close = AsyncMock()
     mock_session_registry.remove = AsyncMock(return_value=mock_session_manager)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_session_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
 
     context = MockContext(
         {

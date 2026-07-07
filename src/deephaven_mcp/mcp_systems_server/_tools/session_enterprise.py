@@ -16,7 +16,11 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
 from deephaven_mcp.auth.credentials import PasswordCredentials
-from deephaven_mcp.client import CorePlusQueryConfig, CorePlusSession
+from deephaven_mcp.client import (
+    CorePlusQueryConfig,
+    CorePlusQuerySerial,
+    CorePlusSession,
+)
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_session_limit,
     error_response,
@@ -786,6 +790,60 @@ def _resolve_session_parameters(
     }
 
 
+async def _close_and_remove_enterprise_session(
+    session_registry: EnterpriseSessionRegistry,
+    session_manager: EnterpriseSessionManager,
+    qsid: QualifiedSessionId,
+    session_id: str,
+) -> str | None:
+    """Close an enterprise session client and remove it from the registry.
+
+    Close failure is non-fatal: it is logged as a warning and removal
+    proceeds so the registry entry is always cleared. Removal failure is
+    fatal and reported to the caller.
+
+    Args:
+        session_registry (EnterpriseSessionRegistry): Registry to remove the session from.
+        session_manager (EnterpriseSessionManager): The manager whose client to close.
+        qsid (QualifiedSessionId): Typed identifier used for registry removal.
+        session_id (str): Wire-form identifier, used in log and error messages.
+
+    Returns:
+        str | None: An error message if registry removal failed, otherwise ``None``.
+    """
+    try:
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_enterprise_delete] Closing session '{session_id}'"
+        )
+        await session_manager.close()
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_enterprise_delete] Successfully closed session '{session_id}'"
+        )
+    except Exception as e:
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_enterprise_delete] Failed to close session '{session_id}': {e}"
+        )
+        # Continue with removal even if close failed
+
+    try:
+        removed_manager = await session_registry.remove(qsid)
+    except Exception as e:
+        error_msg = f"Failed to remove session '{session_id}' from registry: {e}"
+        _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
+        return error_msg
+
+    if removed_manager is None:
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_enterprise_delete] Session '{session_id}' "
+            "was not found in registry during removal"
+        )
+    else:
+        _LOGGER.debug(
+            f"[mcp_systems_server:session_enterprise_delete] Removed session '{session_id}' from registry"
+        )
+    return None
+
+
 async def session_enterprise_delete(
     context: Context,
     session_id: str,
@@ -859,7 +917,9 @@ async def session_enterprise_delete(
         - Validates session_id format (must be "enterprise:{system_name}:{session_name}")
         - Validates that the system_name component matches this server's configured system
         - Checks that the specified session exists in registry
-        - Properly closes the session before removal
+        - Deletes the underlying persistent query on the controller (the
+          authoritative removal from the enterprise system)
+        - Closes the session client connection
         - Removes session from registry to prevent future access
         - Provides detailed error messages for troubleshooting
 
@@ -869,7 +929,7 @@ async def session_enterprise_delete(
         - Wrong server: "Session 'enterprise:dev:s1' belongs to system 'dev', but this server manages 'prod'"
         - Session not found: "Session 'enterprise:sys:session' not found"
         - Already deleted: "Session 'enterprise:sys:session' not found"
-        - Close failure: "Failed to close session"
+        - Persistent-query deletion failure: "Failed to delete persistent query for session ..."
         - Registry error: "Failed to remove session from registry"
 
     Note:
@@ -953,40 +1013,40 @@ async def session_enterprise_delete(
             f"[mcp_systems_server:session_enterprise_delete] Found enterprise session manager for '{session_id}'"
         )
 
-        # Close the session if it's active
+        # Delete the underlying persistent query on the controller. Closing the
+        # client session alone leaves the PQ present on the enterprise system,
+        # so this controller-side delete is the authoritative removal. On
+        # failure, return an error without removing the registry entry so the
+        # caller can retry.
         try:
+            serial = CorePlusQuerySerial(int(qsid.session_id))
+            factory = await session_registry.factory_manager.get()
+            controller = factory.controller_client
             _LOGGER.debug(
-                f"[mcp_systems_server:session_enterprise_delete] Closing session '{session_id}'"
+                f"[mcp_systems_server:session_enterprise_delete] Deleting persistent query "
+                f"(serial={serial}) for session '{session_id}'"
             )
-            await session_manager.close()
+            await controller.delete_query(serial)
             _LOGGER.debug(
-                f"[mcp_systems_server:session_enterprise_delete] Successfully closed session '{session_id}'"
+                f"[mcp_systems_server:session_enterprise_delete] Deleted persistent query "
+                f"(serial={serial}) for session '{session_id}'"
             )
         except Exception as e:
-            _LOGGER.warning(
-                f"[mcp_systems_server:session_enterprise_delete] Failed to close session '{session_id}': {e}"
+            error_msg = (
+                f"Failed to delete persistent query for session '{session_id}': {e}"
             )
-            # Continue with removal even if close failed
-
-        # Remove from session registry
-        try:
-            removed_manager = await session_registry.remove(qsid)
-            if removed_manager is None:
-                error_msg = (
-                    f"Session '{session_id}' was not found in registry during removal"
-                )
-                _LOGGER.warning(
-                    f"[mcp_systems_server:session_enterprise_delete] {error_msg}"
-                )
-            else:
-                _LOGGER.debug(
-                    f"[mcp_systems_server:session_enterprise_delete] Removed session '{session_id}' from registry"
-                )
-
-        except Exception as e:
-            error_msg = f"Failed to remove session '{session_id}' from registry: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        # Close the session client and remove it from the registry. Close
+        # failure is non-fatal; removal failure returns an error.
+        teardown_error = await _close_and_remove_enterprise_session(
+            session_registry, session_manager, qsid, session_id
+        )
+        if teardown_error:
+            result["error"] = teardown_error
             result["isError"] = True
             return result
 

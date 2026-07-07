@@ -587,9 +587,11 @@ _OUTPUT_DELETE = OutputSpec(
     help=build_help(
         summary="Delete a session by id.",
         description=(
-            "Routes to the Community or Enterprise backend by the id's "
-            "'type:' prefix, so the type need not be restated. Only "
-            "dynamically created sessions can be deleted."
+            "Permanently deletes the session with SESSION_ID; this cannot be "
+            "undone. For an enterprise session, this also deletes its "
+            "underlying persistent query from the system. A community session "
+            "can be deleted only if it was dynamically created; those defined "
+            "in static config cannot."
         ),
         arguments=(HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_DELETE,
