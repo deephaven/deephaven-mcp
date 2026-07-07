@@ -85,7 +85,7 @@ from deephaven_mcp.sessions import EnterpriseSystemConfig
 from ._auth_client import CorePlusAuthClient
 
 # Local application imports
-from ._base import ClientObjectWrapper
+from ._base import ClientObjectWrapper, describe_exception_chain
 from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
 from ._session import CorePlusSession
 from ._timeouts import EnterpriseClientTimeouts
@@ -286,7 +286,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise DeephavenConnectionError(
-                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {describe_exception_chain(e)}"
             ) from e
 
         elapsed = time.monotonic() - start_time
@@ -391,7 +391,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise DeephavenConnectionError(
-                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {describe_exception_chain(e)}"
             ) from e
 
         elapsed = time.monotonic() - start_time
@@ -600,7 +600,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise SessionError(
-                f"Failed to close session manager connections: {e}"
+                f"Failed to close session manager connections: {describe_exception_chain(e)}"
             ) from e
 
     @staticmethod
@@ -838,7 +838,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise SessionCreationError(
-                f"Failed to create and connect to new worker: {e}"
+                f"Failed to create and connect to new worker: {describe_exception_chain(e)}"
             ) from e
 
     async def connect_to_persistent_query(
@@ -1005,7 +1005,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise SessionCreationError(
-                f"Failed to establish connection to persistent query: {e}"
+                f"Failed to establish connection to persistent query: {describe_exception_chain(e)}"
             ) from e
 
     async def delete_key(self, public_key_text: str) -> None:
@@ -1106,7 +1106,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise ResourceError(f"Failed to delete authentication key: {e}") from e
+            raise ResourceError(
+                f"Failed to delete authentication key: {describe_exception_chain(e)}"
+            ) from e
 
     async def password(
         self,
@@ -1216,7 +1218,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise AuthenticationError(f"Failed to authenticate user {user}: {e}") from e
+            raise AuthenticationError(
+                f"Failed to authenticate user {user}: {describe_exception_chain(e)}"
+            ) from e
 
     async def ping(self) -> bool:
         """Send a connectivity check ping to verify the connection to Deephaven services.
@@ -1297,7 +1301,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise DeephavenConnectionError(f"Failed to ping server: {e}") from e
+            raise DeephavenConnectionError(
+                f"Failed to ping server: {describe_exception_chain(e)}"
+            ) from e
 
     async def private_key(self, file: str | io.StringIO) -> None:
         r"""Authenticate to the server using a Deephaven format private key file.
@@ -1420,7 +1426,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise AuthenticationError(
-                f"Failed to authenticate with private key: {e}"
+                f"Failed to authenticate with private key: {describe_exception_chain(e)}"
             ) from e
 
     async def saml(self) -> None:
@@ -1533,7 +1539,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise AuthenticationError(f"Failed to authenticate via SAML: {e}") from e
+            raise AuthenticationError(
+                f"Failed to authenticate via SAML: {describe_exception_chain(e)}"
+            ) from e
 
     async def upload_key(self, public_key_text: str) -> None:
         """Upload a public key to the Deephaven server for certificate-based authentication.
@@ -1630,4 +1638,6 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise ResourceError(f"Failed to upload authentication key: {e}") from e
+            raise ResourceError(
+                f"Failed to upload authentication key: {describe_exception_chain(e)}"
+            ) from e

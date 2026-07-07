@@ -4,6 +4,7 @@ import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import grpc
 import pyarrow as pa
 import pytest
 
@@ -1235,3 +1236,75 @@ def test_credentials_to_pydeephaven_auth_rejects_unknown_type():
 
     with pytest.raises(ConfigurationError, match="Unsupported credential type"):
         _credentials_to_pydeephaven_auth(MysteryCreds())
+
+
+# ---------------------------------------------------------------------------
+# gRPC exception-detail surfacing (describe_exception_chain integration)
+# ---------------------------------------------------------------------------
+
+
+class _FakeGrpcCall(grpc.RpcError, grpc.Call):
+    """Minimal real ``grpc.Call``/``grpc.RpcError`` double for chain tests."""
+
+    def __init__(self, code, details):
+        super().__init__()
+        self._code = code
+        self._details = details
+
+    def code(self):
+        return self._code
+
+    def details(self):
+        return self._details
+
+    def initial_metadata(self):
+        return ()
+
+    def trailing_metadata(self):
+        return ()
+
+    def is_active(self):
+        return False
+
+    def time_remaining(self):
+        return None
+
+    def cancel(self):
+        return False
+
+    def add_callback(self, _callback):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_historical_table_surfaces_grpc_detail(core_plus_session):
+    grpc_err = _FakeGrpcCall(
+        grpc.StatusCode.INVALID_ARGUMENT, "Column Foo has unsupported type"
+    )
+    dh_err = Exception("failed to finish FetchTableOp operation")
+    dh_err.__cause__ = grpc_err
+    core_plus_session.wrapped.historical_table = MagicMock(side_effect=dh_err)
+
+    with pytest.raises(QueryError) as excinfo:
+        await core_plus_session.historical_table("ns", "tbl")
+
+    message = str(excinfo.value)
+    assert "Failed to fetch historical table" in message
+    assert "gRPC INVALID_ARGUMENT: Column Foo has unsupported type" in message
+
+
+@pytest.mark.asyncio
+async def test_live_table_surfaces_grpc_detail(core_plus_session):
+    grpc_err = _FakeGrpcCall(
+        grpc.StatusCode.INVALID_ARGUMENT, "Column Bar has unsupported type"
+    )
+    dh_err = Exception("failed to finish FetchTableOp operation")
+    dh_err.__cause__ = grpc_err
+    core_plus_session.wrapped.live_table = MagicMock(side_effect=dh_err)
+
+    with pytest.raises(QueryError) as excinfo:
+        await core_plus_session.live_table("ns", "tbl")
+
+    message = str(excinfo.value)
+    assert "Failed to fetch live table" in message
+    assert "gRPC INVALID_ARGUMENT: Column Bar has unsupported type" in message

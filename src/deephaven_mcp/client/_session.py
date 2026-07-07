@@ -100,7 +100,7 @@ from deephaven_mcp.auth.tls import TlsConfig
 from deephaven_mcp.config import ConfigurationError
 from deephaven_mcp.sessions import CommunitySessionConfig
 
-from ._base import ClientObjectWrapper
+from ._base import ClientObjectWrapper, describe_exception_chain
 from ._protobuf import CorePlusQueryInfo
 from ._timeouts import CommunityClientTimeouts
 
@@ -254,7 +254,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to create empty table: {e}") from e
+            raise QueryError(
+                f"Failed to create empty table: {describe_exception_chain(e)}"
+            ) from e
 
     async def time_table(
         self,
@@ -315,7 +317,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to create time table: {e}") from e
+            raise QueryError(
+                f"Failed to create time table: {describe_exception_chain(e)}"
+            ) from e
 
     async def import_table(self, data: pa.Table) -> Table:
         """
@@ -383,7 +387,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to import table: {e}") from e
+            raise QueryError(
+                f"Failed to import table: {describe_exception_chain(e)}"
+            ) from e
 
     async def merge_tables(
         self, tables: list[Table], order_by: str | None = None
@@ -420,7 +426,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to merge tables: {e}") from e
+            raise QueryError(
+                f"Failed to merge tables: {describe_exception_chain(e)}"
+            ) from e
 
     async def query(self, table: Table) -> Query:
         """
@@ -536,7 +544,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to create query: {e}") from e
+            raise QueryError(
+                f"Failed to create query: {describe_exception_chain(e)}"
+            ) from e
 
     async def input_table(
         self,
@@ -608,7 +618,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to create input table: {e}") from e
+            raise QueryError(
+                f"Failed to create input table: {describe_exception_chain(e)}"
+            ) from e
 
     # ===== Table Management =====
 
@@ -651,7 +663,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to open table: {e}") from e
+            raise QueryError(
+                f"Failed to open table: {describe_exception_chain(e)}"
+            ) from e
 
     async def bind_table(self, name: str, table: Table) -> None:
         """
@@ -728,7 +742,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to bind table: {e}") from e
+            raise QueryError(
+                f"Failed to bind table: {describe_exception_chain(e)}"
+            ) from e
 
     # ===== Session Management =====
 
@@ -802,7 +818,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise SessionError(f"Failed to close session: {e}") from e
+            raise SessionError(
+                f"Failed to close session: {describe_exception_chain(e)}"
+            ) from e
 
     async def run_script(self, script: str, systemic: bool | None = None) -> None:
         """
@@ -925,7 +943,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to run script: {e}") from e
+            raise QueryError(
+                f"Failed to run script: {describe_exception_chain(e)}"
+            ) from e
 
     # ===== Table and Session Status Methods =====
 
@@ -1006,7 +1026,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to list tables: {e}") from e
+            raise QueryError(
+                f"Failed to list tables: {describe_exception_chain(e)}"
+            ) from e
 
     async def is_alive(self) -> bool:
         """
@@ -1038,7 +1060,9 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 e,
                 exc_info=True,
             )
-            raise SessionError(f"Failed to check session status: {e}") from e
+            raise SessionError(
+                f"Failed to check session status: {describe_exception_chain(e)}"
+            ) from e
 
 
 def _credentials_to_pydeephaven_auth(
@@ -1278,7 +1302,7 @@ class CoreSession(BaseSession[Session]):
             cls._log_session_creation_error_details(e)
             raise SessionCreationError(
                 f"Failed to create Deephaven Community (Core) Session "
-                f"({creds_redacted}): {e}"
+                f"({creds_redacted}): {describe_exception_chain(e)}"
             ) from e
 
     @classmethod
@@ -1615,7 +1639,7 @@ class CorePlusSession(BaseSession[DndSession]):
                 exc_info=True,
             )
             raise QueryError(
-                f"Failed to retrieve persistent query information: {e}"
+                f"Failed to retrieve persistent query information: {describe_exception_chain(e)}"
             ) from e
 
     async def historical_table(self, namespace: str, table_name: str) -> Table:
@@ -1716,7 +1740,9 @@ class CorePlusSession(BaseSession[DndSession]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to fetch historical table: {e}") from e
+            raise QueryError(
+                f"Failed to fetch historical table: {describe_exception_chain(e)}"
+            ) from e
 
     async def live_table(self, namespace: str, table_name: str) -> Table:
         """
@@ -1822,7 +1848,9 @@ class CorePlusSession(BaseSession[DndSession]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to fetch live table: {e}") from e
+            raise QueryError(
+                f"Failed to fetch live table: {describe_exception_chain(e)}"
+            ) from e
 
     async def catalog_table(self) -> Table:
         """
@@ -1914,4 +1942,6 @@ class CorePlusSession(BaseSession[DndSession]):
                 e,
                 exc_info=True,
             )
-            raise QueryError(f"Failed to fetch catalog table: {e}") from e
+            raise QueryError(
+                f"Failed to fetch catalog table: {describe_exception_chain(e)}"
+            ) from e

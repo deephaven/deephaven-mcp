@@ -51,7 +51,7 @@ from deephaven_mcp._exceptions import (
     ResourceError,
 )
 
-from ._base import ClientObjectWrapper
+from ._base import ClientObjectWrapper, describe_exception_chain
 from ._pq_config import apply_pq_config_fields, validate_pq_config_args
 from ._protobuf import (
     CorePlusQueryConfig,
@@ -198,7 +198,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:ping] Unexpected error during ping: {e}"
             )
-            raise DeephavenConnectionError(f"Connection error during ping: {e}") from e
+            raise DeephavenConnectionError(
+                f"Connection error during ping: {describe_exception_chain(e)}"
+            ) from e
 
     async def subscribe(self) -> None:
         """Subscribe to persistent query state updates asynchronously.
@@ -283,7 +285,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                     f"[CorePlusControllerClient:subscribe] Failed to subscribe to query state: {e}"
                 )
                 raise QueryError(
-                    f"Failed to subscribe to persistent query state: {e}"
+                    f"Failed to subscribe to persistent query state: {describe_exception_chain(e)}"
                 ) from e
 
     # ===========================================================================
@@ -349,7 +351,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:map] Failed to retrieve query map: {e}"
             )
-            raise QueryError(f"Failed to retrieve query state: {e}") from e
+            raise QueryError(
+                f"Failed to retrieve query state: {describe_exception_chain(e)}"
+            ) from e
 
     async def map_and_version(
         self,
@@ -408,7 +412,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:map_and_version] Failed to retrieve query map: {e}"
             )
-            raise QueryError(f"Failed to retrieve query state with version: {e}") from e
+            raise QueryError(
+                f"Failed to retrieve query state with version: {describe_exception_chain(e)}"
+            ) from e
 
     async def get_serial_for_name(self, name: str) -> CorePlusQuerySerial:
         """Retrieve the serial number for a given query name asynchronously.
@@ -476,7 +482,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:get_serial_for_name] Failed to get serial for query name '{name}': {e}"
             )
-            raise QueryError(f"Failed to find query with name '{name}': {e}") from e
+            raise QueryError(
+                f"Failed to find query with name '{name}': {describe_exception_chain(e)}"
+            ) from e
 
     async def wait_for_change(self, timeout_seconds: float) -> None:
         """Wait for a change in the query map to occur asynchronously.
@@ -527,7 +535,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:wait_for_change] Failed to wait for change: {e}"
             )
-            raise QueryError(f"Failed to wait for query state change: {e}") from e
+            raise QueryError(
+                f"Failed to wait for query state change: {describe_exception_chain(e)}"
+            ) from e
 
     async def wait_for_change_from_version(
         self, map_version: int, timeout_seconds: float
@@ -600,7 +610,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 f"[CorePlusControllerClient:wait_for_change_from_version] Failed: {e}"
             )
             raise QueryError(
-                f"Failed to wait for version change from {map_version}: {e}"
+                f"Failed to wait for version change from {map_version}: {describe_exception_chain(e)}"
             ) from e
 
     async def get(self, serial: CorePlusQuerySerial) -> CorePlusQueryInfo:
@@ -657,7 +667,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:get] Failed to get query {serial}: {e}"
             )
-            raise QueryError(f"Failed to retrieve query {serial}: {e}") from e
+            raise QueryError(
+                f"Failed to retrieve query {serial}: {describe_exception_chain(e)}"
+            ) from e
 
     # ===========================================================================
     # Query Creation & Configuration
@@ -745,7 +757,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:add_query] Failed to create query: {e}"
             )
-            raise QueryError(f"Failed to create query: {e}") from e
+            raise QueryError(
+                f"Failed to create query: {describe_exception_chain(e)}"
+            ) from e
 
     async def make_pq_config(
         self,
@@ -1079,7 +1093,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:delete_query] Failed to delete query {serial}: {e}"
             )
-            raise QueryError(f"Failed to delete query {serial}: {e}") from e
+            raise QueryError(
+                f"Failed to delete query {serial}: {describe_exception_chain(e)}"
+            ) from e
 
     async def modify_query(
         self,
@@ -1173,7 +1189,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             _LOGGER.error(
                 f"[CorePlusControllerClient:modify_query] Failed to modify query {pb.serial}: {e}"
             )
-            raise QueryError(f"Failed to modify query {pb.serial}: {e}") from e
+            raise QueryError(
+                f"Failed to modify query {pb.serial}: {describe_exception_chain(e)}"
+            ) from e
 
     async def _run_state_change(
         self,
@@ -1237,7 +1255,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             raise
         except Exception as e:
             _LOGGER.error(f"{log_prefix} Failed to run {target_description}: {e}")
-            raise QueryError(f"Failed to run {target_description}: {e}") from e
+            raise QueryError(
+                f"Failed to run {target_description}: {describe_exception_chain(e)}"
+            ) from e
 
     async def restart_query(
         self,
