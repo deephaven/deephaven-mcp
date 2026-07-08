@@ -646,7 +646,7 @@ async def test_make_pq_config_auto_delete_timeout_zero_normalized_to_none(
         mock_config.scheduling.extend.assert_called_once_with(
             pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
         )
-        assert mock_config.typeSpecificFieldsJson == ""
+        mock_config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
 
 
 @pytest.mark.asyncio
@@ -755,8 +755,8 @@ async def test_make_pq_config_permanent_query_clears_scheduling(
         assert "StartTime=00:00:00" in extended
         assert "DailyRestart=false" in extended
         assert "SchedulingDisabled=false" in extended
-        # Permanent → no TerminationDelay.
-        assert mock_config.typeSpecificFieldsJson == ""
+        # Permanent → no TerminationDelay: the presence-tracked field is cleared.
+        mock_config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
 
 
 @pytest.mark.asyncio
@@ -1564,7 +1564,7 @@ def test_update_pq_config_auto_delete_zero_continuous(
     wrapper.pb.scheduling.extend.assert_called_once_with(
         pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
     )
-    assert wrapper.pb.typeSpecificFieldsJson == ""
+    wrapper.pb.ClearField.assert_called_once_with("typeSpecificFieldsJson")
 
 
 def test_update_pq_config_auto_delete_positive_temporary(

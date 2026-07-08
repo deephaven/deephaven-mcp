@@ -47,6 +47,19 @@ def _make_config_mock():
 # ===========================================================================
 
 
+def test_default_permanent_continuous_scheduling_matches_vendor(pq_config_mod):
+    """The default permanent scheduler is the vendor generator's exact output.
+
+    Locks the constant to the vendor helper so the entry set cannot drift from
+    the vendor client as a hand-rolled copy.
+    """
+    from deephaven_enterprise.client.generate_scheduling import GenerateScheduling
+
+    assert pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING == tuple(
+        GenerateScheduling.generate_continuous_scheduler(start_time="00:00:00")
+    )
+
+
 def test_normalize_programming_language_python():
     assert _normalize_programming_language("python") == "Python"
     assert _normalize_programming_language("PYTHON") == "Python"
@@ -119,7 +132,22 @@ def test_set_termination_delay_remove_empties_when_only_key():
         {"TerminationDelay": {"type": "long", "value": "5000"}}
     )
     _set_termination_delay(config, None)
-    assert config.typeSpecificFieldsJson == ""
+    config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
+
+
+def test_set_termination_delay_remove_clears_presence_on_real_proto():
+    """Removing the last entry clears the presence-tracked optional field.
+
+    Regression test: ``typeSpecificFieldsJson`` is a proto3 ``optional`` field.
+    Assigning ``\"\"`` marks it present-but-empty, which the controller rejects
+    on add_query with ControllerSerializationException. The field must be
+    cleared, not set to an empty string.
+    """
+    config = _PQConfigMessage()
+    _set_termination_delay(config, 5000)
+    assert config.HasField("typeSpecificFieldsJson")
+    _set_termination_delay(config, None)
+    assert not config.HasField("typeSpecificFieldsJson")
 
 
 def test_apply_auto_delete_timeout_none_is_noop():
@@ -140,8 +168,8 @@ def test_apply_auto_delete_timeout_zero_installs_continuous(pq_config_mod):
     config.scheduling.extend.assert_called_once_with(
         pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
     )
-    # TerminationDelay removed (was the only key) -> empty string.
-    assert config.typeSpecificFieldsJson == ""
+    # TerminationDelay removed (was the only key) -> presence-tracked field cleared.
+    config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
 
 
 def test_apply_auto_delete_timeout_positive_installs_temporary(pq_config_mod):
