@@ -42,7 +42,7 @@ import logging
 from collections.abc import Iterable
 from typing import Any, cast
 
-from deephaven_enterprise.client.controller import ControllerClient
+from deephaven_enterprise.client.controller import ControllerClient, SubState
 
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
@@ -224,7 +224,14 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         A successful call to authenticate should have happened before this call.
 
         This method is idempotent - calling it multiple times is safe and will only
-        subscribe once. Subsequent calls will return immediately without error.
+        subscribe once. Subsequent calls will return immediately without error. If the
+        wrapped vendor client already holds a subscription (the vendor SessionManager
+        subscribes during authentication via ``_init_controller``), that subscription is
+        adopted instead of opening a second stream: the controller server permits one
+        subscription stream per session, so a second stream would terminate the first,
+        whose response thread auto-resubscribes and terminates the second, producing an
+        infinite kill/re-subscribe loop that starves state reads (``map()``/``get()``
+        fail with "Deadline exceeded waiting for subscription to finish").
 
         The subscription timeout is sourced from
         ``EnterpriseClientTimeouts.subscribe_timeout_seconds``.
@@ -248,6 +255,20 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             if self._subscribed:
                 _LOGGER.debug(
                     "[CorePlusControllerClient:subscribe] Already subscribed, skipping"
+                )
+                return
+
+            # The vendor SessionManager subscribes the controller client itself
+            # during authentication (_init_controller). Adopt that subscription
+            # rather than opening a second stream — the controller server allows
+            # one subscription stream per session, so a second stream starts an
+            # infinite mutual kill/re-subscribe loop between response threads.
+            if self.wrapped.sub_state is not SubState.NOT_SUBSCRIBED:
+                self._subscribed = True
+                _LOGGER.debug(
+                    "[CorePlusControllerClient:subscribe] Wrapped client already "
+                    "subscribed by the vendor SessionManager; adopting existing "
+                    "subscription"
                 )
                 return
 

@@ -40,7 +40,12 @@ def _make_config_mock():
 
 @pytest.fixture
 def dummy_controller_client():
+    from deephaven_enterprise.client.controller import SubState
+
     client = MagicMock()
+    # Model a vendor client that has not been subscribed yet (e.g. by the
+    # vendor SessionManager during authentication).
+    client.sub_state = SubState.NOT_SUBSCRIBED
     client.map = MagicMock(return_value={})
     client.get = MagicMock(return_value="info")
     client.delete_query = MagicMock()
@@ -1154,6 +1159,31 @@ async def test_subscribe_idempotent(
     # Third call should also be a no-op
     await coreplus_controller_client.subscribe()
     dummy_controller_client.subscribe.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vendor_state", ["SUBSCRIBING", "SUBSCRIBED"])
+async def test_subscribe_adopts_existing_vendor_subscription(
+    coreplus_controller_client, dummy_controller_client, vendor_state
+):
+    """An existing vendor-side subscription is adopted, not duplicated.
+
+    Regression test: the vendor SessionManager subscribes the controller client
+    during authentication (_init_controller). Opening a second stream makes the
+    controller server terminate the first, whose response thread auto-resubscribes
+    and terminates the second — an infinite kill/re-subscribe loop that starves
+    map()/get() ("Deadline exceeded waiting for subscription to finish").
+    """
+    from deephaven_enterprise.client.controller import SubState
+
+    dummy_controller_client.sub_state = SubState[vendor_state]
+    await coreplus_controller_client.subscribe()
+    dummy_controller_client.subscribe.assert_not_called()
+    assert coreplus_controller_client._subscribed is True
+
+    # State-read methods are usable after adoption.
+    dummy_controller_client.map.return_value = {}
+    assert await coreplus_controller_client.map() == {}
 
 
 @pytest.mark.asyncio
