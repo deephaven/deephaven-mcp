@@ -73,6 +73,7 @@ __all__ = [
     "SpawnError",
     # CLI MCP client exceptions
     "McpClientError",
+    "McpRequestTimeoutError",
 ]
 
 
@@ -706,6 +707,20 @@ class McpClientError(McpError):
     Used by :class:`deephaven_mcp.cli._mcp_client.McpClient`.
     Subcommand handlers translate this exception to a non-zero
     exit code; the message is printed verbatim to stderr.
+    """
+
+    pass
+
+
+class McpRequestTimeoutError(McpClientError):
+    """Raised when an MCP request times out waiting for the daemon's response.
+
+    A distinct subtype of :class:`McpClientError` because the correct
+    reaction differs from other transport failures: the daemon may still
+    complete the operation server-side after the client stops waiting, so
+    callers should verify the resulting state before retrying. Subcommand
+    handlers map this to the ``mcp_request_timeout`` error code rather
+    than ``mcp_request_failed``.
     """
 
     pass

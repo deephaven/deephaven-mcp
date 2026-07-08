@@ -24,7 +24,7 @@ from deephaven_mcp.cli._commands._wrapping import (
     wrapper_error_codes,
 )
 from deephaven_mcp.cli._errors import CliError, ErrorCode
-from deephaven_mcp.cli._mcp_client import McpClientError
+from deephaven_mcp.cli._mcp_client import McpClientError, McpRequestTimeoutError
 from deephaven_mcp.daemon_registry import RegistryCorruptError
 
 from .._helpers import make_entry, make_runtime
@@ -102,6 +102,20 @@ async def test_call_tool_transport_error_maps_to_mcp_request_failed(
         with pytest.raises(CliError) as exc:
             await call_tool(make_entry(), rt, "list_systems", {})
     assert exc.value.code is ErrorCode.MCP_REQUEST_FAILED
+
+
+@pytest.mark.asyncio
+async def test_call_tool_timeout_maps_to_mcp_request_timeout(
+    tmp_path: Path,
+) -> None:
+    rt = make_runtime(tmp_path)
+    fake = AsyncMock()
+    fake.__aenter__.side_effect = McpRequestTimeoutError("timed out after 60 seconds")
+    with patch.object(_wrapping, "McpClient", return_value=fake):
+        with pytest.raises(CliError) as exc:
+            await call_tool(make_entry(), rt, "pq_delete", {})
+    assert exc.value.code is ErrorCode.MCP_REQUEST_TIMEOUT
+    assert "timed out" in exc.value.message
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +226,17 @@ def test_wrapper_error_codes_prepends_tool_returned_error_by_default() -> None:
 
 def test_wrapper_error_codes_base_set_excludes_tool_returned_error() -> None:
     assert ErrorCode.TOOL_RETURNED_ERROR not in wrapper_error_codes(tool_error=False)
+
+
+def test_wrapper_error_codes_includes_timeout_by_default() -> None:
+    assert ErrorCode.MCP_REQUEST_TIMEOUT in wrapper_error_codes()
+
+
+def test_wrapper_error_codes_request_timeout_false_excludes_timeout() -> None:
+    """list_tools-only verbs (tool list/show) cannot hit the request timeout."""
+    codes = wrapper_error_codes(tool_error=False, request_timeout=False)
+    assert ErrorCode.MCP_REQUEST_TIMEOUT not in codes
+    assert ErrorCode.MCP_REQUEST_FAILED in codes
 
 
 # ---------------------------------------------------------------------------

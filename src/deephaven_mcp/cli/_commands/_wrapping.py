@@ -40,7 +40,11 @@ from deephaven_mcp.cli._commands._acquire import (
 )
 from deephaven_mcp.cli._errors import CliError, ErrorCode, render_warning
 from deephaven_mcp.cli._format import format_output
-from deephaven_mcp.cli._mcp_client import McpClient, McpClientError
+from deephaven_mcp.cli._mcp_client import (
+    McpClient,
+    McpClientError,
+    McpRequestTimeoutError,
+)
 from deephaven_mcp.cli._runtime import Runtime
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
@@ -53,11 +57,14 @@ _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
     ErrorCode.DAEMON_REGISTRY_CORRUPT,
     ErrorCode.DAEMON_REUSE_REFUSED,
     ErrorCode.MCP_REQUEST_FAILED,
+    ErrorCode.MCP_REQUEST_TIMEOUT,
 )
 """Error codes the shared acquire + tool-call flow can raise."""
 
 
-def wrapper_error_codes(*, tool_error: bool = True) -> tuple[ErrorCode, ...]:
+def wrapper_error_codes(
+    *, tool_error: bool = True, request_timeout: bool = True
+) -> tuple[ErrorCode, ...]:
     """Return the error codes a tool-wrapping command surfaces in its help.
 
     Args:
@@ -65,15 +72,23 @@ def wrapper_error_codes(*, tool_error: bool = True) -> tuple[ErrorCode, ...]:
             :attr:`~deephaven_mcp.cli._errors.ErrorCode.TOOL_RETURNED_ERROR`
             (exit 3). Pass ``False`` for a wrapper whose tool never reports
             failure (e.g. ``system list``).
+        request_timeout (bool): Whether to include
+            :attr:`~deephaven_mcp.cli._errors.ErrorCode.MCP_REQUEST_TIMEOUT`.
+            Pass ``False`` for a verb that only lists tools (``tool list`` /
+            ``tool show``): ``list_tools`` applies no per-request read
+            timeout, so the timeout code is unreachable there.
 
     Returns:
         tuple[ErrorCode, ...]: ``TOOL_RETURNED_ERROR`` (when ``tool_error``)
             followed by the error codes the shared acquire + tool-call flow
             can raise.
     """
+    codes = _ACQUIRE_ERROR_CODES
+    if not request_timeout:
+        codes = tuple(ec for ec in codes if ec is not ErrorCode.MCP_REQUEST_TIMEOUT)
     if tool_error:
-        return (ErrorCode.TOOL_RETURNED_ERROR, *_ACQUIRE_ERROR_CODES)
-    return _ACQUIRE_ERROR_CODES
+        return (ErrorCode.TOOL_RETURNED_ERROR, *codes)
+    return codes
 
 
 async def acquire(runtime: Runtime, *, retry_command: str) -> DaemonRegistryEntry:
@@ -121,7 +136,9 @@ async def call_tool(
         CallToolResult: The raw MCP call result.
 
     Raises:
-        CliError: When the MCP transport reports an error.
+        CliError: When the MCP transport reports an error —
+            ``mcp_request_timeout`` for a request timeout,
+            ``mcp_request_failed`` for everything else.
     """
     try:
         async with McpClient(
@@ -129,6 +146,8 @@ async def call_tool(
             request_timeout_seconds=runtime.config.cli.request.timeouts.default_seconds,
         ) as client:
             return await client.call_tool(name, arguments)
+    except McpRequestTimeoutError as exc:
+        raise CliError(str(exc), code=ErrorCode.MCP_REQUEST_TIMEOUT) from exc
     except McpClientError as exc:
         raise CliError(str(exc), code=ErrorCode.MCP_REQUEST_FAILED) from exc
 

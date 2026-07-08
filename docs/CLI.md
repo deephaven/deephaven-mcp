@@ -666,7 +666,8 @@ registry programmatically via `dh-mcp introspect errors` (or the
 | `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon repair`. |
 | `daemon_registry_live`        | `dh-mcp daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dh-mcp daemon stop` first. |
 | `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `daemon.reuse` resolved to `refuse`. Run `dh-mcp daemon restart`, or adjust `daemon.reuse` in `cli.json`. |
-| `mcp_request_failed`          | The MCP transport reported an error (connect, timeout, parse).     |
+| `mcp_request_failed`          | The MCP transport reported an error (connect, parse, server failure). |
+| `mcp_request_timeout`         | The MCP request timed out waiting for the daemon's response. The daemon may still complete the operation server-side — verify the resulting state before retrying. Allow more time with `--timeout` or `request.timeouts.default_seconds` in `cli.json`. |
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |

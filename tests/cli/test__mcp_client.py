@@ -6,12 +6,18 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.shared.exceptions import McpError
+from mcp.types import CallToolResult, ErrorData, TextContent, Tool
 from pydantic import SecretStr
 
 from deephaven_mcp.cli import _mcp_client as mc
-from deephaven_mcp.cli._mcp_client import McpClient, McpClientError
+from deephaven_mcp.cli._mcp_client import (
+    McpClient,
+    McpClientError,
+    McpRequestTimeoutError,
+)
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
 _PSK_PLAINTEXT = "shhhhhhhhhhhhhhhh"
@@ -181,3 +187,53 @@ async def test_call_tool_wraps_exception() -> None:
     client._session = fake_session  # noqa: SLF001
     with pytest.raises(McpClientError, match="call_tool"):
         await client.call_tool("foo")
+
+
+def _mcp_timeout_error() -> McpError:
+    return McpError(
+        ErrorData(
+            code=httpx.codes.REQUEST_TIMEOUT,
+            message="Timed out while waiting for response to ClientRequest. Waited 60.0 seconds.",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_call_tool_timeout_gets_dedicated_message() -> None:
+    """A request timeout notes possible server-side completion and how to allow more time."""
+    fake_session = AsyncMock()
+    fake_session.call_tool = AsyncMock(side_effect=_mcp_timeout_error())
+    client = McpClient(_handle(), request_timeout_seconds=60)
+    client._session = fake_session  # noqa: SLF001
+    with pytest.raises(McpRequestTimeoutError) as exc_info:
+        await client.call_tool("pq_delete")
+    msg = str(exc_info.value)
+    assert "timed out after 60 seconds" in msg
+    assert "may still complete the operation server-side" in msg
+    assert "--timeout" in msg
+    assert "request.timeouts.default_seconds" in msg
+
+
+@pytest.mark.asyncio
+async def test_call_tool_timeout_message_uses_per_call_override() -> None:
+    fake_session = AsyncMock()
+    fake_session.call_tool = AsyncMock(side_effect=_mcp_timeout_error())
+    client = McpClient(_handle(), request_timeout_seconds=60)
+    client._session = fake_session  # noqa: SLF001
+    with pytest.raises(McpRequestTimeoutError, match="timed out after 5 seconds"):
+        await client.call_tool("pq_delete", timeout_seconds=5)
+
+
+@pytest.mark.asyncio
+async def test_call_tool_non_timeout_mcp_error_keeps_generic_message() -> None:
+    fake_session = AsyncMock()
+    fake_session.call_tool = AsyncMock(
+        side_effect=McpError(
+            ErrorData(code=httpx.codes.INTERNAL_SERVER_ERROR, message="boom")
+        )
+    )
+    client = McpClient(_handle())
+    client._session = fake_session  # noqa: SLF001
+    with pytest.raises(McpClientError, match=r"call_tool\('foo'\) failed: boom") as ei:
+        await client.call_tool("foo")
+    assert not isinstance(ei.value, McpRequestTimeoutError)
