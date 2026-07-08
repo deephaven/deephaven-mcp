@@ -655,6 +655,44 @@ async def test_make_pq_config_auto_delete_timeout_zero_normalized_to_none(
 
 
 @pytest.mark.asyncio
+async def test_make_pq_config_env_vars_converted_to_wire_format(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Env vars reach the vendor call in the controller's alternating wire format.
+
+    Regression test: the controller reads extraEnvironmentVariables as a flat
+    alternating key/value list; passing "KEY=VALUE" strings through unconverted
+    is rejected server-side with "Has an invalid key with no value".
+    """
+    mock_config = _make_config_mock()
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            extra_environment_vars=["A=1", "OPTS=-Da=b"],
+        )
+
+    call_args = dummy_controller_client.make_temporary_config.call_args
+    # extra_environment_vars is the 5th positional arg.
+    assert call_args[0][4] == ["A", "1", "OPTS", "-Da=b"]
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_malformed_env_var_raises_value_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    with pytest.raises(ValueError, match="expected 'KEY=VALUE'"):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            extra_environment_vars=["NOEQUALS"],
+        )
+    dummy_controller_client.make_temporary_config.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_make_pq_config_owner_applied_when_supplied(
     coreplus_controller_client, dummy_controller_client, controller_client_mod
 ):

@@ -282,6 +282,47 @@ async def test_connect_to_new_worker_success(
 
 
 @pytest.mark.asyncio
+async def test_connect_to_new_worker_env_vars_converted_to_wire_format(
+    coreplus_session_manager, dummy_session_manager
+):
+    """Env vars reach the vendor call in the controller's alternating wire format.
+
+    Regression test: the controller reads extraEnvironmentVariables as a flat
+    alternating key/value list; passing "KEY=VALUE" strings through unconverted
+    is rejected server-side with "Has an invalid key with no value".
+    """
+    mock_session_instance = MagicMock()
+    mock_session_instance._session_type = "python"
+    dummy_session_manager.connect_to_new_worker.return_value = mock_session_instance
+
+    with patch(
+        "deephaven_mcp.client._session_factory.CorePlusSession",
+        return_value="wrapped_session",
+    ):
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker",
+            heap_size_gb=4,
+            extra_environment_vars=["A=1", "OPTS=-Da=b"],
+        )
+
+    kwargs = dummy_session_manager.connect_to_new_worker.call_args.kwargs
+    assert kwargs["extra_environment_vars"] == ["A", "1", "OPTS", "-Da=b"]
+
+
+@pytest.mark.asyncio
+async def test_connect_to_new_worker_malformed_env_var_raises_value_error(
+    coreplus_session_manager, dummy_session_manager
+):
+    with pytest.raises(ValueError, match="expected 'KEY=VALUE'"):
+        await coreplus_session_manager.connect_to_new_worker(
+            name="worker",
+            heap_size_gb=4,
+            extra_environment_vars=["NOEQUALS"],
+        )
+    dummy_session_manager.connect_to_new_worker.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_connect_to_new_worker_resource_error(
     coreplus_session_manager, dummy_session_manager
 ):

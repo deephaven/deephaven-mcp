@@ -1410,7 +1410,7 @@ async def pq_create(
         extra_jvm_args (list[str] | None): Additional JVM arguments
         extra_class_path (list[str] | None): Additional classpath entries to prepend (e.g., ["/opt/libs/custom.jar"])
         python_virtual_environment (str | None): Named Python venv for Core+ workers
-        extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...]
+        extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None (default) and 0 = permanent; positive = temporary
         admin_groups (list[str] | None): Groups with admin access
@@ -1885,7 +1885,7 @@ async def pq_modify(
         extra_jvm_args (list[str] | None): Additional JVM arguments (replaces current)
         extra_class_path (list[str] | None): Additional classpath entries (replaces current)
         python_virtual_environment (str | None): Named Python venv for Core+ workers
-        extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] (replaces current)
+        extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format; replaces current)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (auto-delete disabled), positive integer = timeout in seconds
         admin_groups (list[str] | None): Groups with admin access (replaces current)

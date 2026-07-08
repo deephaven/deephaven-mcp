@@ -255,7 +255,8 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "--env",
             "extra_environment_vars",
             multiple=True,
-            help="Environment var entry (repeatable).",
+            metavar="KEY=VALUE",
+            help="Worker environment variable as KEY=VALUE (repeatable).",
         ),
         click.option(
             "--init-timeout-nanos",

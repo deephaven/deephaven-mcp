@@ -483,7 +483,7 @@ additionally requires `--system` and `--heap-size-gb` and accepts
 shared flags are: `--script-body`/`--script-path`, `--language`
 (`Python`/`Groovy`), `--configuration-type` (`Script`/`RunAndDone`), `--schedule`
 (repeatable), `--server`, `--engine`, `--jvm-profile`, `--jvm-arg` (repeatable),
-`--class-path` (repeatable), `--python-venv`, `--env` (repeatable),
+`--class-path` (repeatable), `--python-venv`, `--env KEY=VALUE` (repeatable),
 `--init-timeout-nanos`, `--auto-delete-timeout`, `--admin-group`/`--viewer-group`
 (repeatable), `--restart-users`, and `--owner`. Run `dh-mcp pq create --help`
 (or `modify`) for the full per-flag detail. `--script-body`/`--script-path` and

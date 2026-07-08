@@ -2,8 +2,8 @@
 
 Pure, synchronous helpers that build and modify ``PersistentQueryConfigMessage`` protobufs
 for the controller client's ``make_pq_config`` (create) and ``update_pq_config`` (modify).
-The public entry points are :func:`validate_pq_config_args` and :func:`apply_pq_config_fields`;
-everything else is internal. These helpers perform no IO.
+The public entry points are :func:`validate_pq_config_args`, :func:`apply_pq_config_fields`,
+and :func:`env_var_entries_to_wire`; everything else is internal. These helpers perform no IO.
 """
 
 import json
@@ -28,6 +28,37 @@ _DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING: tuple[str, ...] = tuple(
 # applies, so PQs created via make_pq_config and modified via update_pq_config are identical.
 _TEMPORARY_QUEUE_NAME = "InteractiveConsoleTemporaryQueue"
 _TEMPORARY_EXPIRATION_MINUTES = 2880
+
+
+def env_var_entries_to_wire(entries: list[str]) -> list[str]:
+    """Convert ``KEY=VALUE`` environment-variable entries to the controller wire format.
+
+    The controller's ``extraEnvironmentVariables`` field is a flat alternating
+    key/value list — ``["KEY1", "value1", "KEY2", "value2"]``. A ``"KEY=VALUE"``
+    string placed directly in the field is rejected server-side with
+    ``ValidationFailure: ... Has an invalid key with no value``. Callers accept
+    the conventional ``KEY=VALUE`` form and this helper converts it at the wire
+    boundary. The value is everything after the first ``=``, so values may
+    themselves contain ``=``.
+
+    Args:
+        entries (list[str]): Environment-variable entries, each ``"KEY=VALUE"``.
+
+    Returns:
+        list[str]: Flat alternating key/value list, twice the input length.
+
+    Raises:
+        ValueError: If an entry has no ``=`` or an empty key.
+    """
+    wire: list[str] = []
+    for entry in entries:
+        key, sep, value = entry.partition("=")
+        if not sep or not key:
+            raise ValueError(
+                f"Invalid environment variable entry {entry!r}: expected 'KEY=VALUE'."
+            )
+        wire.extend((key, value))
+    return wire
 
 
 def _normalize_programming_language(language: str) -> str:
@@ -234,12 +265,16 @@ def _apply_pq_config_list_fields(
         schedule (list[str] | None): Scheduling entries as ``Key=Value`` strings → ``config_pb.scheduling``.
         extra_jvm_args (list[str] | None): JVM arguments → ``config_pb.extraJvmArguments``.
         extra_class_path (list[str] | None): Classpath entries → ``config_pb.classPathAdditions``.
-        extra_environment_vars (list[str] | None): Env vars (KEY=VALUE) → ``config_pb.extraEnvironmentVariables``.
+        extra_environment_vars (list[str] | None): Env vars as ``KEY=VALUE`` entries,
+            converted via :func:`env_var_entries_to_wire` → ``config_pb.extraEnvironmentVariables``.
         admin_groups (list[str] | None): Admin group names → ``config_pb.adminGroups``.
         viewer_groups (list[str] | None): Viewer group names → ``config_pb.viewerGroups``.
 
     Returns:
         bool: True if any field was updated, False if all parameters were None.
+
+    Raises:
+        ValueError: If an ``extra_environment_vars`` entry is not ``KEY=VALUE``.
     """
     has_changes = False
     if schedule is not None:
@@ -256,7 +291,9 @@ def _apply_pq_config_list_fields(
         has_changes = True
     if extra_environment_vars is not None:
         del config_pb.extraEnvironmentVariables[:]
-        config_pb.extraEnvironmentVariables.extend(extra_environment_vars)
+        config_pb.extraEnvironmentVariables.extend(
+            env_var_entries_to_wire(extra_environment_vars)
+        )
         has_changes = True
     if admin_groups is not None:
         del config_pb.adminGroups[:]

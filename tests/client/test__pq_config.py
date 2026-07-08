@@ -11,6 +11,7 @@ from deephaven_mcp.client._pq_config import (
     _normalize_programming_language,
     _set_termination_delay,
     apply_pq_config_fields,
+    env_var_entries_to_wire,
     validate_pq_config_args,
 )
 
@@ -58,6 +59,42 @@ def test_default_permanent_continuous_scheduling_matches_vendor(pq_config_mod):
     assert pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING == tuple(
         GenerateScheduling.generate_continuous_scheduler(start_time="00:00:00")
     )
+
+
+def test_env_var_entries_to_wire_converts_to_alternating_pairs():
+    """KEY=VALUE entries become a flat alternating key/value list.
+
+    Regression test: the controller reads extraEnvironmentVariables as
+    alternating key/value entries; a "KEY=VALUE" string placed directly in
+    the field is rejected server-side with "Has an invalid key with no value".
+    """
+    assert env_var_entries_to_wire(["A=1", "B=two"]) == [
+        "A",
+        "1",
+        "B",
+        "two",
+    ]
+
+
+def test_env_var_entries_to_wire_value_may_contain_equals():
+    assert env_var_entries_to_wire(["OPTS=-Da=b"]) == [
+        "OPTS",
+        "-Da=b",
+    ]
+
+
+def test_env_var_entries_to_wire_empty_value_allowed():
+    assert env_var_entries_to_wire(["EMPTY="]) == ["EMPTY", ""]
+
+
+def test_env_var_entries_to_wire_empty_list():
+    assert env_var_entries_to_wire([]) == []
+
+
+@pytest.mark.parametrize("bad", ["NOEQUALS", "=value"])
+def test_env_var_entries_to_wire_malformed_entry_raises(bad):
+    with pytest.raises(ValueError, match="expected 'KEY=VALUE'"):
+        env_var_entries_to_wire([bad])
 
 
 def test_normalize_programming_language_python():
@@ -271,7 +308,9 @@ def test_apply_pq_config_list_fields_explicit_replaces_each():
     config.scheduling.extend.assert_called_once_with(["s1"])
     config.extraJvmArguments.extend.assert_called_once_with(["-Xmx1g"])
     config.classPathAdditions.extend.assert_called_once_with(["/jar"])
-    config.extraEnvironmentVariables.extend.assert_called_once_with(["K=V"])
+    # KEY=VALUE entries are converted to the controller's alternating
+    # key/value wire format at the protobuf boundary.
+    config.extraEnvironmentVariables.extend.assert_called_once_with(["K", "V"])
     config.adminGroups.extend.assert_called_once_with(["a"])
     config.viewerGroups.extend.assert_called_once_with(["v"])
 

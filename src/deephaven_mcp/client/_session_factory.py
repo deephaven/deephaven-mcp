@@ -87,6 +87,7 @@ from ._auth_client import CorePlusAuthClient
 # Local application imports
 from ._base import ClientObjectWrapper, describe_exception_chain
 from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
+from ._pq_config import env_var_entries_to_wire
 from ._session import CorePlusSession
 from ._timeouts import EnterpriseClientTimeouts
 
@@ -674,8 +675,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 Examples include garbage collection settings ("-XX:+UseG1GC"), memory settings, or
                 custom Java properties. If None (default), only standard JVM arguments are used.
             extra_environment_vars (list[str] | None): Environment variables to set for the worker process.
-                Format as ["NAME=value", ...]. Useful for configuring system properties, paths,
-                or feature flags. If None (default), the standard environment is used.
+                Format as ["NAME=value", ...] (converted internally to the controller's
+                alternating key/value wire format). Useful for configuring system properties,
+                paths, or feature flags. If None (default), the standard environment is used.
             engine (str): Engine type that determines the worker's capabilities and behavior.
                 Defaults to "DeephavenCommunity". Other options may include enterprise engines
                 with additional features depending on your Deephaven installation.
@@ -775,6 +777,14 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
             - CorePlusSession.close: Method to disconnect from a worker and release resources
         """
         timeout_seconds = self._timeouts.worker_creation_timeout_seconds
+        # The vendor call places these directly into the protobuf's repeated
+        # extraEnvironmentVariables field, which the controller reads as a flat
+        # alternating key/value list — convert from the KEY=VALUE form here.
+        wire_environment_vars = (
+            env_var_entries_to_wire(extra_environment_vars)
+            if extra_environment_vars is not None
+            else None
+        )
         try:
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_new_worker] Creating new worker and connecting to it"
@@ -788,7 +798,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                     heap_size_gb=heap_size_gb,
                     server=server,
                     extra_jvm_args=extra_jvm_args,
-                    extra_environment_vars=extra_environment_vars,
+                    extra_environment_vars=wire_environment_vars,
                     engine=engine,
                     auto_delete_timeout=auto_delete_timeout,
                     admin_groups=admin_groups,

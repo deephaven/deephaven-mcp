@@ -315,12 +315,12 @@ async def enterprise_systems_status(
 
 
 def _env_vars_to_list(env_vars: dict[str, str] | None) -> list[str] | None:
-    """Convert an ``environment_vars`` mapping to the controller wire format.
+    """Convert an ``environment_vars`` mapping to ``"NAME=value"`` entries.
 
-    The Deephaven Enterprise controller accepts environment variables
-    as a list of ``"NAME=value"`` strings; the MCP-side schema and
-    tool surface use a more idiomatic ``dict[str, str]``. This helper
-    is the call-site adapter at the controller boundary.
+    The MCP-side schema and tool surface use an idiomatic ``dict[str, str]``;
+    the client layer accepts ``"NAME=value"`` entries and converts them to the
+    controller's alternating key/value wire format at the protobuf boundary
+    (:func:`deephaven_mcp.client._pq_config.env_var_entries_to_wire`).
 
     Args:
         env_vars (dict[str, str] | None): Environment variables keyed
@@ -674,7 +674,7 @@ async def session_enterprise_create(
             extra_jvm_args=resolved_config["extra_jvm_args"],
             extra_environment_vars=resolved_config[
                 "extra_environment_vars"
-            ],  # controller wire format: ["NAME=value", ...]
+            ],  # ["NAME=value", ...]; the client layer converts to the wire format
             admin_groups=resolved_config["admin_groups"],
             viewer_groups=resolved_config["viewer_groups"],
             configuration_transformer=configuration_transformer,
@@ -758,7 +758,8 @@ def _resolve_session_parameters(
         engine (str | None): Tool parameter value for engine type.
         extra_jvm_args (list[str] | None): Tool parameter value for additional JVM arguments.
         environment_vars (dict[str, str] | None): Tool parameter value for environment
-            variables (mapping form; the controller adapter converts to ``["NAME=value", ...]``).
+            variables (mapping form; converted to ``["NAME=value", ...]`` entries for
+            the client layer).
         admin_groups (list[str] | None): Tool parameter value for admin user groups.
         viewer_groups (list[str] | None): Tool parameter value for viewer user groups.
         session_arguments (dict[str, Any] | None): Tool parameter value for pydeephaven.Session constructor.

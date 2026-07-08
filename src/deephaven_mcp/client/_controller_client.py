@@ -52,7 +52,11 @@ from deephaven_mcp._exceptions import (
 )
 
 from ._base import ClientObjectWrapper, describe_exception_chain
-from ._pq_config import apply_pq_config_fields, validate_pq_config_args
+from ._pq_config import (
+    apply_pq_config_fields,
+    env_var_entries_to_wire,
+    validate_pq_config_args,
+)
 from ._protobuf import (
     CorePlusQueryConfig,
     CorePlusQueryInfo,
@@ -847,7 +851,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             extra_jvm_args (list[str] | None): A list of extra JVM arguments to pass to the worker.
             extra_class_path (list[str] | None): Additional classpath entries to prepend to worker's classpath.
             python_virtual_environment (str | None): Named Python virtual environment for Core+ workers.
-            extra_environment_vars (list[str] | None): A list of extra environment variables for the worker.
+            extra_environment_vars (list[str] | None): Environment variables for the worker,
+                each entry ``"KEY=VALUE"`` (converted internally to the controller's
+                alternating key/value wire format).
             init_timeout_nanos (int | None): Initialization timeout in nanoseconds.
             auto_delete_timeout (int | None): Seconds of inactivity before the controller
                 auto-deletes the query. None (default) and 0 both create a permanent query
@@ -865,7 +871,8 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         Raises:
             ValueError: If invalid parameters are provided (script_body/script_path or
-                auto_delete_timeout/schedule supplied together).
+                auto_delete_timeout/schedule supplied together, or a malformed
+                extra_environment_vars entry).
             DeephavenConnectionError: If not authenticated or unable to communicate with the controller.
             QueryError: If configuration creation fails for any other reason.
         """
@@ -883,6 +890,15 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         validate_pq_config_args(auto_delete_timeout, schedule, script_body, script_path)
 
+        # The vendor call places these directly into the protobuf's repeated
+        # extraEnvironmentVariables field, which the controller reads as a flat
+        # alternating key/value list — convert from the KEY=VALUE form here.
+        wire_environment_vars = (
+            env_var_entries_to_wire(extra_environment_vars)
+            if extra_environment_vars is not None
+            else None
+        )
+
         try:
             # Baseline config from the vendor: serial, version, defaults, and the
             # natively-supported fields (name, heap, server, engine, groups, jvm args,
@@ -894,7 +910,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 heap_size_gb,
                 server,
                 extra_jvm_args,
-                extra_environment_vars,
+                wire_environment_vars,
                 engine,
                 None,
                 admin_groups,
@@ -1001,7 +1017,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             extra_jvm_args (list[str] | None): JVM arguments; replaces existing.
             extra_class_path (list[str] | None): Classpath entries; replaces existing.
             python_virtual_environment (str | None): Python venv control.
-            extra_environment_vars (list[str] | None): Env vars; replaces existing.
+            extra_environment_vars (list[str] | None): Env vars as ``"KEY=VALUE"`` entries
+                (converted internally to the controller's alternating key/value wire
+                format); replaces existing.
             init_timeout_nanos (int | None): Initialization timeout in nanoseconds.
             auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion.
                 None leaves it unchanged; 0 makes the query permanent; a positive integer
