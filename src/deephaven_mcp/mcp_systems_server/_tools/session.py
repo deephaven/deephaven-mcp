@@ -125,9 +125,9 @@ async def sessions_list(
 
     AI Agent Usage:
     - Use this to discover available sessions before calling other session-based tools
-    - Use returned 'session_id' values with other tools like run_script, get_table_data
+    - Use returned 'id' values with other tools like run_script, get_table_data
     - Check 'type' / 'system' / 'origin' fields on returned rows to scope subsequent calls
-    - For detailed session information, use session_details with a specific session_id
+    - For detailed session information, use session_details with a specific id
     - If 'partial_result' is present, this list may be incomplete: check its 'phase'
       ('loading'/'partial' → discovery still running, retry later; 'failed' → report)
       and 'errors' for which enterprise systems could not be reached
@@ -159,7 +159,7 @@ async def sessions_list(
         dict: Structured result object with keys:
             - 'success' (bool): True if retrieval succeeded, False otherwise.
             - 'sessions' (list[dict]): List of session info dicts. Each contains:
-                - 'session_id' (str): Fully qualified session identifier
+                - 'id' (str): Fully qualified session identifier
                   in the format ``"{type}:{system}:{session_name}"``. Use
                   this verbatim when calling other tools.
                 - 'type' (str): ``"community"`` or ``"enterprise"``.
@@ -189,14 +189,14 @@ async def sessions_list(
             'success': True,
             'sessions': [
                 {
-                    'session_id': 'enterprise:prod-system:my-session',
+                    'id': 'enterprise:prod-system:my-session',
                     'type': 'enterprise',
                     'system': 'prod-system',
                     'origin': 'discovered',
                     'session_name': 'my-session',
                 },
                 {
-                    'session_id': 'community:community:default',
+                    'id': 'community:community:default',
                     'type': 'community',
                     'system': 'community',
                     'origin': 'static',
@@ -210,7 +210,7 @@ async def sessions_list(
             'success': True,
             'sessions': [
                 {
-                    'session_id': 'community:community:default',
+                    'id': 'community:community:default',
                     'type': 'community',
                     'system': 'community',
                     'origin': 'static',
@@ -290,7 +290,7 @@ async def sessions_list(
 
 
 async def _get_session_liveness_info(
-    mgr: BaseItemManager, session_id: str, attempt_to_connect: bool
+    mgr: BaseItemManager, id: str, attempt_to_connect: bool
 ) -> tuple[bool, str, str | None]:
     """Get session liveness status and availability.
 
@@ -299,7 +299,7 @@ async def _get_session_liveness_info(
 
     Args:
         mgr (BaseItemManager): Session manager for the target session
-        session_id (str): Session identifier for logging purposes
+        id (str): Fully qualified id, used for logging
         attempt_to_connect (bool): Whether to attempt connecting to verify status
 
     Returns:
@@ -314,19 +314,19 @@ async def _get_session_liveness_info(
         liveness_detail = detail
         available = await mgr.is_alive()
         _LOGGER.debug(
-            f"[mcp_systems_server:session_details] Session '{session_id}' liveness: {liveness_status}, detail: {liveness_detail}"
+            f"[mcp_systems_server:session_details] Session '{id}' liveness: {liveness_status}, detail: {liveness_detail}"
         )
         return available, liveness_status, liveness_detail
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:session_details] Could not check liveness for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not check liveness for '{id}': {e!r}"
         )
         return False, "OFFLINE", str(e)
 
 
 async def _get_session_property[T](
     mgr: BaseItemManager,
-    session_id: str,
+    id: str,
     available: bool,
     property_name: str,
     getter_func: Callable[[BaseSession], Awaitable[T]],
@@ -335,7 +335,7 @@ async def _get_session_property[T](
 
     Args:
         mgr (BaseItemManager): Session manager
-        session_id (str): Session identifier
+        id (str): Fully qualified id.
         available (bool): Whether the session is available
         property_name (str): Name of the property for logging
         getter_func (Callable[[BaseSession], Awaitable[T]]): Async function to get the property from the session
@@ -350,18 +350,18 @@ async def _get_session_property[T](
         session = await mgr.get()
         result = await getter_func(session)
         _LOGGER.debug(
-            f"[mcp_systems_server:session_details] Session '{session_id}' {property_name}: {result}"
+            f"[mcp_systems_server:session_details] Session '{id}' {property_name}: {result}"
         )
         return result
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:session_details] Could not get {property_name} for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not get {property_name} for '{id}': {e!r}"
         )
         return None
 
 
 async def _get_session_programming_language(
-    mgr: BaseItemManager, session_id: str, available: bool
+    mgr: BaseItemManager, id: str, available: bool
 ) -> str | None:
     """Get the programming language of a session.
 
@@ -371,7 +371,7 @@ async def _get_session_programming_language(
 
     Args:
         mgr (BaseItemManager): Session manager for the target session
-        session_id (str): Session identifier for logging purposes
+        id (str): Fully qualified id, used for logging
         available (bool): Whether the session is available (pre-checked)
 
     Returns:
@@ -385,18 +385,18 @@ async def _get_session_programming_language(
         session: BaseSession = await mgr.get()
         programming_language = str(session.programming_language)
         _LOGGER.debug(
-            f"[mcp_systems_server:session_details] Session '{session_id}' programming_language: {programming_language}"
+            f"[mcp_systems_server:session_details] Session '{id}' programming_language: {programming_language}"
         )
         return programming_language
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:session_details] Could not get programming_language for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not get programming_language for '{id}': {e!r}"
         )
         return None
 
 
 async def _get_session_versions(
-    mgr: BaseItemManager, session_id: str, available: bool
+    mgr: BaseItemManager, id: str, available: bool
 ) -> tuple[str | None, str | None]:
     """Get Deephaven version information from a session.
 
@@ -405,7 +405,7 @@ async def _get_session_versions(
 
     Args:
         mgr (BaseItemManager): Session manager for the target session
-        session_id (str): Session identifier for logging purposes
+        id (str): Fully qualified id, used for logging
         available (bool): Whether the session is available (pre-checked)
 
     Returns:
@@ -421,18 +421,18 @@ async def _get_session_versions(
         session = await mgr.get()
         community_version, enterprise_version = await queries.get_dh_versions(session)
         _LOGGER.debug(
-            f"[mcp_systems_server:session_details] Session '{session_id}' versions: community={community_version}, enterprise={enterprise_version}"
+            f"[mcp_systems_server:session_details] Session '{id}' versions: community={community_version}, enterprise={enterprise_version}"
         )
         return community_version, enterprise_version
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:session_details] Could not get Deephaven versions for '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_details] Could not get Deephaven versions for '{id}': {e!r}"
         )
         return None, None
 
 
 async def session_details(
-    context: Context, session_id: str, attempt_to_connect: bool = False
+    context: Context, id: str, attempt_to_connect: bool = False
 ) -> dict:
     """MCP Tool: Get detailed information about a specific session.
 
@@ -453,13 +453,15 @@ async def session_details(
     - Use attempt_to_connect=True to actively verify session connectivity
     - Check 'available' field to determine if session can be used
     - Use 'liveness_status' for detailed status classification
-    - Use sessions_list first to discover available session_id values
+    - Use sessions_list first to discover available id values
     - IMPORTANT: attempt_to_connect=True creates resource overhead (open sessions consume MCP server resources and each session maintains connections)
     - Only use attempt_to_connect=True for sessions you actually intend to use, not for general discovery or monitoring
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): The session identifier (fully qualified name) to get details for.
+        id (str): Fully qualified id in the form 'type:system:name'
+            (e.g. 'community:local:my_worker', 'enterprise:prod:12345'),
+            as returned by sessions_list.
         attempt_to_connect (bool, optional): Whether to attempt connecting to the session
             to verify its status. Defaults to False for faster response.
 
@@ -467,7 +469,7 @@ async def session_details(
         dict: Structured result object with keys:
             - 'success' (bool): True if retrieval succeeded, False otherwise.
             - 'session' (dict): Session details including:
-                - session_id (fully qualified session name)
+                - id (fully qualified session name)
                 - type ("community" or "enterprise")
                 - system (matches list_systems names)
                 - origin ("static" / "dynamic" / "discovered"; null only for a manager kind not yet classified)
@@ -495,9 +497,7 @@ async def session_details(
         the information could be retrieved successfully. Fields with null values are excluded
         from the response.
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:session_details] Invoked for session_id: {session_id}"
-    )
+    _LOGGER.info(f"[mcp_systems_server:session_details] Invoked for id: {id}")
     try:
         _LOGGER.debug(
             "[mcp_systems_server:session_details] Accessing session registry from context"
@@ -506,25 +506,25 @@ async def session_details(
 
         # Get the specific session manager directly
         _LOGGER.debug(
-            f"[mcp_systems_server:session_details] Retrieving session manager for '{session_id}'"
+            f"[mcp_systems_server:session_details] Retrieving session manager for '{id}'"
         )
         try:
             _t0 = time.monotonic()
-            mgr = await session_registry.get(QualifiedSessionId.from_str(session_id))
+            mgr = await session_registry.get(QualifiedSessionId.from_str(id))
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Retrieved session manager for '{session_id}' in {time.monotonic() - _t0:.2f}s"
+                f"[mcp_systems_server:session_details] Retrieved session manager for '{id}' in {time.monotonic() - _t0:.2f}s"
             )
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Session with ID '{session_id}' not found: {e}",
+                "error": f"Session with ID '{id}' not found: {e}",
                 "isError": True,
             }
 
         try:
             # Get basic metadata
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Extracting metadata for session '{session_id}'"
+                f"[mcp_systems_server:session_details] Extracting metadata for session '{id}'"
             )
             # ``session_registry.get(...)`` returns a ``SessionManager``,
             # so the manager serializes itself — common identity plus any
@@ -532,45 +532,45 @@ async def session_details(
             # caller layers on the runtime facts it queries below.
             session_info: dict[str, object] = mgr.to_dict(verbose=True)
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Session '{session_id}' metadata: "
+                f"[mcp_systems_server:session_details] Session '{id}' metadata: "
                 f"type={session_info['type']}, system={session_info['system']}, "
                 f"origin={session_info['origin']}, name={session_info['session_name']}"
             )
 
             # Get liveness status and availability
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Checking liveness for session '{session_id}' (attempt_to_connect={attempt_to_connect})"
+                f"[mcp_systems_server:session_details] Checking liveness for session '{id}' (attempt_to_connect={attempt_to_connect})"
             )
             _t1 = time.monotonic()
             available, liveness_status, liveness_detail = (
-                await _get_session_liveness_info(mgr, session_id, attempt_to_connect)
+                await _get_session_liveness_info(mgr, id, attempt_to_connect)
             )
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Liveness check for '{session_id}' took {time.monotonic() - _t1:.2f}s"
+                f"[mcp_systems_server:session_details] Liveness check for '{id}' took {time.monotonic() - _t1:.2f}s"
             )
 
             # Get session properties using helper functions
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Retrieving session properties for '{session_id}' (available={available})"
+                f"[mcp_systems_server:session_details] Retrieving session properties for '{id}' (available={available})"
             )
             programming_language = await _get_session_programming_language(
-                mgr, session_id, available
+                mgr, id, available
             )
 
             # TODO: should the versions be cached?
             programming_language_version = await _get_session_property(
                 mgr,
-                session_id,
+                id,
                 available,
                 "programming_language_version",
                 queries.get_programming_language_version,
             )
 
             community_version, enterprise_version = await _get_session_versions(
-                mgr, session_id, available
+                mgr, id, available
             )
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Completed property retrieval for session '{session_id}'"
+                f"[mcp_systems_server:session_details] Completed property retrieval for session '{id}'"
             )
 
             # The runtime facts are queried from the live session, not
@@ -591,18 +591,18 @@ async def session_details(
                 {k: v for k, v in runtime_facts.items() if v is not None}
             )
             _LOGGER.debug(
-                f"[mcp_systems_server:session_details] Built session info for '{session_id}' with {len(session_info)} fields"
+                f"[mcp_systems_server:session_details] Built session info for '{id}' with {len(session_info)} fields"
             )
 
             return {"success": True, "session": session_info}
 
         except Exception as e:
             _LOGGER.warning(
-                f"[mcp_systems_server:session_details] Could not process session '{session_id}': {e!r}"
+                f"[mcp_systems_server:session_details] Could not process session '{id}': {e!r}"
             )
             return {
                 "success": False,
-                "error": f"Error processing session '{session_id}': {str(e)}",
+                "error": f"Error processing session '{id}': {str(e)}",
                 "isError": True,
             }
 

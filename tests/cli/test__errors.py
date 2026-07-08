@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -184,6 +185,33 @@ def test_error_code_help_text_values_are_unique() -> None:
     """
     seen = {ec.help_text for ec in ErrorCode}
     assert len(seen) == len(ErrorCode)
+
+
+def test_mcp_request_timeout_member() -> None:
+    """Pin the timeout code's wire value, exit code, and actionable help.
+
+    The dynamic sweeps above check structural invariants for every member;
+    this pins the specific contract agents rely on: the stable wire string,
+    the exit-2 classification, and help text that carries the two remedies
+    (the operation may still complete server-side; how to allow more time).
+    """
+    code = ErrorCode.MCP_REQUEST_TIMEOUT
+    assert code.value == "mcp_request_timeout"
+    assert code.exit_code == 2
+    assert "may still complete the operation server-side" in code.help_text
+    assert "--timeout" in code.help_text
+
+
+def test_every_error_code_documented_in_cli_md() -> None:
+    """Every ErrorCode wire value appears in docs/CLI.md.
+
+    The module docstring declares the enum "the single source of truth"
+    that "docs/CLI.md mirrors"; this guards the mirror against drift when
+    a new code is added without a docs table row.
+    """
+    docs = (Path(__file__).parents[2] / "docs" / "CLI.md").read_text(encoding="utf-8")
+    missing = [ec.value for ec in ErrorCode if f"`{ec.value}`" not in docs]
+    assert not missing, f"error codes missing from docs/CLI.md: {missing}"
 
 
 def test_error_code_help_text_is_attribute_of_member() -> None:

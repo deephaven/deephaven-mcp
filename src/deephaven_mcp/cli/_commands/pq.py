@@ -3,8 +3,9 @@
 Verbs: ``list``, ``details``, ``name-to-id``, ``create``, ``modify``,
 ``delete``, ``start``, ``stop``, ``restart``.
 
-Enterprise (Core+) only. Persistent Queries are addressed by serial id;
-use ``name-to-id`` to resolve a human name within a system.
+Enterprise (Core+) only. Persistent Queries are addressed by their fully
+qualified id ``enterprise:<system>:<serial>`` — the same id the session
+verbs use; use ``name-to-id`` to resolve a human name within a system.
 """
 
 from __future__ import annotations
@@ -38,8 +39,10 @@ def pq() -> None:
 
     Enterprise (Core+) only. Inspect with 'list', 'details', and
     'name-to-id'; manage with 'create', 'modify', 'delete'; control the
-    lifecycle with 'start', 'stop', 'restart'. PQs are addressed by serial
-    id. These commands auto-start the daemon unless --no-auto-start is set.
+    lifecycle with 'start', 'stop', 'restart'. PQs are addressed by their
+    fully qualified id 'enterprise:system:serial' — the same id the
+    session verbs use. These commands auto-start the daemon unless
+    --no-auto-start is set.
     """
 
 
@@ -79,27 +82,31 @@ async def pq_list(runtime: Runtime, system: str) -> None:
     wraps_tool="pq_details",
     help=build_help(
         summary="Show details for one Persistent Query.",
-        description="Enterprise (Core+) only. Reports configuration and status for PQ_ID.",
+        description="Enterprise (Core+) only. Reports configuration and status for ID.",
         arguments=(
-            HelpEntry("PQ_ID", "PQ serial id. Run 'pq list' or 'pq name-to-id'."),
+            HelpEntry(
+                "ID",
+                "Fully qualified PQ id 'enterprise:system:serial'. "
+                "Run 'pq list' or 'pq name-to-id'.",
+            ),
         ),
         output=_OUTPUT_OBJECT,
-        examples=("$ dh-mcp pq details 1234567890",),
+        examples=("$ dh-mcp pq details enterprise:prod:1234567890",),
         see_also=("dh-mcp pq list SYSTEM",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("pq_id")
+@click.argument("id")
 @click.pass_obj
 @run_async
-async def pq_details(runtime: Runtime, pq_id: str) -> None:
+async def pq_details(runtime: Runtime, id: str) -> None:
     """Show details for one Persistent Query."""
     await call_and_echo(
         runtime,
         "pq_details",
         retry_command="dh-mcp pq details",
-        arguments={"pq_id": pq_id},
+        arguments={"id": id},
     )
 
 
@@ -108,7 +115,7 @@ async def pq_details(runtime: Runtime, pq_id: str) -> None:
     output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_name_to_id",
     help=build_help(
-        summary="Resolve a Persistent Query name to its serial id.",
+        summary="Resolve a Persistent Query name to its fully qualified id.",
         description="Enterprise (Core+) only. Looks up PQ_NAME within SYSTEM.",
         arguments=(
             HelpEntry("SYSTEM", "Enterprise system name."),
@@ -248,7 +255,8 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "--env",
             "extra_environment_vars",
             multiple=True,
-            help="Environment var entry (repeatable).",
+            metavar="KEY=VALUE",
+            help="Worker environment variable as KEY=VALUE (repeatable).",
         ),
         click.option(
             "--init-timeout-nanos",
@@ -361,25 +369,29 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
     help=build_help(
         summary="Modify an existing Persistent Query.",
         description=(
-            "Enterprise (Core+) only. Updates only the fields you pass on PQ_ID; "
+            "Enterprise (Core+) only. Updates only the fields you pass on ID; "
             "everything else is left unchanged. --script-body/--script-path and "
             "--auto-delete-timeout/--schedule are each mutually exclusive. Pass "
             "--restart to restart the PQ after applying the change."
         ),
         arguments=(
-            HelpEntry("PQ_ID", "PQ serial id. Run 'pq list' or 'pq name-to-id'."),
+            HelpEntry(
+                "ID",
+                "Fully qualified PQ id 'enterprise:system:serial'. "
+                "Run 'pq list' or 'pq name-to-id'.",
+            ),
         ),
         output=_OUTPUT_OBJECT,
         examples=(
-            "$ dh-mcp pq modify 1234567890 --heap-size-gb 8 --restart",
-            "$ dh-mcp pq modify 1234567890 --disabled",
+            "$ dh-mcp pq modify enterprise:prod:1234567890 --heap-size-gb 8 --restart",
+            "$ dh-mcp pq modify enterprise:prod:1234567890 --disabled",
         ),
         see_also=("dh-mcp pq details ID", "dh-mcp pq restart ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS, *wrapper_error_codes()),
     ),
 )
-@click.argument("pq_id")
+@click.argument("id")
 @click.option(
     "--restart",
     "restart",
@@ -425,13 +437,11 @@ async def pq_modify(ctx: click.Context, **_options: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _ids(pq_id: tuple[str, ...]) -> list[str]:
+def _ids(id: tuple[str, ...]) -> list[str]:
     """Validate and return the PQ id list from a variadic argument."""
-    if not pq_id:
-        raise CliError(
-            "At least one PQ_ID is required.", code=ErrorCode.MISSING_ARGUMENT
-        )
-    return list(pq_id)
+    if not id:
+        raise CliError("At least one ID is required.", code=ErrorCode.MISSING_ARGUMENT)
+    return list(id)
 
 
 @pq.command(
@@ -441,20 +451,27 @@ def _ids(pq_id: tuple[str, ...]) -> list[str]:
     help=build_help(
         summary="Delete one or more Persistent Queries.",
         description=(
-            "Enterprise (Core+) only. Deletes every PQ_ID given. --max-concurrent "
+            "Enterprise (Core+) only. Deletes every ID given. --max-concurrent "
             "caps how many deletions run in parallel. Best-effort: exit 0 means the "
             "batch ran, not that every id succeeded — check the summary and per-item "
             "results for failures."
         ),
-        arguments=(HelpEntry("PQ_ID", "One or more PQ serial ids."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "One or more fully qualified PQ ids ('enterprise:system:serial').",
+            ),
+        ),
         output=_OUTPUT_OBJECT,
-        examples=("$ dh-mcp pq delete 1234567890 1234567891",),
+        examples=(
+            "$ dh-mcp pq delete enterprise:prod:1234567890 enterprise:prod:1234567891",
+        ),
         see_also=("dh-mcp pq list SYSTEM",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
     ),
 )
-@click.argument("pq_id", nargs=-1)
+@click.argument("id", nargs=-1)
 @click.option(
     "--max-concurrent",
     "max_concurrent",
@@ -465,10 +482,10 @@ def _ids(pq_id: tuple[str, ...]) -> list[str]:
 @click.pass_obj
 @run_async
 async def pq_delete(
-    runtime: Runtime, pq_id: tuple[str, ...], max_concurrent: int | None
+    runtime: Runtime, id: tuple[str, ...], max_concurrent: int | None
 ) -> None:
     """Delete one or more Persistent Queries."""
-    arguments: dict[str, Any] = {"pq_id": _ids(pq_id)}
+    arguments: dict[str, Any] = {"id": _ids(id)}
     if max_concurrent is not None:
         arguments["max_concurrent"] = max_concurrent
     await call_and_echo(
@@ -492,15 +509,21 @@ def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]
                 "across multiple ids. Best-effort: exit 0 means the batch ran, not "
                 "that every id succeeded — check the per-item results for failures."
             ),
-            arguments=(HelpEntry("PQ_ID", "One or more PQ serial ids."),),
+            arguments=(
+                HelpEntry(
+                    "ID",
+                    "One or more fully qualified PQ ids "
+                    "('enterprise:system:serial').",
+                ),
+            ),
             output=_OUTPUT_OBJECT,
-            examples=(f"$ dh-mcp pq {name} 1234567890",),
+            examples=(f"$ dh-mcp pq {name} enterprise:prod:1234567890",),
             see_also=("dh-mcp pq details ID",),
             exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
             error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
         ),
     )
-    @click.argument("pq_id", nargs=-1)
+    @click.argument("id", nargs=-1)
     @click.option(
         "--wait/--no-wait", "wait", default=True, help="Wait for the state change."
     )
@@ -514,9 +537,9 @@ def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]
     @click.pass_obj
     @run_async
     async def _cmd(
-        runtime: Runtime, pq_id: tuple[str, ...], wait: bool, max_concurrent: int | None
+        runtime: Runtime, id: tuple[str, ...], wait: bool, max_concurrent: int | None
     ) -> None:
-        arguments: dict[str, Any] = {"pq_id": _ids(pq_id), "wait": wait}
+        arguments: dict[str, Any] = {"id": _ids(id), "wait": wait}
         if max_concurrent is not None:
             arguments["max_concurrent"] = max_concurrent
         await call_and_echo(

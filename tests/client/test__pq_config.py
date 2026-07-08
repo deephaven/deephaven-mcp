@@ -11,7 +11,9 @@ from deephaven_mcp.client._pq_config import (
     _normalize_programming_language,
     _set_termination_delay,
     apply_pq_config_fields,
+    env_var_entries_to_wire,
     validate_pq_config_args,
+    wire_to_env_var_entries,
 )
 
 
@@ -45,6 +47,72 @@ def _make_config_mock():
 # ===========================================================================
 # Module-level PQ-config helper tests
 # ===========================================================================
+
+
+def test_default_permanent_continuous_scheduling_matches_vendor(pq_config_mod):
+    """The default permanent scheduler is the vendor generator's exact output.
+
+    Locks the constant to the vendor helper so the entry set cannot drift from
+    the vendor client as a hand-rolled copy.
+    """
+    from deephaven_enterprise.client.generate_scheduling import GenerateScheduling
+
+    assert pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING == tuple(
+        GenerateScheduling.generate_continuous_scheduler(start_time="00:00:00")
+    )
+
+
+def test_env_var_entries_to_wire_converts_to_alternating_pairs():
+    """KEY=VALUE entries become a flat alternating key/value list.
+
+    Regression test: the controller reads extraEnvironmentVariables as
+    alternating key/value entries; a "KEY=VALUE" string placed directly in
+    the field is rejected server-side with "Has an invalid key with no value".
+    """
+    assert env_var_entries_to_wire(["A=1", "B=two"]) == [
+        "A",
+        "1",
+        "B",
+        "two",
+    ]
+
+
+def test_env_var_entries_to_wire_value_may_contain_equals():
+    assert env_var_entries_to_wire(["OPTS=-Da=b"]) == [
+        "OPTS",
+        "-Da=b",
+    ]
+
+
+def test_env_var_entries_to_wire_empty_value_allowed():
+    assert env_var_entries_to_wire(["EMPTY="]) == ["EMPTY", ""]
+
+
+def test_env_var_entries_to_wire_empty_list():
+    assert env_var_entries_to_wire([]) == []
+
+
+@pytest.mark.parametrize("bad", ["NOEQUALS", "=value"])
+def test_env_var_entries_to_wire_malformed_entry_raises(bad):
+    with pytest.raises(ValueError, match="expected 'KEY=VALUE'"):
+        env_var_entries_to_wire([bad])
+
+
+def test_wire_to_env_var_entries_converts_pairs():
+    assert wire_to_env_var_entries(["A", "1", "B", "two"]) == ["A=1", "B=two"]
+
+
+def test_wire_to_env_var_entries_empty_list():
+    assert wire_to_env_var_entries([]) == []
+
+
+def test_wire_to_env_var_entries_round_trips():
+    entries = ["A=1", "OPTS=-Da=b", "EMPTY="]
+    assert wire_to_env_var_entries(env_var_entries_to_wire(entries)) == entries
+
+
+def test_wire_to_env_var_entries_odd_length_emits_bare_trailing_key():
+    assert wire_to_env_var_entries(["A", "1", "DANGLING"]) == ["A=1", "DANGLING"]
 
 
 def test_normalize_programming_language_python():
@@ -119,7 +187,22 @@ def test_set_termination_delay_remove_empties_when_only_key():
         {"TerminationDelay": {"type": "long", "value": "5000"}}
     )
     _set_termination_delay(config, None)
-    assert config.typeSpecificFieldsJson == ""
+    config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
+
+
+def test_set_termination_delay_remove_clears_presence_on_real_proto():
+    """Removing the last entry clears the presence-tracked optional field.
+
+    Regression test: ``typeSpecificFieldsJson`` is a proto3 ``optional`` field.
+    Assigning ``\"\"`` marks it present-but-empty, which the controller rejects
+    on add_query with ControllerSerializationException. The field must be
+    cleared, not set to an empty string.
+    """
+    config = _PQConfigMessage()
+    _set_termination_delay(config, 5000)
+    assert config.HasField("typeSpecificFieldsJson")
+    _set_termination_delay(config, None)
+    assert not config.HasField("typeSpecificFieldsJson")
 
 
 def test_apply_auto_delete_timeout_none_is_noop():
@@ -140,8 +223,8 @@ def test_apply_auto_delete_timeout_zero_installs_continuous(pq_config_mod):
     config.scheduling.extend.assert_called_once_with(
         pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
     )
-    # TerminationDelay removed (was the only key) -> empty string.
-    assert config.typeSpecificFieldsJson == ""
+    # TerminationDelay removed (was the only key) -> presence-tracked field cleared.
+    config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
 
 
 def test_apply_auto_delete_timeout_positive_installs_temporary(pq_config_mod):
@@ -243,7 +326,9 @@ def test_apply_pq_config_list_fields_explicit_replaces_each():
     config.scheduling.extend.assert_called_once_with(["s1"])
     config.extraJvmArguments.extend.assert_called_once_with(["-Xmx1g"])
     config.classPathAdditions.extend.assert_called_once_with(["/jar"])
-    config.extraEnvironmentVariables.extend.assert_called_once_with(["K=V"])
+    # KEY=VALUE entries are converted to the controller's alternating
+    # key/value wire format at the protobuf boundary.
+    config.extraEnvironmentVariables.extend.assert_called_once_with(["K", "V"])
     config.adminGroups.extend.assert_called_once_with(["a"])
     config.viewerGroups.extend.assert_called_once_with(["v"])
 

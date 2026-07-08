@@ -16,11 +16,58 @@ The wrapping pattern implemented here enables several key benefits:
 
 Classes:
     ClientObjectWrapper: Generic base class for wrapping client objects with enhanced interfaces
+
+Functions:
+    describe_exception_chain: Render an exception and its ``__cause__`` chain into one message, surfacing gRPC status detail
 """
 
 import logging
 
+import grpc
+
 _LOGGER = logging.getLogger(__name__)
+
+
+def describe_exception_chain(exc: BaseException) -> str:
+    """Render an exception and its ``__cause__`` chain into a single message.
+
+    Walks the explicit ``__cause__`` links (those set by ``raise ... from ...``)
+    and joins each exception's message; implicit ``__context__`` links are not
+    followed, so unrelated suppressed exceptions never leak into the result. For
+    any :class:`grpc.Call` in the chain, the gRPC status code and ``details()``
+    are included, surfacing the server-side reason (such as an unsupported
+    column type) that a generic wrapper message like "failed to finish
+    FetchTableOp operation" omits.
+
+    Usage:
+        Client wrappers call this to build the message of an exception raised
+        from a caught Deephaven/gRPC error (the ``except Exception`` fallback of
+        a wrapped call), so the underlying server detail is preserved instead of
+        being flattened to the wrapper's own message.
+
+    Args:
+        exc (BaseException): The exception to describe.
+
+    Returns:
+        str: The exception message followed by each distinct underlying cause,
+            joined by " -> ". A cause is skipped when its message is already
+            contained in the preceding entry.
+    """
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, grpc.Call):
+            code = current.code()
+            code_name = code.name if code is not None else "UNKNOWN"
+            message = f"gRPC {code_name}: {current.details()}"
+        else:
+            message = str(current).strip()
+        if message and (not parts or message not in parts[-1]):
+            parts.append(message)
+        current = current.__cause__
+    return " -> ".join(parts)
 
 
 class ClientObjectWrapper[T]:

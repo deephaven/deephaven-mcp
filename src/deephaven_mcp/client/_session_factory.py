@@ -85,8 +85,9 @@ from deephaven_mcp.sessions import EnterpriseSystemConfig
 from ._auth_client import CorePlusAuthClient
 
 # Local application imports
-from ._base import ClientObjectWrapper
+from ._base import ClientObjectWrapper, describe_exception_chain
 from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
+from ._pq_config import env_var_entries_to_wire
 from ._session import CorePlusSession
 from ._timeouts import EnterpriseClientTimeouts
 
@@ -286,7 +287,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise DeephavenConnectionError(
-                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {describe_exception_chain(e)}"
             ) from e
 
         elapsed = time.monotonic() - start_time
@@ -391,7 +392,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise DeephavenConnectionError(
-                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {describe_exception_chain(e)}"
             ) from e
 
         elapsed = time.monotonic() - start_time
@@ -600,7 +601,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise SessionError(
-                f"Failed to close session manager connections: {e}"
+                f"Failed to close session manager connections: {describe_exception_chain(e)}"
             ) from e
 
     @staticmethod
@@ -674,8 +675,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 Examples include garbage collection settings ("-XX:+UseG1GC"), memory settings, or
                 custom Java properties. If None (default), only standard JVM arguments are used.
             extra_environment_vars (list[str] | None): Environment variables to set for the worker process.
-                Format as ["NAME=value", ...]. Useful for configuring system properties, paths,
-                or feature flags. If None (default), the standard environment is used.
+                Format as ["NAME=value", ...] (converted internally to the controller's
+                alternating key/value wire format). Useful for configuring system properties,
+                paths, or feature flags. If None (default), the standard environment is used.
             engine (str): Engine type that determines the worker's capabilities and behavior.
                 Defaults to "DeephavenCommunity". Other options may include enterprise engines
                 with additional features depending on your Deephaven installation.
@@ -775,6 +777,14 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
             - CorePlusSession.close: Method to disconnect from a worker and release resources
         """
         timeout_seconds = self._timeouts.worker_creation_timeout_seconds
+        # The vendor call places these directly into the protobuf's repeated
+        # extraEnvironmentVariables field, which the controller reads as a flat
+        # alternating key/value list — convert from the KEY=VALUE form here.
+        wire_environment_vars = (
+            env_var_entries_to_wire(extra_environment_vars)
+            if extra_environment_vars is not None
+            else None
+        )
         try:
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_new_worker] Creating new worker and connecting to it"
@@ -788,7 +798,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                     heap_size_gb=heap_size_gb,
                     server=server,
                     extra_jvm_args=extra_jvm_args,
-                    extra_environment_vars=extra_environment_vars,
+                    extra_environment_vars=wire_environment_vars,
                     engine=engine,
                     auto_delete_timeout=auto_delete_timeout,
                     admin_groups=admin_groups,
@@ -838,7 +848,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise SessionCreationError(
-                f"Failed to create and connect to new worker: {e}"
+                f"Failed to create and connect to new worker: {describe_exception_chain(e)}"
             ) from e
 
     async def connect_to_persistent_query(
@@ -1005,7 +1015,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise SessionCreationError(
-                f"Failed to establish connection to persistent query: {e}"
+                f"Failed to establish connection to persistent query: {describe_exception_chain(e)}"
             ) from e
 
     async def delete_key(self, public_key_text: str) -> None:
@@ -1106,7 +1116,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise ResourceError(f"Failed to delete authentication key: {e}") from e
+            raise ResourceError(
+                f"Failed to delete authentication key: {describe_exception_chain(e)}"
+            ) from e
 
     async def password(
         self,
@@ -1216,7 +1228,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise AuthenticationError(f"Failed to authenticate user {user}: {e}") from e
+            raise AuthenticationError(
+                f"Failed to authenticate user {user}: {describe_exception_chain(e)}"
+            ) from e
 
     async def ping(self) -> bool:
         """Send a connectivity check ping to verify the connection to Deephaven services.
@@ -1297,7 +1311,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise DeephavenConnectionError(f"Failed to ping server: {e}") from e
+            raise DeephavenConnectionError(
+                f"Failed to ping server: {describe_exception_chain(e)}"
+            ) from e
 
     async def private_key(self, file: str | io.StringIO) -> None:
         r"""Authenticate to the server using a Deephaven format private key file.
@@ -1420,7 +1436,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 exc_info=True,
             )
             raise AuthenticationError(
-                f"Failed to authenticate with private key: {e}"
+                f"Failed to authenticate with private key: {describe_exception_chain(e)}"
             ) from e
 
     async def saml(self) -> None:
@@ -1533,7 +1549,9 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise AuthenticationError(f"Failed to authenticate via SAML: {e}") from e
+            raise AuthenticationError(
+                f"Failed to authenticate via SAML: {describe_exception_chain(e)}"
+            ) from e
 
     async def upload_key(self, public_key_text: str) -> None:
         """Upload a public key to the Deephaven server for certificate-based authentication.
@@ -1630,4 +1648,6 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
                 e,
                 exc_info=True,
             )
-            raise ResourceError(f"Failed to upload authentication key: {e}") from e
+            raise ResourceError(
+                f"Failed to upload authentication key: {describe_exception_chain(e)}"
+            ) from e

@@ -44,7 +44,7 @@ from deephaven_enterprise.client.auth import AuthClient
 
 from deephaven_mcp._exceptions import AuthenticationError, DeephavenConnectionError
 
-from ._base import ClientObjectWrapper
+from ._base import ClientObjectWrapper, describe_exception_chain
 from ._protobuf import CorePlusToken
 from ._timeouts import EnterpriseClientTimeouts
 
@@ -201,4 +201,6 @@ class CorePlusAuthClient(ClientObjectWrapper[AuthClient]):
                 e,
                 exc_info=True,
             )
-            raise AuthenticationError(f"Token retrieval failed: {e}") from e
+            raise AuthenticationError(
+                f"Token retrieval failed: {describe_exception_chain(e)}"
+            ) from e

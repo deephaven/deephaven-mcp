@@ -124,13 +124,13 @@ def _provided(value: Any) -> bool:
 
 
 async def _fetch_credentials(
-    runtime: Runtime, session_id: str, *, retry_command: str
+    runtime: Runtime, id: str, *, retry_command: str
 ) -> dict[str, Any]:
     """Fetch one Community session's credential payload.
 
     Args:
         runtime (Runtime): The active CLI runtime.
-        session_id (str): The fully qualified session id.
+        id (str): The fully qualified session id.
         retry_command (str): Command rendered into the corrupt-registry hint.
 
     Returns:
@@ -145,7 +145,7 @@ async def _fetch_credentials(
         runtime,
         _CREDENTIALS_TOOL,
         retry_command=retry_command,
-        arguments={"session_id": session_id},
+        arguments={"id": id},
     )
 
 
@@ -178,7 +178,7 @@ def _authenticated_url(payload: dict[str, Any]) -> str:
 _OUTPUT_LIST = OutputSpec(
     "list",
     (
-        OutputField("session_id", "string", "Fully qualified id 'type:system:name'."),
+        OutputField("id", "string", "Fully qualified id 'type:system:name'."),
         OutputField("type", "string", "'community' or 'enterprise'."),
         OutputField("system", "string", "Owning system name."),
     ),
@@ -195,13 +195,13 @@ _OUTPUT_LIST = OutputSpec(
         description=(
             "Lightweight discovery across Community and Enterprise sessions; "
             "does not connect. Filter with --type, --system, and --origin. Use "
-            "a returned session_id verbatim with the other session verbs."
+            "a returned id verbatim with the other session verbs."
         ),
         output=_OUTPUT_LIST,
         examples=(
             "$ dh-mcp session list",
             "$ dh-mcp session list --type community",
-            "$ dh-mcp -o json session list | jq '.[].session_id'",
+            "$ dh-mcp -o json session list | jq '.[].id'",
         ),
         see_also=("dh-mcp session show ID", "dh-mcp system list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
@@ -263,12 +263,13 @@ async def session_list(
 _OUTPUT_SHOW = OutputSpec(
     "object",
     (
-        OutputField("session_id", "string", "Fully qualified session id."),
+        OutputField("id", "string", "Fully qualified session id."),
         OutputField("type", "string", "'community' or 'enterprise'."),
         OutputField("programming_language", "string", "Worker language, if known."),
         OutputField("liveness_status", "string", "ONLINE / OFFLINE / etc."),
     ),
-    note="The session detail object (additional fields may be present).",
+    note="The session detail object (additional fields may be present). An "
+    "enterprise session's id works verbatim with the 'pq' verbs.",
 )
 
 
@@ -284,7 +285,7 @@ _OUTPUT_SHOW = OutputSpec(
             "and verify liveness (slower, more accurate). An unknown or missing "
             "session exits 3."
         ),
-        arguments=(HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_SHOW,
         examples=(
             "$ dh-mcp session show community:community:my-session",
@@ -295,7 +296,7 @@ _OUTPUT_SHOW = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.option(
     "--connect",
     "attempt_to_connect",
@@ -305,11 +306,9 @@ _OUTPUT_SHOW = OutputSpec(
 )
 @click.pass_obj
 @run_async
-async def session_show(
-    runtime: Runtime, session_id: str, attempt_to_connect: bool
-) -> None:
+async def session_show(runtime: Runtime, id: str, attempt_to_connect: bool) -> None:
     """Show detailed information about one session."""
-    arguments: dict[str, Any] = {"session_id": session_id}
+    arguments: dict[str, Any] = {"id": id}
     if attempt_to_connect:
         arguments["attempt_to_connect"] = True
     await call_and_echo_field(
@@ -329,7 +328,7 @@ async def session_show(
 _OUTPUT_CREATE = OutputSpec(
     "object",
     (
-        OutputField("session_id", "string", "Fully qualified id of the new session."),
+        OutputField("id", "string", "Fully qualified id of the new session."),
         OutputField("session_name", "string", "The simple name."),
     ),
     note="Additional backend-specific fields may be present.",
@@ -346,7 +345,11 @@ _OUTPUT_CREATE = OutputSpec(
         description=(
             "The --system value selects the backend and its type: 'community' "
             "(the default) creates a local Community worker; any other name "
-            "creates a worker on that Enterprise system. SESSION_NAME is "
+            "creates a worker on that Enterprise system. For an Enterprise "
+            "system this is create-and-connect: it provisions a Persistent "
+            "Query and connects immediately; use 'pq create' instead to "
+            "define a durable PQ (scheduled, RunAndDone, or disabled) "
+            "without connecting. SESSION_NAME is "
             "required for Community and optional (auto-generated) for "
             "Enterprise. Community options (--launch-method, --docker-*, "
             "--python-venv-path, --auth-token) and Enterprise options "
@@ -575,7 +578,7 @@ async def session_create(  # noqa: PLR0913 — a wrapper mirrors its tool's full
 
 _OUTPUT_DELETE = OutputSpec(
     "object",
-    (OutputField("session_id", "string", "The deleted session's id."),),
+    (OutputField("id", "string", "The deleted session's id."),),
     note="Additional backend-specific fields may be present.",
 )
 
@@ -587,11 +590,14 @@ _OUTPUT_DELETE = OutputSpec(
     help=build_help(
         summary="Delete a session by id.",
         description=(
-            "Routes to the Community or Enterprise backend by the id's "
-            "'type:' prefix, so the type need not be restated. Only "
-            "dynamically created sessions can be deleted."
+            "Permanently deletes the session with ID; this cannot be "
+            "undone. For an enterprise session, this also deletes its "
+            "underlying Persistent Query from the system (equivalent to "
+            "'pq delete' with the same id). A community session "
+            "can be deleted only if it was dynamically created; those defined "
+            "in static config cannot."
         ),
-        arguments=(HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_DELETE,
         examples=("$ dh-mcp session delete community:community:my-session",),
         see_also=("dh-mcp session create", "dh-mcp session list"),
@@ -599,18 +605,18 @@ _OUTPUT_DELETE = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.pass_obj
 @run_async
-async def session_delete(runtime: Runtime, session_id: str) -> None:
+async def session_delete(runtime: Runtime, id: str) -> None:
     """Delete a session by id, routing on the id's type prefix."""
-    community = session_id.startswith(f"{_COMMUNITY_SYSTEM}:")
+    community = id.startswith(f"{_COMMUNITY_SYSTEM}:")
     tool = "session_community_delete" if community else "session_enterprise_delete"
     await call_and_echo(
         runtime,
         tool,
         retry_command="dh-mcp session delete",
-        arguments={"session_id": session_id},
+        arguments={"id": id},
     )
 
 
@@ -647,9 +653,7 @@ _CREDENTIALS_DESCRIPTION = (
     help=build_help(
         summary="Print a Community session's browser-login credentials.",
         description=_CREDENTIALS_DESCRIPTION,
-        arguments=(
-            HelpEntry("SESSION_ID", "Community session id. Run 'session list'."),
-        ),
+        arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
         output=_OUTPUT_CREDENTIALS,
         examples=("$ dh-mcp session credentials community:community:my-session",),
         see_also=("dh-mcp session url ID", "dh-mcp session open ID"),
@@ -657,13 +661,13 @@ _CREDENTIALS_DESCRIPTION = (
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.pass_obj
 @run_async
-async def session_credentials(runtime: Runtime, session_id: str) -> None:
+async def session_credentials(runtime: Runtime, id: str) -> None:
     """Fetch one Community session's browser-login credentials."""
     payload = await _fetch_credentials(
-        runtime, session_id, retry_command="dh-mcp session credentials"
+        runtime, id, retry_command="dh-mcp session credentials"
     )
     credentials = {field: payload.get(field) for field in _CREDENTIAL_FIELDS}
     echo_payload(runtime, credentials)
@@ -689,9 +693,7 @@ _OUTPUT_URL = OutputSpec("text", note="The authenticated browser URL, one line."
             "affects the structured error on failure. Same Community-only scope "
             "and security gate as 'session credentials'."
         ),
-        arguments=(
-            HelpEntry("SESSION_ID", "Community session id. Run 'session list'."),
-        ),
+        arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
         output=_OUTPUT_URL,
         examples=(
             "$ dh-mcp session url community:community:my-session",
@@ -702,14 +704,12 @@ _OUTPUT_URL = OutputSpec("text", note="The authenticated browser URL, one line."
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.pass_obj
 @run_async
-async def session_url(runtime: Runtime, session_id: str) -> None:
+async def session_url(runtime: Runtime, id: str) -> None:
     """Print a Community session's authenticated browser URL."""
-    payload = await _fetch_credentials(
-        runtime, session_id, retry_command="dh-mcp session url"
-    )
+    payload = await _fetch_credentials(runtime, id, retry_command="dh-mcp session url")
     click.echo(_authenticated_url(payload))
 
 
@@ -741,9 +741,7 @@ _OUTPUT_OPEN = OutputSpec(
             "launched, exits 2 (browser_launch_failed) with the URL in the "
             "message so you can open it manually."
         ),
-        arguments=(
-            HelpEntry("SESSION_ID", "Community session id. Run 'session list'."),
-        ),
+        arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
         output=_OUTPUT_OPEN,
         examples=(
             "$ dh-mcp session open community:community:my-session",
@@ -754,7 +752,7 @@ _OUTPUT_OPEN = OutputSpec(
         error_codes=(ErrorCode.BROWSER_LAUNCH_FAILED, *wrapper_error_codes()),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.option(
     "--print",
     "print_only",
@@ -764,11 +762,9 @@ _OUTPUT_OPEN = OutputSpec(
 )
 @click.pass_obj
 @run_async
-async def session_open(runtime: Runtime, session_id: str, print_only: bool) -> None:
+async def session_open(runtime: Runtime, id: str, print_only: bool) -> None:
     """Open a Community session in the default web browser."""
-    payload = await _fetch_credentials(
-        runtime, session_id, retry_command="dh-mcp session open"
-    )
+    payload = await _fetch_credentials(runtime, id, retry_command="dh-mcp session open")
     url = _authenticated_url(payload)
     launched = False if print_only else launch_browser(url)
     echo_payload(runtime, {"opened": url, "launched": launched})

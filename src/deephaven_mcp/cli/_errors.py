@@ -124,7 +124,16 @@ class ErrorCode(StrEnum):
     )
     MCP_REQUEST_FAILED = (
         "mcp_request_failed",
-        "The MCP transport reported an error (connect, timeout, parse).",
+        "The MCP transport reported an error (connect, parse, server failure).",
+    )
+    MCP_REQUEST_TIMEOUT = (
+        "mcp_request_timeout",
+        (
+            "The MCP request timed out waiting for the daemon's response. "
+            "The daemon may still complete the operation server-side — verify "
+            "the resulting state before retrying. Allow more time with "
+            "--timeout or request.timeouts.default_seconds in cli.json."
+        ),
     )
     TOOL_NOT_FOUND = (
         "tool_not_found",

@@ -12,13 +12,14 @@ from mcp.types import CallToolResult, TextContent, Tool
 
 from deephaven_mcp.cli import _main
 from deephaven_mcp.cli._commands import _acquire as acquire_mod
+from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._commands import tool as tool_mod
 from deephaven_mcp.cli._daemon import (
     DaemonClientError,
     DaemonStartupTimeoutError,
 )
 from deephaven_mcp.cli._main import cli
-from deephaven_mcp.cli._mcp_client import McpClientError
+from deephaven_mcp.cli._mcp_client import McpClientError, McpRequestTimeoutError
 from deephaven_mcp.cli._runtime import Runtime
 from deephaven_mcp.daemon_registry import RegistryCorruptError
 
@@ -296,7 +297,7 @@ def test_tool_call_success(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(wrapping_mod, "McpClient", return_value=fake),
     ):
         result = _invoke(["tool", "call", "foo", "--arg", "k=42"], rt)
     assert result.exit_code == 0
@@ -318,7 +319,7 @@ def test_tool_call_returns_3_on_tool_error(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(wrapping_mod, "McpClient", return_value=fake),
     ):
         result = _invoke(["tool", "call", "foo"], rt)
     assert result.exit_code == 3
@@ -360,10 +361,25 @@ def test_tool_call_mcp_failure(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(wrapping_mod, "McpClient", return_value=fake),
     ):
         result = _invoke(["tool", "call", "foo"], rt)
     assert result.exit_code == 2
+
+
+def test_tool_call_timeout_maps_to_mcp_request_timeout(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    fake = AsyncMock()
+    fake.__aenter__.side_effect = McpRequestTimeoutError("timed out after 60 seconds")
+    with (
+        patch.object(
+            acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
+        ),
+        patch.object(wrapping_mod, "McpClient", return_value=fake),
+    ):
+        result = _invoke(["tool", "call", "foo"], rt)
+    assert result.exit_code == 2
+    assert "timed out" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -393,21 +409,27 @@ def test_tool_list_registry_corrupt(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "verb,extra_codes",
+    "verb,extra_codes,absent_codes",
     [
-        ("list", ()),
-        ("show", ("tool_not_found",)),
-        ("call", ("arg_parse_error", "tool_returned_error")),
+        ("list", (), ("mcp_request_timeout",)),
+        ("show", ("tool_not_found",), ("mcp_request_timeout",)),
+        (
+            "call",
+            ("arg_parse_error", "tool_returned_error", "mcp_request_timeout"),
+            (),
+        ),
     ],
 )
 def test_tool_help_documents_full_error_code_set(
-    verb: str, extra_codes: tuple[str, ...]
+    verb: str, extra_codes: tuple[str, ...], absent_codes: tuple[str, ...]
 ) -> None:
     """Every tool verb documents the full shared _acquire error set plus its own.
 
     Regression test for the drift where daemon_registry_corrupt (and, for
     show/call, daemon_startup_timeout) were omitted despite being reachable
-    through the shared _acquire path.
+    through the shared _acquire path. Conversely, list/show must NOT
+    advertise mcp_request_timeout: they only call list_tools, which applies
+    no per-request read timeout, so that code is unreachable there.
     """
     help_text = tool_mod.tool.commands[verb].help or ""
     for code in (
@@ -418,3 +440,5 @@ def test_tool_help_documents_full_error_code_set(
         *extra_codes,
     ):
         assert code in help_text, f"tool {verb}: missing error code {code!r}"
+    for code in absent_codes:
+        assert code not in help_text, f"tool {verb}: unreachable error code {code!r}"

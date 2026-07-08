@@ -17,6 +17,7 @@ __all__ = [
     "acquire",
     "call_and_echo",
     "call_and_echo_field",
+    "call_and_echo_table",
     "call_for_payload",
     "call_tool",
     "echo_payload",
@@ -27,6 +28,7 @@ __all__ = [
 ]
 
 import json
+from collections.abc import Collection
 from typing import Any
 
 import click
@@ -38,7 +40,11 @@ from deephaven_mcp.cli._commands._acquire import (
 )
 from deephaven_mcp.cli._errors import CliError, ErrorCode, render_warning
 from deephaven_mcp.cli._format import format_output
-from deephaven_mcp.cli._mcp_client import McpClient, McpClientError
+from deephaven_mcp.cli._mcp_client import (
+    McpClient,
+    McpClientError,
+    McpRequestTimeoutError,
+)
 from deephaven_mcp.cli._runtime import Runtime
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
@@ -51,11 +57,14 @@ _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
     ErrorCode.DAEMON_REGISTRY_CORRUPT,
     ErrorCode.DAEMON_REUSE_REFUSED,
     ErrorCode.MCP_REQUEST_FAILED,
+    ErrorCode.MCP_REQUEST_TIMEOUT,
 )
 """Error codes the shared acquire + tool-call flow can raise."""
 
 
-def wrapper_error_codes(*, tool_error: bool = True) -> tuple[ErrorCode, ...]:
+def wrapper_error_codes(
+    *, tool_error: bool = True, request_timeout: bool = True
+) -> tuple[ErrorCode, ...]:
     """Return the error codes a tool-wrapping command surfaces in its help.
 
     Args:
@@ -63,15 +72,23 @@ def wrapper_error_codes(*, tool_error: bool = True) -> tuple[ErrorCode, ...]:
             :attr:`~deephaven_mcp.cli._errors.ErrorCode.TOOL_RETURNED_ERROR`
             (exit 3). Pass ``False`` for a wrapper whose tool never reports
             failure (e.g. ``system list``).
+        request_timeout (bool): Whether to include
+            :attr:`~deephaven_mcp.cli._errors.ErrorCode.MCP_REQUEST_TIMEOUT`.
+            Pass ``False`` for a verb that only lists tools (``tool list`` /
+            ``tool show``): ``list_tools`` applies no per-request read
+            timeout, so the timeout code is unreachable there.
 
     Returns:
         tuple[ErrorCode, ...]: ``TOOL_RETURNED_ERROR`` (when ``tool_error``)
             followed by the error codes the shared acquire + tool-call flow
             can raise.
     """
+    codes = _ACQUIRE_ERROR_CODES
+    if not request_timeout:
+        codes = tuple(ec for ec in codes if ec is not ErrorCode.MCP_REQUEST_TIMEOUT)
     if tool_error:
-        return (ErrorCode.TOOL_RETURNED_ERROR, *_ACQUIRE_ERROR_CODES)
-    return _ACQUIRE_ERROR_CODES
+        return (ErrorCode.TOOL_RETURNED_ERROR, *codes)
+    return codes
 
 
 async def acquire(runtime: Runtime, *, retry_command: str) -> DaemonRegistryEntry:
@@ -119,7 +136,9 @@ async def call_tool(
         CallToolResult: The raw MCP call result.
 
     Raises:
-        CliError: When the MCP transport reports an error.
+        CliError: When the MCP transport reports an error —
+            ``mcp_request_timeout`` for a request timeout,
+            ``mcp_request_failed`` for everything else.
     """
     try:
         async with McpClient(
@@ -127,6 +146,8 @@ async def call_tool(
             request_timeout_seconds=runtime.config.cli.request.timeouts.default_seconds,
         ) as client:
             return await client.call_tool(name, arguments)
+    except McpRequestTimeoutError as exc:
+        raise CliError(str(exc), code=ErrorCode.MCP_REQUEST_TIMEOUT) from exc
     except McpClientError as exc:
         raise CliError(str(exc), code=ErrorCode.MCP_REQUEST_FAILED) from exc
 
@@ -259,11 +280,12 @@ def echo_payload(
     *,
     empty_message: str = "(none)",
     sort_keys: bool = True,
+    human_exclude: Collection[str] = (),
 ) -> None:
     """Render ``value`` in the runtime's output mode and print it.
 
-    The single place any command reaches into ``runtime.config.cli.output``;
-    presentation is owned by :func:`~deephaven_mcp.cli._format.format_output`.
+    Presentation is owned by :func:`~deephaven_mcp.cli._format.format_output`;
+    this is where most commands read ``runtime.config.cli.output``.
 
     Args:
         runtime (Runtime): The active CLI runtime, for the output mode.
@@ -274,11 +296,18 @@ def echo_payload(
             alphabetically. Defaults to ``True``. Pass ``False`` for payloads
             whose key order is meaningful, forwarded to
             :func:`~deephaven_mcp.cli._format.format_output`.
+        human_exclude (Collection[str]): Keys dropped from a dict ``value`` in
+            ``human`` mode only, for fields that are noise to a terminal reader
+            but meaningful to machine consumers. Ignored in ``json``/``yaml``
+            and for non-dict values. Defaults to ``()`` (drop nothing).
     """
+    output = runtime.config.cli.output.format
+    if human_exclude and output == "human" and isinstance(value, dict):
+        value = {k: v for k, v in value.items() if k not in human_exclude}
     click.echo(
         format_output(
             value,
-            output=runtime.config.cli.output.format,
+            output=output,
             empty_message=empty_message,
             sort_keys=sort_keys,
         )
@@ -286,7 +315,13 @@ def echo_payload(
 
 
 async def call_and_echo(
-    runtime: Runtime, tool: str, *, retry_command: str, arguments: dict[str, Any]
+    runtime: Runtime,
+    tool: str,
+    *,
+    retry_command: str,
+    arguments: dict[str, Any],
+    sort_keys: bool = True,
+    human_exclude: Collection[str] = (),
 ) -> None:
     """Acquire, invoke ``tool``, and print its whole success payload.
 
@@ -300,6 +335,10 @@ async def call_and_echo(
         retry_command (str): The command rendered into the corrupt-registry
             recovery hint.
         arguments (dict[str, Any]): The tool arguments.
+        sort_keys (bool): Forwarded to :func:`echo_payload`. Pass ``False`` for
+            payloads whose key order is meaningful.
+        human_exclude (Collection[str]): Forwarded to :func:`echo_payload`. Keys
+            dropped from a dict payload in ``human`` mode only.
 
     Raises:
         CliError: When the daemon cannot be acquired, the MCP transport
@@ -308,7 +347,45 @@ async def call_and_echo(
     payload = await call_for_payload(
         runtime, tool, retry_command=retry_command, arguments=arguments
     )
-    echo_payload(runtime, payload)
+    echo_payload(runtime, payload, sort_keys=sort_keys, human_exclude=human_exclude)
+
+
+async def call_and_echo_table(
+    runtime: Runtime, tool: str, *, retry_command: str, arguments: dict[str, Any]
+) -> None:
+    """Acquire, invoke a tabular ``tool``, and print its envelope in reading order.
+
+    The tools already emit their envelope keys in reading order (identity,
+    summary, ``format``, schema, data); this echoes them with ``sort_keys=False``
+    so ``json``/``yaml`` preserve that order instead of alphabetizing. In
+    ``human`` mode two fields are dropped (via ``human_exclude``) as noise to a
+    terminal reader: ``format``, which always reports ``json-row`` (the
+    serialization these commands request so the human renderer can re-draw
+    ``data`` as an aligned table); and ``columns``, the list tools' column
+    definitions, which merely restate the headers of the rendered ``data``
+    table. ``schema`` (the sample/data tools' typed definitions) uses a
+    different key and is left intact. ``json``/``yaml`` keep both fields for
+    machine consumers.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        tool (str): The MCP tool name to invoke.
+        retry_command (str): The command rendered into the corrupt-registry
+            recovery hint.
+        arguments (dict[str, Any]): The tool arguments.
+
+    Raises:
+        CliError: When the daemon cannot be acquired, the MCP transport
+            fails, or the tool reports ``success=False`` (exit 3).
+    """
+    await call_and_echo(
+        runtime,
+        tool,
+        retry_command=retry_command,
+        arguments=arguments,
+        sort_keys=False,
+        human_exclude=("format", "columns"),
+    )
 
 
 def _warn_if_incomplete(

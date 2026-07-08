@@ -36,7 +36,7 @@ def test_tables_minimal(tmp_path: Path) -> None:
     result, call = _run(["catalog", "tables", _SID], {"success": True}, tmp_path)
     assert result.exit_code == 0
     assert call.await_args.args[2] == "catalog_tables_list"
-    assert call.await_args.args[3] == {"session_id": _SID, "format": "json-row"}
+    assert call.await_args.args[3] == {"id": _SID, "format": "json-row"}
 
 
 def test_tables_with_options(tmp_path: Path) -> None:
@@ -57,7 +57,7 @@ def test_tables_with_options(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[3] == {
-        "session_id": _SID,
+        "id": _SID,
         "max_rows": 5,
         "filters": ["a>1", "b<2"],
         "format": "json-row",
@@ -89,7 +89,7 @@ def test_schema_with_namespace_and_names(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[3] == {
-        "session_id": _SID,
+        "id": _SID,
         "table_names": ["Trades"],
         "namespace": "Market",
         "filters": ["x"],
@@ -102,7 +102,7 @@ def test_schema_minimal(tmp_path: Path) -> None:
         ["catalog", "schema", _SID], {"success": True, "schemas": []}, tmp_path
     )
     assert result.exit_code == 0
-    assert call.await_args.args[3] == {"session_id": _SID}
+    assert call.await_args.args[3] == {"id": _SID}
 
 
 def test_sample_defaults(tmp_path: Path) -> None:
@@ -112,7 +112,7 @@ def test_sample_defaults(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert call.await_args.args[2] == "catalog_table_sample"
     assert call.await_args.args[3] == {
-        "session_id": _SID,
+        "id": _SID,
         "namespace": "Market",
         "table_name": "Trades",
         "head": True,
@@ -139,7 +139,7 @@ def test_sample_options(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[3] == {
-        "session_id": _SID,
+        "id": _SID,
         "namespace": "Market",
         "table_name": "Trades",
         "head": False,

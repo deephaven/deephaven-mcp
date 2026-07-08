@@ -40,7 +40,12 @@ def _make_config_mock():
 
 @pytest.fixture
 def dummy_controller_client():
+    from deephaven_enterprise.client.controller import SubState
+
     client = MagicMock()
+    # Model a vendor client that has not been subscribed yet (e.g. by the
+    # vendor SessionManager during authentication).
+    client.sub_state = SubState.NOT_SUBSCRIBED
     client.map = MagicMock(return_value={})
     client.get = MagicMock(return_value="info")
     client.delete_query = MagicMock()
@@ -646,7 +651,45 @@ async def test_make_pq_config_auto_delete_timeout_zero_normalized_to_none(
         mock_config.scheduling.extend.assert_called_once_with(
             pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
         )
-        assert mock_config.typeSpecificFieldsJson == ""
+        mock_config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_env_vars_converted_to_wire_format(
+    coreplus_controller_client, dummy_controller_client, controller_client_mod
+):
+    """Env vars reach the vendor call in the controller's alternating wire format.
+
+    Regression test: the controller reads extraEnvironmentVariables as a flat
+    alternating key/value list; passing "KEY=VALUE" strings through unconverted
+    is rejected server-side with "Has an invalid key with no value".
+    """
+    mock_config = _make_config_mock()
+    dummy_controller_client.make_temporary_config.return_value = mock_config
+
+    with patch.object(controller_client_mod, "CorePlusQueryConfig", autospec=True):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            extra_environment_vars=["A=1", "OPTS=-Da=b"],
+        )
+
+    call_args = dummy_controller_client.make_temporary_config.call_args
+    # extra_environment_vars is the 5th positional arg.
+    assert call_args[0][4] == ["A", "1", "OPTS", "-Da=b"]
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_malformed_env_var_raises_value_error(
+    coreplus_controller_client, dummy_controller_client
+):
+    with pytest.raises(ValueError, match="expected 'KEY=VALUE'"):
+        await coreplus_controller_client.make_pq_config(
+            name="test-pq",
+            heap_size_gb=8.0,
+            extra_environment_vars=["NOEQUALS"],
+        )
+    dummy_controller_client.make_temporary_config.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -755,8 +798,8 @@ async def test_make_pq_config_permanent_query_clears_scheduling(
         assert "StartTime=00:00:00" in extended
         assert "DailyRestart=false" in extended
         assert "SchedulingDisabled=false" in extended
-        # Permanent → no TerminationDelay.
-        assert mock_config.typeSpecificFieldsJson == ""
+        # Permanent → no TerminationDelay: the presence-tracked field is cleared.
+        mock_config.ClearField.assert_called_once_with("typeSpecificFieldsJson")
 
 
 @pytest.mark.asyncio
@@ -1154,6 +1197,31 @@ async def test_subscribe_idempotent(
     # Third call should also be a no-op
     await coreplus_controller_client.subscribe()
     dummy_controller_client.subscribe.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vendor_state", ["SUBSCRIBING", "SUBSCRIBED"])
+async def test_subscribe_adopts_existing_vendor_subscription(
+    coreplus_controller_client, dummy_controller_client, vendor_state
+):
+    """An existing vendor-side subscription is adopted, not duplicated.
+
+    Regression test: the vendor SessionManager subscribes the controller client
+    during authentication (_init_controller). Opening a second stream makes the
+    controller server terminate the first, whose response thread auto-resubscribes
+    and terminates the second — an infinite kill/re-subscribe loop that starves
+    map()/get() ("Deadline exceeded waiting for subscription to finish").
+    """
+    from deephaven_enterprise.client.controller import SubState
+
+    dummy_controller_client.sub_state = SubState[vendor_state]
+    await coreplus_controller_client.subscribe()
+    dummy_controller_client.subscribe.assert_not_called()
+    assert coreplus_controller_client._subscribed is True
+
+    # State-read methods are usable after adoption.
+    dummy_controller_client.map.return_value = {}
+    assert await coreplus_controller_client.map() == {}
 
 
 @pytest.mark.asyncio
@@ -1564,7 +1632,7 @@ def test_update_pq_config_auto_delete_zero_continuous(
     wrapper.pb.scheduling.extend.assert_called_once_with(
         pq_config_mod._DEFAULT_PERMANENT_CONTINUOUS_SCHEDULING
     )
-    assert wrapper.pb.typeSpecificFieldsJson == ""
+    wrapper.pb.ClearField.assert_called_once_with("typeSpecificFieldsJson")
 
 
 def test_update_pq_config_auto_delete_positive_temporary(

@@ -15,6 +15,7 @@ from deephaven_mcp._exceptions import (
     InternalError,
     McpClientError,
     McpError,
+    McpRequestTimeoutError,
     QueryError,
     RegistryCorruptError,
     ResourceError,
@@ -129,6 +130,11 @@ class TestExceptionParameterized:
                 "startup timeout",
             ),
             (McpClientError, [McpError], "mcp client error"),
+            (
+                McpRequestTimeoutError,
+                [McpClientError, McpError],
+                "request timeout",
+            ),
         ],
     )
     def test_exception_basics(self, exception_class, parent_classes, message):

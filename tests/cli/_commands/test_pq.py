@@ -42,7 +42,7 @@ def test_details(tmp_path: Path) -> None:
     result, call = _run(["pq", "details", "123"], {"success": True}, tmp_path)
     assert result.exit_code == 0
     assert call.await_args.args[2] == "pq_details"
-    assert call.await_args.args[3] == {"pq_id": "123"}
+    assert call.await_args.args[3] == {"id": "123"}
 
 
 def test_name_to_id(tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ def test_create_builds_args(tmp_path: Path) -> None:
             "--schedule",
             "daily",
         ],
-        {"success": True, "pq_id": "999"},
+        {"success": True, "id": "999"},
         tmp_path,
     )
     assert result.exit_code == 0
@@ -106,7 +106,7 @@ def test_modify_only_passes_given_fields(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert call.await_args.args[2] == "pq_modify"
     args = call.await_args.args[3]
-    assert args["pq_id"] == "123"
+    assert args["id"] == "123"
     assert args["enabled"] is False
     assert args["pq_name"] == "new"
     assert args["heap_size_gb"] == 8.0
@@ -165,13 +165,13 @@ def test_delete_multiple_with_max_concurrent(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[2] == "pq_delete"
-    assert call.await_args.args[3] == {"pq_id": ["1", "2"], "max_concurrent": 3}
+    assert call.await_args.args[3] == {"id": ["1", "2"], "max_concurrent": 3}
 
 
 def test_delete_requires_an_id(tmp_path: Path) -> None:
     result, _ = _run(["pq", "delete"], {"success": True}, tmp_path)
     assert result.exit_code == 2
-    assert "At least one PQ_ID" in result.output
+    assert "At least one ID" in result.output
 
 
 @pytest.mark.parametrize(
@@ -181,7 +181,7 @@ def test_lifecycle_no_wait(verb: str, tool: str, tmp_path: Path) -> None:
     result, call = _run(["pq", verb, "1", "--no-wait"], {"success": True}, tmp_path)
     assert result.exit_code == 0
     assert call.await_args.args[2] == tool
-    assert call.await_args.args[3] == {"pq_id": ["1"], "wait": False}
+    assert call.await_args.args[3] == {"id": ["1"], "wait": False}
 
 
 def test_lifecycle_default_wait_and_max_concurrent(tmp_path: Path) -> None:
@@ -190,7 +190,7 @@ def test_lifecycle_default_wait_and_max_concurrent(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[3] == {
-        "pq_id": ["1", "2"],
+        "id": ["1", "2"],
         "wait": True,
         "max_concurrent": 2,
     }

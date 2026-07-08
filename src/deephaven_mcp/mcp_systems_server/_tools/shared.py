@@ -7,7 +7,8 @@ Provides common helpers used across the MCP tool modules:
   :func:`get_multi_config`, :func:`get_community_settings`,
   :func:`get_enterprise_settings`, :func:`get_community_registry`,
   :func:`get_enterprise_registry`.
-- ID parsers: :func:`parse_pq_id` (use :meth:`QualifiedSessionId.from_str` directly for session ids).
+- ID parsers and formatters: :func:`parse_pq_id`, :func:`make_pq_id`
+  (use :meth:`QualifiedSessionId.from_str` directly for session ids).
 - Session retrieval: :func:`get_session_from_context`,
   :func:`get_enterprise_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
@@ -54,6 +55,7 @@ from deephaven_mcp.resource_manager import (
     InitializationPhase,
     MultiSystemRegistry,
     QualifiedSessionId,
+    SessionId,
     SystemType,
 )
 
@@ -75,6 +77,7 @@ __all__ = [
     "get_registry",
     "get_response_limits",
     "get_session_from_context",
+    "make_pq_id",
     "parse_pq_id",
     "redact_json_sensitive_fields",
     "resolve_pq_ids_to_single_system",
@@ -325,11 +328,11 @@ class ParsedPqId(NamedTuple):
 def parse_pq_id(pq_id: str) -> ParsedPqId:
     """Parse an enterprise persistent-query identifier.
 
-    Persistent-query identifiers always belong to the enterprise space
-    and have the shape ``"<system_name>:<serial>"`` where ``serial`` is
-    a non-negative integer assigned by the controller. They are
-    distinct from session identifiers, which carry a leading
-    ``"enterprise:"`` type segment.
+    A persistent-query identifier is the fully qualified session id of
+    the PQ: ``"enterprise:<system_name>:<serial>"`` where ``serial`` is
+    a non-negative integer assigned by the controller. It is the same
+    string the session tools report for a running PQ, so ids can be
+    passed between the ``pq`` and ``session`` tool families verbatim.
 
     Args:
         pq_id (str): The persistent-query identifier to parse.
@@ -339,29 +342,51 @@ def parse_pq_id(pq_id: str) -> ParsedPqId:
             plain 2-tuple for callers using positional unpacking.
 
     Raises:
-        InvalidSessionNameError: If ``pq_id`` is not exactly two
-            colon-separated, non-empty segments, or if the serial
-            segment is not a non-negative integer.
+        InvalidSessionNameError: If ``pq_id`` is not a valid fully
+            qualified session id, if its type segment is not
+            ``"enterprise"``, or if the trailing segment is not a
+            non-negative integer serial.
     """
-    parts = pq_id.split(":")
-    if len(parts) != 2 or not all(parts):
+    qsid = QualifiedSessionId.from_str(pq_id)
+    if qsid.system_type is not SystemType.ENTERPRISE:
         raise InvalidSessionNameError(
-            f"Persistent-query id {pq_id!r} must be of the form "
-            "'<system_name>:<serial>' with two non-empty segments."
+            f"Persistent-query id {pq_id!r} must be enterprise-scoped "
+            f"('enterprise:<system_name>:<serial>'); got type "
+            f"{qsid.system_type.value!r}."
         )
     try:
-        serial = int(parts[1])
+        serial = int(qsid.session_id)
     except ValueError as exc:
         raise InvalidSessionNameError(
             f"Persistent-query id {pq_id!r} has non-integer serial "
-            f"{parts[1]!r}; expected a non-negative integer."
+            f"{str(qsid.session_id)!r}; expected a non-negative integer."
         ) from exc
-    if serial < 0:
-        raise InvalidSessionNameError(
-            f"Persistent-query id {pq_id!r} has negative serial {serial}; "
-            "expected a non-negative integer."
+    return ParsedPqId(system_name=qsid.system_name, serial=serial)
+
+
+def make_pq_id(system_name: str, serial: int) -> str:
+    """Format a persistent-query identifier from its components.
+
+    The inverse of :func:`parse_pq_id`: renders the fully qualified
+    session id ``"enterprise:<system_name>:<serial>"`` for the PQ.
+
+    Args:
+        system_name (str): Enterprise system that owns the PQ.
+        serial (int): Non-negative integer serial assigned by the
+            controller.
+
+    Returns:
+        str: The identifier, e.g. ``"enterprise:prod:12345"``.
+
+    Raises:
+        InvalidSessionNameError: If ``system_name`` is not a valid
+            resource name or ``serial`` is negative.
+    """
+    return str(
+        QualifiedSessionId(
+            SystemType.ENTERPRISE, system_name, SessionId.from_int(serial)
         )
-    return ParsedPqId(system_name=parts[0], serial=serial)
+    )
 
 
 def resolve_pq_ids_to_single_system(
@@ -375,7 +400,8 @@ def resolve_pq_ids_to_single_system(
     check so each batch tool can route to a single child registry.
 
     Args:
-        pq_ids (list[str]): One or more persistent-query identifiers.
+        pq_ids (list[str]): One or more persistent-query identifiers,
+            each of the form ``"enterprise:<system_name>:<serial>"``.
 
     Returns:
         tuple[str, list[int]]: ``(system_name, serials)`` where every
@@ -698,18 +724,16 @@ def build_table_data_response(
         {"name": field.name, "type": str(field.type)} for field in arrow_table.schema
     ]
     actual_format, formatted_data = format_table_data(arrow_table, format_type=format)
-    response: dict[str, object] = {
-        "success": True,
-        "format": actual_format,
-        "schema": schema,
-        "row_count": len(arrow_table),
-        "is_complete": is_complete,
-        "data": formatted_data,
-    }
+    response: dict[str, object] = {"success": True}
     if namespace is not None:
         response["namespace"] = namespace
     if table_name is not None:
         response["table_name"] = table_name
+    response["row_count"] = len(arrow_table)
+    response["is_complete"] = is_complete
+    response["format"] = actual_format
+    response["schema"] = schema
+    response["data"] = formatted_data
     return response
 
 

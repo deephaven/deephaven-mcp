@@ -424,7 +424,7 @@ async def test_tool_call_error_exits_3(
 ) -> None:
     """A tool that reports an error exits 3 with ``tool_returned_error``.
 
-    ``session_details`` requires ``session_id``; omitting it makes the
+    ``session_details`` requires ``id``; omitting it makes the
     server-side argument validation fail, which surfaces as a tool
     result with ``isError=true`` — the CLI's exit-3 contract.
     """
@@ -797,13 +797,13 @@ async def test_session_wrapper_verbs_e2e(
         # session list → the seeded static session is discoverable.
         result = run(["session", "list"])
         assert result.returncode == 0, result.stderr
-        ids = {s["session_id"] for s in json.loads(result.stdout)}
+        ids = {s["id"] for s in json.loads(result.stdout)}
         assert _DEMO_ID in ids
 
         # session show → detail object for the static session.
         result = run(["session", "show", _DEMO_ID])
         assert result.returncode == 0, result.stderr
-        assert json.loads(result.stdout)["session_id"] == _DEMO_ID
+        assert json.loads(result.stdout)["id"] == _DEMO_ID
 
         # table list → empty array on a fresh worker (success, not error).
         result = run(["table", "list", _DEMO_ID])
@@ -917,12 +917,12 @@ def test_session_create_delete_roundtrip_e2e(tmp_path: Path) -> None:
             root_flags=["--timeout", "300"],
         )
         assert result.returncode == 0, result.stderr
-        assert json.loads(result.stdout)["session_id"] == sid
+        assert json.loads(result.stdout)["id"] == sid
 
         # list → a *separate* invocation sees the persisted dynamic session.
         result = run(["session", "list"])
         assert result.returncode == 0, result.stderr
-        assert sid in {s["session_id"] for s in json.loads(result.stdout)}
+        assert sid in {s["id"] for s in json.loads(result.stdout)}
 
         # delete → a *separate* invocation finds and reaps the worker.
         result = run(["session", "delete", sid])
@@ -931,7 +931,7 @@ def test_session_create_delete_roundtrip_e2e(tmp_path: Path) -> None:
         # list again → the dynamic session is gone.
         result = run(["session", "list"])
         assert result.returncode == 0, result.stderr
-        assert sid not in {s["session_id"] for s in json.loads(result.stdout)}
+        assert sid not in {s["id"] for s in json.loads(result.stdout)}
     finally:
         # Best-effort reap if an assertion failed after create, then stop the
         # daemon (graceful SIGTERM closes the registry and any live worker).

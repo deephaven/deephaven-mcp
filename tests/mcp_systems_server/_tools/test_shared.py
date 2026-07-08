@@ -4,7 +4,7 @@ Covers the helpers used by every tool:
 
 - Lifespan-context accessors (``get_lifespan_context``, ``get_registry``,
   ``get_multi_config``, ``get_community_registry``, ``get_enterprise_registry``).
-- Identifier parser (``parse_pq_id``).
+- Identifier parser and formatter (``parse_pq_id``, ``make_pq_id``).
 - Session retrieval (``get_session_from_context``, ``get_enterprise_session``).
 - Response shapers / size guards (``error_response``, ``check_response_size``,
   ``format_meta_table_result``, ``build_table_data_response``).
@@ -215,9 +215,9 @@ def test_get_enterprise_registry_unknown_system_raises():
 @pytest.mark.parametrize(
     "pq_id,expected",
     [
-        ("prod:0", ("prod", 0)),
-        ("prod:42", ("prod", 42)),
-        ("dev:9999", ("dev", 9999)),
+        ("enterprise:prod:0", ("prod", 0)),
+        ("enterprise:prod:42", ("prod", 42)),
+        ("enterprise:dev:9999", ("dev", 9999)),
     ],
 )
 def test_parse_pq_id_valid(pq_id, expected):
@@ -230,26 +230,36 @@ def test_parse_pq_id_valid(pq_id, expected):
         "prod",
         "prod:",
         ":42",
-        "prod:42:extra",
+        "prod:42",
+        "enterprise:prod:42:extra",
+        "enterprise::42",
+        "enterprise:prod:",
     ],
 )
 def test_parse_pq_id_bad_shape(pq_id):
-    with pytest.raises(InvalidSessionNameError, match="must be of the form"):
+    with pytest.raises(InvalidSessionNameError, match="Invalid session id"):
         shared.parse_pq_id(pq_id)
+
+
+def test_parse_pq_id_rejects_community_id():
+    with pytest.raises(InvalidSessionNameError, match="must be enterprise-scoped"):
+        shared.parse_pq_id("community:community:my_worker")
 
 
 def test_parse_pq_id_non_integer_serial_raises():
     with pytest.raises(InvalidSessionNameError, match="non-integer serial"):
-        shared.parse_pq_id("prod:abc")
+        shared.parse_pq_id("enterprise:prod:abc")
 
 
 def test_parse_pq_id_negative_serial_raises():
-    with pytest.raises(InvalidSessionNameError, match="negative serial"):
-        shared.parse_pq_id("prod:-1")
+    # A leading '-' fails SessionId resource-name validation before the
+    # integer coercion is reached.
+    with pytest.raises(InvalidSessionNameError):
+        shared.parse_pq_id("enterprise:prod:-1")
 
 
 def test_parse_pq_id_returns_named_tuple():
-    parsed = shared.parse_pq_id("prod:7")
+    parsed = shared.parse_pq_id("enterprise:prod:7")
     assert isinstance(parsed, shared.ParsedPqId)
     assert parsed.system_name == "prod"
     assert parsed.serial == 7
@@ -258,8 +268,26 @@ def test_parse_pq_id_returns_named_tuple():
     assert (s, n) == ("prod", 7)
 
 
+def test_make_pq_id_round_trips_through_parse():
+    pq_id = shared.make_pq_id("prod", 42)
+    assert pq_id == "enterprise:prod:42"
+    assert shared.parse_pq_id(pq_id) == ("prod", 42)
+
+
+def test_make_pq_id_rejects_negative_serial():
+    with pytest.raises(InvalidSessionNameError):
+        shared.make_pq_id("prod", -1)
+
+
+def test_make_pq_id_rejects_bad_system_name():
+    with pytest.raises(InvalidSessionNameError):
+        shared.make_pq_id("bad name", 42)
+
+
 def test_resolve_pq_ids_to_single_system_happy_path():
-    sys_name, serials = shared.resolve_pq_ids_to_single_system(["prod:1", "prod:2"])
+    sys_name, serials = shared.resolve_pq_ids_to_single_system(
+        ["enterprise:prod:1", "enterprise:prod:2"]
+    )
     assert sys_name == "prod"
     assert serials == [1, 2]
 
@@ -271,12 +299,14 @@ def test_resolve_pq_ids_to_single_system_rejects_empty():
 
 def test_resolve_pq_ids_to_single_system_rejects_mixed_systems():
     with pytest.raises(InvalidSessionNameError, match="same"):
-        shared.resolve_pq_ids_to_single_system(["prod:1", "staging:2"])
+        shared.resolve_pq_ids_to_single_system(
+            ["enterprise:prod:1", "enterprise:staging:2"]
+        )
 
 
 def test_resolve_pq_ids_to_single_system_propagates_parse_errors():
     with pytest.raises(InvalidSessionNameError):
-        shared.resolve_pq_ids_to_single_system(["prod:abc"])
+        shared.resolve_pq_ids_to_single_system(["enterprise:prod:abc"])
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +496,27 @@ def test_build_table_data_response_with_namespace_and_name():
     assert out["table_name"] == "T"
     assert out["namespace"] == "ns"
     assert out["is_complete"] is False
+
+
+def test_build_table_data_response_reading_order():
+    """Keys are emitted in reading order: identity, summary, format, schema, data."""
+    out = shared.build_table_data_response(
+        _arrow_table(),
+        is_complete=True,
+        format="json-row",
+        table_name="T",
+        namespace="ns",
+    )
+    assert list(out) == [
+        "success",
+        "namespace",
+        "table_name",
+        "row_count",
+        "is_complete",
+        "format",
+        "schema",
+        "data",
+    ]
 
 
 # ---------------------------------------------------------------------------

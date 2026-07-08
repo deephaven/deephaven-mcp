@@ -125,7 +125,7 @@ async def test_session_community_create_success():
 
         # Verify success
         assert result["success"] is True
-        assert result["session_id"] == "community:community:1"
+        assert result["id"] == "community:community:1"
         assert result["session_name"] == "test-session"
         assert result["port"] == 10000
         assert "connection_url" in result
@@ -243,7 +243,7 @@ async def test_session_community_create_sessions_disabled():
 
         # Should succeed - limit is disabled so no limit check
         assert result["success"] is True
-        assert result["session_id"] == "community:community:1"
+        assert result["id"] == "community:community:1"
         # count_added_sessions should NOT have been called since limit is disabled
         mock_session_registry.count_added_sessions.assert_not_called()
 
@@ -370,9 +370,7 @@ async def test_session_community_delete_no_community_returns_clean_error():
             "No Community sessions are configured on this server."
         ),
     ):
-        result = await session_community_delete(
-            context, session_id="community:community:1"
-        )
+        result = await session_community_delete(context, id="community:community:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -444,12 +442,12 @@ async def test_session_community_delete_success():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:1",
+        id="community:community:1",
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "community:community:1"
+    assert result["id"] == "community:community:1"
     assert result["session_name"] == "test-session"
 
     # Verify session was closed and removed
@@ -491,12 +489,12 @@ async def test_session_community_delete_python_session():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:2",
+        id="community:community:2",
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "community:community:2"
+    assert result["id"] == "community:community:2"
 
     # Verify untrack_python_process was called (line 4197)
     mock_instance_tracker.untrack_python_process.assert_called_once_with(
@@ -528,7 +526,7 @@ async def test_session_community_delete_not_found():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:999",
+        id="community:community:999",
     )
 
     # Verify error
@@ -564,7 +562,7 @@ async def test_session_community_delete_not_dynamic():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:1",
+        id="community:community:1",
     )
 
     assert result["success"] is False
@@ -1007,7 +1005,7 @@ async def test_session_community_delete_validates_origin():
 
     result = await session_community_delete(
         context,
-        session_id="community:community:10",
+        id="community:community:10",
     )
 
     assert result["success"] is False
@@ -1018,7 +1016,7 @@ async def test_session_community_delete_validates_origin():
 
 @pytest.mark.asyncio
 async def test_session_community_delete_allows_dynamic_sessions():
-    """session_community_delete succeeds for a valid dynamic session_id."""
+    """session_community_delete succeeds for a valid dynamic id."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
@@ -1044,15 +1042,15 @@ async def test_session_community_delete_allows_dynamic_sessions():
         }
     )
 
-    # Delete dynamic session using full session_id
+    # Delete dynamic session using full id
     result = await session_community_delete(
         context,
-        session_id="community:community:1",
+        id="community:community:1",
     )
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "community:community:1"
+    assert result["id"] == "community:community:1"
 
     # Verify close and remove were called
     mock_dynamic_manager.close.assert_called_once()
@@ -1085,13 +1083,11 @@ async def test_session_community_delete_close_failure_continues():
         }
     )
 
-    result = await session_community_delete(
-        context, session_id="community:community:11"
-    )
+    result = await session_community_delete(context, id="community:community:11")
 
     # Should succeed despite close failure
     assert result["success"] is True
-    assert result["session_id"] == "community:community:11"
+    assert result["id"] == "community:community:11"
     mock_session_registry.remove.assert_called_once()
 
 
@@ -1119,9 +1115,7 @@ async def test_session_community_delete_removal_missing_in_registry():
         }
     )
 
-    result = await session_community_delete(
-        context, session_id="community:community:12"
-    )
+    result = await session_community_delete(context, id="community:community:12")
 
     assert result["success"] is True
 
@@ -1152,9 +1146,7 @@ async def test_session_community_delete_registry_remove_raises():
         }
     )
 
-    result = await session_community_delete(
-        context, session_id="community:community:13"
-    )
+    result = await session_community_delete(context, id="community:community:13")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1195,9 +1187,7 @@ async def test_session_community_delete_outer_exception():
         "deephaven_mcp.mcp_systems_server._tools.session_community._LOGGER.info",
         side_effect=info_side_effect,
     ):
-        result = await session_community_delete(
-            context, session_id="community:community:14"
-        )
+        result = await session_community_delete(context, id="community:community:14")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1206,7 +1196,7 @@ async def test_session_community_delete_outer_exception():
 
 @pytest.mark.asyncio
 async def test_session_community_delete_invalid_session_id_format():
-    """session_community_delete returns error for malformed session_id."""
+    """session_community_delete returns error for malformed id."""
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     context = MockContext(
@@ -1217,17 +1207,17 @@ async def test_session_community_delete_invalid_session_id_format():
         }
     )
 
-    result = await session_community_delete(context, session_id="not-a-valid-id")
+    result = await session_community_delete(context, id="not-a-valid-id")
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Invalid session_id format" in result["error"]
+    assert "Invalid id format" in result["error"]
     mock_session_registry.get.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_session_community_delete_wrong_system_type():
-    """session_community_delete returns error when session_id is not community type."""
+    """session_community_delete returns error when id is not community type."""
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
     context = MockContext(
@@ -1238,7 +1228,7 @@ async def test_session_community_delete_wrong_system_type():
         }
     )
 
-    result = await session_community_delete(context, session_id="enterprise:prod:1")
+    result = await session_community_delete(context, id="enterprise:prod:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1590,9 +1580,7 @@ async def test_session_community_credentials_disabled_by_default():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:1"
-    )
+    result = await session_community_credentials(context, id="community:community:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1624,9 +1612,7 @@ async def test_session_community_credentials_explicit_none():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:1"
-    )
+    result = await session_community_credentials(context, id="community:community:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1677,9 +1663,7 @@ async def test_session_community_credentials_dynamic_success():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:1"
-    )
+    result = await session_community_credentials(context, id="community:community:1")
 
     assert result["success"] is True
     assert result["connection_url"] == "http://localhost:10000"
@@ -1733,9 +1717,7 @@ async def test_session_community_credentials_anonymous_auth():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:1"
-    )
+    result = await session_community_credentials(context, id="community:community:1")
 
     assert result["success"] is True
     assert result["auth_token"] == ""  # Empty string for None
@@ -1762,9 +1744,7 @@ async def test_session_community_credentials_no_config():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:1"
-    )
+    result = await session_community_credentials(context, id="community:community:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1797,9 +1777,7 @@ async def test_session_community_credentials_session_not_found():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:999"
-    )
+    result = await session_community_credentials(context, id="community:community:999")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1832,7 +1810,7 @@ async def test_session_community_credentials_not_dynamic_session():
     )
 
     result = await session_community_credentials(
-        context, session_id="community:community:static-session"
+        context, id="community:community:static-session"
     )
 
     assert result["success"] is False
@@ -1880,9 +1858,7 @@ async def test_session_community_credentials_static_session():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:100"
-    )
+    result = await session_community_credentials(context, id="community:community:100")
 
     assert result["success"] is True
     assert result["connection_url"] == "http://localhost:10000"
@@ -1934,9 +1910,7 @@ async def test_session_community_credentials_static_session_anonymous():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:101"
-    )
+    result = await session_community_credentials(context, id="community:community:101")
 
     assert result["success"] is True
     assert result["connection_url"] == "http://localhost:10000"
@@ -2056,7 +2030,7 @@ async def test_session_community_credentials_static_session_custom_token():
         }
     )
     result = await session_community_credentials(
-        context, session_id="community:community:custom-session"
+        context, id="community:community:custom-session"
     )
 
     assert result["success"] is True
@@ -2108,7 +2082,7 @@ async def test_session_community_credentials_static_session_unsupported_creds():
         }
     )
     result = await session_community_credentials(
-        context, session_id="community:community:pw-session"
+        context, id="community:community:pw-session"
     )
 
     assert result["success"] is True
@@ -2118,7 +2092,7 @@ async def test_session_community_credentials_static_session_unsupported_creds():
 
 @pytest.mark.asyncio
 async def test_session_community_credentials_invalid_session_id():
-    """Test when session_id has invalid format."""
+    """Test when id has invalid format."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
@@ -2136,13 +2110,11 @@ async def test_session_community_credentials_invalid_session_id():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="enterprise:test-session"
-    )
+    result = await session_community_credentials(context, id="enterprise:test-session")
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Invalid session_id" in result["error"]
+    assert "Invalid id" in result["error"]
     assert "community:community:" in result["error"]
 
 
@@ -2174,9 +2146,7 @@ async def test_session_community_credentials_exception_handling():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:1"
-    )
+    result = await session_community_credentials(context, id="community:community:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -2217,9 +2187,7 @@ async def test_session_community_credentials_dynamic_only_denies_static():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:100"
-    )
+    result = await session_community_credentials(context, id="community:community:100")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -2269,9 +2237,7 @@ async def test_session_community_credentials_static_only_denies_dynamic():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:1"
-    )
+    result = await session_community_credentials(context, id="community:community:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -2319,9 +2285,7 @@ async def test_session_community_credentials_all_allows_both():
         }
     )
 
-    result = await session_community_credentials(
-        context, session_id="community:community:100"
-    )
+    result = await session_community_credentials(context, id="community:community:100")
 
     assert result["success"] is True
     assert result["auth_token"] == "static_token_123"

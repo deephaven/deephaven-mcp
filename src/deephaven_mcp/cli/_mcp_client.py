@@ -15,7 +15,7 @@ request and applies a per-call timeout that defaults to
 
 from __future__ import annotations
 
-__all__ = ["McpClient", "McpClientError"]
+__all__ = ["McpClient", "McpClientError", "McpRequestTimeoutError"]
 
 import logging
 from contextlib import AsyncExitStack
@@ -23,11 +23,13 @@ from datetime import timedelta
 from types import TracebackType
 from typing import Any
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+from mcp.shared.exceptions import McpError
 from mcp.types import CallToolResult, Tool
 
-from deephaven_mcp._exceptions import McpClientError
+from deephaven_mcp._exceptions import McpClientError, McpRequestTimeoutError
 from deephaven_mcp.auth.middleware._psk import PSK_HEADER_NAME
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
@@ -156,10 +158,13 @@ class McpClient:
             CallToolResult: The fully-typed MCP result.
 
         Raises:
-            McpClientError: When the call fails for any reason
-                (network, timeout, server-reported error). The
-                exception preserves the original cause via
-                ``__cause__``.
+            McpRequestTimeoutError: When the daemon does not respond
+                within the timeout. The daemon may still complete the
+                operation server-side; the message says so and how to
+                allow more time.
+            McpClientError: When the call fails for any other reason
+                (network, server-reported error). The exception
+                preserves the original cause via ``__cause__``.
         """
         if self._session is None:
             raise McpClientError(
@@ -175,4 +180,18 @@ class McpClient:
                 name, arguments or {}, read_timeout_seconds=timeout
             )
         except Exception as exc:
+            # The MCP SDK signals its client-side read timeout as an
+            # McpError carrying httpx.codes.REQUEST_TIMEOUT (see
+            # mcp.shared.session); surface it as the dedicated subtype.
+            if (
+                isinstance(exc, McpError)
+                and exc.error.code == httpx.codes.REQUEST_TIMEOUT
+            ):
+                raise McpRequestTimeoutError(
+                    f"call_tool({name!r}) timed out after "
+                    f"{timeout.total_seconds():g} seconds. The daemon may still "
+                    f"complete the operation server-side — verify the resulting "
+                    f"state before retrying. To allow more time, pass --timeout "
+                    f"or raise request.timeouts.default_seconds in cli.json."
+                ) from exc
             raise McpClientError(f"call_tool({name!r}) failed: {exc}") from exc

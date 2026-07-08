@@ -107,9 +107,10 @@ class EnterpriseSessionCreationDefaults(StrictSchema):
     environment_vars: dict[str, str] | None = None
     """Optional environment variables set in the worker process,
     keyed by variable name. ``None`` sets no extra env vars. The
-    enterprise session-creation tool converts this mapping to the
-    upstream controller's ``["NAME=value", ...]`` wire format at
-    call time."""
+    enterprise session-creation tool converts this mapping to
+    ``["NAME=value", ...]`` entries; the client layer converts those
+    to the controller's alternating key/value wire format at call
+    time."""
 
     admin_groups: list[str] | None = None
     """Optional list of group names granted admin access to workers

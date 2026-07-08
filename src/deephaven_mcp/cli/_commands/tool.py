@@ -14,6 +14,7 @@ import click
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands._wrapping import (
     acquire,
+    call_tool,
     echo_payload,
     parse_key_value,
     wrapper_error_codes,
@@ -74,7 +75,7 @@ _OUTPUT_LIST = OutputSpec("list", _TOOL_FIELDS, note="Array of registered tools.
         ),
         see_also=("dh-mcp tool show NAME", "dh-mcp tool call NAME"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
-        error_codes=wrapper_error_codes(tool_error=False),
+        error_codes=wrapper_error_codes(tool_error=False, request_timeout=False),
     ),
 )
 @click.option(
@@ -130,7 +131,7 @@ _OUTPUT_SHOW = OutputSpec("object", _TOOL_FIELDS)
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.TOOL_NOT_FOUND,
-            *wrapper_error_codes(tool_error=False),
+            *wrapper_error_codes(tool_error=False, request_timeout=False),
         ),
     ),
 )
@@ -236,16 +237,7 @@ async def tool_call(runtime: Runtime, name: str, args: tuple[str, ...]) -> None:
     """Invoke a single MCP tool and print its result."""
     arguments = dict(parse_key_value(p, decode_json=True) for p in args)
     handle = await acquire(runtime, retry_command="dh-mcp tool call")
-
-    try:
-        async with McpClient(
-            handle,
-            request_timeout_seconds=runtime.config.cli.request.timeouts.default_seconds,
-        ) as client:
-            result = await client.call_tool(name, arguments)
-    except McpClientError as exc:
-        raise CliError(str(exc), code=ErrorCode.MCP_REQUEST_FAILED) from exc
-
+    result = await call_tool(handle, runtime, name, arguments)
     echo_payload(runtime, result)
     if result.isError:
         raise CliError(
