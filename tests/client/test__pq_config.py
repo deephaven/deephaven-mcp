@@ -13,6 +13,7 @@ from deephaven_mcp.client._pq_config import (
     apply_pq_config_fields,
     env_var_entries_to_wire,
     validate_pq_config_args,
+    wire_to_env_var_entries,
 )
 
 
@@ -95,6 +96,23 @@ def test_env_var_entries_to_wire_empty_list():
 def test_env_var_entries_to_wire_malformed_entry_raises(bad):
     with pytest.raises(ValueError, match="expected 'KEY=VALUE'"):
         env_var_entries_to_wire([bad])
+
+
+def test_wire_to_env_var_entries_converts_pairs():
+    assert wire_to_env_var_entries(["A", "1", "B", "two"]) == ["A=1", "B=two"]
+
+
+def test_wire_to_env_var_entries_empty_list():
+    assert wire_to_env_var_entries([]) == []
+
+
+def test_wire_to_env_var_entries_round_trips():
+    entries = ["A=1", "OPTS=-Da=b", "EMPTY="]
+    assert wire_to_env_var_entries(env_var_entries_to_wire(entries)) == entries
+
+
+def test_wire_to_env_var_entries_odd_length_emits_bare_trailing_key():
+    assert wire_to_env_var_entries(["A", "1", "DANGLING"]) == ["A=1", "DANGLING"]
 
 
 def test_normalize_programming_language_python():

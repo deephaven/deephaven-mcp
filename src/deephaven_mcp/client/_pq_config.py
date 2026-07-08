@@ -3,7 +3,8 @@
 Pure, synchronous helpers that build and modify ``PersistentQueryConfigMessage`` protobufs
 for the controller client's ``make_pq_config`` (create) and ``update_pq_config`` (modify).
 The public entry points are :func:`validate_pq_config_args`, :func:`apply_pq_config_fields`,
-and :func:`env_var_entries_to_wire`; everything else is internal. These helpers perform no IO.
+:func:`env_var_entries_to_wire`, and :func:`wire_to_env_var_entries`; everything else is
+internal. These helpers perform no IO.
 """
 
 import json
@@ -59,6 +60,28 @@ def env_var_entries_to_wire(entries: list[str]) -> list[str]:
             )
         wire.extend((key, value))
     return wire
+
+
+def wire_to_env_var_entries(wire: list[str]) -> list[str]:
+    """Convert the controller's alternating key/value list to ``KEY=VALUE`` entries.
+
+    Inverse of :func:`env_var_entries_to_wire`, used when serializing a PQ
+    config for user-facing output so environment variables display in the
+    conventional form rather than the wire form. A trailing key with no value
+    (an odd-length list, which the controller itself rejects) is emitted as a
+    bare key so no data is silently dropped.
+
+    Args:
+        wire (list[str]): Flat alternating key/value list from the protobuf's
+            ``extraEnvironmentVariables`` field.
+
+    Returns:
+        list[str]: Entries of the form ``"KEY=VALUE"``, half the input length.
+    """
+    entries = [f"{wire[i]}={wire[i + 1]}" for i in range(0, len(wire) - 1, 2)]
+    if len(wire) % 2:
+        entries.append(wire[-1])
+    return entries
 
 
 def _normalize_programming_language(language: str) -> str:

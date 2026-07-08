@@ -33,6 +33,7 @@ def test_pq_states_in_all():
         "CorePlusQueryState",
         "CorePlusQueryInfo",
         "CorePlusToken",
+        "wire_to_env_var_entries",
     ],
 )
 def test_symbol_in_module(symbol):
@@ -62,6 +63,7 @@ def test___all__():
         "CorePlusQueryInfo",
         "CorePlusToken",
         "PQ_STATES",
+        "wire_to_env_var_entries",
     }
     assert isinstance(client.__all__, list)
     assert set(client.__all__) == expected
@@ -86,6 +88,7 @@ def test_import_star_behavior():
         "CorePlusQueryInfo",
         "CorePlusToken",
         "PQ_STATES",
+        "wire_to_env_var_entries",
     }
     ns = {}
     exec("from deephaven_mcp.client import *", ns)

@@ -312,7 +312,8 @@ def test_format_pq_config(mock_restart_enum):
 
     # List fields
     mock_pb.extraJvmArguments = ["-XX:+UseG1GC", "-Xmx8g"]
-    mock_pb.extraEnvironmentVariables = ["VAR1=value1", "VAR2=value2"]
+    # Controller wire format: flat alternating key/value list.
+    mock_pb.extraEnvironmentVariables = ["VAR1", "value1", "VAR2", "value2"]
     mock_pb.classPathAdditions = ["/custom/libs"]
 
     # Execution fields

@@ -37,6 +37,7 @@ Note:
 from ._auth_client import CorePlusAuthClient
 from ._base import ClientObjectWrapper
 from ._controller_client import CorePlusControllerClient
+from ._pq_config import wire_to_env_var_entries
 from ._protobuf import (
     PQ_STATES,
     CorePlusQueryConfig,
@@ -69,4 +70,5 @@ __all__ = [
     "CoreSession",
     "CorePlusSession",
     "CorePlusSessionFactory",
+    "wire_to_env_var_entries",
 ]

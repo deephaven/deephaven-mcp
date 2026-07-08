@@ -44,6 +44,7 @@ from deephaven_mcp.client import (
     CorePlusQueryConfig,
     CorePlusQuerySerial,
     CorePlusQueryState,
+    wire_to_env_var_entries,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_enterprise_registry,
@@ -144,6 +145,8 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
     - Empty strings → None for optional string fields
     - Zero values → None for optional timestamp fields
     - Repeated fields → Python lists
+    - ``extra_environment_variables`` → ``"KEY=VALUE"`` entries (converted from the
+      protobuf's alternating key/value wire format)
     - Enum values → Stringified
     - camelCase protobuf names → snake_case API names
     - ``script_code`` and ``script_path`` are a protobuf ``oneof`` (``scriptData``); at most
@@ -176,7 +179,9 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         "buffer_pool_to_heap_ratio": pb.bufferPoolToHeapRatio,
         "detailed_gc_logging_enabled": pb.detailedGCLoggingEnabled,
         "extra_jvm_arguments": list(pb.extraJvmArguments),
-        "extra_environment_variables": list(pb.extraEnvironmentVariables),
+        "extra_environment_variables": wire_to_env_var_entries(
+            list(pb.extraEnvironmentVariables)
+        ),
         "class_path_additions": list(pb.classPathAdditions),
         "server_name": pb.serverName if pb.serverName else None,
         "admin_groups": list(pb.adminGroups),
