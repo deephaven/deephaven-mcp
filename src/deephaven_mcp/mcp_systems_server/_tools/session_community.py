@@ -512,7 +512,7 @@ async def _register_session_manager(
     registry, and tracks the Python launcher for orphan cleanup.
 
     Args:
-        session_name (str): Simple session name (not full session_id).
+        session_name (str): Simple session name (not full id).
         port (int): Port number where the session is listening.
         programming_language (str): Programming language for the session
             (``"Python"`` or ``"Groovy"``).
@@ -528,7 +528,7 @@ async def _register_session_manager(
             cleanup. Python launches are recorded here.
 
     Returns:
-        str: The canonical ``session_id`` (``"community:community:<session_name>"``)
+        str: The canonical ``id`` (``"community:community:<session_name>"``)
             assigned by the registry.
     """
     # Build a typed CommunitySessionConfig describing how to connect to
@@ -569,7 +569,7 @@ async def _register_session_manager(
         session_config=session_config,
         launched_session=launched_session,
     )
-    session_id = manager.qualified_session_id
+    id = manager.qualified_session_id
 
     # Track python process if applicable
     if isinstance(launched_session, PythonLaunchedSession):
@@ -578,9 +578,9 @@ async def _register_session_manager(
         )
 
     _LOGGER.info(
-        f"[mcp_systems_server:session_community_create] Successfully created and registered session '{session_id}'"
+        f"[mcp_systems_server:session_community_create] Successfully created and registered session '{id}'"
     )
-    return str(session_id)
+    return str(id)
 
 
 async def _launch_process_and_wait_for_ready(
@@ -686,7 +686,7 @@ async def _launch_process_and_wait_for_ready(
 
 
 def _build_success_response(
-    session_id: str,
+    id: str,
     session_name: str,
     connection_url: str,
     resolved_auth_type: str,
@@ -701,7 +701,7 @@ def _build_success_response(
     """
     result = {
         "success": True,
-        "session_id": session_id,
+        "id": id,
         "session_name": session_name,
         "connection_url": connection_url,
         "auth_type": resolved_auth_type,
@@ -767,13 +767,13 @@ async def _check_display_name_conflict_fast(
         Error dict if a same-named session already exists, or ``None``
         to proceed with creation.
     """
-    session_id = QualifiedSessionId(
+    id = QualifiedSessionId(
         SystemType.COMMUNITY,
         SystemType.COMMUNITY.value,
         SessionId(session_name),
     )
     try:
-        await session_registry.get(session_id)
+        await session_registry.get(id)
     except RegistryItemNotFoundError:
         return None
     error_msg = f"A community session named {session_name!r} already exists"
@@ -821,7 +821,7 @@ async def session_community_create(
     - Sessions are automatically cleaned up when MCP server shuts down
     - Check 'success' field to verify creation completed
     - Use 'connection_url' or 'connection_url_with_auth' to connect to the session
-    - Save the 'session_id' to reference the session in other MCP tools
+    - Save the 'id' to reference the session in other MCP tools
     - IMPORTANT: Created sessions consume system resources (memory, CPU, ports)
     - Delete sessions when done using session_community_delete
 
@@ -829,7 +829,7 @@ async def session_community_create(
         context (Context): The MCP context object.
         session_name (str): Unique display name for the session. Must not conflict with
             existing session display names. It is also the hash input that the registry
-            uses as the session's :class:`SessionId`. The final ``session_id``
+            uses as the session's :class:`SessionId`. The final ``id``
             returned to the caller has the form ``"community:community:<session_name>"``.
         launch_method (str | None): How to launch the session ("docker" or "python", case-insensitive).
             - "docker": Uses Docker containers (requires Docker daemon running)
@@ -878,7 +878,7 @@ async def session_community_create(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if creation succeeded, False if error occurred
-            - 'session_id' (str): Full identifier in format ``"community:community:<session_name>"``.
+            - 'id' (str): Full identifier in format ``"community:community:<session_name>"``.
             - 'session_name' (str): Display name provided by user
             - 'connection_url' (str): Base HTTP URL without authentication
             - 'auth_type' (str): Normalized authentication type as full class name
@@ -899,7 +899,7 @@ async def session_community_create(
         Example Success Response (docker):
         {
             "success": True,
-            "session_id": "community:community:my-session",
+            "id": "community:community:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
             "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
@@ -911,7 +911,7 @@ async def session_community_create(
         Example Success Response (python):
         {
             "success": True,
-            "session_id": "community:community:my-session",
+            "id": "community:community:my-session",
             "session_name": "my-session",
             "connection_url": "http://localhost:45123",
             "auth_type": "io.deephaven.authentication.psk.PskAuthenticationHandler",
@@ -1076,7 +1076,7 @@ async def session_community_create(
 
         # Create and register session manager. The registry assigns the
         # SessionId; we read the full canonical id back.
-        session_id = await _register_session_manager(
+        id = await _register_session_manager(
             session_name,
             port,
             resolved_programming_language,
@@ -1098,7 +1098,7 @@ async def session_community_create(
 
         # Build and return success response
         return _build_success_response(
-            session_id,
+            id,
             session_name,
             launched_session.connection_url,
             resolved_auth_type,
@@ -1121,7 +1121,7 @@ async def session_community_create(
 
 
 async def _delete_session_resources(
-    session_id: str,
+    id: str,
     session_name: str,
     session_manager: CommunitySessionManager,
     session_registry: CommunitySessionRegistry,
@@ -1141,9 +1141,9 @@ async def _delete_session_resources(
        the exception propagates to the caller.
 
     Args:
-        session_id (str): Full session identifier, e.g. ``"community:community:my_worker"``.
+        id (str): Fully qualified id, e.g. ``"community:community:my_worker"``.
         session_name (str): Display name carried on the manager. For community
-            sessions this equals the trailing segment of ``session_id``. Used for
+            sessions this equals the trailing segment of ``id``. Used for
             Python process untracking.
         session_manager (CommunitySessionManager): The session manager retrieved from
             the registry.
@@ -1160,34 +1160,32 @@ async def _delete_session_resources(
 
     try:
         _LOGGER.debug(
-            f"[mcp_systems_server:session_community_delete] Closing session '{session_id}'"
+            f"[mcp_systems_server:session_community_delete] Closing session '{id}'"
         )
         await session_manager.close()
         _LOGGER.debug(
-            f"[mcp_systems_server:session_community_delete] Successfully closed session '{session_id}'"
+            f"[mcp_systems_server:session_community_delete] Successfully closed session '{id}'"
         )
     except Exception as e:
         _LOGGER.warning(
-            f"[mcp_systems_server:session_community_delete] Failed to close session '{session_id}': {e}"
+            f"[mcp_systems_server:session_community_delete] Failed to close session '{id}': {e}"
         )
         # Continue with removal even if close failed
 
-    removed_manager = await session_registry.remove(
-        QualifiedSessionId.from_str(session_id)
-    )
+    removed_manager = await session_registry.remove(QualifiedSessionId.from_str(id))
     if removed_manager is None:
         _LOGGER.warning(
-            f"[mcp_systems_server:session_community_delete] Session '{session_id}' was not found in registry during removal"
+            f"[mcp_systems_server:session_community_delete] Session '{id}' was not found in registry during removal"
         )
     else:
         _LOGGER.debug(
-            f"[mcp_systems_server:session_community_delete] Removed session '{session_id}' from registry"
+            f"[mcp_systems_server:session_community_delete] Removed session '{id}' from registry"
         )
 
 
 async def session_community_delete(
     context: Context,
-    session_id: str,
+    id: str,
 ) -> dict:
     """MCP Tool: Delete a dynamically created Deephaven Community session.
 
@@ -1198,7 +1196,7 @@ async def session_community_delete(
     Session ID Format:
         Community session IDs have the format ``"community:community:<session_name>"``
         — the community :class:`SessionId` is the session name itself.
-        Use the ``session_id`` returned by ``session_community_create`` or ``sessions_list``
+        Use the ``id`` returned by ``session_community_create`` or ``sessions_list``
         verbatim — do not construct or modify it manually.
         Only dynamically created sessions (``origin="dynamic"``) can be deleted; passing
         a static session ID (``origin="static"``) returns a clear error.
@@ -1215,17 +1213,17 @@ async def session_community_delete(
 
     AI Agent Usage:
     - Use this tool to clean up sessions when no longer needed to free resources
-    - Pass the ``session_id`` exactly as returned by ``session_community_create`` or ``sessions_list``
+    - Pass the ``id`` exactly as returned by ``session_community_create`` or ``sessions_list``
     - Always check 'success' field first to verify deletion completed
     - This operation is irreversible - deleted sessions cannot be recovered
     - Only dynamically created sessions (origin='dynamic') can be deleted
     - Static sessions from configuration cannot be deleted (will return error)
-    - After successful deletion, session_id will no longer be valid for other MCP tools
+    - After successful deletion, id will no longer be valid for other MCP tools
     - Deletion stops the Docker container or terminates the Python process
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): Full session identifier in format
+        id (str): Fully qualified id in the form
             ``"community:community:<session_name>"``. Must be a dynamically created
             session from ``session_community_create``. Static sessions from configuration
             files cannot be deleted.
@@ -1233,7 +1231,7 @@ async def session_community_delete(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if deletion succeeded, False if error occurred
-            - 'session_id' (str): Full identifier in format
+            - 'id' (str): Full identifier in format
                 ``"community:community:<session_name>"``.
             - 'session_name' (str): Display name carried on the manager.
             - 'error' (str, optional): Error message if deletion failed. Omitted on success.
@@ -1242,7 +1240,7 @@ async def session_community_delete(
         Example Success Response:
         {
             "success": True,
-            "session_id": "community:community:my-session",
+            "id": "community:community:my-session",
             "session_name": "my-session"
         }
 
@@ -1262,12 +1260,12 @@ async def session_community_delete(
         - Provides detailed error messages for troubleshooting
 
     Common Error Scenarios:
-        - Session not found: "Session '{session_id}' not found"
-        - Not a community session: "Session '{session_id}' is not a community session"
-        - Not a dynamic session: "Session '{session_id}' is not a dynamically created session (origin: '{origin}'). Only dynamically created sessions can be deleted."
-        - Already deleted: "Session '{session_id}' not found"
-        - Cleanup failure: "Failed to close session '{session_id}': {error}"
-        - Registry removal failure: "Failed to remove session '{session_id}' from registry: {error}"
+        - Session not found: "Session '{id}' not found"
+        - Not a community session: "Session '{id}' is not a community session"
+        - Not a dynamic session: "Session '{id}' is not a dynamically created session (origin: '{origin}'). Only dynamically created sessions can be deleted."
+        - Already deleted: "Session '{id}' not found"
+        - Cleanup failure: "Failed to close session '{id}': {error}"
+        - Registry removal failure: "Failed to remove session '{id}' from registry: {error}"
 
     Note:
         - This operation is irreversible - deleted sessions cannot be recovered
@@ -1275,46 +1273,44 @@ async def session_community_delete(
         - The Docker container or pip process will be terminated
         - Use with caution - ensure you have saved any important data
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:session_community_delete] Invoked: session_id={session_id!r}"
-    )
+    _LOGGER.info(f"[mcp_systems_server:session_community_delete] Invoked: id={id!r}")
 
     result: dict[str, object] = {"success": False}
-    # Display name is unknown until we look up the manager; the session_id
+    # Display name is unknown until we look up the manager; the id
     # itself is the most informative fallback for the outer exception handler.
-    session_name: str = session_id
+    session_name: str = id
 
     try:
         # Get session registry
         session_registry = get_community_registry(context)
 
-        # Parse and validate the session_id. Wrap once and reuse the typed
+        # Parse and validate the id. Wrap once and reuse the typed
         # value for the registry lookup below.
         try:
-            qsid = QualifiedSessionId.from_str(session_id)
+            qsid = QualifiedSessionId.from_str(id)
         except InvalidSessionNameError as e:
-            error_msg = f"Invalid session_id format: {e}"
+            error_msg = f"Invalid id format: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
 
         if qsid.system_type is not SystemType.COMMUNITY:
-            error_msg = f"Session '{session_id}' is not a community session (type: '{qsid.system_type.value}')"
+            error_msg = f"Session '{id}' is not a community session (type: '{qsid.system_type.value}')"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
             return result
 
         _LOGGER.debug(
-            f"[mcp_systems_server:session_community_delete] Looking for session '{session_id}'"
+            f"[mcp_systems_server:session_community_delete] Looking for session '{id}'"
         )
 
         # Check if session exists in registry
         try:
             session_manager = await session_registry.get(qsid)
         except RegistryItemNotFoundError as e:
-            error_msg = f"Session '{session_id}' not found: {e}"
+            error_msg = f"Session '{id}' not found: {e}"
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
@@ -1334,7 +1330,7 @@ async def session_community_delete(
                 else "unknown"
             )
             error_msg = (
-                f"Session '{session_id}' is not a dynamically created session "
+                f"Session '{id}' is not a dynamically created session "
                 f"(origin: '{origin_str}'). Only dynamically created sessions can be deleted."
             )
             _LOGGER.error(f"[mcp_systems_server:session_community_delete] {error_msg}")
@@ -1347,14 +1343,14 @@ async def session_community_delete(
         session_name = session_manager.name
 
         _LOGGER.debug(
-            f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{session_id}'"
+            f"[mcp_systems_server:session_community_delete] Found dynamic community session manager for '{id}'"
         )
 
         instance_tracker: InstanceTracker = (
             context.request_context.lifespan_context.instance_tracker
         )
         await _delete_session_resources(
-            session_id,
+            id,
             session_name,
             session_manager,
             session_registry,
@@ -1363,13 +1359,13 @@ async def session_community_delete(
 
         _LOGGER.info(
             f"[mcp_systems_server:session_community_delete] Successfully deleted session "
-            f"'{session_name}' (session ID: '{session_id}')"
+            f"'{session_name}' (session ID: '{id}')"
         )
 
         result.update(
             {
                 "success": True,
-                "session_id": session_id,
+                "id": id,
                 "session_name": session_name,
             }
         )
@@ -1429,7 +1425,7 @@ def _static_credentials_view(
 
 async def session_community_credentials(
     context: Context,
-    session_id: str,
+    id: str,
 ) -> dict:
     """SECURITY SENSITIVE: Retrieve connection credentials for browser access.
 
@@ -1484,7 +1480,7 @@ async def session_community_credentials(
 
     Args:
         context (Context): MCP context provided by the MCP framework
-        session_id (str): Session ID in the canonical format
+        id (str): Fully qualified id in the canonical form
             ``"community:community:<session_name>"``. Both static (configured) and
             dynamic (runtime-created) sessions share this prefix; use
             ``sessions_list`` and check the ``origin`` field to distinguish
@@ -1547,7 +1543,7 @@ async def session_community_credentials(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:session_community_credentials] Invoked for session_id: {session_id}"
+        f"[mcp_systems_server:session_community_credentials] Invoked for id: {id}"
     )
 
     try:
@@ -1559,17 +1555,17 @@ async def session_community_credentials(
             else "none"
         )
 
-        # Validate session_id format - must be a community session
-        if not session_id.startswith("community:"):
+        # Validate id format - must be a community session
+        if not id.startswith("community:"):
             return error_response(
-                f"Invalid session_id '{session_id}'. This tool only works for "
+                f"Invalid id '{id}'. This tool only works for "
                 f"community sessions (format: 'community:community:<session_name>')."
             )
 
         # Check if credential retrieval is disabled globally (mode='none')
         if credential_retrieval_mode == "none":
             _LOGGER.warning(
-                f"[mcp_systems_server:session_community_credentials] DENIED: Credential retrieval disabled (mode='none') for session_id '{session_id}'"
+                f"[mcp_systems_server:session_community_credentials] DENIED: Credential retrieval disabled (mode='none') for id '{id}'"
             )
             return error_response(
                 "Credential retrieval is disabled (mode='none'). To enable, set security.credential_retrieval_mode in community/settings.json (in your configuration directory):\n\n"
@@ -1591,13 +1587,13 @@ async def session_community_credentials(
         session_registry = get_community_registry(context)
 
         try:
-            mgr = await session_registry.get(QualifiedSessionId.from_str(session_id))
+            mgr = await session_registry.get(QualifiedSessionId.from_str(id))
         except RegistryItemNotFoundError as e:
-            return error_response(f"Session '{session_id}' not found: {e}")
+            return error_response(f"Session '{id}' not found: {e}")
 
         # Verify it's a community session manager
         if not isinstance(mgr, CommunitySessionManager):
-            return error_response(f"Session '{session_id}' is not a community session")
+            return error_response(f"Session '{id}' is not a community session")
 
         # Determine session type
         is_dynamic = isinstance(mgr, DynamicCommunitySessionManager)
@@ -1606,27 +1602,27 @@ async def session_community_credentials(
         # Check mode-specific permissions
         if credential_retrieval_mode == "dynamic_only" and is_static:
             _LOGGER.warning(
-                f"[mcp_systems_server:session_community_credentials] DENIED: Static session credential retrieval disabled (mode='dynamic_only') for session_id '{session_id}'"
+                f"[mcp_systems_server:session_community_credentials] DENIED: Static session credential retrieval disabled (mode='dynamic_only') for id '{id}'"
             )
             return error_response(
                 f"Credential retrieval for static sessions is disabled. Current mode: 'dynamic_only'. "
-                f"Session '{session_id}' is a static (config-based) session. "
+                f"Session '{id}' is a static (config-based) session. "
                 f"To retrieve static session credentials, set security.credential_retrieval_mode to 'all' or 'static_only' in community/settings.json (in your configuration directory)."
             )
         elif credential_retrieval_mode == "static_only" and is_dynamic:
             _LOGGER.warning(
-                f"[mcp_systems_server:session_community_credentials] DENIED: Dynamic session credential retrieval disabled (mode='static_only') for session_id '{session_id}'"
+                f"[mcp_systems_server:session_community_credentials] DENIED: Dynamic session credential retrieval disabled (mode='static_only') for id '{id}'"
             )
             return error_response(
                 f"Credential retrieval for dynamic sessions is disabled. Current mode: 'static_only'. "
-                f"Session '{session_id}' is a dynamic (on-demand) session. "
+                f"Session '{id}' is a dynamic (on-demand) session. "
                 f"To retrieve dynamic session credentials, set security.credential_retrieval_mode to 'all' or 'dynamic_only' in community/settings.json (in your configuration directory)."
             )
 
         # Credential retrieval is allowed - proceed
         session_type_str = "dynamic" if is_dynamic else "static"
         _LOGGER.warning(
-            f"[mcp_systems_server:session_community_credentials] SECURITY: Credential retrieval ALLOWED (mode='{credential_retrieval_mode}', type='{session_type_str}') for session_id '{session_id}'"
+            f"[mcp_systems_server:session_community_credentials] SECURITY: Credential retrieval ALLOWED (mode='{credential_retrieval_mode}', type='{session_type_str}') for id '{id}'"
         )
 
         # Get credentials based on session type
@@ -1660,7 +1656,7 @@ async def session_community_credentials(
         }
 
         _LOGGER.warning(
-            f"[mcp_systems_server:session_community_credentials] SECURITY: Credentials retrieved for session_id '{session_id}'"
+            f"[mcp_systems_server:session_community_credentials] SECURITY: Credentials retrieved for id '{id}'"
         )
 
         return result

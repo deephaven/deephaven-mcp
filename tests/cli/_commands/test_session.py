@@ -73,8 +73,8 @@ def _error_code(result) -> str:
 _LIST = {
     "success": True,
     "sessions": [
-        {"session_id": _SID, "type": "community", "system": "community"},
-        {"session_id": _EID, "type": "enterprise", "system": "prod"},
+        {"id": _SID, "type": "community", "system": "community"},
+        {"id": _EID, "type": "enterprise", "system": "prod"},
     ],
 }
 
@@ -89,7 +89,7 @@ def test_list_success_bare_array(tmp_path: Path) -> None:
 
 _LIST_WITH_PARTIAL = {
     "success": True,
-    "sessions": [{"session_id": _SID, "type": "community", "system": "community"}],
+    "sessions": [{"id": _SID, "type": "community", "system": "community"}],
     "partial_result": {
         "phase": "completed",
         "detail": "Some enterprise systems had connection issues during discovery.",
@@ -137,14 +137,14 @@ def test_list_human_and_yaml(tmp_path: Path) -> None:
     result, _ = _run(["session", "list"], _LIST, tmp_path)
     assert result.exit_code == 0 and _SID in result.output
     result, _ = _run(["-o", "yaml", "session", "list"], _LIST, tmp_path)
-    assert result.exit_code == 0 and "session_id:" in result.output
+    assert result.exit_code == 0 and "id:" in result.output
 
 
 # ---------------------------------------------------------------------------
 # show
 # ---------------------------------------------------------------------------
 
-_SHOW = {"success": True, "session": {"session_id": _SID, "liveness_status": "ONLINE"}}
+_SHOW = {"success": True, "session": {"id": _SID, "liveness_status": "ONLINE"}}
 
 
 def test_show_emits_session_object(tmp_path: Path) -> None:
@@ -152,13 +152,13 @@ def test_show_emits_session_object(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert json.loads(result.output) == _SHOW["session"]
     assert call.await_args.args[2] == "session_details"
-    assert call.await_args.args[3] == {"session_id": _SID}
+    assert call.await_args.args[3] == {"id": _SID}
 
 
 def test_show_connect_flag(tmp_path: Path) -> None:
     result, call = _run(["session", "show", _SID, "--connect"], _SHOW, tmp_path)
     assert result.exit_code == 0
-    assert call.await_args.args[3] == {"session_id": _SID, "attempt_to_connect": True}
+    assert call.await_args.args[3] == {"id": _SID, "attempt_to_connect": True}
 
 
 def test_show_falls_back_when_no_session_key(tmp_path: Path) -> None:
@@ -183,7 +183,7 @@ def test_show_not_found_exits_3(tmp_path: Path) -> None:
 # create
 # ---------------------------------------------------------------------------
 
-_CREATED = {"success": True, "session_id": _SID, "session_name": "dev"}
+_CREATED = {"success": True, "id": _SID, "session_name": "dev"}
 
 
 def test_create_community_minimal(tmp_path: Path) -> None:
@@ -256,7 +256,7 @@ def test_create_enterprise_auto_name_and_session_arg(tmp_path: Path) -> None:
             "--session-arg",
             "maxHeap=8",
         ],
-        {"success": True, "session_id": _EID},
+        {"success": True, "id": _EID},
         tmp_path,
     )
     assert result.exit_code == 0
@@ -323,16 +323,16 @@ def test_create_tool_failure_exits_3(tmp_path: Path) -> None:
 
 def test_delete_routes_community(tmp_path: Path) -> None:
     result, call = _run(
-        ["session", "delete", _SID], {"success": True, "session_id": _SID}, tmp_path
+        ["session", "delete", _SID], {"success": True, "id": _SID}, tmp_path
     )
     assert result.exit_code == 0
     assert call.await_args.args[2] == "session_community_delete"
-    assert call.await_args.args[3] == {"session_id": _SID}
+    assert call.await_args.args[3] == {"id": _SID}
 
 
 def test_delete_routes_enterprise(tmp_path: Path) -> None:
     result, call = _run(
-        ["session", "delete", _EID], {"success": True, "session_id": _EID}, tmp_path
+        ["session", "delete", _EID], {"success": True, "id": _EID}, tmp_path
     )
     assert result.exit_code == 0
     assert call.await_args.args[2] == "session_enterprise_delete"
@@ -473,7 +473,7 @@ def test_url_no_url_exits_2(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("verb", ["show", "delete", "credentials", "url", "open"])
-def test_id_verbs_require_session_id(verb: str, tmp_path: Path) -> None:
+def test_id_verbs_require_id(verb: str, tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     result = _invoke(["session", verb], rt)
     assert result.exit_code == 2

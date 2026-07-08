@@ -39,7 +39,7 @@ def test_run_inline_script(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[2] == "session_script_run"
-    assert call.await_args.args[3] == {"session_id": _SID, "script": "print(1)"}
+    assert call.await_args.args[3] == {"id": _SID, "script": "print(1)"}
 
 
 def test_run_script_path(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_run_script_path(tmp_path: Path) -> None:
         tmp_path,
     )
     assert result.exit_code == 0
-    assert call.await_args.args[3] == {"session_id": _SID, "script_path": "/tmp/j.py"}
+    assert call.await_args.args[3] == {"id": _SID, "script_path": "/tmp/j.py"}
 
 
 def test_run_failure_exits_3(tmp_path: Path) -> None:

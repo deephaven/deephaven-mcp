@@ -45,7 +45,7 @@ def test_schema_all_tables(tmp_path: Path) -> None:
         ["table", "schema", _SID], {"success": True, "schemas": []}, tmp_path
     )
     assert result.exit_code == 0
-    assert call.await_args.args[3] == {"session_id": _SID}
+    assert call.await_args.args[3] == {"id": _SID}
 
 
 def test_schema_named_tables(tmp_path: Path) -> None:
@@ -56,7 +56,7 @@ def test_schema_named_tables(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[3] == {
-        "session_id": _SID,
+        "id": _SID,
         "table_names": ["trades", "quotes"],
     }
 
@@ -68,7 +68,7 @@ def test_data_defaults(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert call.await_args.args[2] == "session_table_data"
     assert call.await_args.args[3] == {
-        "session_id": _SID,
+        "id": _SID,
         "table_name": "trades",
         "head": True,
         "format": "json-row",
@@ -91,7 +91,7 @@ def test_data_options(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert call.await_args.args[3] == {
-        "session_id": _SID,
+        "id": _SID,
         "table_name": "trades",
         "head": False,
         "max_rows": 50,

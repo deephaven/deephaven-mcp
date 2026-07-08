@@ -345,6 +345,12 @@ Shared: `--language` (`Python`/`Groovy`), `--heap-size-gb`, `--jvm-arg`
 (repeatable), `--env KEY=VALUE` (repeatable). Supplying a wrong-type option
 exits `2` (`option_not_applicable`).
 
+For an Enterprise system, `create` is *create-and-connect*: it provisions
+a Persistent Query and connects immediately, and `delete` also deletes
+the underlying PQ (equivalent to `pq delete` with the same id). To define
+a durable PQ without connecting — scheduled, RunAndDone, or disabled —
+use `pq create` instead; see [`dh-mcp pq`](#dh-mcp-pq).
+
 `credentials`, `url`, and `open` are Community-only and share the
 `session_community_credentials` tool, whose output contains a
 **plaintext auth token by design**. Retrieval is gated by
@@ -400,7 +406,7 @@ dh-mcp system open prod --print
 ### `dh-mcp table`
 
 Inspects tables in a session. All verbs take a fully qualified
-`SESSION_ID`.
+`ID`.
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
@@ -430,7 +436,7 @@ dh-mcp script pip-list community:community:dev
 ### `dh-mcp catalog`
 
 **Enterprise (Core+) only.** Queries an enterprise session's catalog
-(database); `SESSION_ID` must name an enterprise session.
+(database); `ID` must name an enterprise session.
 
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
@@ -447,13 +453,21 @@ dh-mcp catalog sample enterprise:prod:42 Market Trades --max-rows 20
 ### `dh-mcp pq`
 
 **Enterprise (Core+) only.** Manages Persistent Queries, addressed by
-serial id (`pq name-to-id` resolves a name within a system).
+their fully qualified id `enterprise:<system>:<serial>` — the same id the
+`session` verbs use (`pq name-to-id` resolves a name within a system).
+
+A PQ and an enterprise session are two lenses on the same controller
+object, addressed by the same id: `pq` manages the durable definition
+and lifecycle (create, configure, schedule, start/stop), while `session`
+interacts with a live worker (scripts, tables, credentials). Pass a
+running PQ's id to either noun's verbs verbatim. Community sessions have
+no PQ counterpart (local workers are ephemeral).
 
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
 | `list <system>`                       | Lists PQs configured on a system. Wraps `pq_list`. |
 | `details <id>`                        | Configuration + status for one PQ. Wraps `pq_details`. |
-| `name-to-id <system> <name>`          | Resolves a PQ name to its serial id. Wraps `pq_name_to_id`. |
+| `name-to-id <system> <name>`          | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`. |
 | `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
 | `modify <id>`                         | Updates only the fields passed; everything else is left unchanged. `--restart` restarts the PQ after applying the change. Wraps `pq_modify`. |
 | `delete <id>...`                      | Deletes one or more PQs. `--max-concurrent N`. Wraps `pq_delete`. |
@@ -464,7 +478,7 @@ serial id (`pq name-to-id` resolves a name within a system).
 `create` and `modify` share a large optional config flag set; only the flags you
 pass take effect (on `modify`, everything else is left unchanged). `create`
 additionally requires `--system` and `--heap-size-gb` and accepts
-`--enabled/--disabled` (default enabled); `modify` takes `PQ_ID` and accepts
+`--enabled/--disabled` (default enabled); `modify` takes `ID` and accepts
 `--pq-name`, `--heap-size-gb`, `--enabled/--disabled`, and `--restart`. The
 shared flags are: `--script-body`/`--script-path`, `--language`
 (`Python`/`Groovy`), `--configuration-type` (`Script`/`RunAndDone`), `--schedule`
@@ -482,7 +496,7 @@ exit `0` means the batch ran, not that every id succeeded — check the
 
 ```bash
 dh-mcp pq create nightly --system prod --heap-size-gb 4 --script-path /pq/n.py
-dh-mcp pq restart 1234567890 --no-wait
+dh-mcp pq restart enterprise:prod:1234567890 --no-wait
 ```
 
 ### `dh-mcp config`

@@ -63,7 +63,7 @@ async def test_session_tables_schema_empty_table_names():
         }
     )
     res = await session_tables_schema(
-        context, session_id="community:community:worker", table_names=[]
+        context, id="community:community:worker", table_names=[]
     )
     assert isinstance(res, dict)
     assert res == {"success": True, "schemas": [], "count": 0}
@@ -106,7 +106,7 @@ async def test_session_tables_schema_interface_contract():
 
     with patch("deephaven_mcp.queries.get_session_meta_table", mock_get_meta_table):
         result = await session_tables_schema(
-            context, session_id="community:community:worker", table_names=None
+            context, id="community:community:worker", table_names=None
         )
 
     assert result["success"] is True
@@ -169,7 +169,7 @@ async def test_session_tables_schema_no_tables():
         }
     )
     res = await session_tables_schema(
-        context, session_id="community:community:worker", table_names=None
+        context, id="community:community:worker", table_names=None
     )
     assert isinstance(res, dict)
     assert res == {"success": True, "schemas": [], "count": 0}
@@ -221,7 +221,7 @@ async def test_session_tables_schema_success():
         # Call session_tables_schema with a specific table name
         result = await session_tables_schema(
             context,
-            session_id="community:community:test-worker",
+            id="community:community:test-worker",
             table_names=["table1"],
         )
 
@@ -294,9 +294,7 @@ async def test_session_tables_schema_all_tables():
     # Patch queries.get_meta_table to return our mock data
     with patch("deephaven_mcp.queries.get_session_meta_table", mock_get_meta_table):
         # Call table_schemas with no table_names to test getting all tables
-        result = await session_tables_schema(
-            context, session_id="community:community:worker"
-        )
+        result = await session_tables_schema(context, id="community:community:worker")
 
     # Should return results for both tables in the dummy_session.tables list
     assert isinstance(result, dict)
@@ -362,7 +360,7 @@ async def test_session_tables_schema_schema_key_error():
         # Call session_tables_schema with a specific table name
         result = await session_tables_schema(
             context,
-            session_id="community:community:test-worker",
+            id="community:community:test-worker",
             table_names=["table1"],
         )
 
@@ -388,7 +386,7 @@ async def test_session_tables_schema_schema_key_error():
 async def test_session_tables_schema_session_error():
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
-    # 2. session_manager = await session_registry.get(session_id) - set to fail here
+    # 2. session_manager = await session_registry.get(id) - set to fail here
     # 3. session = await session_manager.get()
 
     # Set up session_registry to throw an exception when get() is called
@@ -402,7 +400,7 @@ async def test_session_tables_schema_session_error():
         }
     )
     res = await session_tables_schema(
-        context, session_id="community:community:worker", table_names=["t1"]
+        context, id="community:community:worker", table_names=["t1"]
     )
     assert isinstance(res, dict)
     assert res["success"] is False
@@ -434,9 +432,7 @@ async def test_session_tables_list_success_multiple_tables():
     )
 
     # Call list_tables
-    result = await session_tables_list(
-        context, session_id="community:community:test-session"
-    )
+    result = await session_tables_list(context, id="community:community:test-session")
 
     # Verify correct session access pattern
     session_registry.get.assert_awaited_once_with(
@@ -447,7 +443,7 @@ async def test_session_tables_list_success_multiple_tables():
     # Verify the result
     assert isinstance(result, dict)
     assert result["success"] is True
-    assert result["session_id"] == "community:community:test-session"
+    assert result["id"] == "community:community:test-session"
     assert result["table_names"] == ["trades", "quotes", "orders"]
     assert result["count"] == 3
 
@@ -476,21 +472,19 @@ async def test_session_tables_list_success_empty_session():
     )
 
     # Call list_tables
-    result = await session_tables_list(
-        context, session_id="community:community:empty-session"
-    )
+    result = await session_tables_list(context, id="community:community:empty-session")
 
     # Verify the result
     assert isinstance(result, dict)
     assert result["success"] is True
-    assert result["session_id"] == "community:community:empty-session"
+    assert result["id"] == "community:community:empty-session"
     assert result["table_names"] == []
     assert result["count"] == 0
 
 
 @pytest.mark.asyncio
 async def test_session_tables_list_invalid_session_id():
-    """Test session_tables_list with invalid session_id."""
+    """Test session_tables_list with invalid id."""
     # Set up session registry to raise error on get
     session_registry = MagicMock()
     session_registry.get = AsyncMock(
@@ -505,9 +499,9 @@ async def test_session_tables_list_invalid_session_id():
     )
 
     # Call list_tables
-    # Bare-name session_id fails at the QualifiedSessionId boundary check
+    # Bare-name id fails at the QualifiedSessionId boundary check
     # before the registry mock is ever consulted; the structural error wins.
-    result = await session_tables_list(context, session_id="invalid-session")
+    result = await session_tables_list(context, id="invalid-session")
 
     # Verify error response
     assert isinstance(result, dict)
@@ -534,9 +528,7 @@ async def test_session_tables_list_session_connection_failure():
     )
 
     # Call list_tables
-    result = await session_tables_list(
-        context, session_id="community:community:test-session"
-    )
+    result = await session_tables_list(context, id="community:community:test-session")
 
     # Verify error response
     assert isinstance(result, dict)
@@ -569,9 +561,7 @@ async def test_session_tables_list_session_tables_method_failure():
     )
 
     # Call list_tables
-    result = await session_tables_list(
-        context, session_id="community:community:test-session"
-    )
+    result = await session_tables_list(context, id="community:community:test-session")
 
     # Verify error response
     assert isinstance(result, dict)
@@ -604,12 +594,12 @@ async def test_session_tables_list_community_session():
     )
 
     # Call list_tables
-    result = await session_tables_list(context, session_id="community:local:test")
+    result = await session_tables_list(context, id="community:local:test")
 
     # Verify the result
     assert isinstance(result, dict)
     assert result["success"] is True
-    assert result["session_id"] == "community:local:test"
+    assert result["id"] == "community:local:test"
     assert result["table_names"] == ["table1", "table2"]
     assert result["count"] == 2
 

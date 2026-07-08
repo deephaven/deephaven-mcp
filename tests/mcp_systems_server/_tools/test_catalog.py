@@ -147,7 +147,7 @@ async def test_catalog_tables_success_no_filters():
             result = await catalog_tables_list(context, "enterprise:prod:1")
 
             assert result["success"] is True
-            assert result["session_id"] == "enterprise:prod:1"
+            assert result["id"] == "enterprise:prod:1"
             assert result["format"] == "json-row"
             assert result["row_count"] == 100
             assert result["is_complete"] is True
@@ -499,7 +499,7 @@ async def test_catalog_namespaces_success_no_filters():
             result = await catalog_namespaces_list(context, "enterprise:prod:1")
 
             assert result["success"] is True
-            assert result["session_id"] == "enterprise:prod:1"
+            assert result["id"] == "enterprise:prod:1"
             assert result["format"] == "json-row"
             assert result["row_count"] == 25
             assert result["is_complete"] is True

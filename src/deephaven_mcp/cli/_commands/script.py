@@ -62,7 +62,7 @@ _OUTPUT_RUN = OutputSpec(
             "--script-path; supply exactly one. Supplying neither or both exits 2; "
             "a script error exits 3."
         ),
-        arguments=(HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_RUN,
         examples=(
             "$ dh-mcp script run community:community:dev --script 'print(1+1)'",
@@ -77,7 +77,7 @@ _OUTPUT_RUN = OutputSpec(
         ),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.option("--script", "script", default=None, help="Inline script source.")
 @click.option(
     "--script-path",
@@ -88,7 +88,7 @@ _OUTPUT_RUN = OutputSpec(
 @click.pass_obj
 @run_async
 async def script_run(
-    runtime: Runtime, session_id: str, script: str | None, script_path: str | None
+    runtime: Runtime, id: str, script: str | None, script_path: str | None
 ) -> None:
     """Run a script in a session."""
     if script is not None and script_path is not None:
@@ -101,7 +101,7 @@ async def script_run(
             "Provide a script source: --script or --script-path.",
             code=ErrorCode.MISSING_ARGUMENT,
         )
-    arguments: dict[str, Any] = {"session_id": session_id}
+    arguments: dict[str, Any] = {"id": id}
     if script is not None:
         arguments["script"] = script
     else:
@@ -139,7 +139,7 @@ _OUTPUT_PIP_LIST = OutputSpec(
             "as a list of {package, version}. Use it to confirm a library is "
             "present before running a script that imports it."
         ),
-        arguments=(HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_PIP_LIST,
         examples=(
             "$ dh-mcp script pip-list community:community:dev",
@@ -150,16 +150,16 @@ _OUTPUT_PIP_LIST = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.pass_obj
 @run_async
-async def script_pip_list(runtime: Runtime, session_id: str) -> None:
+async def script_pip_list(runtime: Runtime, id: str) -> None:
     """List a session's installed pip packages."""
     await call_and_echo_field(
         runtime,
         "session_pip_list",
         retry_command="dh-mcp script pip-list",
-        arguments={"session_id": session_id},
+        arguments={"id": id},
         field="result",
         default=[],
     )

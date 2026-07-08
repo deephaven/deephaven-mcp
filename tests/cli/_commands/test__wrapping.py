@@ -401,7 +401,7 @@ async def test_call_and_echo_table_keeps_format_and_order_in_json_mode(
 # ``schema``; ``columns`` merely restates the rendered data table's headers.
 _LIST_TABLE_PAYLOAD = {
     "success": True,
-    "session_id": "enterprise:dev:1",
+    "id": "enterprise:dev:1",
     "row_count": 2,
     "is_complete": True,
     "format": "json-row",
@@ -550,7 +550,7 @@ async def test_call_and_echo_field_surfaces_partial_result_with_errors(
     rt = make_runtime(tmp_path, output_format="human")
     payload = {
         "success": True,
-        "sessions": [{"session_id": "community:community:dev"}],
+        "sessions": [{"id": "community:community:dev"}],
         "partial_result": {
             "phase": "completed",
             "detail": "Some enterprise systems had connection issues during discovery.",

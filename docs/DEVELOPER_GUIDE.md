@@ -171,7 +171,7 @@ graph TD
 every configured Community session and Enterprise system through one
 stdio or streamable-HTTP MCP transport. AI clients call `list_systems`
 to discover what's configured and route subsequent calls via the
-`system` / `session_id` / `pq_id` arguments.
+`system` / `id` arguments.
 
 **Docs Server Architecture:**
 
@@ -372,9 +372,9 @@ For enterprise sessions, `source` equals the server's configured `system_name`. 
 - **Worker**: A Deephaven Community Core instance (configured per-file under `community/sessions/<name>.json`)
 - **System**: A Deephaven Enterprise instance/factory (managed by the DHE server; identified by the configured `system_name` value in session IDs)
 - **Session**: A specific connection/session within a worker or system
-- **Session ID**: The fully qualified identifier used by MCP tools to reference a specific session
+- **Id**: The fully qualified identifier used by MCP tools to reference a specific session or PQ
 
-All MCP tools that interact with Deephaven instances use the `session_id` parameter with this format, replacing the older `session_name` parameter from previous versions.
+All MCP tools that interact with Deephaven instances use the `id` parameter with this format.
 
 #### Response envelope
 
@@ -414,16 +414,16 @@ automatically on failure, and persist across server restarts.
 **Key concepts:**
 
 - **PQ definition** — a configuration specifying how to create a worker session (heap size, JVM args, schedule, and so on).
-- **PQ serial** — the immutable unique identifier for a PQ; prefer it for all operations. A fully qualified `pq_id` has the form `<system>:<serial>`.
-- **PQ name** — a human-readable label that can change, so it is less reliable than the serial. `pq_name_to_id` resolves a name to its canonical `pq_id`.
+- **PQ serial** — the immutable unique identifier for a PQ; prefer it for all operations. A PQ's fully qualified `id` has the form `enterprise:<system>:<serial>` — the one string works with both the `pq_*` and session tools.
+- **PQ name** — a human-readable label that can change, so it is less reliable than the serial. `pq_name_to_id` resolves a name to its canonical `id`.
 - **Status categories** — PQ tools report a `status_category` of `ACTIVE`, `TRANSITIONAL`, `TERMINAL`, or `INVALID` alongside the raw `status`. Branch on the category, never on a specific raw status string (test `status_category == "ACTIVE"`, not `status == "RUNNING"`); the raw vocabulary is large and evolves.
-- **Session integration** — a running PQ exposes a session reachable through the standard session tools via the `session_id` form `enterprise:<system>:<serial>` (present only while the PQ is running or initializing). The trailing segment is the PQ serial as a decimal string, not the PQ name.
+- **Session integration** — while a PQ is running or initializing, its worker session is reachable through the standard session tools using the same `id`. The trailing segment is the PQ serial as a decimal string, not the PQ name.
 
 **Typical workflows:**
 
-1. **Create and start a PQ:** `pq_create` → `pq_start` → use the returned `session_id` with the session tools.
+1. **Create and start a PQ:** `pq_create` → `pq_start` → use the `id` with the session tools.
 2. **Manage an existing PQ:** `pq_list` → `pq_details` → `pq_stop` → `pq_restart`.
-3. **Query a running PQ's data:** `pq_details` → read its `session_id` → `session_tables_list` → `session_table_data`.
+3. **Query a running PQ's data:** `pq_details` (confirm `status_category` is `ACTIVE`) → `session_tables_list` → `session_table_data`, all with the same `id`.
 
 ### Test components
 

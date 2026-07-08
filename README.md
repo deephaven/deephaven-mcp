@@ -504,44 +504,44 @@ in the PQ id (form `<system>:<serial>`).
 *Community sessions:*
 
 - `session_community_create` - Dynamically launch Community Core sessions
-- `session_community_delete(session_id)` - Delete a dynamically created session
-- `session_community_credentials(session_id)` - Retrieve session credentials (subject to `security.credential_retrieval_mode`)
+- `session_community_delete(id)` - Delete a dynamically created session
+- `session_community_credentials(id)` - Retrieve session credentials (subject to `security.credential_retrieval_mode`)
 
 *Enterprise sessions:*
 
 - `session_enterprise_create(system, ...)` - Create a worker session in the named DHE system
-- `session_enterprise_delete(session_id)` - Delete an enterprise session
+- `session_enterprise_delete(id)` - Delete an enterprise session
 
 *Persistent Query (PQ) Management:*
 
-- `pq_name_to_id(system, name)` - Convert a PQ name to its canonical `pq_id`
+- `pq_name_to_id(system, name)` - Convert a PQ name to its canonical `id`
 - `pq_list(system)` - List all persistent queries in a system
-- `pq_details(pq_id)` - Get detailed PQ information (`pq_id` = `<system>:<serial>`)
+- `pq_details(id)` - Get detailed PQ information (`id` = `enterprise:<system>:<serial>`)
 - `pq_create(system, ...)` - Create a new persistent query
-- `pq_modify(pq_id, ...)` - Modify an existing PQ's configuration
-- `pq_start(pq_ids)` - Start PQs (parallel execution with configurable concurrency)
-- `pq_stop(pq_ids)` - Stop running PQs (parallel execution with configurable concurrency)
-- `pq_restart(pq_ids)` - Restart PQs (parallel execution with configurable concurrency)
-- `pq_delete(pq_ids)` - Delete PQs (parallel execution with configurable concurrency)
+- `pq_modify(id, ...)` - Modify an existing PQ's configuration
+- `pq_start(ids)` - Start PQs (parallel execution with configurable concurrency)
+- `pq_stop(ids)` - Stop running PQs (parallel execution with configurable concurrency)
+- `pq_restart(ids)` - Restart PQs (parallel execution with configurable concurrency)
+- `pq_delete(ids)` - Delete PQs (parallel execution with configurable concurrency)
 
 **Parallel Batch Operations**: When operating on multiple PQs, `pq_start`, `pq_stop`, `pq_restart`, and `pq_delete` execute operations in parallel with a default concurrency limit of 20. This provides near-batch performance (~10x faster for large batches) while maintaining granular per-item error reporting for AI agents. The concurrency limit can be adjusted via the `max_concurrent` parameter to balance performance and server load.
 
 *Catalog discovery:*
 
-- `catalog_tables_list(session_id, ...)` - List catalog tables
-- `catalog_namespaces_list(session_id, ...)` - Browse catalog namespaces
-- `catalog_tables_schema(session_id, ...)` - Get catalog table schemas
-- `catalog_table_sample(session_id, ...)` - Sample catalog table data
+- `catalog_tables_list(id, ...)` - List catalog tables
+- `catalog_namespaces_list(id, ...)` - Browse catalog namespaces
+- `catalog_tables_schema(id, ...)` - Get catalog table schemas
+- `catalog_table_sample(id, ...)` - Sample catalog table data
 
 *Session & table operations (any session, community or enterprise):*
 
 - `sessions_list` - List all sessions
-- `session_details(session_id)` - Get detailed session information
-- `session_tables_list(session_id)` - List available tables
-- `session_tables_schema(session_id, ...)` - Get table schema information
-- `session_table_data(session_id, ...)` - Retrieve table data with formatting options
-- `session_script_run(session_id, ...)` - Execute Python/Groovy scripts
-- `session_pip_list(session_id)` - Query installed packages
+- `session_details(id)` - Get detailed session information
+- `session_tables_list(id)` - List available tables
+- `session_tables_schema(id, ...)` - Get table schema information
+- `session_table_data(id, ...)` - Retrieve table data with formatting options
+- `session_script_run(id, ...)` - Execute Python/Groovy scripts
+- `session_pip_list(id)` - Query installed packages
 
 > For each tool's full parameters, return shape, and examples, run `dh-mcp tool show <name>` (or `dh-mcp tool list` to enumerate them) — see [`docs/CLI.md`](docs/CLI.md). The authoritative detail is each tool's source docstring, which is also what the command surfaces live.
 
@@ -914,8 +914,8 @@ Before diving into detailed troubleshooting, try these common solutions:
 | `Python version error` | uv tool install | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...` |
 | `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
 | `Module not found: deephaven_mcp` | MCP server logs | Re-run `uv tool install --python-preference managed "deephaven-mcp"` |
-| `Invalid session_id format` | MCP tool responses | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
-| `Invalid pq_id` | MCP tool responses | PQ ids are `<system>:<serial>` where `<serial>` is a positive integer. |
+| `Invalid id format` | MCP tool responses | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
+| `Invalid id` | MCP tool responses | PQ ids are `enterprise:<system>:<serial>` where `<serial>` is a non-negative integer. |
 | `Enterprise system 'foo' is not configured` | MCP tool responses | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems. |
 | HTTP `401`/`403` from the server | HTTP transport | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK. |
 | HTTP server refuses to start with a loopback error | systems-server startup | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead. |
@@ -1014,11 +1014,10 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Ensure target Deephaven instances are running and network-accessible
   - Check that the MCP server process has read permissions for every file under the configuration directory
 
-- **Session ID Format Issues:**
-  - Use the correct format: `{type}:{system}:{session_id}`
+- **Id Format Issues:**
+  - Use the correct format: `{type}:{system}:{name}`
   - Community: `community:community:<session_name>` (the `SessionId` is the session name itself, e.g. `community:community:my_session`)
   - Enterprise: `enterprise:<system_name>:<pq_serial>` (the `SessionId` is the PQ serial as a decimal string, e.g. `enterprise:prod:42`); use `pq_name_to_id` to resolve a PQ name to its serial
-  - PQ ids use the simpler form `<system>:<serial>` (e.g. `prod:42`) and route to the right enterprise system automatically
   - Avoid special characters or spaces in session names (the community session name must match `[A-Za-z0-9][A-Za-z0-9_.-]*` since it doubles as the `SessionId`)
 
 - **Authentication Problems:**

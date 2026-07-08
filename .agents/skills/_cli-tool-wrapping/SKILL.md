@@ -50,7 +50,7 @@ A wrapper's help error codes come from `wrapper_error_codes()` in `_wrapping.py`
 These describe how a verb *selects* its tool(s); the output shape (`call_and_echo` vs `call_and_echo_field`, from *The shared flow*) is chosen independently per command. A router picks its tool, then calls a helper with it — `tool = ...; await call_and_echo(runtime, tool, retry_command=..., arguments=...)`.
 
 1. **Passthrough** — one tool; flags → tool args. Set `wraps_tool="..."`. Example: `system list`.
-2. **Id-router** — one verb; the `session_id` prefix selects the tool. Set `wraps_tools=("...community...","...enterprise...")`. Parse the `type:system:name` prefix and dispatch.
+2. **Id-router** — one verb; the `id` prefix selects the tool. Set `wraps_tools=("...community...","...enterprise...")`. Parse the `type:system:name` prefix and dispatch.
 3. **System-router** — one verb; the `--system` value's type selects the tool. Set `wraps_tools=(...)` and `router_params=frozenset({"system"})` (`--system` steers dispatch and is forwarded only to the branch that declares it). Group flags by type in help; reject a wrong-type flag.
 4. **Client-side composite** — wrap a tool for data, then act locally (e.g. `session open` → `webbrowser.open`). Set `wraps_tool="..."`; surface only the input args. For browser/host actions, provide a `--print` (or headless/no-`DISPLAY`) fallback and raise a dedicated `ErrorCode` on failure — never hang.
 
@@ -67,7 +67,7 @@ Declare the tool binding on the command so `tests/cli/test_tool_wrapper_drift.py
 - `router_params` — dispatch-router flags that steer which tool runs but *are* a param of some wrapped tool (e.g. `--system` on `session create`). Exempt from the phantom check; the drift test still asserts they are real tool params.
 - `client_only_params` — flags that are *not* a param of any wrapped tool (e.g. `--print` on `session open`, which only controls local behavior). Use this — not `router_params` — for flags with no tool counterpart.
 
-Name each click flag/argument exactly as the tool's parameter (snake_case) so the drift test joins them by name — e.g. the positional session id is `session_id`, and `--system` uses dest `system`. After adding or editing a wrapper, run the drift test:
+Name each click flag/argument exactly as the tool's parameter (snake_case) so the drift test joins them by name — e.g. the positional fully qualified id is `id`, and `--system` uses dest `system`. After adding or editing a wrapper, run the drift test:
 
 ```bash
 uv run --extra test pytest tests/cli/test_tool_wrapper_drift.py -q

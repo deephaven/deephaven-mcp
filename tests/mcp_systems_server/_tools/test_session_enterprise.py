@@ -329,11 +329,11 @@ async def test_session_enterprise_create_auto_name_no_username_and_language_tran
         assert mock_config.pb.scriptLanguage == "Groovy"
 
         # Verify session was added using add_session method - check the call was made
-        session_id = "enterprise:system:1"
+        id = "enterprise:system:1"
         mock_registry.add_session.assert_called_once()
         call_args = mock_registry.add_session.call_args
         session_manager = call_args[0][0]  # First (and only) argument is the manager
-        assert str(session_manager.qualified_session_id) == session_id
+        assert str(session_manager.qualified_session_id) == id
         returned_session = await session_manager._creation_function(
             "system", "mcp-session-20241126-1500"
         )
@@ -1211,7 +1211,7 @@ async def test_session_enterprise_create_success_with_defaults():
     result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "test-worker")
 
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:system:1"
+    assert result["id"] == "enterprise:system:1"
     assert result["system_name"] == "system"
     assert result["session_name"] == "test-worker"
     assert result["configuration"]["heap_size_gb"] == 8.0
@@ -1379,7 +1379,7 @@ async def test_session_enterprise_create_auto_generate_name():
 
         assert result["success"] is True
         assert result["session_name"] == "mcp-test-20241126-1430"
-        assert result["session_id"] == "enterprise:system:1"
+        assert result["id"] == "enterprise:system:1"
 
 
 @pytest.mark.asyncio
@@ -1446,13 +1446,13 @@ async def test_session_enterprise_create_max_workers_exceeded():
     mock_registry.count_added_sessions = AsyncMock(return_value=2)
 
     # Mock session registry get to simulate existing sessions for counting
-    async def mock_session_get(session_id):
-        if session_id in [
+    async def mock_session_get(id):
+        if id in [
             "enterprise:system:101",
             "enterprise:system:102",
         ]:
             return MagicMock(spec=EnterpriseSessionManager)
-        elif session_id == "enterprise:system:103":
+        elif id == "enterprise:system:103":
             raise RegistryItemNotFoundError(
                 "Session not found"
             )  # New session doesn't exist yet
@@ -1526,7 +1526,7 @@ async def test_session_enterprise_create_no_pre_create_name_conflict_check():
     )
 
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:system:200"
+    assert result["id"] == "enterprise:system:200"
 
 
 @pytest.mark.asyncio
@@ -1667,7 +1667,7 @@ async def test_session_enterprise_delete_success():
     result = await session_enterprise_delete(context, "enterprise:system:1")
 
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:system:1"
+    assert result["id"] == "enterprise:system:1"
     assert result["system_name"] == "system"
     assert result["session_name"] == "test-worker"
 
@@ -1826,7 +1826,7 @@ async def test_session_enterprise_delete_close_failure_continues():
 
     # Should succeed despite close failure
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:system:400"
+    assert result["id"] == "enterprise:system:400"
 
     # Verify session was still removed from registry
     # Verify remove was called even after close failure
@@ -1837,7 +1837,7 @@ async def test_session_enterprise_delete_close_failure_continues():
 
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_invalid_session_id_format():
-    """session_enterprise_delete returns error for malformed session_id."""
+    """session_enterprise_delete returns error for malformed id."""
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_registry.system_name = _TEST_SYSTEM_NAME
 
@@ -1848,16 +1848,16 @@ async def test_session_enterprise_delete_invalid_session_id_format():
         }
     )
 
-    result = await session_enterprise_delete(context, session_id="not-a-valid-id")
+    result = await session_enterprise_delete(context, id="not-a-valid-id")
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Invalid session_id format" in result["error"]
+    assert "Invalid id format" in result["error"]
 
 
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_wrong_system_type():
-    """session_enterprise_delete returns error when session_id is not enterprise type."""
+    """session_enterprise_delete returns error when id is not enterprise type."""
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_registry.system_name = _TEST_SYSTEM_NAME
 
@@ -1868,7 +1868,7 @@ async def test_session_enterprise_delete_wrong_system_type():
         }
     )
 
-    result = await session_enterprise_delete(context, session_id="community:system:1")
+    result = await session_enterprise_delete(context, id="community:system:1")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -1896,8 +1896,8 @@ async def test_session_enterprise_delete_unknown_system():
         }
     )
 
-    # session_id targets "dev", which is not in enterprise_systems.
-    result = await session_enterprise_delete(context, session_id="enterprise:dev:11")
+    # id targets "dev", which is not in enterprise_systems.
+    result = await session_enterprise_delete(context, id="enterprise:dev:11")
 
     assert result["success"] is False
     assert result["isError"] is True
@@ -2097,7 +2097,7 @@ async def test_session_enterprise_create_success():
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:system:1"
+    assert result["id"] == "enterprise:system:1"
     assert result["system_name"] == "system"
     assert result["session_name"] == "test-session"
 
@@ -2170,7 +2170,7 @@ async def test_session_enterprise_create_auto_generated_name():
     # Verify success
     assert result["success"] is True
     # The SessionId is the controller-assigned serial (mocked to 1).
-    assert result["session_id"] == "enterprise:system:1"
+    assert result["id"] == "enterprise:system:1"
     assert result["system_name"] == "system"
     assert result["session_name"].startswith("mcp-alice-")
 
@@ -2198,13 +2198,13 @@ async def test_session_enterprise_create_max_sessions_reached():
     mock_session_registry.count_added_sessions = AsyncMock(return_value=2)
 
     # Mock the session registry to return sessions for count validation
-    async def mock_get(session_id):
-        if session_id in [
+    async def mock_get(id):
+        if id in [
             "enterprise:system:501",
             "enterprise:system:502",
         ]:
             return MagicMock()
-        raise RegistryItemNotFoundError(f"Session {session_id} not found")
+        raise RegistryItemNotFoundError(f"Session {id} not found")
 
     mock_session_registry.get = AsyncMock(side_effect=mock_get)
 
@@ -2350,11 +2350,11 @@ async def test_session_enterprise_delete_success_v2():
 
     full_config = {"enterprise": {"systems": enterprise_config}}
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    result = await session_enterprise_delete(context, session_id="enterprise:system:1")
+    result = await session_enterprise_delete(context, id="enterprise:system:1")
 
     # Verify success
     assert result["success"] is True
-    assert result["session_id"] == "enterprise:system:1"
+    assert result["id"] == "enterprise:system:1"
     assert result["system_name"] == "system"
     assert result["session_name"] == "test-session"
 
@@ -2390,9 +2390,7 @@ async def test_session_enterprise_delete_not_found():
         }
     )
 
-    result = await session_enterprise_delete(
-        context, session_id="enterprise:system:9999"
-    )
+    result = await session_enterprise_delete(context, id="enterprise:system:9999")
 
     # Verify failure due to session not found
     assert result["success"] is False
@@ -2419,7 +2417,7 @@ async def test_session_enterprise_delete_system_not_found_v2():
         }
     )
 
-    result = await session_enterprise_delete(context, session_id="enterprise:system:1")
+    result = await session_enterprise_delete(context, id="enterprise:system:1")
 
     # Verify failure due to registry error
     assert result["success"] is False

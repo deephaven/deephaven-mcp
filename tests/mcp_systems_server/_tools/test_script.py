@@ -229,7 +229,7 @@ async def test_session_community_delete_removal_returns_none():
         }
     )
 
-    result = await session_community_delete(context, session_id="community:community:1")
+    result = await session_community_delete(context, id="community:community:1")
 
     # Should still succeed even though removal returned None
     assert result["success"] is True
@@ -268,7 +268,7 @@ def test_run_script_reads_script_from_file():
         result = asyncio.run(
             session_script_run(
                 context,
-                session_id="community:community:test_worker",
+                id="community:community:test_worker",
                 script=None,
                 script_path="dummy.py",
             )
@@ -305,7 +305,7 @@ async def test_session_script_run_both_script_and_path():
     )
     result = await session_script_run(
         context,
-        session_id="community:community:foo",
+        id="community:community:foo",
         script="print('hi')",
         script_path="/tmp/fake.py",
     )
@@ -318,7 +318,7 @@ async def test_session_script_run_both_script_and_path():
 async def test_session_script_run_missing_session():
     # Following the pattern in _mcp.py:
     # 1. session_registry = context["session_registry"]
-    # 2. session_manager = await session_registry.get(session_id) - fails here
+    # 2. session_manager = await session_registry.get(id) - fails here
     # 3. session = await session_manager.get()
 
     # Set up session_registry to throw an exception when get() is called
@@ -332,7 +332,7 @@ async def test_session_script_run_missing_session():
         }
     )
     result = await session_script_run(
-        context, session_id="community:community:missing", script="print('hi')"
+        context, id="community:community:missing", script="print('hi')"
     )
     assert result["success"] is False
     assert result["isError"] is True
@@ -361,7 +361,7 @@ async def test_session_script_run_both_none():
             "registry": session_registry,
         }
     )
-    result = await session_script_run(context, session_id="community:community:foo")
+    result = await session_script_run(context, id="community:community:foo")
     assert result["success"] is False
     assert result["isError"] is True
     assert "Must provide either script or script_path" in result["error"]
@@ -395,7 +395,7 @@ async def test_session_script_run_success():
         }
     )
     result = await session_script_run(
-        context, session_id="community:community:worker", script="print(1)"
+        context, id="community:community:worker", script="print(1)"
     )
 
     # Check correct session access pattern
@@ -421,7 +421,7 @@ async def test_session_script_run_no_script():
             "registry": session_registry,
         }
     )
-    res = await session_script_run(context, session_id="community:community:worker")
+    res = await session_script_run(context, id="community:community:worker")
 
     # No calls to session_registry should be made since validation fails first
     session_registry.get.assert_not_awaited()
@@ -451,7 +451,7 @@ async def test_session_script_run_neither_script_nor_path():
 
     # Call with neither script nor script_path
     res = await session_script_run(
-        context, session_id="community:community:worker", script=None, script_path=None
+        context, id="community:community:worker", script=None, script_path=None
     )
 
     # No calls to session_registry should be made since validation fails first
@@ -479,7 +479,7 @@ async def test_session_script_run_session_error():
         }
     )
     res = await session_script_run(
-        context, session_id="community:community:worker", script="print(1)"
+        context, id="community:community:worker", script="print(1)"
     )
 
     # Verify the session registry was called with the correct session id
@@ -537,7 +537,7 @@ async def test_session_script_run_script_path():
             }
         )
         res = await session_script_run(
-            context, session_id="community:community:worker", script_path=script_path
+            context, id="community:community:worker", script_path=script_path
         )
 
     # Verify session registry was called correctly
@@ -566,7 +566,7 @@ async def test_session_script_run_script_path_none_error():
         }
     )
     res = await session_script_run(
-        context, session_id="community:community:worker", script=None, script_path=None
+        context, id="community:community:worker", script=None, script_path=None
     )
 
     # Verify the validation error is returned
@@ -619,9 +619,7 @@ async def test_session_pip_list_success():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(
-            context, session_id="community:community:test_worker"
-        )
+        result = await session_pip_list(context, id="community:community:test_worker")
 
         # Check correct session access pattern
         mock_session_registry.get.assert_awaited_once_with(
@@ -667,9 +665,7 @@ async def test_session_pip_list_empty():
                 "config_manager": AsyncMock(),
             }
         )
-        result = await session_pip_list(
-            context, session_id="community:community:test_worker"
-        )
+        result = await session_pip_list(context, id="community:community:test_worker")
 
     # Verify results
     assert result["success"] is True
@@ -717,9 +713,7 @@ async def test_session_pip_list_malformed_data():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(
-            context, session_id="community:community:test_worker"
-        )
+        result = await session_pip_list(context, id="community:community:test_worker")
 
     # Verify results
     assert result["success"] is False
@@ -762,9 +756,7 @@ async def test_session_pip_list_error():
                 "instance_tracker": create_mock_instance_tracker(),
             }
         )
-        result = await session_pip_list(
-            context, session_id="community:community:test_worker"
-        )
+        result = await session_pip_list(context, id="community:community:test_worker")
 
         # Verify results
         assert result["success"] is False
@@ -799,7 +791,7 @@ async def test_session_pip_list_session_not_found():
             }
         )
         result = await session_pip_list(
-            context, session_id="community:community:nonexistent_worker"
+            context, id="community:community:nonexistent_worker"
         )
         assert result["success"] is False
         assert "Worker not found" in result["error"]

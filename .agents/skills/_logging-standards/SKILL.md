@@ -21,8 +21,8 @@ _LOGGER = logging.getLogger(__name__)
 Examples:
 
 ```python
-_LOGGER.info(f"[mcp_systems_server:catalog_tables_list] Invoked: session_id={session_id!r}")
-_LOGGER.info(f"[mcp_systems_server:session_enterprise_create] Success: session_id={session_id!r}")
+_LOGGER.info(f"[mcp_systems_server:catalog_tables_list] Invoked: id={id!r}")
+_LOGGER.info(f"[mcp_systems_server:session_enterprise_create] Success: id={id!r}")
 _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] Failed to create session: {e!r}", exc_info=True)
 ```
 
@@ -68,7 +68,7 @@ When logging a non-trivial object, log the specific fields you care about, not t
 
 ```python
 # Good
-_LOGGER.info(f"[mcp_systems_server:session_create] Created: session_id={session_id!r} system={system!r}")
+_LOGGER.info(f"[mcp_systems_server:session_create] Created: id={id!r} system={system!r}")
 
 # Bad — leaks every field, including future-added secrets
 _LOGGER.info(f"[mcp_systems_server:session_create] Created: {session_config!r}")

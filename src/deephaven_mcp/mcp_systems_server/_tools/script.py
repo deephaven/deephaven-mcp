@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def session_script_run(
     context: Context,
-    session_id: str,
+    id: str,
     script: str | None = None,
     script_path: str | None = None,
 ) -> dict:
@@ -52,7 +52,8 @@ async def session_script_run(
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven session on which to execute the script. This argument is required.
+        id (str): Fully qualified id of the session on which to execute the script
+            ('type:system:name', as returned by sessions_list). This argument is required.
         script (str | None, optional): The script to execute. Defaults to None.
         script_path (str | None, optional): Path to a script file to execute. Defaults to None.
 
@@ -73,24 +74,24 @@ async def session_script_run(
         # Execute inline Python script
         Tool: session_script_run
         Parameters: {
-            "session_id": "community:localhost:10000",
+            "id": "community:localhost:10000",
             "script": "from deephaven import new_table\nfrom deephaven.column import int_col\nmy_table = new_table([int_col('ID', [1, 2, 3])])"
         }
 
         # Execute script from file
         Tool: session_script_run
         Parameters: {
-            "session_id": "community:localhost:10000",
+            "id": "community:localhost:10000",
             "script_path": "/path/to/analysis_script.py"
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:session_script_run] Invoked: session_id={session_id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
+        f"[mcp_systems_server:session_script_run] Invoked: id={id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
     )
     result: dict[str, object] = {"success": False}
     try:
         _LOGGER.debug(
-            f"[mcp_systems_server:session_script_run] Validating script parameters for session '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Validating script parameters for session '{id}'"
         )
         if script is None:
             if script_path is None:
@@ -114,15 +115,13 @@ async def session_script_run(
             )
 
         # Use helper to get session from context
-        session = await get_session_from_context(
-            "session_script_run", context, session_id
-        )
+        session = await get_session_from_context("session_script_run", context, id)
         _LOGGER.info(
-            f"[mcp_systems_server:session_script_run] Session established for session: '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Session established for session: '{id}'"
         )
 
         _LOGGER.info(
-            f"[mcp_systems_server:session_script_run] Executing script on session: '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Executing script on session: '{id}'"
         )
         _LOGGER.debug(
             f"[mcp_systems_server:session_script_run] Script length: {len(script)} characters"
@@ -131,22 +130,22 @@ async def session_script_run(
         await session.run_script(script)
 
         _LOGGER.info(
-            f"[mcp_systems_server:session_script_run] Script executed successfully on session: '{session_id}'"
+            f"[mcp_systems_server:session_script_run] Script executed successfully on session: '{id}'"
         )
         result["success"] = True
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:session_script_run] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_script_run] Failed for session: '{id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = (
-            f"Script execution failed for session '{session_id}': {type(e).__name__}: {e}"
+            f"Script execution failed for session '{id}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
     return result
 
 
-async def session_pip_list(context: Context, session_id: str) -> dict:
+async def session_pip_list(context: Context, id: str) -> dict:
     """MCP Tool: Retrieve installed pip packages as a TABULAR LIST from a Deephaven session.
 
     **Returns**: Package information formatted as TABULAR DATA with columns for package name and version.
@@ -180,7 +179,8 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven session to query.
+        id (str): Fully qualified id of the session to query ('type:system:name',
+            as returned by sessions_list).
 
     Returns:
         dict: Structured result object with the following keys:
@@ -195,30 +195,26 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
         {'success': True, 'result': [{"package": "numpy", "version": "1.25.0"}, ...]}
 
     Example Error Response:
-        {'success': False, 'error': "Failed to list pip packages for session '<session_id>': <ExceptionType>: <message>", 'isError': True}
+        {'success': False, 'error': "Failed to list pip packages for session '<id>': <ExceptionType>: <message>", 'isError': True}
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:session_pip_list] Invoked for session_id: {session_id!r}"
-    )
+    _LOGGER.info(f"[mcp_systems_server:session_pip_list] Invoked for id: {id!r}")
     result: dict = {"success": False}
     try:
         # Use helper to get session from context
-        session = await get_session_from_context(
-            "session_pip_list", context, session_id
-        )
+        session = await get_session_from_context("session_pip_list", context, id)
         _LOGGER.info(
-            f"[mcp_systems_server:session_pip_list] Session established for session: '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Session established for session: '{id}'"
         )
 
         _LOGGER.debug(
-            f"[mcp_systems_server:session_pip_list] Querying pip packages for session '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Querying pip packages for session '{id}'"
         )
         arrow_table = await queries.get_pip_packages_table(session)
         _LOGGER.debug(
-            f"[mcp_systems_server:session_pip_list] Retrieved pip packages table for session '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Retrieved pip packages table for session '{id}'"
         )
         _LOGGER.info(
-            f"[mcp_systems_server:session_pip_list] Pip packages table retrieved successfully for session: '{session_id}'"
+            f"[mcp_systems_server:session_pip_list] Pip packages table retrieved successfully for session: '{id}'"
         )
 
         # Convert the Arrow table to a list of dicts
@@ -245,11 +241,11 @@ async def session_pip_list(context: Context, session_id: str) -> dict:
         result["result"] = packages
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:session_pip_list] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_pip_list] Failed for session: '{id}', error: {e!r}",
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to list pip packages for session '{session_id}': {type(e).__name__}: {e}"
+            f"Failed to list pip packages for session '{id}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
     return result

@@ -26,7 +26,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def session_tables_schema(
-    context: Context, session_id: str, table_names: list[str] | None = None
+    context: Context, id: str, table_names: list[str] | None = None
 ) -> dict:
     """MCP Tool: Retrieve table schemas as TABULAR METADATA from a Deephaven session.
 
@@ -67,7 +67,8 @@ async def session_tables_schema(
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven session to query. This argument is required.
+        id (str): Fully qualified id of the session to query ('type:system:name',
+            as returned by sessions_list). This argument is required.
         table_names (list[str], optional): List of table names to retrieve schemas for.
             If None, all available tables will be queried. Defaults to None.
 
@@ -112,32 +113,30 @@ async def session_tables_schema(
         # Get full schemas for all tables in the session
         Tool: session_tables_schema
         Parameters: {
-            "session_id": "community:community:local"
+            "id": "community:community:local"
         }
 
         # Get full schemas for specific tables
         Tool: session_tables_schema
         Parameters: {
-            "session_id": "community:community:local",
+            "id": "community:community:local",
             "table_names": ["trades", "quotes", "orders"]
         }
 
         # Get full schema for a single table
         Tool: session_tables_schema
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "table_names": ["market_data"]
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:session_tables_schema] Invoked: session_id={session_id!r}, table_names={table_names!r}"
+        f"[mcp_systems_server:session_tables_schema] Invoked: id={id!r}, table_names={table_names!r}"
     )
     schemas = []
     try:
         # Use helper to get session from context
-        session = await get_session_from_context(
-            "session_tables_schema", context, session_id
-        )
+        session = await get_session_from_context("session_tables_schema", context, id)
 
         if table_names is not None:
             selected_table_names = table_names
@@ -146,7 +145,7 @@ async def session_tables_schema(
             )
         else:
             _LOGGER.debug(
-                f"[mcp_systems_server:session_tables_schema] Discovering available tables in session '{session_id}'"
+                f"[mcp_systems_server:session_tables_schema] Discovering available tables in session '{id}'"
             )
             selected_table_names = await session.tables()
             _LOGGER.info(
@@ -155,7 +154,7 @@ async def session_tables_schema(
 
         for table_name in selected_table_names:
             _LOGGER.debug(
-                f"[mcp_systems_server:session_tables_schema] Processing table '{table_name}' in session '{session_id}'"
+                f"[mcp_systems_server:session_tables_schema] Processing table '{table_name}' in session '{id}'"
             )
             try:
                 meta_arrow_table = await queries.get_session_meta_table(
@@ -173,14 +172,14 @@ async def session_tables_schema(
                 )
             except Exception as table_exc:
                 _LOGGER.error(
-                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}' in session '{session_id}': {table_exc!r}",
+                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}' in session '{id}': {table_exc!r}",
                     exc_info=True,
                 )
                 schemas.append(
                     {
                         "success": False,
                         "table": table_name,
-                        "error": f"Failed to get schema for table '{table_name}' in session '{session_id}': {type(table_exc).__name__}: {table_exc}",
+                        "error": f"Failed to get schema for table '{table_name}' in session '{id}': {type(table_exc).__name__}: {table_exc}",
                         "isError": True,
                     }
                 )
@@ -191,13 +190,13 @@ async def session_tables_schema(
         return {"success": True, "schemas": schemas, "count": len(schemas)}
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:session_tables_schema] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_tables_schema] Failed for session: '{id}', error: {e!r}",
             exc_info=True,
         )
         return error_response(str(e))
 
 
-async def session_tables_list(context: Context, session_id: str) -> dict:
+async def session_tables_list(context: Context, id: str) -> dict:
     """MCP Tool: Retrieve the names of all tables in a Deephaven session.
 
     Returns a simple list of table names without schemas or metadata. This is a lightweight
@@ -224,26 +223,27 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
 
     Args:
         context (Context): The MCP context object used to access the session registry.
-        session_id (str): ID of the Deephaven session to query. Must match an existing active session.
+        id (str): Fully qualified id of the session to query ('type:system:name',
+            as returned by sessions_list). Must match an existing active session.
 
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): Always present. True if table names were retrieved successfully, False on any error.
-            - 'session_id' (str, optional): The session ID if successful. Useful for confirming which session was queried.
+            - 'id' (str, optional): The session ID if successful. Useful for confirming which session was queried.
             - 'table_names' (list[str], optional): List of table names if successful. Empty list if session has no tables.
             - 'count' (int, optional): Number of tables found if successful. Convenient for quick checks.
             - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag for frameworks.
 
     Error Scenarios:
-        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid id: Returns error if session doesn't exist or is not accessible
         - Session connection issues: Returns error if unable to communicate with Deephaven server
         - Session not available: Returns error if session is closed or unavailable
 
     Example Successful Response:
         {
             'success': True,
-            'session_id': 'community:community:local',
+            'id': 'community:community:local',
             'table_names': ['trades', 'quotes', 'orders'],
             'count': 3
         }
@@ -261,45 +261,41 @@ async def session_tables_list(context: Context, session_id: str) -> dict:
         - Safe to call frequently for session monitoring
         - Scales well even with hundreds of tables
     """
-    _LOGGER.info(
-        f"[mcp_systems_server:session_tables_list] Invoked: session_id={session_id!r}"
-    )
+    _LOGGER.info(f"[mcp_systems_server:session_tables_list] Invoked: id={id!r}")
 
     try:
         # Use helper to get session from context
-        session = await get_session_from_context(
-            "session_tables_list", context, session_id
-        )
+        session = await get_session_from_context("session_tables_list", context, id)
 
         _LOGGER.debug(
-            f"[mcp_systems_server:session_tables_list] Retrieving table names from session '{session_id}'"
+            f"[mcp_systems_server:session_tables_list] Retrieving table names from session '{id}'"
         )
         table_names = await session.tables()
 
         _LOGGER.info(
-            f"[mcp_systems_server:session_tables_list] Success: Retrieved {len(table_names)} table(s) from session '{session_id}'"
+            f"[mcp_systems_server:session_tables_list] Success: Retrieved {len(table_names)} table(s) from session '{id}'"
         )
 
         return {
             "success": True,
-            "session_id": session_id,
+            "id": id,
             "table_names": table_names,
             "count": len(table_names),
         }
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:session_tables_list] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:session_tables_list] Failed for session: '{id}', error: {e!r}",
             exc_info=True,
         )
         return error_response(
-            f"Failed to list tables for session '{session_id}': {type(e).__name__}: {e}"
+            f"Failed to list tables for session '{id}': {type(e).__name__}: {e}"
         )
 
 
 async def session_table_data(
     context: Context,
-    session_id: str,
+    id: str,
     table_name: str,
     max_rows: int | None = 1000,
     head: bool = True,
@@ -335,7 +331,8 @@ async def session_table_data(
 
     Args:
         context (Context): The MCP context object used to access the session registry.
-        session_id (str): ID of the Deephaven session to query. Must match an existing active session.
+        id (str): Fully qualified id of the session to query ('type:system:name',
+            as returned by sessions_list). Must match an existing active session.
         table_name (str): Name of the table to retrieve data from. Must exist in the specified session.
         max_rows (int | None, optional): Maximum number of rows to retrieve. Defaults to 1000 for safety.
                                         Set to None to retrieve entire table (use with caution for large tables).
@@ -370,7 +367,7 @@ async def session_table_data(
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag for frameworks.
 
     Error Scenarios:
-        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid id: Returns error if session doesn't exist or is not accessible
         - Invalid table_name: Returns error if table doesn't exist in the session
         - Invalid format: Returns error if format is not one of the supported options listed above
         - Response too large: Returns error if estimated response would exceed 50MB limit
@@ -404,14 +401,14 @@ async def session_table_data(
         # Get first 1000 rows with default format
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:community:local",
+            "id": "community:community:local",
             "table_name": "my_table"
         }
 
         # Get last 500 rows (most recent for time-series)
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:community:local",
+            "id": "community:community:local",
             "table_name": "trades",
             "max_rows": 500,
             "head": false
@@ -420,7 +417,7 @@ async def session_table_data(
         # Get data in CSV format for efficient parsing
         Tool: session_table_data
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "table_name": "market_data",
             "max_rows": 10000,
             "format": "csv"
@@ -429,7 +426,7 @@ async def session_table_data(
         # Get data optimized for AI comprehension
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:community:local",
+            "id": "community:community:local",
             "table_name": "customer_records",
             "max_rows": 100,
             "format": "optimize-accuracy"
@@ -438,7 +435,7 @@ async def session_table_data(
         # Get entire small table in JSON row format
         Tool: session_table_data
         Parameters: {
-            "session_id": "community:community:local",
+            "id": "community:community:local",
             "table_name": "config_settings",
             "max_rows": null,
             "format": "json-row"
@@ -447,14 +444,14 @@ async def session_table_data(
         # Get data in markdown table format
         Tool: session_table_data
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "table_name": "summary_stats",
             "max_rows": 50,
             "format": "markdown-table"
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:session_table_data] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:session_table_data] Invoked: id={id!r}, "
         f"table_name={table_name!r}, max_rows={max_rows}, head={head}, format={format!r}"
     )
 
@@ -462,9 +459,7 @@ async def session_table_data(
 
     try:
         # Use helper to get session from context
-        session = await get_session_from_context(
-            "session_table_data", context, session_id
-        )
+        session = await get_session_from_context("session_table_data", context, id)
 
         # Get table data using queries module
         _LOGGER.debug(
@@ -477,7 +472,7 @@ async def session_table_data(
         # Check response size before formatting (rough estimation to avoid memory overhead)
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
-        limits = get_response_limits(context, session_id)
+        limits = get_response_limits(context, id)
         estimated_size = row_count * col_count * limits.estimated_bytes_per_cell
         size_error = check_response_size(table_name, estimated_size, limits)
 
@@ -501,21 +496,21 @@ async def session_table_data(
     except ValueError as e:
         # Format validation error from formatters package
         _LOGGER.error(
-            f"[mcp_systems_server:session_table_data] Invalid format parameter '{format}' for table '{table_name}' in session '{session_id}': {e!r}"
+            f"[mcp_systems_server:session_table_data] Invalid format parameter '{format}' for table '{table_name}' in session '{id}': {e!r}"
         )
         result["error"] = (
-            f"Invalid format parameter '{format}' for table '{table_name}' in session '{session_id}': {type(e).__name__}: {e}"
+            f"Invalid format parameter '{format}' for table '{table_name}' in session '{id}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:session_table_data] Failed for session '{session_id}', "
+            f"[mcp_systems_server:session_table_data] Failed for session '{id}', "
             f"table '{table_name}': {e!r}",
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to get data from table '{table_name}' in session '{session_id}': {type(e).__name__}: {e}"
+            f"Failed to get data from table '{table_name}' in session '{id}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
 

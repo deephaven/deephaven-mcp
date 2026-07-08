@@ -58,7 +58,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_lifespan_context,             # Get the LifespanContext from MCP context
     get_registry,                     # Get the MultiSystemRegistry from context
     get_multi_config,                 # Get the merged ConfigTree from context
-    parse_session_id,                 # Parse + validate a session-id string (raises if malformed)
     get_community_registry,           # Get CommunitySessionRegistry from context
     get_enterprise_registry,          # Get EnterpriseSessionRegistry from context
     get_session_from_context,         # Get session from MCP context
@@ -69,6 +68,8 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     redact_json_sensitive_fields,     # Redact sensitive fields from JSON strings
 )
 ```
+
+Id parsing: call `QualifiedSessionId.from_str` (from `deephaven_mcp.resource_manager`) to parse and validate a fully qualified id — it raises `InvalidSessionNameError` rather than substituting a default. For PQ ids, `parse_pq_id` / `make_pq_id` in `shared.py` add the enterprise-scope and integer-serial refinement on top.
 
 ## Naming Conventions
 

@@ -3,7 +3,7 @@
 Verbs: ``tables``, ``namespaces``, ``schema``, ``sample``.
 
 Enterprise (Core+) only — these operate on an enterprise session's
-catalog (database). The SESSION_ID must name an enterprise session.
+catalog (database). The ID must name an enterprise session.
 """
 
 from __future__ import annotations
@@ -78,9 +78,7 @@ _OUTPUT_TABULAR = OutputSpec(
             "data. Narrow with repeatable --filter expressions and cap rows with "
             "--max-rows."
         ),
-        arguments=(
-            HelpEntry("SESSION_ID", "Enterprise session id. Run 'session list'."),
-        ),
+        arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
         output=_OUTPUT_TABULAR,
         examples=("$ dh-mcp catalog tables enterprise:prod:rpt",),
         see_also=("dh-mcp catalog namespaces ID", "dh-mcp catalog schema ID"),
@@ -88,7 +86,7 @@ _OUTPUT_TABULAR = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.option(
     "--max-rows",
     "max_rows",
@@ -101,7 +99,7 @@ _OUTPUT_TABULAR = OutputSpec(
 @run_async
 async def catalog_tables(
     runtime: Runtime,
-    session_id: str,
+    id: str,
     max_rows: int | None,
     filters: tuple[str, ...],
 ) -> None:
@@ -110,7 +108,7 @@ async def catalog_tables(
         runtime,
         "catalog_tables_list",
         "dh-mcp catalog tables",
-        session_id=session_id,
+        id=id,
         max_rows=max_rows,
         filters=filters,
     )
@@ -132,9 +130,7 @@ async def catalog_tables(
             "data. Narrow with repeatable --filter expressions and cap rows with "
             "--max-rows."
         ),
-        arguments=(
-            HelpEntry("SESSION_ID", "Enterprise session id. Run 'session list'."),
-        ),
+        arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
         output=_OUTPUT_TABULAR,
         examples=("$ dh-mcp catalog namespaces enterprise:prod:rpt",),
         see_also=("dh-mcp catalog tables ID",),
@@ -142,7 +138,7 @@ async def catalog_tables(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.option(
     "--max-rows",
     "max_rows",
@@ -155,7 +151,7 @@ async def catalog_tables(
 @run_async
 async def catalog_namespaces(
     runtime: Runtime,
-    session_id: str,
+    id: str,
     max_rows: int | None,
     filters: tuple[str, ...],
 ) -> None:
@@ -164,7 +160,7 @@ async def catalog_namespaces(
         runtime,
         "catalog_namespaces_list",
         "dh-mcp catalog namespaces",
-        session_id=session_id,
+        id=id,
         max_rows=max_rows,
         filters=filters,
     )
@@ -175,12 +171,12 @@ async def _run_catalog_query(
     tool: str,
     retry_command: str,
     *,
-    session_id: str,
+    id: str,
     max_rows: int | None,
     filters: tuple[str, ...],
 ) -> None:
     """Shared body for the two list-style catalog verbs."""
-    arguments: dict[str, Any] = {"session_id": session_id, "format": "json-row"}
+    arguments: dict[str, Any] = {"id": id, "format": "json-row"}
     if max_rows is not None:
         arguments["max_rows"] = max_rows
     if filters:
@@ -213,7 +209,7 @@ _OUTPUT_SCHEMA = OutputSpec(
             "--max-tables."
         ),
         arguments=(
-            HelpEntry("SESSION_ID", "Enterprise session id. Run 'session list'."),
+            HelpEntry("ID", "Enterprise session id. Run 'session list'."),
             HelpEntry("TABLE_NAMES", "Zero or more catalog table names."),
         ),
         output=_OUTPUT_SCHEMA,
@@ -226,7 +222,7 @@ _OUTPUT_SCHEMA = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.argument("table_names", nargs=-1)
 @click.option("--namespace", "namespace", default=None, help="Limit to one namespace.")
 @_filter_option
@@ -241,14 +237,14 @@ _OUTPUT_SCHEMA = OutputSpec(
 @run_async
 async def catalog_schema(
     runtime: Runtime,
-    session_id: str,
+    id: str,
     table_names: tuple[str, ...],
     namespace: str | None,
     filters: tuple[str, ...],
     max_tables: int | None,
 ) -> None:
     """Show column definitions for catalog tables."""
-    arguments: dict[str, Any] = {"session_id": session_id}
+    arguments: dict[str, Any] = {"id": id}
     if table_names:
         arguments["table_names"] = list(table_names)
     if namespace is not None:
@@ -281,7 +277,7 @@ async def catalog_schema(
             "head (default) or, with --tail, the tail of NAMESPACE.TABLE_NAME."
         ),
         arguments=(
-            HelpEntry("SESSION_ID", "Enterprise session id. Run 'session list'."),
+            HelpEntry("ID", "Enterprise session id. Run 'session list'."),
             HelpEntry("NAMESPACE", "The catalog namespace."),
             HelpEntry("TABLE_NAME", "The catalog table."),
         ),
@@ -295,7 +291,7 @@ async def catalog_schema(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.argument("namespace")
 @click.argument("table_name")
 @click.option(
@@ -313,7 +309,7 @@ async def catalog_schema(
 @run_async
 async def catalog_sample(
     runtime: Runtime,
-    session_id: str,
+    id: str,
     namespace: str,
     table_name: str,
     max_rows: int | None,
@@ -322,7 +318,7 @@ async def catalog_sample(
 ) -> None:
     """Sample rows from a catalog table."""
     arguments: dict[str, Any] = {
-        "session_id": session_id,
+        "id": id,
         "namespace": namespace,
         "table_name": table_name,
         "head": head,

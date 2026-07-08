@@ -948,7 +948,7 @@ class TestDynamicCommunitySessionManager:
         result = manager.to_dict(verbose=True)
 
         # Common identity is always present.
-        assert result["session_id"] == str(manager.qualified_session_id)
+        assert result["id"] == str(manager.qualified_session_id)
         assert result["session_name"] == "test-session"
         # Launch-specific connection details are added when verbose.
         assert result["connection_url"] == "http://localhost:10000"
@@ -1051,7 +1051,7 @@ class TestDynamicCommunitySessionManager:
         result = manager.to_dict()
 
         assert result == {
-            "session_id": str(manager.qualified_session_id),
+            "id": str(manager.qualified_session_id),
             "type": manager.system_type.value,
             "system": manager.system,
             "session_name": manager.name,

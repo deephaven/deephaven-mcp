@@ -33,7 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def _get_catalog_data(
     context: Context,
-    session_id: str,
+    id: str,
     *,
     distinct_namespaces: bool,
     max_rows: int | None,
@@ -47,7 +47,8 @@ async def _get_catalog_data(
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven enterprise session to query.
+        id (str): Fully qualified id of an enterprise (Core+) session
+            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
         distinct_namespaces (bool): If True, retrieve distinct namespaces; if False, retrieve full catalog.
         max_rows (int | None): Maximum number of rows to return. None for unlimited.
         filters (list[str] | None): Optional Deephaven query language filters to apply.
@@ -57,7 +58,7 @@ async def _get_catalog_data(
     Returns:
         dict: Result dictionary with keys:
             - success (bool): True if operation succeeded, False otherwise
-            - session_id (str): The session ID that was queried
+            - id (str): The session ID that was queried
             - format (str): The actual format used for data
             - row_count (int): Number of rows returned
             - is_complete (bool): True if all data was returned (not truncated)
@@ -71,7 +72,7 @@ async def _get_catalog_data(
 
     try:
         # Use helper to get session from context
-        session = await get_session_from_context(tool_name, context, session_id)
+        session = await get_session_from_context(tool_name, context, id)
 
         # Get catalog data using queries module (includes enterprise check and filtering)
         _LOGGER.debug(
@@ -91,7 +92,7 @@ async def _get_catalog_data(
 
         # Estimate response size for safety
         estimated_size = arrow_table.nbytes
-        limits = get_response_limits(context, session_id)
+        limits = get_response_limits(context, id)
         size_check_result = check_response_size(tool_name, estimated_size, limits)
         if size_check_result:
             return size_check_result
@@ -114,7 +115,7 @@ async def _get_catalog_data(
         result.update(
             {
                 "success": True,
-                "session_id": session_id,
+                "id": id,
                 "row_count": row_count,
                 "is_complete": is_complete,
                 "format": actual_format,
@@ -131,10 +132,10 @@ async def _get_catalog_data(
     except UnsupportedOperationError as e:
         # Enterprise-only operation attempted on community session
         _LOGGER.error(
-            f"[mcp_systems_server:{tool_name}] Session '{session_id}' is not an enterprise session: {e!r}"
+            f"[mcp_systems_server:{tool_name}] Session '{id}' is not an enterprise session: {e!r}"
         )
         result["error"] = (
-            f"Session '{session_id}' does not support this operation: {type(e).__name__}: {e}"
+            f"Session '{id}' does not support this operation: {type(e).__name__}: {e}"
         )
         result["isError"] = True
 
@@ -148,11 +149,11 @@ async def _get_catalog_data(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:{tool_name}] Failed for session '{session_id}': {e!r}",
+            f"[mcp_systems_server:{tool_name}] Failed for session '{id}': {e!r}",
             exc_info=True,
         )
         result["error"] = (
-            f"Catalog operation failed for session '{session_id}': {type(e).__name__}: {e}"
+            f"Catalog operation failed for session '{id}': {type(e).__name__}: {e}"
         )
         result["isError"] = True
 
@@ -161,7 +162,7 @@ async def _get_catalog_data(
 
 async def catalog_tables_list(
     context: Context,
-    session_id: str,
+    id: str,
     max_rows: int | None = 10000,
     filters: list[str] | None = None,
     format: str = "optimize-rendering",
@@ -274,7 +275,8 @@ async def catalog_tables_list(
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven enterprise session to query.
+        id (str): Fully qualified id of an enterprise (Core+) session
+            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
         max_rows (int | None): Maximum number of catalog entries to return. Default is 10000.
                                Set to None to retrieve entire catalog (use with caution for large deployments).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter catalog.
@@ -287,7 +289,7 @@ async def catalog_tables_list(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if catalog was retrieved successfully, False on error.
-            - 'session_id' (str, optional): The session ID if successful.
+            - 'id' (str, optional): The session ID if successful.
             - 'format' (str, optional): Actual format used for data if successful (e.g., "json-row").
             - 'row_count' (int, optional): Number of catalog entries returned if successful.
             - 'is_complete' (bool, optional): True if all catalog entries returned, False if truncated by max_rows.
@@ -305,7 +307,7 @@ async def catalog_tables_list(
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
 
     Error Scenarios:
-        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid id: Returns error if session doesn't exist or is not accessible
         - Community session: Returns error if session is not an enterprise (Core+) session
         - Invalid filters: Returns error if filter syntax is invalid or references non-existent columns
         - Invalid format: Returns error if format is not one of the supported options
@@ -324,53 +326,53 @@ async def catalog_tables_list(
         # Get first 10000 catalog entries
         Tool: catalog_tables_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics"
+            "id": "enterprise:prod:analytics"
         }
 
         # Filter by namespace
         Tool: catalog_tables_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "filters": ["Namespace = `market_data`"]
         }
 
         # Filter by table name pattern
         Tool: catalog_tables_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "filters": ["TableName.contains(`price`)"]
         }
 
         # Multiple filters (AND logic)
         Tool: catalog_tables_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "filters": ["Namespace = `market_data`", "TableName.toLowerCase().contains(`daily`)"]
         }
 
         # Get all catalog entries (use with caution)
         Tool: catalog_tables_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "max_rows": null
         }
 
         # CSV format for easy parsing
         Tool: catalog_tables_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "filters": ["Namespace = `reference_data`"],
             "format": "csv"
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_tables_list] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_tables_list] Invoked: id={id!r}, "
         f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
     )
 
     return await _get_catalog_data(
         context,
-        session_id,
+        id,
         distinct_namespaces=False,
         max_rows=max_rows,
         filters=filters,
@@ -381,7 +383,7 @@ async def catalog_tables_list(
 
 async def catalog_namespaces_list(
     context: Context,
-    session_id: str,
+    id: str,
     max_rows: int | None = 1000,
     filters: list[str] | None = None,
     format: str = "optimize-rendering",
@@ -441,7 +443,8 @@ async def catalog_namespaces_list(
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven enterprise session to query.
+        id (str): Fully qualified id of an enterprise (Core+) session
+            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
         max_rows (int | None): Maximum number of namespaces to return. Default is 1000.
                                Set to None to retrieve all namespaces (use with caution).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter
@@ -454,7 +457,7 @@ async def catalog_namespaces_list(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if namespaces were retrieved successfully, False on error.
-            - 'session_id' (str, optional): The session ID if successful.
+            - 'id' (str, optional): The session ID if successful.
             - 'format' (str, optional): Actual format used for data if successful (e.g., "json-row").
             - 'row_count' (int, optional): Number of namespaces returned if successful.
             - 'is_complete' (bool, optional): True if all namespaces returned, False if truncated by max_rows.
@@ -473,7 +476,7 @@ async def catalog_namespaces_list(
 
     Error Scenarios:
         - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
-        - Session not found: Returns error if session_id does not exist or is not accessible
+        - Session not found: Returns error if id does not exist or is not accessible
         - Invalid filter: Returns error if filter syntax is invalid
         - Invalid format: Returns error if format is not one of the supported options
         - Response too large: Returns error if estimated response would exceed 50MB limit
@@ -489,31 +492,31 @@ async def catalog_namespaces_list(
         # Get all namespaces (up to 1000)
         Tool: catalog_namespaces_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics"
+            "id": "enterprise:prod:analytics"
         }
 
         # Get namespaces from filtered catalog
         Tool: catalog_namespaces_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "filters": ["TableName.contains(`daily`)"]
         }
 
         # CSV format
         Tool: catalog_namespaces_list
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "format": "csv"
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_namespaces_list] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_namespaces_list] Invoked: id={id!r}, "
         f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
     )
 
     return await _get_catalog_data(
         context,
-        session_id,
+        id,
         distinct_namespaces=True,
         max_rows=max_rows,
         filters=filters,
@@ -557,7 +560,7 @@ def _build_catalog_filters(
 
 async def catalog_tables_schema(
     context: Context,
-    session_id: str,
+    id: str,
     namespace: str | None = None,
     table_names: list[str] | None = None,
     filters: list[str] | None = None,
@@ -636,7 +639,8 @@ async def catalog_tables_schema(
 
     Args:
         context (Context): The MCP context object, used to access the enterprise session.
-        session_id (str): ID of the Deephaven enterprise session to query. Must be an enterprise (Core+) session.
+        id (str): Fully qualified id of an enterprise (Core+) session
+            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
         namespace (str | None, optional): Filter to tables in this specific namespace. If None, searches all namespaces.
                                          Defaults to None.
         table_names (list[str] | None, optional): List of specific table names to retrieve schemas for.
@@ -676,7 +680,7 @@ async def catalog_tables_schema(
 
     Error Scenarios:
         - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
-        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid id: Returns error if session doesn't exist or is not accessible
         - Invalid filters: Returns error if filter syntax is invalid or references non-existent columns
         - Session connection issues: Returns error if unable to communicate with Deephaven server
         - Catalog access error: Returns error if unable to retrieve catalog table
@@ -723,14 +727,14 @@ async def catalog_tables_schema(
         # Get schemas for all tables in a namespace (up to 100)
         Tool: catalog_tables_schema
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "namespace": "market_data"
         }
 
         # Get schemas for specific tables in a namespace
         Tool: catalog_tables_schema
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "namespace": "market_data",
             "table_names": ["daily_prices", "intraday_quotes"]
         }
@@ -738,14 +742,14 @@ async def catalog_tables_schema(
         # Filter-based discovery across namespaces
         Tool: catalog_tables_schema
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "filters": ["TableName.contains(`price`)"]
         }
 
         # Get more than 100 schemas (explicit limit)
         Tool: catalog_tables_schema
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "namespace": "market_data",
             "max_tables": 500
         }
@@ -753,12 +757,12 @@ async def catalog_tables_schema(
         # Get all schemas (requires explicit None, use with extreme caution)
         Tool: catalog_tables_schema
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "max_tables": None
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_tables_schema] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_tables_schema] Invoked: id={id!r}, "
         f"namespace={namespace!r}, table_names={table_names!r}, filters={filters!r}, max_tables={max_tables}"
     )
 
@@ -767,7 +771,7 @@ async def catalog_tables_schema(
     try:
         # Get and validate enterprise session
         session, error = await get_enterprise_session(
-            "catalog_tables_schema", context, session_id
+            "catalog_tables_schema", context, id
         )
 
         if error:
@@ -776,7 +780,7 @@ async def catalog_tables_schema(
         session = cast(CorePlusSession, session)  # Type narrowing for mypy
 
         _LOGGER.info(
-            f"[mcp_systems_server:catalog_tables_schema] Session established for enterprise session: '{session_id}'"
+            f"[mcp_systems_server:catalog_tables_schema] Session established for enterprise session: '{id}'"
         )
 
         combined_filters = _build_catalog_filters(namespace, table_names, filters)
@@ -788,7 +792,7 @@ async def catalog_tables_schema(
         # Get catalog table with filters
         # Use max_tables as max_rows to limit catalog query and prevent excessive RAM usage
         _LOGGER.debug(
-            f"[mcp_systems_server:catalog_tables_schema] Retrieving catalog table from session '{session_id}' "
+            f"[mcp_systems_server:catalog_tables_schema] Retrieving catalog table from session '{id}' "
             f"(max_rows={max_tables})"
         )
         catalog_arrow_table, is_complete_catalog = await queries.get_catalog_table(
@@ -902,7 +906,7 @@ async def catalog_tables_schema(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:catalog_tables_schema] Failed for session: '{session_id}', error: {e!r}",
+            f"[mcp_systems_server:catalog_tables_schema] Failed for session: '{id}', error: {e!r}",
             exc_info=True,
         )
         return error_response(str(e))
@@ -910,7 +914,7 @@ async def catalog_tables_schema(
 
 async def catalog_table_sample(
     context: Context,
-    session_id: str,
+    id: str,
     namespace: str,
     table_name: str,
     max_rows: int | None = 100,
@@ -974,7 +978,8 @@ async def catalog_table_sample(
 
     Args:
         context (Context): The MCP context object.
-        session_id (str): ID of the Deephaven enterprise session to query.
+        id (str): Fully qualified id of an enterprise (Core+) session
+            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
         namespace (str): The catalog namespace containing the table.
         table_name (str): Name of the catalog table to sample.
         max_rows (int | None, optional): Maximum number of rows to retrieve. Defaults to 100 for safe sampling.
@@ -1019,7 +1024,7 @@ async def catalog_table_sample(
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
 
     Error Scenarios:
-        - Invalid session_id: Returns error if session doesn't exist or is not accessible
+        - Invalid id: Returns error if session doesn't exist or is not accessible
         - Community session: Returns error if session is not an enterprise (Core+) session
         - Invalid namespace: Returns error if namespace doesn't exist in the catalog
         - Invalid table_name: Returns error if table doesn't exist in the namespace
@@ -1042,7 +1047,7 @@ async def catalog_table_sample(
         # Sample first 100 rows with default format
         Tool: catalog_table_sample
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "namespace": "market_data",
             "table_name": "daily_prices"
         }
@@ -1050,7 +1055,7 @@ async def catalog_table_sample(
         # Sample last 50 rows (most recent for time-series)
         Tool: catalog_table_sample
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "namespace": "market_data",
             "table_name": "trades",
             "max_rows": 50,
@@ -1060,7 +1065,7 @@ async def catalog_table_sample(
         # Sample with CSV format
         Tool: catalog_table_sample
         Parameters: {
-            "session_id": "enterprise:prod:analytics",
+            "id": "enterprise:prod:analytics",
             "namespace": "reference_data",
             "table_name": "symbols",
             "max_rows": 200,
@@ -1068,7 +1073,7 @@ async def catalog_table_sample(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_table_sample] Invoked: session_id={session_id!r}, "
+        f"[mcp_systems_server:catalog_table_sample] Invoked: id={id!r}, "
         f"namespace={namespace!r}, table_name={table_name!r}, max_rows={max_rows}, head={head}, "
         f"format={format!r}, filters={filters!r}"
     )
@@ -1076,7 +1081,7 @@ async def catalog_table_sample(
     try:
         # Get and validate enterprise session
         session, error = await get_enterprise_session(
-            "catalog_table_sample", context, session_id
+            "catalog_table_sample", context, id
         )
 
         if error:
@@ -1085,7 +1090,7 @@ async def catalog_table_sample(
         session = cast(CorePlusSession, session)  # Type narrowing for mypy
 
         _LOGGER.info(
-            f"[mcp_systems_server:catalog_table_sample] Session established for enterprise session: '{session_id}'"
+            f"[mcp_systems_server:catalog_table_sample] Session established for enterprise session: '{id}'"
         )
 
         # Get catalog table data using queries module
@@ -1104,7 +1109,7 @@ async def catalog_table_sample(
         # Check response size before formatting
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
-        limits = get_response_limits(context, session_id)
+        limits = get_response_limits(context, id)
         estimated_size = row_count * col_count * limits.estimated_bytes_per_cell
         size_error = check_response_size(
             f"{namespace}.{table_name}", estimated_size, limits
@@ -1130,7 +1135,7 @@ async def catalog_table_sample(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:catalog_table_sample] Failed for session: '{session_id}', "
+            f"[mcp_systems_server:catalog_table_sample] Failed for session: '{id}', "
             f"namespace: '{namespace}', table: '{table_name}', error: {e!r}",
             exc_info=True,
         )

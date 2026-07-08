@@ -58,7 +58,7 @@ _OUTPUT_LIST = OutputSpec(
             "Lightweight discovery of table names without schemas. Follow up "
             "with 'table schema' for column definitions or 'table data' for rows."
         ),
-        arguments=(HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_LIST,
         examples=("$ dh-mcp table list community:community:dev",),
         see_also=("dh-mcp table schema ID", "dh-mcp table data ID TABLE"),
@@ -66,16 +66,16 @@ _OUTPUT_LIST = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.pass_obj
 @run_async
-async def table_list(runtime: Runtime, session_id: str) -> None:
+async def table_list(runtime: Runtime, id: str) -> None:
     """List the table names in a session."""
     await call_and_echo_field(
         runtime,
         "session_tables_list",
         retry_command="dh-mcp table list",
-        arguments={"session_id": session_id},
+        arguments={"id": id},
         field="table_names",
         default=[],
     )
@@ -103,7 +103,7 @@ _OUTPUT_SCHEMA = OutputSpec(
             "tables, or for every table when none are named."
         ),
         arguments=(
-            HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),
+            HelpEntry("ID", "Fully qualified id. Run 'session list'."),
             HelpEntry("TABLE_NAMES", "Zero or more table names (default: all tables)."),
         ),
         output=_OUTPUT_SCHEMA,
@@ -116,15 +116,13 @@ _OUTPUT_SCHEMA = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.argument("table_names", nargs=-1)
 @click.pass_obj
 @run_async
-async def table_schema(
-    runtime: Runtime, session_id: str, table_names: tuple[str, ...]
-) -> None:
+async def table_schema(runtime: Runtime, id: str, table_names: tuple[str, ...]) -> None:
     """Show column definitions for tables in a session."""
-    arguments: dict[str, Any] = {"session_id": session_id}
+    arguments: dict[str, Any] = {"id": id}
     if table_names:
         arguments["table_names"] = list(table_names)
     await call_and_echo(
@@ -157,7 +155,7 @@ _OUTPUT_DATA = OutputSpec(
             "--tail, the tail of the table."
         ),
         arguments=(
-            HelpEntry("SESSION_ID", "Fully qualified id. Run 'session list'."),
+            HelpEntry("ID", "Fully qualified id. Run 'session list'."),
             HelpEntry("TABLE_NAME", "The table to read."),
         ),
         output=_OUTPUT_DATA,
@@ -170,7 +168,7 @@ _OUTPUT_DATA = OutputSpec(
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("session_id")
+@click.argument("id")
 @click.argument("table_name")
 @click.option(
     "--max-rows",
@@ -189,14 +187,14 @@ _OUTPUT_DATA = OutputSpec(
 @run_async
 async def table_data(
     runtime: Runtime,
-    session_id: str,
+    id: str,
     table_name: str,
     max_rows: int | None,
     head: bool,
 ) -> None:
     """Fetch row data from a table in a session."""
     arguments: dict[str, Any] = {
-        "session_id": session_id,
+        "id": id,
         "table_name": table_name,
         "head": head,
         "format": "json-row",

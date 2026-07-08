@@ -77,7 +77,7 @@ PQ_STATES: dict[str, str] = {
 """Maps each PQ state string to its lifecycle category.
 
 Categories:
-- ACTIVE: PQ is processing data; session_id is present (RUNNING, EXECUTING)
+- ACTIVE: PQ is processing data; its id works with the session tools (RUNNING, EXECUTING)
 - TRANSITIONAL: PQ is between stable states; do not branch on a specific value
 - TERMINAL: state will not change without user action; STOPPED and FAILED can be restarted
 - INVALID: UNSPECIFIED is a protobuf zero-value sentinel; should not appear at runtime
