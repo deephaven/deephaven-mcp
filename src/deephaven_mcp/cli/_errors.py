@@ -161,6 +161,10 @@ class ErrorCode(StrEnum):
         "mutually_exclusive_options",
         "Two or more options that cannot be combined were supplied together.",
     )
+    FILE_READ_FAILED = (
+        "file_read_failed",
+        "A local file passed on the command line could not be read.",
+    )
     OPTION_NOT_APPLICABLE = (
         "option_not_applicable",
         (

@@ -31,17 +31,57 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _unsupported_session_error(
+    tool_name: str, id: str, e: UnsupportedOperationError
+) -> dict[str, object]:
+    """Log and build the error response for a non-enterprise session.
+
+    Args:
+        tool_name (str): Name of the calling tool for logging.
+        id (str): The session id the caller supplied.
+        e (UnsupportedOperationError): The exception raised by the session lookup.
+
+    Returns:
+        dict[str, object]: Standard error response dict from :func:`error_response`.
+    """
+    _LOGGER.error(
+        f"[mcp_systems_server:{tool_name}] Session '{id}' is not an enterprise session: {e!r}"
+    )
+    return error_response(
+        f"Session '{id}' does not support this operation: {type(e).__name__}: {e}"
+    )
+
+
+def _catalog_failure_error(tool_name: str, id: str, e: Exception) -> dict[str, object]:
+    """Log (with traceback) and build the error response for a failed catalog operation.
+
+    Args:
+        tool_name (str): Name of the calling tool for logging.
+        id (str): The session id the caller supplied.
+        e (Exception): The exception that aborted the operation.
+
+    Returns:
+        dict[str, object]: Standard error response dict from :func:`error_response`.
+    """
+    _LOGGER.error(
+        f"[mcp_systems_server:{tool_name}] Failed for session '{id}': {e!r}",
+        exc_info=True,
+    )
+    return error_response(
+        f"Catalog operation failed for session '{id}': {type(e).__name__}: {e}"
+    )
+
+
 async def _get_catalog_data(
     context: Context,
     id: str,
     *,
-    distinct_namespaces: bool,
     max_rows: int | None,
     filters: list[str] | None,
     format: str,
     tool_name: str,
 ) -> dict:
-    """Retrieve catalog data (tables or namespaces) from an enterprise session.
+    """Retrieve catalog entries from an enterprise session.
 
     Internal helper function that consolidates common catalog retrieval logic.
 
@@ -49,7 +89,6 @@ async def _get_catalog_data(
         context (Context): The MCP context object.
         id (str): Fully qualified id of an enterprise (Core+) session
             (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
-        distinct_namespaces (bool): If True, retrieve distinct namespaces; if False, retrieve full catalog.
         max_rows (int | None): Maximum number of rows to return. None for unlimited.
         filters (list[str] | None): Optional Deephaven query language filters to apply.
         format (str): Output format for data (e.g., "csv", "json-row", "markdown-table").
@@ -68,7 +107,6 @@ async def _get_catalog_data(
             - isError (bool, optional): True if this is an error response
     """
     result: dict[str, object] = {"success": False}
-    data_type = "namespaces" if distinct_namespaces else "catalog entries"
 
     try:
         # Use helper to get session from context
@@ -76,18 +114,18 @@ async def _get_catalog_data(
 
         # Get catalog data using queries module (includes enterprise check and filtering)
         _LOGGER.debug(
-            f"[mcp_systems_server:{tool_name}] Retrieving {data_type} with filters: {filters}"
+            f"[mcp_systems_server:{tool_name}] Retrieving catalog entries with filters: {filters}"
         )
         arrow_table, is_complete = await queries.get_catalog_table(
             session,
             max_rows=max_rows,
             filters=filters,
-            distinct_namespaces=distinct_namespaces,
+            distinct_namespaces=False,
         )
 
         row_count = len(arrow_table)
         _LOGGER.debug(
-            f"[mcp_systems_server:{tool_name}] Retrieved {row_count} {data_type} (complete={is_complete})"
+            f"[mcp_systems_server:{tool_name}] Retrieved {row_count} catalog entries (complete={is_complete})"
         )
 
         # Estimate response size for safety
@@ -125,19 +163,13 @@ async def _get_catalog_data(
         )
 
         _LOGGER.info(
-            f"[mcp_systems_server:{tool_name}] Successfully retrieved {row_count} {data_type} "
+            f"[mcp_systems_server:{tool_name}] Successfully retrieved {row_count} catalog entries "
             f"in '{actual_format}' format (complete={is_complete})"
         )
 
     except UnsupportedOperationError as e:
         # Enterprise-only operation attempted on community session
-        _LOGGER.error(
-            f"[mcp_systems_server:{tool_name}] Session '{id}' is not an enterprise session: {e!r}"
-        )
-        result["error"] = (
-            f"Session '{id}' does not support this operation: {type(e).__name__}: {e}"
-        )
-        result["isError"] = True
+        return _unsupported_session_error(tool_name, id, e)
 
     except ValueError as e:
         # Format validation error from formatters package
@@ -148,14 +180,7 @@ async def _get_catalog_data(
         result["isError"] = True
 
     except Exception as e:
-        _LOGGER.error(
-            f"[mcp_systems_server:{tool_name}] Failed for session '{id}': {e!r}",
-            exc_info=True,
-        )
-        result["error"] = (
-            f"Catalog operation failed for session '{id}': {type(e).__name__}: {e}"
-        )
-        result["isError"] = True
+        return _catalog_failure_error(tool_name, id, e)
 
     return result
 
@@ -373,7 +398,6 @@ async def catalog_tables_list(
     return await _get_catalog_data(
         context,
         id,
-        distinct_namespaces=False,
         max_rows=max_rows,
         filters=filters,
         format=format,
@@ -386,13 +410,11 @@ async def catalog_namespaces_list(
     id: str,
     max_rows: int | None = 1000,
     filters: list[str] | None = None,
-    format: str = "optimize-rendering",
 ) -> dict:
-    """MCP Tool: Retrieve catalog namespaces as a TABULAR LIST from a Deephaven Enterprise (Core+) session.
+    """MCP Tool: List the distinct namespaces in a Deephaven Enterprise (Core+) catalog.
 
-    **Returns**: Namespace information formatted as TABULAR DATA for display. Each row represents
-    a data domain available in the enterprise catalog/database. This tabular data should be displayed as a
-    table to users for easy browsing of available data domains.
+    **Returns**: A plain sorted list of namespace name strings in the 'namespaces' key.
+    Each namespace is a data domain available in the enterprise catalog/database.
 
     This tool retrieves the list of distinct namespaces available via the `deephaven_enterprise.database`
     package (the `db` variable) in an enterprise session. These namespaces represent data domains that
@@ -400,14 +422,6 @@ async def catalog_namespaces_list(
     `db.historical_table(namespace, table_name)`. This enables efficient discovery of data domains
     before drilling down into specific tables. This is typically the first step in exploring an
     enterprise data catalog. Only works with enterprise sessions.
-
-    **Format Accuracy for AI Agents** (based on empirical research):
-    - markdown-kv: 61% accuracy (highest comprehension, more tokens)
-    - markdown-table: 55% accuracy (good balance)
-    - json-row/json-column: 50% accuracy
-    - yaml: 50% accuracy
-    - xml: 45% accuracy
-    - csv: 44% accuracy (lowest comprehension, fewest tokens)
 
     For more information, see:
     - https://deephaven.io
@@ -424,13 +438,6 @@ async def catalog_namespaces_list(
     - This tool only works with enterprise sessions; community sessions do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables
 
-    Table Rendering:
-    - **This tool returns TABULAR NAMESPACE DATA that MUST be displayed as a table to users**
-    - Each row represents one data domain (namespace) in the enterprise catalog
-    - Column: Namespace (the name of the data domain)
-    - Present as a table for easy browsing and discovery of data domains
-    - Do NOT present namespace data as plain text or unstructured lists
-
     AI Agent Usage:
     - Use this as the first step to discover available data domains in the enterprise catalog/database
     - The catalog is the database of available tables organized by namespaces (data domains)
@@ -440,6 +447,7 @@ async def catalog_namespaces_list(
     - Combine with catalog_tables_list to drill down into specific namespaces
     - Essential for top-down data exploration workflow
     - Returns lightweight data (just namespace names) for quick discovery
+    - Check 'is_complete': when False the list was truncated by max_rows; raise max_rows or add filters
 
     Args:
         context (Context): The MCP context object.
@@ -449,28 +457,14 @@ async def catalog_namespaces_list(
                                Set to None to retrieve all namespaces (use with caution).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter
                                     the catalog before extracting namespaces. Use backticks (`) for string literals.
-        format (str): Output format for namespace data. Default is "optimize-rendering" for best table display.
-                     Options: "optimize-rendering" (default, uses markdown-table), "optimize-accuracy" (uses markdown-kv),
-                     "optimize-cost" (uses csv), "optimize-speed" (uses json-column), or explicit formats:
-                     "json-row", "json-column", "csv", "markdown-table", "markdown-kv", "yaml", "xml".
 
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if namespaces were retrieved successfully, False on error.
             - 'id' (str, optional): The session ID if successful.
-            - 'format' (str, optional): Actual format used for data if successful (e.g., "json-row").
-            - 'row_count' (int, optional): Number of namespaces returned if successful.
+            - 'namespaces' (list[str], optional): Sorted distinct namespace names if successful.
+            - 'count' (int, optional): Number of namespaces returned if successful.
             - 'is_complete' (bool, optional): True if all namespaces returned, False if truncated by max_rows.
-            - 'columns' (list[dict], optional): Schema of namespace table if successful. Contains:
-                {'name': 'Namespace', 'type': 'string'}
-            - 'data' (list[dict] | dict | str, optional): Namespace data in requested format if successful:
-                - json-row: List of dicts, one per namespace: [{"Namespace": "market_data"}, ...]
-                - json-column: Dict mapping column name to array: {"Namespace": ["market_data", ...]}
-                - csv: String with CSV-formatted namespace data
-                - markdown-table: String with pipe-delimited table format
-                - markdown-kv: String with record headers and key-value pairs
-                - yaml: String with YAML-formatted namespace list
-                - xml: String with XML namespace structure
             - 'error' (str, optional): Human-readable error message if retrieval failed. Omitted on success.
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
 
@@ -478,7 +472,6 @@ async def catalog_namespaces_list(
         - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
         - Session not found: Returns error if id does not exist or is not accessible
         - Invalid filter: Returns error if filter syntax is invalid
-        - Invalid format: Returns error if format is not one of the supported options
         - Response too large: Returns error if estimated response would exceed 50MB limit
         - Session connection issues: Returns error if unable to communicate with Deephaven server
 
@@ -502,27 +495,60 @@ async def catalog_namespaces_list(
             "filters": ["TableName.contains(`daily`)"]
         }
 
-        # CSV format
-        Tool: catalog_namespaces_list
-        Parameters: {
-            "id": "enterprise:prod:analytics",
-            "format": "csv"
-        }
+    Example Successful Response:
+        {'success': True, 'id': 'enterprise:prod:analytics', 'namespaces': ['market_data', 'reference'], 'count': 2, 'is_complete': True}
     """
     _LOGGER.info(
         f"[mcp_systems_server:catalog_namespaces_list] Invoked: id={id!r}, "
-        f"max_rows={max_rows}, filters={filters!r}, format={format!r}"
+        f"max_rows={max_rows}, filters={filters!r}"
     )
 
-    return await _get_catalog_data(
-        context,
-        id,
-        distinct_namespaces=True,
-        max_rows=max_rows,
-        filters=filters,
-        format=format,
-        tool_name="catalog_namespaces_list",
-    )
+    try:
+        session = await get_session_from_context("catalog_namespaces_list", context, id)
+
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_namespaces_list] Retrieving namespaces with filters: {filters}"
+        )
+        arrow_table, is_complete = await queries.get_catalog_table(
+            session,
+            max_rows=max_rows,
+            filters=filters,
+            distinct_namespaces=True,
+        )
+
+        # Reject an over-limit response before materializing it as Python objects.
+        estimated_size = arrow_table.nbytes
+        limits = get_response_limits(context, id)
+        size_check_result = check_response_size(
+            "catalog_namespaces_list", estimated_size, limits
+        )
+        if size_check_result:
+            return size_check_result
+
+        namespaces = arrow_table.column("Namespace").to_pylist()
+        _LOGGER.debug(
+            f"[mcp_systems_server:catalog_namespaces_list] Retrieved {len(namespaces)} namespaces "
+            f"(complete={is_complete})"
+        )
+
+        _LOGGER.info(
+            f"[mcp_systems_server:catalog_namespaces_list] Successfully retrieved "
+            f"{len(namespaces)} namespaces (complete={is_complete})"
+        )
+
+        return {
+            "success": True,
+            "id": id,
+            "namespaces": namespaces,
+            "count": len(namespaces),
+            "is_complete": is_complete,
+        }
+
+    except UnsupportedOperationError as e:
+        return _unsupported_session_error("catalog_namespaces_list", id, e)
+
+    except Exception as e:
+        return _catalog_failure_error("catalog_namespaces_list", id, e)
 
 
 def _build_catalog_filters(

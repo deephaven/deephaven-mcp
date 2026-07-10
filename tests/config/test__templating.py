@@ -97,6 +97,14 @@ def test_file_preserves_trailing_newline(tmp_path):
     assert out.endswith("\n")
 
 
+def test_file_expands_tilde(tmp_path, monkeypatch):
+    """A leading ``~`` in ``${file:PATH}`` resolves against the user's home."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "token.txt").write_text("SECRET", encoding="utf-8")
+    out = expand_string("${file:~/token.txt}", source="t.json", path="x")
+    assert out == "SECRET"
+
+
 def test_file_missing_raises(tmp_path):
     bogus = tmp_path / "nope"
     with pytest.raises(ConfigurationError, match="does not exist"):

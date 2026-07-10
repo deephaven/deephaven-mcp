@@ -12,6 +12,9 @@ dispatches tool calls — without requiring you to run the server yourself.
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
+  - [Configuration loading](#configuration-loading)
+  - [`cli.json`](#clijson)
+  - [`server.json` — `daemon` block](#serverjson--daemon-block)
 - [Runtime directory](#runtime-directory)
 - [Command tree](#command-tree)
   - [`dh-mcp daemon`](#dh-mcp-daemon)
@@ -19,7 +22,6 @@ dispatches tool calls — without requiring you to run the server yourself.
   - [`dh-mcp session`](#dh-mcp-session)
   - [`dh-mcp system`](#dh-mcp-system)
   - [`dh-mcp table`](#dh-mcp-table)
-  - [`dh-mcp script`](#dh-mcp-script)
   - [`dh-mcp catalog`](#dh-mcp-catalog)
   - [`dh-mcp pq`](#dh-mcp-pq)
   - [`dh-mcp config`](#dh-mcp-config)
@@ -327,10 +329,12 @@ the right backend by the id's prefix; `create` chooses the backend from
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list`                        | Lists sessions (both types) as a JSON array. Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. Wraps `sessions_list`. |
+| `list`                        | Lists sessions (both types). Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. Wraps `sessions_list`. |
 | `show <id>`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
 | `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
 | `delete <id>`                 | Deletes a session, routing by the id prefix. Wraps `session_community_delete` / `session_enterprise_delete`. |
+| `exec <id>`                   | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. Wraps `session_script_run`. |
+| `pip-list <id>`               | Lists the session's installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
 | `credentials <id>`            | Prints a Community session's browser-login credentials (`auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
 | `url <id>`                    | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly. |
 | `open <id>`                   | Opens the authenticated URL in the default browser; `--print` prints it instead (headless-safe). |
@@ -351,6 +355,14 @@ the underlying PQ (equivalent to `pq delete` with the same id). To define
 a durable PQ without connecting — scheduled, RunAndDone, or disabled —
 use `pq create` instead; see [`dh-mcp pq`](#dh-mcp-pq).
 
+`exec` takes exactly one script source: `--script TEXT` (inline),
+`--script-path PATH` (a local file), or `--script-path -` (standard
+input). The file is read by the CLI itself, so a relative path resolves
+against your working directory; an unreadable file exits `2`
+(`file_read_failed`). Supplying no source or several exits `2`
+(`missing_argument` / `mutually_exclusive_options`); a script error
+exits `3`.
+
 `credentials`, `url`, and `open` are Community-only and share the
 `session_community_credentials` tool, whose output contains a
 **plaintext auth token by design**. Retrieval is gated by
@@ -366,6 +378,9 @@ Examples:
 dh-mcp session list --type community
 dh-mcp session create dev --launch-method python --env LOG_LEVEL=DEBUG
 dh-mcp session create rpt --system prod --engine DeephavenEnterprise
+dh-mcp session exec community:community:dev --script 'print(1)'
+cat job.py | dh-mcp session exec community:community:dev --script-path -
+dh-mcp session pip-list community:community:dev
 dh-mcp session delete community:community:dev
 dh-mcp session open community:community:dev --print
 ```
@@ -378,7 +393,7 @@ plus every configured Enterprise (Core+) system.
 
 | Verb         | Purpose                                                                                       |
 |--------------|-----------------------------------------------------------------------------------------------|
-| `list`       | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
+| `list`       | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`. |
 | `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dh-mcp config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
 | `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
 | `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
@@ -410,27 +425,13 @@ Inspects tables in a session. All verbs take a fully qualified
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list <id>`                   | Emits the session's table names as a JSON array. Wraps `session_tables_list`. |
+| `list <id>`                   | Lists the session's table names. Wraps `session_tables_list`. |
 | `schema <id> [TABLE...]`      | Column definitions for the named tables (all tables when none named). Wraps `session_tables_schema`. |
 | `data <id> <table>`           | Row data: `--max-rows N`, `--head/--tail` (default head). Wraps `session_table_data`. |
 
 ```bash
 dh-mcp table list community:community:dev
 dh-mcp table data community:community:dev trades --max-rows 50 --tail
-```
-
-### `dh-mcp script`
-
-Runs code and inspects the package environment in a session.
-
-| Verb                          | Purpose                                                                                       |
-|-------------------------------|-----------------------------------------------------------------------------------------------|
-| `run <id>`                    | Executes a script via `--script TEXT` or `--script-path PATH` (supply one). Wraps `session_script_run`. |
-| `pip-list <id>`               | Lists installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
-
-```bash
-dh-mcp script run community:community:dev --script 'print(1)'
-dh-mcp script pip-list community:community:dev
 ```
 
 ### `dh-mcp catalog`
@@ -441,7 +442,7 @@ dh-mcp script pip-list community:community:dev
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
 | `tables <id>`                         | Catalog table metadata. `--max-rows`, `--filter` (repeatable). Wraps `catalog_tables_list`. |
-| `namespaces <id>`                     | Catalog namespaces. Same options as `tables`. Wraps `catalog_namespaces_list`. |
+| `namespaces <id>`                     | Lists the catalog's namespace names. Same options as `tables`. Wraps `catalog_namespaces_list`. When the list is truncated by `--max-rows`, a warning is written to stderr. |
 | `schema <id> [TABLE...]`              | Catalog table schemas. `--namespace`, `--filter` (repeatable), `--max-tables`. Wraps `catalog_tables_schema`. |
 | `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 
@@ -468,7 +469,7 @@ no PQ counterpart (local workers are ephemeral).
 | `list <system>`                       | Lists PQs configured on a system. Wraps `pq_list`. |
 | `details <id>`                        | Configuration + status for one PQ. Wraps `pq_details`. |
 | `name-to-id <system> <name>`          | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`. |
-| `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
+| `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-body-path`/`--git-script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
 | `modify <id>`                         | Updates only the fields passed; everything else is left unchanged. `--restart` restarts the PQ after applying the change. Wraps `pq_modify`. |
 | `delete <id>...`                      | Deletes one or more PQs. `--max-concurrent N`. Wraps `pq_delete`. |
 | `start <id>...`                       | Starts one or more PQs. `--wait/--no-wait`, `--max-concurrent`. Wraps `pq_start`. |
@@ -480,22 +481,33 @@ pass take effect (on `modify`, everything else is left unchanged). `create`
 additionally requires `--system` and `--heap-size-gb` and accepts
 `--enabled/--disabled` (default enabled); `modify` takes `ID` and accepts
 `--pq-name`, `--heap-size-gb`, `--enabled/--disabled`, and `--restart`. The
-shared flags are: `--script-body`/`--script-path`, `--language`
-(`Python`/`Groovy`), `--configuration-type` (`Script`/`RunAndDone`), `--schedule`
-(repeatable), `--server`, `--engine`, `--jvm-profile`, `--jvm-arg` (repeatable),
-`--class-path` (repeatable), `--python-venv`, `--env KEY=VALUE` (repeatable),
-`--init-timeout-nanos`, `--auto-delete-timeout`, `--admin-group`/`--viewer-group`
-(repeatable), `--restart-users`, and `--owner`. Run `dh-mcp pq create --help`
-(or `modify`) for the full per-flag detail. `--script-body`/`--script-path` and
-`--auto-delete-timeout`/`--schedule` are each mutually exclusive; combining a
-pair exits `2` with `mutually_exclusive_options`.
+shared flags are: `--script-body`/`--script-body-path`/`--git-script-path`,
+`--language` (`Python`/`Groovy`), `--configuration-type` (`Script`/`RunAndDone`),
+`--schedule` (repeatable), `--server`, `--engine`, `--jvm-profile`, `--jvm-arg`
+(repeatable), `--class-path` (repeatable), `--python-venv`, `--env KEY=VALUE`
+(repeatable), `--init-timeout-nanos`, `--auto-delete-timeout`,
+`--admin-group`/`--viewer-group` (repeatable), `--restart-users`, and `--owner`.
+Run `dh-mcp pq create --help` (or `modify`) for the full per-flag detail.
+The three script sources and `--auto-delete-timeout`/`--schedule` are each
+mutually exclusive; combining them exits `2` with `mutually_exclusive_options`.
+
+The script sources differ in where the file lives: `--script-body TEXT` is
+inline source stored in the PQ definition; `--script-body-path PATH|-` is a
+**local** file (or stdin) read by the CLI — like `session exec --script-path`
+— and stored as the inline body (unreadable file exits `2`,
+`file_read_failed`); `--git-script-path PATH` is a path into the Enterprise
+controller's Git-backed script repository, resolved **on the server** each
+time the PQ starts (use it for version-controlled scripts). `--python-venv`
+and `--class-path` also name resources on the Enterprise server, not this
+machine.
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the
 `summary` and per-item `results` in the payload for failures.
 
 ```bash
-dh-mcp pq create nightly --system prod --heap-size-gb 4 --script-path /pq/n.py
+dh-mcp pq create nightly --system prod --heap-size-gb 4 --script-body-path ./n.py
+dh-mcp pq create weekly --system prod --heap-size-gb 4 --git-script-path IrisQueries/py/weekly.py
 dh-mcp pq restart enterprise:prod:1234567890 --no-wait
 ```
 
@@ -674,6 +686,7 @@ registry programmatically via `dh-mcp introspect errors` (or the
 | `command_not_found`           | `dh-mcp introspect command PATH` referenced a command path that does not exist. |
 | `missing_argument`            | A required positional argument or option was not provided.         |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
+| `file_read_failed`            | A local file passed on the command line could not be read.          |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
 | `browser_launch_failed`       | `dh-mcp session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
 | `system_not_found`            | `dh-mcp system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |

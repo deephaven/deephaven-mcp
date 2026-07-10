@@ -13,5 +13,11 @@
         "streamablehttp",
         "uvx",
         "venv"
-    ]
+    ],
+    // Markdown All in One: don't rewrite TOCs on save. Its defaults (include
+    // the H1 title, all heading levels) conflict with this project's TOC rules
+    // (H2/H3 only, no H1 root entry) and have corrupted docs/CLI.md and
+    // docs/DEVELOPER_GUIDE.md before. TOCs are maintained by hand; see
+    // .agents/skills/_markdown-documentation-standards/SKILL.md.
+    "markdown.extension.toc.updateOnSave": false
 }

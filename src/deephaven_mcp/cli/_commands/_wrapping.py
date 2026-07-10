@@ -22,6 +22,7 @@ __all__ = [
     "call_tool",
     "echo_payload",
     "parse_key_value",
+    "read_local_script",
     "require_success",
     "tool_payload",
     "wrapper_error_codes",
@@ -29,6 +30,7 @@ __all__ = [
 
 import json
 from collections.abc import Collection
+from pathlib import Path
 from typing import Any
 
 import click
@@ -216,6 +218,47 @@ def parse_key_value(raw: str, *, decode_json: bool) -> tuple[str, Any]:
         return key, value
 
 
+def read_local_script(script_path: str) -> str:
+    """Read a script source from a local file or standard input.
+
+    The locality contract for CLI path flags: a local script file is read
+    by the CLI itself — a relative path resolves against the invoking
+    shell's working directory, never the daemon's — and forwarded to the
+    tool as inline source. ``"-"`` reads standard input instead. A
+    leading ``~`` is expanded via :meth:`Path.expanduser`, matching the
+    ``--config-dir`` / ``--runtime-dir`` convention, so a quoted
+    ``'~/job.py'`` works.
+
+    Args:
+        script_path (str): Path to a local script file (``~`` expanded),
+            or ``"-"`` for standard input.
+
+    Returns:
+        str: The script source text.
+
+    Raises:
+        CliError: With :attr:`ErrorCode.MISSING_ARGUMENT` when stdin is
+            selected but empty, or :attr:`ErrorCode.FILE_READ_FAILED` when
+            the file cannot be read or is not valid UTF-8.
+    """
+    if script_path == "-":
+        script = click.get_text_stream("stdin").read()
+        if not script:
+            raise CliError(
+                "Standard input was empty; provide the script on stdin "
+                "or pass a file path.",
+                code=ErrorCode.MISSING_ARGUMENT,
+            )
+        return script
+    try:
+        return Path(script_path).expanduser().read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CliError(
+            f"Could not read script file {script_path!r}: {exc}",
+            code=ErrorCode.FILE_READ_FAILED,
+        ) from exc
+
+
 def require_success(payload: dict[str, Any], *, tool: str) -> dict[str, Any]:
     """Return the payload's content, or raise an exit-3 error on failure.
 
@@ -393,18 +436,26 @@ def _warn_if_incomplete(
     payload: dict[str, Any],
     *,
     reasons_in_rows: bool = False,
+    truncation_hint: str | None = None,
 ) -> None:
     """Warn on stderr when a successful result is flagged incomplete.
 
-    Discovery tools (e.g. ``sessions_list``) attach a ``partial_result`` block
-    only when the result may be missing data — discovery is still running, or a
-    system failed to connect. Set by ``format_partial_result`` in
-    ``mcp_systems_server/_tools/shared.py``, the block is
-    ``{"phase": <discovery phase>, "detail": <message>, "errors": {<system>:
-    <message>}}`` (``errors`` only on failures), and the key is absent when the
-    result is complete. A shaping verb prints one field and drops the rest, so
-    this re-emits the block's human-readable ``detail`` — and the per-system
-    ``errors`` map — as a stderr warning.
+    Two incompleteness signals are recognized:
+
+    - ``is_complete: false`` — a truncating tool (e.g.
+      ``catalog_namespaces_list``) trimmed the result to a caller-chosen row
+      cap. Warns with a generic truncation message, extended by
+      ``truncation_hint`` when the verb names its own recovery flags.
+    - ``partial_result`` — discovery tools (e.g. ``sessions_list``) attach
+      this block only when the result may be missing data — discovery is
+      still running, or a system failed to connect. Set by
+      ``format_partial_result`` in ``mcp_systems_server/_tools/shared.py``,
+      the block is ``{"phase": <discovery phase>, "detail": <message>,
+      "errors": {<system>: <message>}}`` (``errors`` only on failures), and
+      the key is absent when the result is complete. A shaping verb prints
+      one field and drops the rest, so this re-emits the block's
+      human-readable ``detail`` — and the per-system ``errors`` map — as a
+      stderr warning.
 
     Args:
         runtime (Runtime): The active CLI runtime.
@@ -417,7 +468,15 @@ def _warn_if_incomplete(
             table. ``"loading"`` / ``"failed"`` phases still warn and still
             carry the ``errors`` map, because the rows show only the short
             reason and the full message would otherwise be unreachable.
+        truncation_hint (str | None, optional): Sentence appended to the
+            ``is_complete: false`` warning naming the verb's recovery flags
+            (e.g. ``"Raise --max-rows or narrow with --filter."``).
     """
+    if payload.get("is_complete") is False:
+        message = "Result truncated by the row cap."
+        if truncation_hint:
+            message = f"{message} {truncation_hint}"
+        render_warning(message, output=runtime.config.cli.output.format)
     incomplete = payload.get("partial_result")
     if incomplete is None:
         return
@@ -441,13 +500,15 @@ async def call_and_echo_field(
     field: str,
     default: Any,
     reasons_in_rows: bool = False,
+    truncation_hint: str | None = None,
 ) -> None:
     """Acquire, invoke ``tool``, surface diagnostics, and print ``payload[field]``.
 
     The shaping counterpart to :func:`call_and_echo`: emits a single payload
     field (e.g. a ``list`` verb's array) on stdout while warning on stderr if the
-    result is incomplete (:func:`_warn_if_incomplete`) — so shaping never
-    silently drops partial-result information.
+    result is incomplete (:func:`_warn_if_incomplete`, which recognizes both
+    ``partial_result`` and ``is_complete: false``) — so shaping never silently
+    drops partial-result or truncation information.
 
     Args:
         runtime (Runtime): The active CLI runtime.
@@ -461,6 +522,9 @@ async def call_and_echo_field(
             :func:`_warn_if_incomplete`. Set ``True`` when the emitted rows
             already carry per-system error reasons, so a ``"completed"``
             warning doesn't restate them.
+        truncation_hint (str | None, optional): Forwarded to
+            :func:`_warn_if_incomplete`. Sentence appended to the
+            ``is_complete: false`` warning naming the verb's recovery flags.
 
     Raises:
         CliError: When the daemon cannot be acquired, the MCP transport
@@ -469,5 +533,10 @@ async def call_and_echo_field(
     payload = await call_for_payload(
         runtime, tool, retry_command=retry_command, arguments=arguments
     )
-    _warn_if_incomplete(runtime, payload, reasons_in_rows=reasons_in_rows)
+    _warn_if_incomplete(
+        runtime,
+        payload,
+        reasons_in_rows=reasons_in_rows,
+        truncation_hint=truncation_hint,
+    )
     echo_payload(runtime, payload.get(field, default))

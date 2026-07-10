@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -19,6 +20,7 @@ from deephaven_mcp.cli._commands._wrapping import (
     call_tool,
     echo_payload,
     parse_key_value,
+    read_local_script,
     require_success,
     tool_payload,
     wrapper_error_codes,
@@ -211,6 +213,49 @@ def test_parse_key_value_empty_key_raises() -> None:
     with pytest.raises(CliError) as exc:
         parse_key_value("=v", decode_json=False)
     assert exc.value.code is ErrorCode.ARG_PARSE_ERROR
+
+
+# ---------------------------------------------------------------------------
+# read_local_script
+# ---------------------------------------------------------------------------
+
+
+def test_read_local_script_reads_file(tmp_path: Path) -> None:
+    script_file = tmp_path / "job.py"
+    script_file.write_text("print('hi')\n")
+    assert read_local_script(str(script_file)) == "print('hi')\n"
+
+
+def test_read_local_script_expands_tilde(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A quoted '~/...' path (shell did not expand it) still resolves."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "job.py").write_text("print('home')\n")
+    assert read_local_script("~/job.py") == "print('home')\n"
+
+
+def test_read_local_script_dash_reads_stdin() -> None:
+    stream = io.StringIO("print('stdin')\n")
+    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
+        assert read_local_script("-") == "print('stdin')\n"
+
+
+def test_read_local_script_empty_stdin_raises_missing_argument() -> None:
+    stream = io.StringIO("")
+    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
+        with pytest.raises(CliError) as exc:
+            read_local_script("-")
+    assert exc.value.code is ErrorCode.MISSING_ARGUMENT
+
+
+def test_read_local_script_unreadable_file_raises_file_read_failed(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(CliError) as exc:
+        read_local_script(str(tmp_path / "missing.py"))
+    assert exc.value.code is ErrorCode.FILE_READ_FAILED
+    assert "missing.py" in exc.value.message
 
 
 # ---------------------------------------------------------------------------
@@ -728,3 +773,74 @@ async def test_call_and_echo_field_failed_surfaces_errors_when_reasons_in_rows(
     # The full per-system message must reach stderr — not just the short
     # exception type the table cell shows.
     assert "Network is unreachable" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_warns_on_truncated_result(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``is_complete: false`` warns on stderr; stdout stays the bare field."""
+    rt = make_runtime(tmp_path)
+    payload = {"success": True, "namespaces": ["a", "b"], "is_complete": False}
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+            field="namespaces",
+            default=[],
+        )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == ["a", "b"]
+    assert "truncated" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_truncation_hint_appended(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``truncation_hint`` extends the generic truncation warning."""
+    rt = make_runtime(tmp_path)
+    payload = {"success": True, "namespaces": [], "is_complete": False}
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+            field="namespaces",
+            default=[],
+            truncation_hint="Raise --max-rows or narrow with --filter.",
+        )
+    captured = capsys.readouterr()
+    assert "truncated" in captured.err
+    assert "Raise --max-rows or narrow with --filter." in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_complete_result_no_truncation_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``is_complete: true`` produces no stderr warning."""
+    rt = make_runtime(tmp_path)
+    payload = {"success": True, "namespaces": ["a"], "is_complete": True}
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+            field="namespaces",
+            default=[],
+            truncation_hint="Raise --max-rows or narrow with --filter.",
+        )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == ["a"]
+    assert captured.err == ""

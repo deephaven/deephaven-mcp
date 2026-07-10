@@ -83,8 +83,8 @@ branches the command tree by type. Type is carried three ways:
   system's type selects the underlying tool; flags are grouped by type
   in help and a mismatched flag errors.
 - **the id's `type:` prefix** — at every verb that takes an existing id
-  (`show`, `delete`, `credentials`, `url`, `open`, and all
-  table/script verbs). Dispatchers route on the prefix.
+  (`show`, `delete`, `exec`, `pip-list`, `credentials`, `url`, `open`,
+  and all table verbs). Dispatchers route on the prefix.
 - **group-level documentation** — for wholly single-type resources
   (`pq`, `catalog` are top-level and documented "Enterprise (Core+)
   only").
@@ -92,8 +92,42 @@ branches the command tree by type. Type is carried three ways:
 This is resource-first, like every mature CLI (kubectl, docker, gh,
 aws, gcloud). Type-first (`community …` / `enterprise …` at the top)
 was rejected because it duplicates the genuinely shared resources
-(`table`, `script`, `session list/show/delete`) under both prefixes and
+(`table`, `session list/show/delete/exec`) under both prefixes and
 destroys the cross-type `session list`.
+
+**Scripts are input, not a resource.** A script has no server-side
+identity — nothing to `list` or `show` — so it never gets a noun. Code
+rides verbs and flags (`session exec --script/--script-path`,
+`pq create --script-body/--script-body-path/--git-script-path`), the way
+`kubectl apply -f` takes a file without a `file` noun.
+
+## Path locality
+
+Every path-valued flag resolves in exactly one of two places, and the
+command surface must make that place unmistakable:
+
+- **The CLI machine.** The flag names a local file. The CLI reads it
+  itself (`read_local_script` in `_wrapping.py`) and forwards the
+  *contents* to the tool, so a relative path resolves against the
+  invoking shell's working directory, `-` means stdin, and an unreadable
+  file fails fast with `file_read_failed` (exit 2) before any daemon
+  round trip. Examples: `session exec --script-path`,
+  `pq create --script-body-path`.
+- **The server.** The flag is an identifier in a server-side namespace
+  and is forwarded verbatim — e.g. `pq --git-script-path` (a path into
+  the controller's Git-backed script repository, read at PQ start) or
+  `pq --python-venv` (a venv name configured on the Enterprise server).
+  The flag name and help must say so; a bare name like `--script-path`
+  on a server-side flag reads as a local file and was renamed for
+  exactly that reason.
+
+The daemon is deliberately **never** a file-resolution locus for the CLI
+surface: it is a background process whose working directory and lifetime
+are unrelated to the user's shell, so "a file readable by the daemon" is
+a footgun, not a feature. (The MCP tools themselves keep server-side
+path parameters like `session_script_run`'s `script_path` for agents
+that are co-resident with the server; the CLI wrappers simply do not
+forward them.)
 
 ## Wrapper categories
 
@@ -151,9 +185,11 @@ Two consequences shaped the helpers:
 - **A partial-but-successful result must not be dropped.** Tools whose
   result spans systems (`sessions_list`, `enterprise_systems_status`)
   attach a `partial_result` block (`phase` / `detail` / optional per-system
-  `errors`) when discovery is incomplete. Whole-envelope verbs carry it in
-  stdout; field-shaping verbs would discard it, so `call_and_echo_field`
-  re-surfaces it as a **stderr** warning (`_warn_if_incomplete`), keeping
+  `errors`) when discovery is incomplete; truncating tools
+  (`catalog_namespaces_list`) flag a row-capped result with
+  `is_complete: false`. Whole-envelope verbs carry these in
+  stdout; field-shaping verbs would discard them, so `call_and_echo_field`
+  re-surfaces both as a **stderr** warning (`_warn_if_incomplete`), keeping
   stdout clean for piping.
 
 ## The drift contract
@@ -202,10 +238,9 @@ runs the drift check on `_tools/**` or `cli/_commands/**` edits).
 
 | Group | Verbs → MCP tool(s) |
 |-------|---------------------|
-| `session` | `list`→`sessions_list`; `show`→`session_details`; `create --system`→`session_community_create`\|`session_enterprise_create`; `delete`→`session_community_delete`\|`session_enterprise_delete`; `credentials`/`url`/`open`→`session_community_credentials` |
+| `session` | `list`→`sessions_list`; `show`→`session_details`; `create --system`→`session_community_create`\|`session_enterprise_create`; `delete`→`session_community_delete`\|`session_enterprise_delete`; `exec`→`session_script_run`; `pip-list`→`session_pip_list`; `credentials`/`url`/`open`→`session_community_credentials` |
 | `system` | `list`→`list_systems`; `status`→`enterprise_systems_status` |
 | `table` | `list`→`session_tables_list`; `schema`→`session_tables_schema`; `data`→`session_table_data` |
-| `script` | `run`→`session_script_run`; `pip-list`→`session_pip_list` |
 | `catalog` | (Enterprise only) `tables`→`catalog_tables_list`; `namespaces`→`catalog_namespaces_list`; `schema`→`catalog_tables_schema`; `sample`→`catalog_table_sample` |
 | `pq` | (Enterprise only) `list`/`details`/`create`/`modify`/`delete`/`start`/`stop`/`restart`/`name-to-id` → `pq_*` |
 

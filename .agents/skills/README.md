@@ -18,13 +18,13 @@ Conventions:
 | --- | --- |
 | `_agents-md-curation` | Standards for editing the project root `AGENTS.md`: what belongs there vs in a skill, format conventions, composition with skills, sync rules. |
 | `_cli-help-standards` | The content contract for `dh-mcp` CLI help: required help sections, `build_help` usage, plain-text/no-RST rule, the no-rewrap marker, single-source `OutputSpec` output schema, and the three-surface consistency rule (`docs/CLI.md`, `--help`, introspect). |
-| `_cli-tool-wrapping` | Conventions for `dh-mcp` runtime commands that wrap MCP tools: the four wrapper categories, the shared `_wrapping` helpers, type scoping via `--system`/id/group-doc (never subgroups), and the `wraps_tool` schema-drift contract. |
+| `_cli-tool-wrapping` | Conventions for `dh-mcp` runtime commands that wrap MCP tools: the four wrapper categories, the shared `_wrapping` helpers, type scoping via `--system`/id/group-doc (never subgroups), path-flag locality (CLI-read vs server-side), and the `wraps_tool` schema-drift contract. |
 | `_configuration-conventions` | Canonical reference for the project's config model: JSON5 + Pydantic v2 + `${env:VAR}` / `${file:PATH}` templating; no ad-hoc env reads or `DEFAULT_FOO` constants. |
 | `_documentation-roles` | Defines the role (audience and scope) of every top-level markdown document; loaded by the docs workflows (`docs-improve`, `docs-accuracy`) and `cli-command-add` to keep edits in-scope and prevent content drift. |
 | `_logging-standards` | Logger instantiation, `[module:function] Action: details` message format, log levels, sensitive-data rules, redaction-aware Pydantic model logging. |
 | `_markdown-documentation-standards` | Markdown formatting: JSON/JSON5 code block requirements, placeholder formatting, headings, links, tables, prose conventions. |
 | `_mcp-module-organization` | Module placement and design patterns for MCP tool modules under `src/deephaven_mcp/mcp_systems_server/_tools/`. |
-| `_output-serialization-conventions` | Project conventions for serializing values into user-facing output (MCP tool return dicts and CLI output fields). The hub where output-value rules accrete — currently enum-value casing. |
+| `_output-serialization-conventions` | Project conventions for serializing values into user-facing output (MCP tool return dicts and CLI output fields). The hub where output-value rules accrete — enum-value casing and MCP-layer payload shape. |
 | `_project-reference` | High-level project map: architecture, server entry points and ports, config layout, code-quality check commands, test clients. |
 | `_python-coding-practices` | Project-wide Python style and conventions (private-symbol access, MCP-tool docstring rules, f-strings, `Any`/`hasattr` policy, etc.). |
 | `_skill-authoring-standards` | Structural standards for skill files: composition hierarchy, frontmatter contract, `_`-prefix rule for human-invocability, body shape, length budgets, lifecycle, precedence. |

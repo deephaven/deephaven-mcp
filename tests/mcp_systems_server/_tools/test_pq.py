@@ -202,7 +202,7 @@ async def test_pq_name_to_id_success():
     assert result["id"] == "enterprise:system:12345"
     assert result["serial"] == 12345
     assert result["name"] == "analytics"
-    assert result["system_name"] == "system"
+    assert result["system"] == "system"
     mock_controller.get_serial_for_name.assert_called_once_with("analytics")
 
 
@@ -1596,7 +1596,7 @@ async def test_pq_list_success():
 
     # Verify success
     assert result["success"] is True
-    assert result["system_name"] == "system"
+    assert result["system"] == "system"
     assert len(result["pqs"]) == 2
 
     # Verify PQ1 summary data (trimmed response - no full config/state_details)

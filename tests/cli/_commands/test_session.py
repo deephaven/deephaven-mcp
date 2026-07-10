@@ -24,10 +24,16 @@ _SID = "community:community:my-session"
 _EID = "enterprise:prod:rpt"
 
 
-def _invoke(args: list[str], runtime: Runtime, *, standalone_mode: bool = True):
+def _invoke(
+    args: list[str],
+    runtime: Runtime,
+    *,
+    standalone_mode: bool = True,
+    input: str | None = None,
+):
     runner = CliRunner()
     with patch.object(_main, "load_runtime", fake_load_runtime(runtime)):
-        return runner.invoke(cli, args, standalone_mode=standalone_mode)
+        return runner.invoke(cli, args, standalone_mode=standalone_mode, input=input)
 
 
 def _result(payload: dict) -> CallToolResult:
@@ -45,13 +51,18 @@ def _patch(result: CallToolResult):
 
 
 def _run(
-    args: list[str], payload: dict, tmp_path: Path, *, standalone_mode: bool = True
+    args: list[str],
+    payload: dict,
+    tmp_path: Path,
+    *,
+    standalone_mode: bool = True,
+    input: str | None = None,
 ):
     """Invoke ``args`` with the call_tool seam returning ``payload``."""
     rt = make_runtime(tmp_path)
     acquire_p, call_p = _patch(_result(payload))
     with acquire_p, call_p as call:
-        result = _invoke(args, rt, standalone_mode=standalone_mode)
+        result = _invoke(args, rt, standalone_mode=standalone_mode, input=input)
     return result, call
 
 
@@ -268,6 +279,48 @@ def test_create_enterprise_auto_name_and_session_arg(tmp_path: Path) -> None:
     assert "session_name" not in args
 
 
+def test_create_community_expands_tilde_in_local_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """~ expands in --python-venv-path and a volume's host half only."""
+    monkeypatch.setenv("HOME", "/home/tester")
+    result, call = _run(
+        [
+            "session",
+            "create",
+            "dev",
+            "--launch-method",
+            "docker",
+            "--docker-volume",
+            "~/data:/data:ro",
+            "--docker-volume",
+            "/abs:/abs",
+        ],
+        _CREATED,
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    args = call.await_args.args[3]
+    # Host half expanded; container path and mode verbatim.
+    assert args["docker_volumes"] == ["/home/tester/data:/data:ro", "/abs:/abs"]
+
+    result, call = _run(
+        [
+            "session",
+            "create",
+            "dev",
+            "--launch-method",
+            "python",
+            "--python-venv-path",
+            "~/venvs/dh",
+        ],
+        _CREATED,
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3]["python_venv_path"] == "/home/tester/venvs/dh"
+
+
 def test_create_community_missing_name_errors(tmp_path: Path) -> None:
     result, _ = _run(["session", "create"], _CREATED, tmp_path, standalone_mode=False)
     assert _error_code(result) == "option_not_applicable"
@@ -345,6 +398,140 @@ def test_delete_tool_failure_exits_3(tmp_path: Path) -> None:
         tmp_path,
     )
     assert result.exit_code == 3
+
+
+# ---------------------------------------------------------------------------
+# exec
+# ---------------------------------------------------------------------------
+
+
+def test_exec_inline_script(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "exec", _SID, "--script", "print(1)"], {"success": True}, tmp_path
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[2] == "session_script_run"
+    assert call.await_args.args[3] == {"id": _SID, "script": "print(1)"}
+
+
+def test_exec_script_path_reads_file_client_side(tmp_path: Path) -> None:
+    script_file = tmp_path / "j.py"
+    script_file.write_text("print('from file')\n")
+    result, call = _run(
+        ["session", "exec", _SID, "--script-path", str(script_file)],
+        {"success": True},
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": _SID, "script": "print('from file')\n"}
+
+
+def test_exec_script_path_unreadable_exits_2(tmp_path: Path) -> None:
+    missing = tmp_path / "does_not_exist.py"
+    result, call = _run(
+        ["session", "exec", _SID, "--script-path", str(missing)],
+        {"success": True},
+        tmp_path,
+        standalone_mode=False,
+    )
+    assert _error_code(result) == "file_read_failed"
+    assert result.exception.exit_code == 2
+    assert "Could not read script file" in str(result.exception)
+    call.assert_not_awaited()
+
+
+def test_exec_stdin(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "exec", _SID, "--script-path", "-"],
+        {"success": True},
+        tmp_path,
+        input="print('from stdin')\n",
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": _SID, "script": "print('from stdin')\n"}
+
+
+def test_exec_stdin_empty_exits_2(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "exec", _SID, "--script-path", "-"],
+        {"success": True},
+        tmp_path,
+        standalone_mode=False,
+        input="",
+    )
+    assert _error_code(result) == "missing_argument"
+    assert result.exception.exit_code == 2
+    assert "Standard input was empty" in str(result.exception)
+    call.assert_not_awaited()
+
+
+def test_exec_failure_exits_3(tmp_path: Path) -> None:
+    result, _ = _run(
+        ["session", "exec", _SID, "--script", "boom()"],
+        {"success": False, "error": "script blew up"},
+        tmp_path,
+    )
+    assert result.exit_code == 3
+    assert "script blew up" in result.output
+
+
+def test_exec_requires_a_source(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "exec", _SID], {"success": True}, tmp_path, standalone_mode=False
+    )
+    assert _error_code(result) == "missing_argument"
+    assert result.exception.exit_code == 2
+    assert "Provide a script source" in str(result.exception)
+    call.assert_not_awaited()
+
+
+def test_exec_rejects_both_sources(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "exec", _SID, "--script", "print(1)", "--script-path", "/tmp/j.py"],
+        {"success": True},
+        tmp_path,
+        standalone_mode=False,
+    )
+    assert _error_code(result) == "mutually_exclusive_options"
+    assert result.exception.exit_code == 2
+    assert "cannot be combined" in str(result.exception)
+    call.assert_not_awaited()
+
+
+def test_exec_rejects_stdin_with_inline(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "exec", _SID, "--script", "print(1)", "--script-path", "-"],
+        {"success": True},
+        tmp_path,
+        standalone_mode=False,
+        input="print(2)\n",
+    )
+    assert _error_code(result) == "mutually_exclusive_options"
+    call.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# pip-list
+# ---------------------------------------------------------------------------
+
+
+def test_pip_list_emits_array(tmp_path: Path) -> None:
+    payload = {"success": True, "packages": [{"package": "numpy", "version": "1.25"}]}
+    result, call = _run(["-o", "json", "session", "pip-list", _SID], payload, tmp_path)
+    assert result.exit_code == 0
+    assert json.loads(result.output) == payload["packages"]
+    assert call.await_args.args[2] == "session_pip_list"
+    assert call.await_args.args[3] == {"id": _SID}
+
+
+def test_pip_list_failure_exits_3(tmp_path: Path) -> None:
+    result, _ = _run(
+        ["session", "pip-list", _SID],
+        {"success": False, "error": "no such session"},
+        tmp_path,
+    )
+    assert result.exit_code == 3
+    assert "no such session" in result.output
 
 
 # ---------------------------------------------------------------------------
