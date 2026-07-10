@@ -1,7 +1,7 @@
-"""``dh-mcp session`` noun group: manage and inspect Deephaven sessions.
+"""``dh-mcp session`` noun group: manage, inspect, and operate Deephaven sessions.
 
-Verbs: ``list``, ``show``, ``create``, ``delete``, ``credentials``,
-``url``, ``open``.
+Verbs: ``list``, ``show``, ``create``, ``delete``, ``exec``, ``pip-list``,
+``credentials``, ``url``, ``open``.
 
 Every session is addressed by a fully qualified id
 ``type:system:name`` (``type`` is ``community`` or ``enterprise``).
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 __all__ = ["session"]
 
+from pathlib import Path
 from typing import Any, cast
 
 import click
@@ -27,6 +28,7 @@ from deephaven_mcp.cli._commands._wrapping import (
     call_for_payload,
     echo_payload,
     parse_key_value,
+    read_local_script,
     wrapper_error_codes,
 )
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
@@ -76,13 +78,14 @@ _ENTERPRISE_ONLY_CREATE = (
 
 @click.group(cls=HelpfulGroup)
 def session() -> None:
-    """Manage and inspect Deephaven sessions hosted by the daemon.
+    """Manage, inspect, and operate Deephaven sessions hosted by the daemon.
 
     Sessions are addressed by a fully qualified id 'type:system:name'.
     'list' and 'show' inspect; 'create' provisions one (the backend is
-    chosen by --system); 'delete' removes one; 'credentials', 'url', and
-    'open' surface a Community session's browser login. These commands
-    auto-start the daemon unless --no-auto-start is set.
+    chosen by --system); 'delete' removes one; 'exec' runs a script in
+    one; 'pip-list' reports its installed pip packages; 'credentials',
+    'url', and 'open' surface a Community session's browser login. These
+    commands auto-start the daemon unless --no-auto-start is set.
     """
 
 
@@ -107,6 +110,42 @@ def _pairs(tokens: tuple[str, ...], *, decode_json: bool) -> dict[str, Any] | No
     if not tokens:
         return None
     return dict(parse_key_value(t, decode_json=decode_json) for t in tokens)
+
+
+def _expand_local_path(path: str | None) -> str | None:
+    """Expand a leading ``~`` in a local-machine path option.
+
+    The community worker is launched by the local daemon, so these paths
+    are on this machine; expanding client-side matches the
+    ``--config-dir`` / ``--runtime-dir`` convention. A path without a
+    leading ``~`` is returned verbatim (no normalization).
+
+    Args:
+        path (str | None): The option value, or ``None`` when omitted.
+
+    Returns:
+        str | None: The expanded path, or the input unchanged.
+    """
+    if path is not None and path.startswith("~"):
+        return str(Path(path).expanduser())
+    return path
+
+
+def _expand_volume_host(spec: str) -> str:
+    """Expand a leading ``~`` in the host half of a Docker volume spec.
+
+    A spec is ``host:container[:mode]``; only the host path is on this
+    machine, so only it is expanded. The container path names a location
+    inside the container and is always forwarded verbatim.
+
+    Args:
+        spec (str): The ``--docker-volume`` option value.
+
+    Returns:
+        str: The spec with the host half ``~``-expanded.
+    """
+    host, sep, rest = spec.partition(":")
+    return f"{_expand_local_path(host)}{sep}{rest}"
 
 
 def _provided(value: Any) -> bool:
@@ -444,13 +483,15 @@ _OUTPUT_CREATE = OutputSpec(
     "--docker-volume",
     "docker_volumes",
     multiple=True,
-    help="[Community] Docker bind mount (repeatable).",
+    help="[Community] Docker bind mount; host paths are on this machine (repeatable).",
 )
 @click.option(
     "--python-venv-path",
     "python_venv_path",
     default=None,
-    help="[Community] Host virtualenv path for the python launch method.",
+    help=(
+        "[Community] Virtualenv path on this machine for the python " "launch method."
+    ),
 )
 # Enterprise-only
 @click.option("--server", "server", default=None, help="[Enterprise] Server pool name.")
@@ -526,8 +567,8 @@ async def session_create(  # noqa: PLR0913 — a wrapper mirrors its tool's full
         "docker_image": docker_image,
         "docker_memory_limit_gb": docker_memory_limit_gb,
         "docker_cpu_limit": docker_cpu_limit,
-        "docker_volumes": list(docker_volumes) or None,
-        "python_venv_path": python_venv_path,
+        "docker_volumes": [_expand_volume_host(v) for v in docker_volumes] or None,
+        "python_venv_path": _expand_local_path(python_venv_path),
         "server": server,
         "engine": engine,
         "auto_delete_timeout": auto_delete_timeout,
@@ -617,6 +658,134 @@ async def session_delete(runtime: Runtime, id: str) -> None:
         tool,
         retry_command="dh-mcp session delete",
         arguments={"id": id},
+    )
+
+
+# ---------------------------------------------------------------------------
+# exec
+# ---------------------------------------------------------------------------
+
+_OUTPUT_EXEC = OutputSpec(
+    "object",
+    (),
+    note="Empty object on success; on failure the command exits 3 with the error.",
+)
+
+
+@session.command(
+    "exec",
+    output_spec=_OUTPUT_EXEC,
+    wraps_tool="session_script_run",
+    help=build_help(
+        summary="Run a script in a session.",
+        description=(
+            "Executes a script in the session's worker. Provide the code inline "
+            "with --script, from a local file with --script-path, or from "
+            "standard input with '--script-path -'; supply exactly one source. "
+            "The file is read by the CLI itself, so a relative path resolves "
+            "against your working directory; an unreadable file exits 2. "
+            "Supplying no source or several exits 2; a script error exits 3."
+        ),
+        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
+        output=_OUTPUT_EXEC,
+        examples=(
+            "$ dh-mcp session exec community:community:dev --script 'print(1+1)'",
+            "$ dh-mcp session exec community:community:dev --script-path /tmp/job.py",
+            "$ cat job.py | dh-mcp session exec community:community:dev --script-path -",
+        ),
+        see_also=("dh-mcp session pip-list ID",),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
+        error_codes=(
+            ErrorCode.MISSING_ARGUMENT,
+            ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
+            ErrorCode.FILE_READ_FAILED,
+            *wrapper_error_codes(),
+        ),
+    ),
+)
+@click.argument("id")
+@click.option("--script", "script", default=None, help="Inline script source.")
+@click.option(
+    "--script-path",
+    "script_path",
+    default=None,
+    help="Path to a local script file (read by the CLI), or '-' to read stdin.",
+)
+@click.pass_obj
+@run_async
+async def session_exec(
+    runtime: Runtime, id: str, script: str | None, script_path: str | None
+) -> None:
+    """Run a script in a session."""
+    if script is not None and script_path is not None:
+        raise CliError(
+            "--script and --script-path cannot be combined; supply exactly one.",
+            code=ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
+        )
+    if script is None and script_path is None:
+        raise CliError(
+            "Provide a script source: --script, --script-path, or --script-path -.",
+            code=ErrorCode.MISSING_ARGUMENT,
+        )
+    if script_path is not None:
+        script = read_local_script(script_path)
+    arguments: dict[str, Any] = {"id": id, "script": script}
+    await call_and_echo(
+        runtime,
+        "session_script_run",
+        retry_command="dh-mcp session exec",
+        arguments=arguments,
+    )
+
+
+# ---------------------------------------------------------------------------
+# pip-list
+# ---------------------------------------------------------------------------
+
+_OUTPUT_PIP_LIST = OutputSpec(
+    "list",
+    (
+        OutputField("package", "string", "Package name."),
+        OutputField("version", "string", "Installed version."),
+    ),
+    note="Array of installed pip packages.",
+)
+
+
+@session.command(
+    "pip-list",
+    output_spec=_OUTPUT_PIP_LIST,
+    wraps_tool="session_pip_list",
+    help=build_help(
+        summary="List a session's installed pip packages.",
+        description=(
+            "Returns the Python packages available in the session's environment "
+            "as a list of {package, version}. Use it to confirm a library is "
+            "present before running a script that imports it."
+        ),
+        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
+        output=_OUTPUT_PIP_LIST,
+        examples=(
+            "$ dh-mcp session pip-list community:community:dev",
+            "$ dh-mcp -o json session pip-list community:community:dev | jq '.[].package'",
+        ),
+        see_also=("dh-mcp session exec ID",),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
+        error_codes=wrapper_error_codes(),
+    ),
+)
+@click.argument("id")
+@click.pass_obj
+@run_async
+async def session_pip_list(runtime: Runtime, id: str) -> None:
+    """List a session's installed pip packages."""
+    await call_and_echo_field(
+        runtime,
+        "session_pip_list",
+        retry_command="dh-mcp session pip-list",
+        arguments={"id": id},
+        field="packages",
+        default=[],
     )
 
 

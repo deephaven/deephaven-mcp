@@ -22,6 +22,7 @@ __all__ = [
     "call_tool",
     "echo_payload",
     "parse_key_value",
+    "read_local_script",
     "require_success",
     "tool_payload",
     "wrapper_error_codes",
@@ -29,6 +30,7 @@ __all__ = [
 
 import json
 from collections.abc import Collection
+from pathlib import Path
 from typing import Any
 
 import click
@@ -214,6 +216,47 @@ def parse_key_value(raw: str, *, decode_json: bool) -> tuple[str, Any]:
         return key, json.loads(value)
     except json.JSONDecodeError:
         return key, value
+
+
+def read_local_script(script_path: str) -> str:
+    """Read a script source from a local file or standard input.
+
+    The locality contract for CLI path flags: a local script file is read
+    by the CLI itself — a relative path resolves against the invoking
+    shell's working directory, never the daemon's — and forwarded to the
+    tool as inline source. ``"-"`` reads standard input instead. A
+    leading ``~`` is expanded via :meth:`Path.expanduser`, matching the
+    ``--config-dir`` / ``--runtime-dir`` convention, so a quoted
+    ``'~/job.py'`` works.
+
+    Args:
+        script_path (str): Path to a local script file (``~`` expanded),
+            or ``"-"`` for standard input.
+
+    Returns:
+        str: The script source text.
+
+    Raises:
+        CliError: With :attr:`ErrorCode.MISSING_ARGUMENT` when stdin is
+            selected but empty, or :attr:`ErrorCode.FILE_READ_FAILED` when
+            the file cannot be read.
+    """
+    if script_path == "-":
+        script = click.get_text_stream("stdin").read()
+        if not script:
+            raise CliError(
+                "Standard input was empty; provide the script on stdin "
+                "or pass a file path.",
+                code=ErrorCode.MISSING_ARGUMENT,
+            )
+        return script
+    try:
+        return Path(script_path).expanduser().read_text()
+    except OSError as exc:
+        raise CliError(
+            f"Could not read script file {script_path!r}: {exc}",
+            code=ErrorCode.FILE_READ_FAILED,
+        ) from exc
 
 
 def require_success(payload: dict[str, Any], *, tool: str) -> dict[str, Any]:

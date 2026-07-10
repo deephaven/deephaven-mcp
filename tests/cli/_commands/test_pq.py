@@ -17,7 +17,7 @@ from deephaven_mcp.cli._main import cli
 from .._helpers import fake_load_runtime, make_entry, make_runtime
 
 
-def _run(args: list[str], payload: dict, tmp_path: Path):
+def _run(args: list[str], payload: dict, tmp_path: Path, input: str | None = None):
     rt = make_runtime(tmp_path)
     result = CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload))],
@@ -28,7 +28,7 @@ def _run(args: list[str], payload: dict, tmp_path: Path):
         patch.object(wrapping_mod, "call_tool", AsyncMock(return_value=result)) as call,
         patch.object(_main, "load_runtime", fake_load_runtime(rt)),
     ):
-        return CliRunner().invoke(cli, args), call
+        return CliRunner().invoke(cli, args, input=input), call
 
 
 _PQS = [
@@ -84,8 +84,8 @@ def test_create_builds_args(tmp_path: Path) -> None:
             "prod",
             "--heap-size-gb",
             "4",
-            "--script-path",
-            "/pq/n.py",
+            "--git-script-path",
+            "IrisQueries/py/n.py",
             "--jvm-arg",
             "-Xmx2g",
             "--schedule",
@@ -101,11 +101,73 @@ def test_create_builds_args(tmp_path: Path) -> None:
     assert args["system"] == "prod"
     assert args["heap_size_gb"] == 4.0
     assert args["enabled"] is True
-    assert args["script_path"] == "/pq/n.py"
+    assert args["script_path"] == "IrisQueries/py/n.py"
     assert args["extra_jvm_args"] == ["-Xmx2g"]
     assert args["schedule"] == ["daily"]
     # Unset options are omitted so the controller defaults apply.
     assert "server" not in args
+
+
+def test_create_script_body_path_reads_file_client_side(tmp_path: Path) -> None:
+    script_file = tmp_path / "n.py"
+    script_file.write_text("print('from file')\n")
+    result, call = _run(
+        [
+            "pq",
+            "create",
+            "nightly",
+            "--system",
+            "prod",
+            "--heap-size-gb",
+            "4",
+            "--script-body-path",
+            str(script_file),
+        ],
+        {"success": True, "id": "999"},
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    args = call.await_args.args[3]
+    # The local file is materialized into script_body; the client-only
+    # script_body_path key is never forwarded.
+    assert args["script_body"] == "print('from file')\n"
+    assert "script_body_path" not in args
+    assert "script_path" not in args
+
+
+def test_modify_script_body_path_stdin(tmp_path: Path) -> None:
+    result, call = _run(
+        ["pq", "modify", "123", "--script-body-path", "-"],
+        {"success": True},
+        tmp_path,
+        input="print('from stdin')\n",
+    )
+    assert result.exit_code == 0
+    args = call.await_args.args[3]
+    assert args["script_body"] == "print('from stdin')\n"
+    assert "script_body_path" not in args
+
+
+def test_create_script_body_path_unreadable_exits_2(tmp_path: Path) -> None:
+    missing = tmp_path / "does_not_exist.py"
+    result, call = _run(
+        [
+            "pq",
+            "create",
+            "nightly",
+            "--system",
+            "prod",
+            "--heap-size-gb",
+            "4",
+            "--script-body-path",
+            str(missing),
+        ],
+        {"success": True},
+        tmp_path,
+    )
+    assert result.exit_code == 2
+    assert "Could not read script file" in result.output
+    call.assert_not_awaited()
 
 
 def test_modify_only_passes_given_fields(tmp_path: Path) -> None:
@@ -144,7 +206,9 @@ def test_modify_restart_flag(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "extra_args",
     [
-        ["--script-body", "print(1)", "--script-path", "/pq/n.py"],
+        ["--script-body", "print(1)", "--git-script-path", "IrisQueries/py/n.py"],
+        ["--script-body", "print(1)", "--script-body-path", "/tmp/n.py"],
+        ["--script-body-path", "/tmp/n.py", "--git-script-path", "IrisQueries/py/n.py"],
         ["--auto-delete-timeout", "60", "--schedule", "daily"],
     ],
 )
@@ -164,7 +228,9 @@ def test_create_rejects_mutually_exclusive_options(
 @pytest.mark.parametrize(
     "extra_args",
     [
-        ["--script-body", "print(1)", "--script-path", "/pq/n.py"],
+        ["--script-body", "print(1)", "--git-script-path", "IrisQueries/py/n.py"],
+        ["--script-body", "print(1)", "--script-body-path", "/tmp/n.py"],
+        ["--script-body-path", "/tmp/n.py", "--git-script-path", "IrisQueries/py/n.py"],
         ["--auto-delete-timeout", "60", "--schedule", "daily"],
     ],
 )

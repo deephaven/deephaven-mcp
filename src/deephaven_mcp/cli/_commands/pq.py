@@ -21,6 +21,7 @@ from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
+    read_local_script,
     wrapper_error_codes,
 )
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
@@ -197,15 +198,23 @@ def _create_modify_args(params: dict[str, Any]) -> dict[str, Any]:
 
     Drops unset options (``None`` / empty tuple) so the tool's own
     defaults apply, and converts repeatable-option tuples to lists. Every
-    parameter on these commands maps directly to a tool argument.
+    parameter maps directly to a tool argument except ``script_body_path``,
+    which is materialized client-side: the CLI reads the local file (or
+    stdin for ``'-'``) and forwards its contents as ``script_body``.
     """
-    return {name: _norm(value) for name, value in params.items() if _provided(value)}
+    args = {name: _norm(value) for name, value in params.items() if _provided(value)}
+    script_body_path = args.pop("script_body_path", None)
+    if script_body_path is not None:
+        args["script_body"] = read_local_script(script_body_path)
+    return args
 
 
 # Option pairs the controller rejects when combined, as
 # ``(flag_a, param_a, flag_b, param_b)``.
 _MUTUALLY_EXCLUSIVE: tuple[tuple[str, str, str, str], ...] = (
-    ("--script-body", "script_body", "--script-path", "script_path"),
+    ("--script-body", "script_body", "--git-script-path", "script_path"),
+    ("--script-body", "script_body", "--script-body-path", "script_body_path"),
+    ("--script-body-path", "script_body_path", "--git-script-path", "script_path"),
     ("--auto-delete-timeout", "auto_delete_timeout", "--schedule", "schedule"),
 )
 
@@ -232,13 +241,25 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "--script-body",
             "script_body",
             default=None,
-            help="Inline PQ script source.",
+            help="Inline PQ script source, stored in the PQ definition.",
         ),
         click.option(
-            "--script-path",
+            "--script-body-path",
+            "script_body_path",
+            default=None,
+            help=(
+                "Local script file read by the CLI and stored as the PQ's "
+                "inline body, or '-' to read stdin."
+            ),
+        ),
+        click.option(
+            "--git-script-path",
             "script_path",
             default=None,
-            help="Path to a PQ script file.",
+            help=(
+                "Path to a script in the Enterprise controller's Git-backed "
+                "script repository, resolved on the server; not a local file."
+            ),
         ),
         click.option(
             "--language",
@@ -278,13 +299,13 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "--class-path",
             "extra_class_path",
             multiple=True,
-            help="Extra class-path entry (repeatable).",
+            help="Extra class-path entry on the Enterprise server (repeatable).",
         ),
         click.option(
             "--python-venv",
             "python_virtual_environment",
             default=None,
-            help="Python virtualenv name.",
+            help="Name of a Python virtualenv configured on the Enterprise server.",
         ),
         click.option(
             "--env",
@@ -341,24 +362,34 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
     "create",
     output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_create",
+    client_only_params=frozenset({"script_body_path"}),
     help=build_help(
         summary="Create a Persistent Query.",
         description=(
             "Enterprise (Core+) only. Creates a PQ named PQ_NAME on --system with "
-            "--heap-size-gb of heap. Provide the script inline with --script-body "
-            "or from a file with --script-path (at most one). --auto-delete-timeout "
-            "and --schedule are mutually exclusive. Unset options use the "
-            "controller's defaults."
+            "--heap-size-gb of heap. Provide the script inline with --script-body, "
+            "from a local file or stdin with --script-body-path (read by the CLI "
+            "and stored as the inline body), or from the controller's Git script "
+            "repository with --git-script-path (at most one source). "
+            "--auto-delete-timeout and --schedule are mutually exclusive. Unset "
+            "options use the controller's defaults."
         ),
         arguments=(HelpEntry("PQ_NAME", "Name for the new PQ."),),
         output=_OUTPUT_OBJECT,
         examples=(
             "$ dh-mcp pq create nightly --system prod --heap-size-gb 4 "
-            "--script-path /pq/nightly.py",
+            "--script-body-path ./nightly.py",
+            "$ dh-mcp pq create nightly --system prod --heap-size-gb 4 "
+            "--git-script-path IrisQueries/py/nightly.py",
         ),
         see_also=("dh-mcp pq modify ID", "dh-mcp pq start ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=(ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS, *wrapper_error_codes()),
+        error_codes=(
+            ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
+            ErrorCode.FILE_READ_FAILED,
+            ErrorCode.MISSING_ARGUMENT,
+            *wrapper_error_codes(),
+        ),
     ),
 )
 @click.argument("pq_name")
@@ -401,12 +432,14 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
     "modify",
     output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_modify",
+    client_only_params=frozenset({"script_body_path"}),
     help=build_help(
         summary="Modify an existing Persistent Query.",
         description=(
             "Enterprise (Core+) only. Updates only the fields you pass on ID; "
-            "everything else is left unchanged. --script-body/--script-path and "
-            "--auto-delete-timeout/--schedule are each mutually exclusive. Pass "
+            "everything else is left unchanged. The script sources "
+            "--script-body/--script-body-path/--git-script-path (and separately "
+            "--auto-delete-timeout/--schedule) are mutually exclusive. Pass "
             "--restart to restart the PQ after applying the change."
         ),
         arguments=(
@@ -423,7 +456,12 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
         ),
         see_also=("dh-mcp pq details ID", "dh-mcp pq restart ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=(ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS, *wrapper_error_codes()),
+        error_codes=(
+            ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
+            ErrorCode.FILE_READ_FAILED,
+            ErrorCode.MISSING_ARGUMENT,
+            *wrapper_error_codes(),
+        ),
     ),
 )
 @click.argument("id")

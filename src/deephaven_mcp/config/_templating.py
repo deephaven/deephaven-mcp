@@ -23,9 +23,10 @@ a JSON string value, including inside an otherwise-literal string
   and non-empty, otherwise the literal text after ``:-`` (which may
   itself be empty, e.g. ``${env:FOO:-}``).
 - ``${file:PATH}`` --- resolves to the UTF-8 text contents of the file
-  at ``PATH``, returned verbatim (trailing newlines preserved). Raises
-  :class:`~deephaven_mcp._exceptions.ConfigurationError` if the file is
-  missing, unreadable, or not valid UTF-8. **No fallback form**:
+  at ``PATH``, returned verbatim (trailing newlines preserved). A
+  leading ``~`` in ``PATH`` is expanded via :meth:`Path.expanduser`.
+  Raises :class:`~deephaven_mcp._exceptions.ConfigurationError` if the
+  file is missing, unreadable, or not valid UTF-8. **No fallback form**:
   ``${file:PATH:-default}`` is intentionally not supported; file paths
   are required when written.
 
@@ -120,7 +121,8 @@ def expand_string(
             message.
         config_dir: Optional base directory for resolving *relative*
             ``${file:PATH}`` arguments. A relative path is resolved
-            against this directory; an absolute path is used as-is.
+            against this directory; an absolute path (including one
+            produced by expanding a leading ``~``) is used as-is.
             When ``None``, a relative path is resolved against the
             process working directory.
 
@@ -249,7 +251,8 @@ def _resolve_file(
     """Resolve a single ``${file:...}`` placeholder argument.
 
     Reads up to :data:`_MAX_FILE_TEMPLATE_BYTES` from the file at
-    ``argument`` and returns its UTF-8 decoded contents. A relative
+    ``argument`` and returns its UTF-8 decoded contents. A leading
+    ``~`` is expanded via :meth:`Path.expanduser`. A relative
     ``argument`` is resolved against ``config_dir`` when supplied
     (otherwise against the process working directory); an absolute
     ``argument`` is used as-is. Symlinks are followed (common for
@@ -268,7 +271,7 @@ def _resolve_file(
             f"':-default' fallback syntax; file paths are always required"
         )
 
-    file_path = Path(argument)
+    file_path = Path(argument).expanduser()
     if config_dir is not None and not file_path.is_absolute():
         file_path = config_dir / file_path
 

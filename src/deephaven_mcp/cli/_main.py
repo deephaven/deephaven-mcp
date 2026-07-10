@@ -33,7 +33,6 @@ from deephaven_mcp.cli._commands.config import config as config_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
 from deephaven_mcp.cli._commands.introspect import introspect as introspect_group
 from deephaven_mcp.cli._commands.pq import pq as pq_group
-from deephaven_mcp.cli._commands.script import script as script_group
 from deephaven_mcp.cli._commands.session import session as session_group
 from deephaven_mcp.cli._commands.system import system as system_group
 from deephaven_mcp.cli._commands.table import table as table_group
@@ -185,10 +184,11 @@ def _quiet_dependency_loggers(verbose: int) -> None:
             "Deephaven MCP systems server, then connects to it to inspect "
             "and invoke tools. Getting started: run 'dh-mcp session list' to "
             "see the available sessions (the daemon auto-starts on first "
-            "use), then use a verb like 'dh-mcp table data' to act on one. "
+            "use), then use a verb like 'dh-mcp table data' to read a table "
+            "or 'dh-mcp session exec' to run a script. "
             "Use the 'daemon' group to manage the daemon lifecycle (start, "
             "stop, status, restart, repair, logs); the 'session', 'system', "
-            "'table', 'script', 'catalog', and 'pq' groups to inspect and "
+            "'table', 'catalog', and 'pq' groups to inspect and "
             "operate sessions and Enterprise resources with first-class "
             "flags; 'tool' to list, show, and call any MCP tool directly; "
             "and 'config' to inspect and validate configuration. "
@@ -340,7 +340,6 @@ cli.add_command(tool_group)
 cli.add_command(session_group)
 cli.add_command(system_group)
 cli.add_command(table_group)
-cli.add_command(script_group)
 cli.add_command(catalog_group)
 cli.add_command(pq_group)
 cli.add_command(config_group)

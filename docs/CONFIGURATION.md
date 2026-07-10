@@ -75,9 +75,10 @@ validators:
 | `${file:/absolute/path}`     | UTF-8 contents of the named file, returned verbatim. Error if the file is missing.           |
 
 A `${file:...}` path may be absolute (used as-is, so a system trust
-store such as `/etc/ssl/cert.pem` works) or relative (resolved
-against the configuration directory). Symlinks are followed and the
-file must be UTF-8 and under 1 MiB.
+store such as `/etc/ssl/cert.pem` works), home-relative (a leading `~`
+expands to the user's home directory), or relative (resolved against
+the configuration directory). Symlinks are followed and the file must
+be UTF-8 and under 1 MiB.
 
 Placeholders may appear anywhere inside a string value (substring
 expansion), but nesting is not supported. Keys are never expanded.

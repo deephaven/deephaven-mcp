@@ -1,12 +1,12 @@
 ---
 name: _cli-tool-wrapping
-description: Conventions for dh-mcp commands that wrap an MCP tool — wrapper categories, type scoping, and the wraps_tool drift contract — invoke when adding/editing a cli/_commands verb that fronts a tool; not for authoring MCP server tools (_mcp-module-organization)
+description: Conventions for dh-mcp commands that wrap an MCP tool — wrapper categories, type scoping, path-flag locality (CLI-read vs server-side), and the wraps_tool drift contract — invoke when adding/editing a cli/_commands verb that fronts a tool; not for authoring MCP server tools (_mcp-module-organization)
 user-invocable: false
 ---
 
 # CLI tool-wrapping conventions
 
-Runtime `dh-mcp` commands (`session`, `system`, `table`, `script`, `catalog`, `pq`) wrap MCP tools. This skill is the how; the *why* is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `_cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`_mcp-module-organization`).
+Runtime `dh-mcp` commands (`session`, `system`, `table`, `catalog`, `pq`) wrap MCP tools. This skill is the how; the *why* is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `_cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`_mcp-module-organization`).
 
 ## The shared flow
 
@@ -57,6 +57,15 @@ These describe how a verb *selects* its tool(s); the output shape (`call_and_ech
 ## Type scoping: never a subgroup
 
 `community`/`enterprise` is never a command subgroup. Carry it via: `--system` at `create`; the id's `type:` prefix at every verb that takes an id; and the group docstring for wholly-Enterprise nouns (`pq`, `catalog` open with "Enterprise (Core+) only"). A community-only verb (`session credentials`/`url`/`open`) stays flat and errors on an enterprise id.
+
+## Path locality: decide it per flag, say it in the name and help
+
+A path-valued flag resolves on exactly one of the CLI machine or the server — never the daemon (its cwd/filesystem view is not the user's; rationale in the design doc's *Path locality* section).
+
+- **Local file**: read it in the CLI with `read_local_script` from `_wrapping.py` (`-` = stdin, relative paths resolve against the shell cwd, unreadable file → `file_read_failed`, empty stdin → `missing_argument`) and forward the *contents* as the tool's inline param. A flag materialized into a different tool param this way (e.g. `script_body_path` → `script_body`) goes in `client_only_params`. Add `FILE_READ_FAILED` (and `MISSING_ARGUMENT` for the stdin case) to the help's `error_codes`. Canonical: `session exec --script-path`, `pq create --script-body-path`.
+- **Server-side identifier**: forward verbatim and give the flag a self-documenting name — `--git-script-path`, not `--script-path` — plus help text naming the server-side namespace ("the Enterprise controller's Git-backed script repository"). Canonical: `pq --git-script-path`, `pq --python-venv`.
+
+Per `_cli-help-standards` §2, every path-valued option's help states where the path resolves.
 
 ## The drift contract (required)
 

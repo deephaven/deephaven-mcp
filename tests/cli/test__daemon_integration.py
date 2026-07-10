@@ -698,7 +698,6 @@ def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
         "session",
         "system",
         "table",
-        "script",
         "catalog",
         "pq",
     } <= set(manifest["commands"])
@@ -760,7 +759,7 @@ async def test_session_wrapper_verbs_e2e(
 
     Covers ``session list`` / ``show`` / ``credentials`` / ``url`` /
     ``open --print``, ``system list``, ``table list`` / ``schema``, and
-    ``script run`` / ``pip-list`` end-to-end against the live worker. The
+    ``session exec`` / ``pip-list`` end-to-end against the live worker. The
     seeded ``demo`` session is static, so credential retrieval is enabled
     with ``credential_retrieval_mode='all'``. Dynamic ``create`` /
     ``delete`` are covered separately (they launch their own worker).
@@ -810,11 +809,11 @@ async def test_session_wrapper_verbs_e2e(
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout) == []
 
-        # script run → create a table with one column in the worker.
+        # session exec → create a table with one column in the worker.
         result = run(
             [
-                "script",
-                "run",
+                "session",
+                "exec",
                 _DEMO_ID,
                 "--script",
                 'from deephaven import empty_table\nt = empty_table(5).update(["X = i"])',
@@ -839,8 +838,8 @@ async def test_session_wrapper_verbs_e2e(
         assert data["table_name"] == "t"
         assert data["row_count"] == 5
 
-        # script pip-list → packages available in the worker.
-        result = run(["script", "pip-list", _DEMO_ID])
+        # session pip-list → packages available in the worker.
+        result = run(["session", "pip-list", _DEMO_ID])
         assert result.returncode == 0, result.stderr
         assert isinstance(json.loads(result.stdout), list)
 

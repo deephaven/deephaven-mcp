@@ -44,7 +44,10 @@ async def session_script_run(
 
     AI Agent Usage:
     - Use 'script' parameter for inline script execution
-    - Use 'script_path' parameter to execute scripts from files
+    - Use 'script_path' parameter to execute scripts from files. The path is
+      resolved on the machine running this MCP server (a relative path resolves
+      against the server process's working directory) — if your file lives
+      elsewhere, read it yourself and pass its contents via 'script'
     - Check 'success' field in response to verify execution completed without errors
     - Script executes in the session's environment with access to session state
     - Any tables or variables created will persist in the session for future use
