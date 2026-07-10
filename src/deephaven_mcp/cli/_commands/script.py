@@ -160,6 +160,6 @@ async def script_pip_list(runtime: Runtime, id: str) -> None:
         "session_pip_list",
         retry_command="dh-mcp script pip-list",
         arguments={"id": id},
-        field="result",
+        field="packages",
         default=[],
     )

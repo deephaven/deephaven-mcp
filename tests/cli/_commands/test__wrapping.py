@@ -728,3 +728,74 @@ async def test_call_and_echo_field_failed_surfaces_errors_when_reasons_in_rows(
     # The full per-system message must reach stderr — not just the short
     # exception type the table cell shows.
     assert "Network is unreachable" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_warns_on_truncated_result(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``is_complete: false`` warns on stderr; stdout stays the bare field."""
+    rt = make_runtime(tmp_path)
+    payload = {"success": True, "namespaces": ["a", "b"], "is_complete": False}
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+            field="namespaces",
+            default=[],
+        )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == ["a", "b"]
+    assert "truncated" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_truncation_hint_appended(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``truncation_hint`` extends the generic truncation warning."""
+    rt = make_runtime(tmp_path)
+    payload = {"success": True, "namespaces": [], "is_complete": False}
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+            field="namespaces",
+            default=[],
+            truncation_hint="Raise --max-rows or narrow with --filter.",
+        )
+    captured = capsys.readouterr()
+    assert "truncated" in captured.err
+    assert "Raise --max-rows or narrow with --filter." in captured.err
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_complete_result_no_truncation_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``is_complete: true`` produces no stderr warning."""
+    rt = make_runtime(tmp_path)
+    payload = {"success": True, "namespaces": ["a"], "is_complete": True}
+    result = CallToolResult(content=[], structuredContent=payload)
+    acq, call = _patched_call(result)
+    with acq, call:
+        await call_and_echo_field(
+            rt,
+            "catalog_namespaces_list",
+            retry_command="dh-mcp catalog namespaces",
+            arguments={},
+            field="namespaces",
+            default=[],
+            truncation_hint="Raise --max-rows or narrow with --filter.",
+        )
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == ["a"]
+    assert captured.err == ""

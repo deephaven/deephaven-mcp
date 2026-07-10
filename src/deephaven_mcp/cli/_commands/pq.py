@@ -18,11 +18,16 @@ from typing import Any
 import click
 
 from deephaven_mcp.cli._async import run_async
-from deephaven_mcp.cli._commands._wrapping import call_and_echo, wrapper_error_codes
+from deephaven_mcp.cli._commands._wrapping import (
+    call_and_echo,
+    call_and_echo_field,
+    wrapper_error_codes,
+)
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    OutputField,
     OutputSpec,
     build_help,
 )
@@ -51,16 +56,41 @@ def pq() -> None:
 # ---------------------------------------------------------------------------
 
 
+_OUTPUT_LIST = OutputSpec(
+    "list",
+    (
+        OutputField("id", "string", "Fully qualified id 'enterprise:system:serial'."),
+        OutputField("serial", "integer", "PQ serial number."),
+        OutputField("name", "string", "Human-readable PQ name."),
+        OutputField("status", "string", "PQ state (e.g. 'RUNNING', 'STOPPED')."),
+        OutputField(
+            "status_category",
+            "string",
+            "'ACTIVE', 'TRANSITIONAL', 'TERMINAL', or 'INVALID'.",
+        ),
+        OutputField("owner", "string", "Owning user."),
+        OutputField("enabled", "boolean", "Whether the PQ is enabled."),
+    ),
+    note="Array of PQ summaries (extra per-PQ fields may be present).",
+)
+
+
 @pq.command(
     "list",
-    output_spec=_OUTPUT_OBJECT,
+    output_spec=_OUTPUT_LIST,
     wraps_tool="pq_list",
     help=build_help(
         summary="List Persistent Queries on a system.",
-        description="Enterprise (Core+) only. Lists the PQs configured on SYSTEM.",
+        description=(
+            "Enterprise (Core+) only. Lists the PQs configured on SYSTEM. Use "
+            "a returned id verbatim with the other pq and session verbs."
+        ),
         arguments=(HelpEntry("SYSTEM", "Enterprise system name. Run 'system list'."),),
-        output=_OUTPUT_OBJECT,
-        examples=("$ dh-mcp pq list prod",),
+        output=_OUTPUT_LIST,
+        examples=(
+            "$ dh-mcp pq list prod",
+            "$ dh-mcp pq list prod | jq '.[].id'",
+        ),
         see_also=("dh-mcp pq details ID", "dh-mcp pq name-to-id SYSTEM NAME"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
@@ -71,8 +101,13 @@ def pq() -> None:
 @run_async
 async def pq_list(runtime: Runtime, system: str) -> None:
     """List Persistent Queries on a system."""
-    await call_and_echo(
-        runtime, "pq_list", retry_command="dh-mcp pq list", arguments={"system": system}
+    await call_and_echo_field(
+        runtime,
+        "pq_list",
+        retry_command="dh-mcp pq list",
+        arguments={"system": system},
+        field="pqs",
+        default=[],
     )
 
 

@@ -17,6 +17,7 @@ import click
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
+    call_and_echo_field,
     call_and_echo_table,
     wrapper_error_codes,
 )
@@ -104,13 +105,16 @@ async def catalog_tables(
     filters: tuple[str, ...],
 ) -> None:
     """List tables in the Enterprise catalog."""
-    await _run_catalog_query(
+    arguments: dict[str, Any] = {"id": id, "format": "json-row"}
+    if max_rows is not None:
+        arguments["max_rows"] = max_rows
+    if filters:
+        arguments["filters"] = list(filters)
+    await call_and_echo_table(
         runtime,
         "catalog_tables_list",
-        "dh-mcp catalog tables",
-        id=id,
-        max_rows=max_rows,
-        filters=filters,
+        retry_command="dh-mcp catalog tables",
+        arguments=arguments,
     )
 
 
@@ -118,20 +122,29 @@ async def catalog_tables(
 # namespaces
 # ---------------------------------------------------------------------------
 
+_OUTPUT_NAMESPACES = OutputSpec(
+    "list",
+    (),
+    note=(
+        "Array of namespace-name strings in the catalog. When the list is "
+        "truncated by --max-rows, a warning is written to stderr."
+    ),
+)
+
 
 @catalog.command(
     "namespaces",
-    output_spec=_OUTPUT_TABULAR,
+    output_spec=_OUTPUT_NAMESPACES,
     wraps_tool="catalog_namespaces_list",
     help=build_help(
         summary="List namespaces in the Enterprise catalog.",
         description=(
-            "Enterprise (Core+) only. Returns the catalog's namespaces as tabular "
-            "data. Narrow with repeatable --filter expressions and cap rows with "
-            "--max-rows."
+            "Enterprise (Core+) only. Prints the catalog's distinct namespace "
+            "names. Narrow with repeatable --filter expressions and cap the "
+            "count with --max-rows."
         ),
         arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
-        output=_OUTPUT_TABULAR,
+        output=_OUTPUT_NAMESPACES,
         examples=("$ dh-mcp catalog namespaces enterprise:prod:rpt",),
         see_also=("dh-mcp catalog tables ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -144,7 +157,7 @@ async def catalog_tables(
     "max_rows",
     type=int,
     default=None,
-    help="Row cap (default: 1000).",
+    help="Namespace cap (default: 1000).",
 )
 @_filter_option
 @click.pass_obj
@@ -156,33 +169,19 @@ async def catalog_namespaces(
     filters: tuple[str, ...],
 ) -> None:
     """List namespaces in the Enterprise catalog."""
-    await _run_catalog_query(
-        runtime,
-        "catalog_namespaces_list",
-        "dh-mcp catalog namespaces",
-        id=id,
-        max_rows=max_rows,
-        filters=filters,
-    )
-
-
-async def _run_catalog_query(
-    runtime: Runtime,
-    tool: str,
-    retry_command: str,
-    *,
-    id: str,
-    max_rows: int | None,
-    filters: tuple[str, ...],
-) -> None:
-    """Shared body for the two list-style catalog verbs."""
-    arguments: dict[str, Any] = {"id": id, "format": "json-row"}
+    arguments: dict[str, Any] = {"id": id}
     if max_rows is not None:
         arguments["max_rows"] = max_rows
     if filters:
         arguments["filters"] = list(filters)
-    await call_and_echo_table(
-        runtime, tool, retry_command=retry_command, arguments=arguments
+    await call_and_echo_field(
+        runtime,
+        "catalog_namespaces_list",
+        retry_command="dh-mcp catalog namespaces",
+        arguments=arguments,
+        field="namespaces",
+        default=[],
+        truncation_hint="Raise --max-rows or narrow with --filter.",
     )
 
 

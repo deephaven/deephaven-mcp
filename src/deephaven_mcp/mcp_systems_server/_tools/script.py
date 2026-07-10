@@ -172,7 +172,7 @@ async def session_pip_list(context: Context, id: str) -> dict:
 
     AI Agent Usage:
     - Use this to understand what libraries are available in a session before running scripts
-    - Check 'result' array for list of installed packages with names and versions
+    - Check 'packages' array for list of installed packages with names and versions
     - Useful for determining if specific libraries need to be installed before script execution
     - Essential for generating code that uses available libraries and avoiding import errors
     - Helps inform decisions about which libraries to use when multiple options are available
@@ -185,14 +185,14 @@ async def session_pip_list(context: Context, id: str) -> dict:
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): True if the packages were retrieved successfully, False otherwise.
-            - 'result' (list[dict], optional): List of pip package dicts if successful. Each contains:
+            - 'packages' (list[dict], optional): List of pip package dicts if successful. Each contains:
                 - 'package' (str): Package name
                 - 'version' (str): Package version
             - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
     Example Successful Response:
-        {'success': True, 'result': [{"package": "numpy", "version": "1.25.0"}, ...]}
+        {'success': True, 'packages': [{"package": "numpy", "version": "1.25.0"}, ...]}
 
     Example Error Response:
         {'success': False, 'error': "Failed to list pip packages for session '<id>': <ExceptionType>: <message>", 'isError': True}
@@ -238,7 +238,7 @@ async def session_pip_list(context: Context, id: str) -> dict:
                 packages.append({"package": pkg["Package"], "version": pkg["Version"]})
 
         result["success"] = True
-        result["result"] = packages
+        result["packages"] = packages
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:session_pip_list] Failed for session: '{id}', error: {e!r}",

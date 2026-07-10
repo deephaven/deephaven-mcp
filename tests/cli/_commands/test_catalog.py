@@ -64,10 +64,44 @@ def test_tables_with_options(tmp_path: Path) -> None:
     }
 
 
+_NAMESPACES = {
+    "success": True,
+    "id": _SID,
+    "namespaces": ["market_data", "reference"],
+    "count": 2,
+    "is_complete": True,
+}
+
+
 def test_namespaces(tmp_path: Path) -> None:
-    result, call = _run(["catalog", "namespaces", _SID], {"success": True}, tmp_path)
+    result, call = _run(
+        ["-o", "json", "catalog", "namespaces", _SID], _NAMESPACES, tmp_path
+    )
     assert result.exit_code == 0
+    # stdout is the bare namespaces array, not the tool envelope.
+    assert json.loads(result.stdout) == _NAMESPACES["namespaces"]
+    assert result.stderr == ""
     assert call.await_args.args[2] == "catalog_namespaces_list"
+    assert call.await_args.args[3] == {"id": _SID}
+
+
+def test_namespaces_with_options(tmp_path: Path) -> None:
+    result, call = _run(
+        ["catalog", "namespaces", _SID, "--max-rows", "5", "--filter", "a>1"],
+        _NAMESPACES,
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": _SID, "max_rows": 5, "filters": ["a>1"]}
+
+
+def test_namespaces_truncated_warns_on_stderr(tmp_path: Path) -> None:
+    """`is_complete: false` warns on stderr; stdout stays the bare array."""
+    payload = dict(_NAMESPACES, is_complete=False)
+    result, _ = _run(["-o", "json", "catalog", "namespaces", _SID], payload, tmp_path)
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == _NAMESPACES["namespaces"]
+    assert "truncated" in result.stderr
 
 
 def test_schema_with_namespace_and_names(tmp_path: Path) -> None:

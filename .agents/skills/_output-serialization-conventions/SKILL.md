@@ -1,6 +1,6 @@
 ---
 name: _output-serialization-conventions
-description: "Project conventions for serializing values into user-facing output — MCP tool return dicts and CLI output fields — invoke when authoring or reviewing any string field that ships to a user or agent (a return payload or a CLI OutputField)"
+description: "Project conventions for serializing values into user-facing output — MCP tool return dicts and CLI output fields — invoke when authoring or reviewing any string field or payload shape that ships to a user or agent (a return payload or a CLI OutputField)"
 user-invocable: false
 ---
 
@@ -24,14 +24,16 @@ Pick the right enum accessor at definition time; never normalize casing at the c
 
 - `liveness_status`: `ResourceLivenessStatus.ONLINE.name` → `"ONLINE"`
 
+**Discriminator when a field mutates**: a lifecycle value that belongs to a documented protocol vocabulary — echoed in docs, filters, and agent retry logic — is categorical even though it changes over time (`phase` progresses `not_started` → `completed` and emits `.value`). Runtime state is a point-in-time health probe with no protocol vocabulary (`liveness_status`).
+
 Canonical implementations:
 
-- Categorical: `mcp_systems_server/_tools/session.py` (`_build_sessions_list_row`) reads `mgr.system_type.value` and `mgr.origin.value`.
+- Categorical: `resource_manager/_manager.py` (`SessionManager.to_dict`) reads `self.system_type.value` and `self.origin.value`.
 - Runtime state: `mcp_systems_server/_tools/session.py` (`_get_session_liveness_info`) reads `status.name`.
 
 ### The call-site rule
 
-Never call `.upper()` or `.lower()` on an enum value at the call site. If a value's casing feels wrong, fix the enum definition or you have found a vocabulary mismatch that needs a deeper fix, not a transform.
+Never call `.upper()` or `.lower()` on an enum value at the call site. If a value's casing feels wrong, fix the enum definition — or recognize a vocabulary mismatch that needs a deeper fix, not a transform.
 
 ```python
 # Good — the enum's chosen accessor is what ships
@@ -54,3 +56,14 @@ Column headers match the JSON key exactly (lowercase). They are not stylistic; t
 - **Call-site `.upper()` / `.lower()` to mint a "presentation" form.** Example failure mode: a launcher flag (lowercase Literal) is uppercased inside one tool's `to_dict()` while another tool's caller emits the same field lowercase — the same logical session then appears as `type: "community"` and `session_type: "COMMUNITY"` in one merged payload. Fix: emit the canonical vocabulary at definition time, not at the call site.
 - **Duplicate keys with different casing in one payload.** Two producers contribute to a merged response with different accessors (`.name` in one, `.value` in another) and the merge ships both. Fix: name one key per concept; pick the accessor once per field.
 - **Mixing `.name` and `.value` for the same field across tools.** If `sessions_list` emits `type: "community"`, then `session_details` must also emit `type: "community"`, not `type: "COMMUNITY"`. The vocabulary is per field, not per tool.
+
+## Payload shape is designed at the MCP layer
+
+MCP tool return dicts are the single design surface for output shape. A CLI wrapper projects the payload it receives — it never renames keys, restructures nesting, or re-cases values. When CLI output looks wrong, fix the tool's payload upstream, not the wrapper. Wrapper mechanics (helper choice, stdout/stderr split, diagnostic re-surfacing) are owned by `_cli-tool-wrapping` (*The shared flow*).
+
+The `{success, error, isError}` envelope is fixed by the MCP contract; these rules govern what goes *inside* it:
+
+- **Domain-named array.** A list result lives under a key that names the domain: `sessions`, `systems`, `table_names`, `schemas`, `pqs`, `packages`, `namespaces`. Never an anonymous key (`result`, `data`, `items`).
+- **Shape matches the data.** A list of names is a plain array of strings, not a single-column table. Tabular envelopes (`columns` + `data` + `format`) are for genuinely multi-column data (`session_table_data`, `catalog_tables_list`, `catalog_table_sample`).
+- **Echo-back keys reuse the established field vocabulary** — in every tool, not only list tools. A tool that echoes its addressing argument uses the same key the rest of the payload surface uses for that concept (`id`, `system`) — never a private variant. Known inconsistency: `session_enterprise_create` and `session_enterprise_delete` currently emit `system_name`; that key awaits a coordinated rename. Do not copy it into new tools, and do not rename it piecemeal.
+- **Truncation is a successful partial result, not an error.** A caller-chosen row cap that trims the list sets `is_complete: false` alongside the data; multi-system discovery attaches `partial_result` instead. Never fail the call for a shorter-than-complete list.

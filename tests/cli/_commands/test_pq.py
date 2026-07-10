@@ -31,11 +31,31 @@ def _run(args: list[str], payload: dict, tmp_path: Path):
         return CliRunner().invoke(cli, args), call
 
 
+_PQS = [
+    {"id": "enterprise:prod:12345", "serial": 12345, "name": "analytics"},
+    {"id": "enterprise:prod:67890", "serial": 67890, "name": "reporting"},
+]
+
+
 def test_list(tmp_path: Path) -> None:
-    result, call = _run(["pq", "list", "prod"], {"success": True, "pqs": []}, tmp_path)
+    result, call = _run(
+        ["-o", "json", "pq", "list", "prod"],
+        {"success": True, "system": "prod", "pqs": _PQS},
+        tmp_path,
+    )
     assert result.exit_code == 0
+    # stdout is the bare pqs array, not the tool envelope.
+    assert json.loads(result.output) == _PQS
     assert call.await_args.args[2] == "pq_list"
     assert call.await_args.args[3] == {"system": "prod"}
+
+
+def test_list_empty(tmp_path: Path) -> None:
+    result, _ = _run(
+        ["-o", "json", "pq", "list", "prod"], {"success": True, "pqs": []}, tmp_path
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.output) == []
 
 
 def test_details(tmp_path: Path) -> None:

@@ -629,9 +629,9 @@ async def test_session_pip_list_success():
 
         # Verify results
         assert result["success"] is True
-        assert len(result["result"]) == 2
-        assert result["result"][0]["package"] == "numpy"
-        assert result["result"][0]["version"] == "1.25.0"
+        assert len(result["packages"]) == 2
+        assert result["packages"][0]["package"] == "numpy"
+        assert result["packages"][0]["version"] == "1.25.0"
 
 
 @pytest.mark.asyncio
@@ -669,7 +669,7 @@ async def test_session_pip_list_empty():
 
     # Verify results
     assert result["success"] is True
-    assert result["result"] == []
+    assert result["packages"] == []
 
     # Check correct session access pattern
     mock_session_registry.get.assert_awaited_once_with(

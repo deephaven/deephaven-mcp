@@ -81,8 +81,8 @@ def test_run_rejects_both_sources(tmp_path: Path) -> None:
 
 
 def test_pip_list_emits_array(tmp_path: Path) -> None:
-    payload = {"success": True, "result": [{"package": "numpy", "version": "1.25"}]}
+    payload = {"success": True, "packages": [{"package": "numpy", "version": "1.25"}]}
     result, call = _run(["-o", "json", "script", "pip-list", _SID], payload, tmp_path)
     assert result.exit_code == 0
-    assert json.loads(result.output) == payload["result"]
+    assert json.loads(result.output) == payload["packages"]
     assert call.await_args.args[2] == "session_pip_list"

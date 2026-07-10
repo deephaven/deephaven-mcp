@@ -151,9 +151,11 @@ Two consequences shaped the helpers:
 - **A partial-but-successful result must not be dropped.** Tools whose
   result spans systems (`sessions_list`, `enterprise_systems_status`)
   attach a `partial_result` block (`phase` / `detail` / optional per-system
-  `errors`) when discovery is incomplete. Whole-envelope verbs carry it in
-  stdout; field-shaping verbs would discard it, so `call_and_echo_field`
-  re-surfaces it as a **stderr** warning (`_warn_if_incomplete`), keeping
+  `errors`) when discovery is incomplete; truncating tools
+  (`catalog_namespaces_list`) flag a row-capped result with
+  `is_complete: false`. Whole-envelope verbs carry these in
+  stdout; field-shaping verbs would discard them, so `call_and_echo_field`
+  re-surfaces both as a **stderr** warning (`_warn_if_incomplete`), keeping
   stdout clean for piping.
 
 ## The drift contract

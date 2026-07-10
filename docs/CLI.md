@@ -12,6 +12,9 @@ dispatches tool calls — without requiring you to run the server yourself.
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
+  - [Configuration loading](#configuration-loading)
+  - [`cli.json`](#clijson)
+  - [`server.json` — `daemon` block](#serverjson--daemon-block)
 - [Runtime directory](#runtime-directory)
 - [Command tree](#command-tree)
   - [`dh-mcp daemon`](#dh-mcp-daemon)
@@ -327,7 +330,7 @@ the right backend by the id's prefix; `create` chooses the backend from
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list`                        | Lists sessions (both types) as a JSON array. Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. Wraps `sessions_list`. |
+| `list`                        | Lists sessions (both types). Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. Wraps `sessions_list`. |
 | `show <id>`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
 | `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
 | `delete <id>`                 | Deletes a session, routing by the id prefix. Wraps `session_community_delete` / `session_enterprise_delete`. |
@@ -378,7 +381,7 @@ plus every configured Enterprise (Core+) system.
 
 | Verb         | Purpose                                                                                       |
 |--------------|-----------------------------------------------------------------------------------------------|
-| `list`       | Lists every configured system as `{name, type}`. Wraps `list_systems`. Output is a JSON array — use the names with `session create --system NAME`. |
+| `list`       | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`. |
 | `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dh-mcp config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
 | `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
 | `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
@@ -410,7 +413,7 @@ Inspects tables in a session. All verbs take a fully qualified
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list <id>`                   | Emits the session's table names as a JSON array. Wraps `session_tables_list`. |
+| `list <id>`                   | Lists the session's table names. Wraps `session_tables_list`. |
 | `schema <id> [TABLE...]`      | Column definitions for the named tables (all tables when none named). Wraps `session_tables_schema`. |
 | `data <id> <table>`           | Row data: `--max-rows N`, `--head/--tail` (default head). Wraps `session_table_data`. |
 
@@ -441,7 +444,7 @@ dh-mcp script pip-list community:community:dev
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
 | `tables <id>`                         | Catalog table metadata. `--max-rows`, `--filter` (repeatable). Wraps `catalog_tables_list`. |
-| `namespaces <id>`                     | Catalog namespaces. Same options as `tables`. Wraps `catalog_namespaces_list`. |
+| `namespaces <id>`                     | Lists the catalog's namespace names. Same options as `tables`. Wraps `catalog_namespaces_list`. When the list is truncated by `--max-rows`, a warning is written to stderr. |
 | `schema <id> [TABLE...]`              | Catalog table schemas. `--namespace`, `--filter` (repeatable), `--max-tables`. Wraps `catalog_tables_schema`. |
 | `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 

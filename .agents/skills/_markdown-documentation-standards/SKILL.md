@@ -95,6 +95,18 @@ Requirements:
 - Each entry must link to a live anchor in the same file (lowercase, hyphen-separated, generated from the heading text).
 - The TOC must reflect the live H2 / H3 structure — verify after every edit that adds, removes, or renames a heading.
 - Keep entries to H2 (and selected H3) only; deeper levels create noise.
+- Never include the document's H1 title as a root entry — it links to the page the reader is already on and indents every real entry one level.
+- Never include a self-referential "Table of Contents" entry.
+
+### Auto-generated TOC fingerprint
+
+A TOC whose first entry links to the document's own H1, or that lists "Table of Contents" inside itself, was written by an editor extension (e.g. Markdown All in One on default settings), not by hand. `docs/CLI.md` and `docs/DEVELOPER_GUIDE.md` have both been hit.
+
+To repair one while the extension may still be active:
+
+- Delete the H1 root entry and the self-referential entry, then dedent every remaining entry one level. **Do not thin the TOC's depth in the same edit** — TOC-updater extensions rewrite on save any TOC that omits headings they track, so a depth reduction is silently reverted while entry-removal plus dedent is stable.
+- Thin over-deep entries (H4+) only after confirming the rewrite loop is dead: edit, wait a few seconds, re-read the file from disk.
+- The workspace kill switch for Markdown All in One is `"markdown.extension.toc.updateOnSave": false` in `.vscode/settings.json`.
 
 AI-configuration files (e.g. `AGENTS.md`) and skill definitions under `.agents/skills/` do **not** require a TOC, regardless of length — they are not human documentation.
 

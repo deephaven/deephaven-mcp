@@ -136,7 +136,7 @@ Pre-cleanup (idempotent): Call session_community_delete with id="community:commu
 
 Setup: Call session_community_create with session_name="mcp-test-pip", launch_method="python", auth_type="anonymous". Verify success==true before proceeding.
 
-1. Call session_pip_list with id="community:community:mcp-test-pip". Verify success==true. Verify the result list is non-empty. Check whether "deephaven-server" or "deephaven" appears in the package list. Record the total number of packages returned.
+1. Call session_pip_list with id="community:community:mcp-test-pip". Verify success==true. Verify the packages list is non-empty. Check whether "deephaven-server" or "deephaven" appears in the package list. Record the total number of packages returned.
 
 2. Call session_pip_list with id="community:community:nonexistent-pip-xyz". Verify success==false (expected error).
 
@@ -198,7 +198,7 @@ Report: PASS/FAIL for each numbered step with a one-line explanation. Include th
 ```text
 Test session discovery tools on the enterprise MCP server. Do the following steps in order and report results.
 
-1. Call sessions_list. Verify success==true. Record how many sessions are returned and how many have type "ENTERPRISE". Note any enterprise session IDs (format: "enterprise:{system_name}:{session_name}").
+1. Call sessions_list. Verify success==true. Record how many sessions are returned and how many have type "enterprise". Note any enterprise session IDs (format: "enterprise:{system_name}:{session_name}").
 
 2. For each enterprise session returned (up to 5), call session_details with that id and attempt_to_connect=false. Verify success==true for each. Record the liveness_status for each.
 
@@ -258,7 +258,7 @@ Setup: Call session_enterprise_create with session_name="mcp-test-ent-shared". V
 
 5. Call session_table_data with the id from Setup, table_name="ent_test", and max_rows=2. Verify success==true. Verify exactly 2 rows are returned.
 
-6. Call session_pip_list with the id from Setup. Verify success==true. Verify the result list is non-empty.
+6. Call session_pip_list with the id from Setup. Verify success==true. Verify the packages list is non-empty.
 
 7. Call session_script_run with the id from Setup and script="this is not valid python!!!". Verify success==false (negative test).
 

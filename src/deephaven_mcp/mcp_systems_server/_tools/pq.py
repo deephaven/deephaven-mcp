@@ -756,7 +756,7 @@ async def pq_name_to_id(
             "id": "enterprise:prod:12345",
             "serial": 12345,
             "name": "analytics_worker",
-            "system_name": "prod"
+            "system": "prod"
         }
 
         dict: Error response:
@@ -806,7 +806,7 @@ async def pq_name_to_id(
             "id": id,
             "serial": serial,
             "name": pq_name,
-            "system_name": system_name,
+            "system": system_name,
         }
 
         _LOGGER.info(
@@ -874,7 +874,7 @@ async def pq_list(
         dict: Success response:
         {
             "success": True,
-            "system_name": "prod_cluster",
+            "system": "prod_cluster",
             "pqs": [
                 {
                     "id": "enterprise:prod_cluster:12345",
@@ -970,7 +970,7 @@ async def pq_list(
         result.update(
             {
                 "success": True,
-                "system_name": system_name,
+                "system": system_name,
                 "pqs": pqs,
             }
         )

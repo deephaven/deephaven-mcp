@@ -10,10 +10,10 @@ Runtime `dh-mcp` commands (`session`, `system`, `table`, `script`, `catalog`, `p
 
 ## The shared flow
 
-Every wrapper routes through `cli/_commands/_wrapping.py`, never a hand-rolled daemon/MCP dance. Two top-level helpers cover the two output shapes; both surface a partial-but-successful result's diagnostic siblings (e.g. the `partial_result` block from enterprise-session discovery) to stderr so shaping never silently drops them:
+Every wrapper routes through `cli/_commands/_wrapping.py`, never a hand-rolled daemon/MCP dance. Two top-level helpers cover the two output shapes; neither drops a partial-but-successful result's diagnostic siblings (the `partial_result` block from enterprise-session discovery, and a truncating tool's `is_complete: false` flag) — the whole-payload helper carries them in the stdout envelope, the shaping helper re-surfaces them on stderr:
 
 - `call_and_echo(runtime, "<tool>", *, retry_command, arguments)` — whole-payload verb: emit the tool's success payload as-is on stdout (the envelope carries any diagnostics).
-- `call_and_echo_field(runtime, "<tool>", *, retry_command, arguments, field, default)` — shaping verb: emit one payload field (e.g. a `list` verb's array) on stdout, and surface diagnostic siblings on stderr. Use this instead of hand-rolling `call_for_payload` + `echo_payload`, which would drop them.
+- `call_and_echo_field(runtime, "<tool>", *, retry_command, arguments, field, default)` — shaping verb: emit one payload field (e.g. a `list` verb's array) on stdout, and surface diagnostic siblings on stderr. For a truncating tool, pass `truncation_hint="Raise --max-rows or narrow with --filter."` (naming the verb's own flags) to extend the generic `is_complete: false` warning. Use this instead of hand-rolling `call_for_payload` + `echo_payload`, which would drop the diagnostics.
 
 ```python
 # Whole-payload verb (emit the tool's result as-is):
@@ -28,7 +28,7 @@ await call_and_echo_field(
 )
 ```
 
-Both build on the lower-level fetch/render pieces — `call_for_payload` (acquire → `call_tool` → `tool_payload` → `require_success`, which raises exit-3 `tool_returned_error` on `success=False`) and `echo_payload` (the one place that reads `runtime.config.cli.output.format` and prints via `format_output`). Reach for those directly only when a command builds a bespoke value (e.g. `session credentials` assembles a dict from several fields). Shape the payload per command — but never branch on output mode; that is `format_output`'s job.
+Both build on the lower-level fetch/render pieces — `call_for_payload` (acquire → `call_tool` → `tool_payload` → `require_success`, which raises exit-3 `tool_returned_error` on `success=False`) and `echo_payload` (the one place that reads `runtime.config.cli.output.format` and prints via `format_output`). Reach for those directly only when a command builds a bespoke value (e.g. `session credentials` assembles a dict from several fields). Shape the payload per command — but never branch on output mode; that is `format_output`'s job. Payload shape itself (key names, array naming, truncation semantics) is designed at the MCP layer and governed by `_output-serialization-conventions` — fix shape problems in the tool, never in the wrapper.
 
 Data-returning tools take a `format` (data-encoding) parameter — do **not** expose it as a CLI flag. Request the structured `json-row` encoding in the argument dict and emit the full result envelope; `-o`/`format_output` owns all presentation (human mode renders the row list as an aligned table). The tool's `format` is not a second output knob.
 
