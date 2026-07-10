@@ -239,7 +239,7 @@ def read_local_script(script_path: str) -> str:
     Raises:
         CliError: With :attr:`ErrorCode.MISSING_ARGUMENT` when stdin is
             selected but empty, or :attr:`ErrorCode.FILE_READ_FAILED` when
-            the file cannot be read.
+            the file cannot be read or is not valid UTF-8.
     """
     if script_path == "-":
         script = click.get_text_stream("stdin").read()
@@ -251,8 +251,8 @@ def read_local_script(script_path: str) -> str:
             )
         return script
     try:
-        return Path(script_path).expanduser().read_text()
-    except OSError as exc:
+        return Path(script_path).expanduser().read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
         raise CliError(
             f"Could not read script file {script_path!r}: {exc}",
             code=ErrorCode.FILE_READ_FAILED,
