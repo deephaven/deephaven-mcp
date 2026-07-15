@@ -74,8 +74,10 @@ def test_parse_history_valid() -> None:
     ]
 
 
-def test_parse_history_forwards_content_unvalidated() -> None:
-    """Message content is not validated client-side; the server owns the contract."""
+def test_parse_history_forwards_entries_unvalidated() -> None:
+    """Entries pass through untouched; validation is single-homed at the
+    terminal OpenAI call (``OpenAIClient._validate_history``), which e.g.
+    accepts ``system`` roles a client-side copy might wrongly reject."""
     raw = json.dumps([{"role": "system", "content": "x", "extra": 1}])
     assert _parse_history(raw) == [{"role": "system", "content": "x", "extra": 1}]
 

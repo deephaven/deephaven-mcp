@@ -281,12 +281,19 @@ class DocsConfig(RedactableSchema):
             ValueError: When ``value`` is not an ``http://`` or
                 ``https://`` URL with a non-empty host.
         """
-        parts = urlsplit(value)
-        if parts.scheme not in ("http", "https") or not parts.netloc:
-            raise ValueError(
-                f"docs.url must be an http:// or https:// URL with a host, "
-                f"got {value!r}"
-            )
+        message = (
+            f"docs.url must be an http:// or https:// URL with a host, got {value!r}"
+        )
+        try:
+            parts = urlsplit(value)
+            # ``hostname``, not ``netloc``: a hostless authority such
+            # as ``http://@/mcp`` or ``http://:8000/mcp`` has a
+            # non-empty netloc but no host to connect to.
+            hostname = parts.hostname
+        except ValueError as exc:
+            raise ValueError(message) from exc
+        if parts.scheme not in ("http", "https") or not hostname:
+            raise ValueError(message)
         return value
 
 

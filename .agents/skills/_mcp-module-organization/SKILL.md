@@ -71,7 +71,7 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 
 Id parsing: call `QualifiedSessionId.from_str` (from `deephaven_mcp.resource_manager`) to parse and validate a fully qualified id — it raises `InvalidSessionNameError` rather than substituting a default. For PQ ids, `parse_pq_id` / `make_pq_id` in `shared.py` add the enterprise-scope and integer-serial refinement on top.
 
-Error strings: an `except` handler that embeds the caught exception in a payload `error` field renders it with `exception_summary(e)` from `deephaven_mcp._exception_utils` — `f"Failed to <action> '{id}': {exception_summary(e)}"` — never a hand-typed `f"{type(e).__name__}: {e}"`. The paired log line keeps `{e!r}` + `exc_info=True` (see `_python-coding-practices` rule 20 for the boundary).
+Error strings: an `except` handler that embeds the caught exception in a payload `error` field renders it with `exception_summary(e)` — `f"Failed to <action> '{id}': {exception_summary(e)}"`. Apply `_python-coding-practices` rule 20 for the renderer choice and the logging boundary.
 
 ## Naming Conventions
 

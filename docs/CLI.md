@@ -541,10 +541,11 @@ daemon is not involved and is never started.
 `ask` accepts `--language` (`python`/`groovy`) to tailor code examples,
 `--core-version VERSION` / `--enterprise-version VERSION` to tailor the
 answer to a Deephaven release, and `--history JSON` — a JSON array of
-objects, each with exactly two fields, `role` (`user` or `assistant`)
-and a string `content`, oldest first — to carry a prior exchange into a
-follow-up question. A malformed `--history` exits `2` with
-`arg_parse_error`; an assistant-reported failure exits `3` with
+message objects, each with a string `role` (`user` or `assistant`) and
+a string `content`, oldest first — to carry a prior exchange into a
+follow-up question. A `--history` value that is not a JSON array exits
+`2` with `arg_parse_error`; the entries themselves are validated by the
+docs server, and an assistant-reported failure exits `3` with
 `tool_returned_error`.
 
 The assistant is LLM-backed, so answers typically take several seconds;
@@ -728,7 +729,7 @@ registry programmatically via `dh-mcp introspect errors` (or the
 | `daemon_registry_live`        | `dh-mcp daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dh-mcp daemon stop` first. |
 | `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `daemon.reuse` resolved to `refuse`. Run `dh-mcp daemon restart`, or adjust `daemon.reuse` in `cli.json`. |
 | `mcp_request_failed`          | The MCP transport reported an error (connect, parse, server failure). |
-| `mcp_request_timeout`         | The MCP request timed out. The server may still finish the operation — verify the resulting state before retrying. Allow more time with `--timeout`, or raise the timeout in `cli.json`: `request.timeouts.default_seconds` (`docs.timeouts.request_seconds` for the `docs` commands). |
+| `mcp_request_timeout`         | The MCP request timed out. The server may still finish processing the request — if the operation changes state, verify the result before retrying. Allow more time with `--timeout`, or raise the timeout in `cli.json`: `request.timeouts.default_seconds` (`docs.timeouts.request_seconds` for the `docs` commands). |
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |

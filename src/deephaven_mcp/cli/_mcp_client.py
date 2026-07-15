@@ -242,7 +242,9 @@ class McpClient:
         try:
             response = await self._session.list_tools()
         except Exception as exc:
-            raise McpClientError(f"list_tools failed: {exc}") from exc
+            raise McpClientError(
+                f"list_tools failed: {describe_exception(exc)}"
+            ) from exc
         return list(response.tools)
 
     async def call_tool(
@@ -267,8 +269,8 @@ class McpClient:
 
         Raises:
             McpRequestTimeoutError: When the server does not respond
-                within the timeout. The server may still complete the
-                operation server-side; the message says so and how to
+                within the timeout. The server may still finish
+                processing the request; the message says so and how to
                 allow more time.
             McpClientError: When the call fails for any other reason
                 (network, server-reported error). The exception
@@ -298,8 +300,11 @@ class McpClient:
                 raise McpRequestTimeoutError(
                     f"call_tool({name!r}) timed out after "
                     f"{timeout.total_seconds():g} seconds. The server may still "
-                    f"complete the operation server-side — verify the resulting "
-                    f"state before retrying. To allow more time, pass --timeout "
-                    f"or raise {self._timeout_setting} in cli.json."
+                    f"finish processing the request — if the operation changes "
+                    f"state, verify the result before retrying. To allow more "
+                    f"time, pass --timeout or raise {self._timeout_setting} "
+                    f"in cli.json."
                 ) from exc
-            raise McpClientError(f"call_tool({name!r}) failed: {exc}") from exc
+            raise McpClientError(
+                f"call_tool({name!r}) failed: {describe_exception(exc)}"
+            ) from exc

@@ -129,10 +129,10 @@ class ErrorCode(StrEnum):
     MCP_REQUEST_TIMEOUT = (
         "mcp_request_timeout",
         (
-            "The MCP request timed out. The server may still finish the "
-            "operation — verify the resulting state before retrying. Allow "
-            "more time with --timeout, or raise the timeout in cli.json: "
-            "request.timeouts.default_seconds "
+            "The MCP request timed out. The server may still finish "
+            "processing the request — if the operation changes state, verify "
+            "the result before retrying. Allow more time with --timeout, or "
+            "raise the timeout in cli.json: request.timeouts.default_seconds "
             "(docs.timeouts.request_seconds for the 'docs' commands)."
         ),
     )

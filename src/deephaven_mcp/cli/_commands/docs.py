@@ -103,9 +103,9 @@ async def _call_docs_tool(
 def _parse_history(raw: str) -> list[dict[str, str]]:
     """Parse the ``--history`` JSON payload into the tool argument value.
 
-    Decodes only — message content is not validated here. The docs
-    server (and the LLM endpoint behind it) owns the history contract
-    and rejects invalid messages with a structured error.
+    Decodes only — message entries are not validated here. The docs
+    server's ``docs_chat`` tool validates them and rejects invalid
+    messages with a structured error.
 
     Args:
         raw (str): The raw ``--history`` option value; a JSON array of
@@ -129,6 +129,11 @@ def _parse_history(raw: str) -> list[dict[str, str]]:
             "--history must be a JSON array of {role, content} objects.",
             code=ErrorCode.ARG_PARSE_ERROR,
         )
+    # Do not add per-entry {role, content} checks here: entry
+    # validation is deliberately single-homed at the terminal OpenAI
+    # call (OpenAIClient._validate_history), and a client-side copy
+    # drifts — e.g. the terminal level accepts 'system' roles that a
+    # stricter local check would wrongly reject.
     return parsed
 
 
@@ -225,9 +230,9 @@ _OUTPUT_ASK = OutputSpec(
     metavar="JSON",
     help=(
         "Prior conversation turns for a follow-up question: a JSON array of "
-        "objects, each with exactly two fields — 'role' ('user' or "
-        "'assistant') and a string 'content' — oldest first. Omit for a "
-        "fresh question."
+        "message objects — each with a string 'role' ('user' or 'assistant') "
+        "and a string 'content' — oldest first. The docs server validates "
+        "the entries. Omit for a fresh question."
     ),
 )
 @click.pass_obj

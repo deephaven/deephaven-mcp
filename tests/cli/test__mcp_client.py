@@ -386,7 +386,7 @@ async def test_list_tools_wraps_exception() -> None:
     fake_session.list_tools = AsyncMock(side_effect=RuntimeError("boom"))
     client = McpClient.for_daemon(_handle())
     client._session = fake_session  # noqa: SLF001
-    with pytest.raises(McpClientError, match="list_tools failed"):
+    with pytest.raises(McpClientError, match="list_tools failed: RuntimeError: boom"):
         await client.list_tools()
 
 
@@ -446,7 +446,7 @@ def _mcp_timeout_error() -> McpError:
 
 @pytest.mark.asyncio
 async def test_call_tool_timeout_gets_dedicated_message() -> None:
-    """A request timeout notes possible server-side completion and how to allow more time."""
+    """A request timeout notes the server may still finish and how to allow more time."""
     fake_session = AsyncMock()
     fake_session.call_tool = AsyncMock(side_effect=_mcp_timeout_error())
     client = McpClient.for_daemon(_handle(), request_timeout_seconds=60)
@@ -455,7 +455,8 @@ async def test_call_tool_timeout_gets_dedicated_message() -> None:
         await client.call_tool("pq_delete")
     msg = str(exc_info.value)
     assert "timed out after 60 seconds" in msg
-    assert "may still complete the operation server-side" in msg
+    assert "may still finish processing the request" in msg
+    assert "if the operation changes state" in msg
     assert "--timeout" in msg
     assert "request.timeouts.default_seconds" in msg
 
@@ -495,6 +496,8 @@ async def test_call_tool_non_timeout_mcp_error_keeps_generic_message() -> None:
     )
     client = McpClient.for_daemon(_handle())
     client._session = fake_session  # noqa: SLF001
-    with pytest.raises(McpClientError, match=r"call_tool\('foo'\) failed: boom") as ei:
+    with pytest.raises(
+        McpClientError, match=r"call_tool\('foo'\) failed: McpError: boom"
+    ) as ei:
         await client.call_tool("foo")
     assert not isinstance(ei.value, McpRequestTimeoutError)
