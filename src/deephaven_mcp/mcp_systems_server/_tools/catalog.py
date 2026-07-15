@@ -15,6 +15,7 @@ from typing import cast
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import UnsupportedOperationError
 from deephaven_mcp.client import CorePlusSession
 from deephaven_mcp.formatters import format_table_data
@@ -48,7 +49,7 @@ def _unsupported_session_error(
         f"[mcp_systems_server:{tool_name}] Session '{id}' is not an enterprise session: {e!r}"
     )
     return error_response(
-        f"Session '{id}' does not support this operation: {type(e).__name__}: {e}"
+        f"Session '{id}' does not support this operation: {exception_summary(e)}"
     )
 
 
@@ -68,7 +69,7 @@ def _catalog_failure_error(tool_name: str, id: str, e: Exception) -> dict[str, o
         exc_info=True,
     )
     return error_response(
-        f"Catalog operation failed for session '{id}': {type(e).__name__}: {e}"
+        f"Catalog operation failed for session '{id}': {exception_summary(e)}"
     )
 
 
@@ -176,7 +177,7 @@ async def _get_catalog_data(
         _LOGGER.error(
             f"[mcp_systems_server:{tool_name}] Invalid format parameter: {e!r}"
         )
-        result["error"] = f"Invalid format parameter: {type(e).__name__}: {e}"
+        result["error"] = f"Invalid format parameter: {exception_summary(e)}"
         result["isError"] = True
 
     except Exception as e:

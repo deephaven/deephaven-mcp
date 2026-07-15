@@ -25,19 +25,36 @@ import logging
 
 import grpc
 
+from deephaven_mcp._exception_utils import describe_exception, exception_summary
+
 _LOGGER = logging.getLogger(__name__)
+
+
+def _render_grpc_leaf(exc: BaseException) -> str:
+    """Render one exception, surfacing gRPC status detail for :class:`grpc.Call`.
+
+    Args:
+        exc (BaseException): The exception to render.
+
+    Returns:
+        str: ``"gRPC CODE: details"`` for a :class:`grpc.Call`, the
+            canonical ``TypeName: message`` summary otherwise.
+    """
+    if isinstance(exc, grpc.Call):
+        code = exc.code()
+        code_name = code.name if code is not None else "UNKNOWN"
+        return f"gRPC {code_name}: {exc.details()}"
+    return exception_summary(exc)
 
 
 def describe_exception_chain(exc: BaseException) -> str:
     """Render an exception and its ``__cause__`` chain into a single message.
 
-    Walks the explicit ``__cause__`` links (those set by ``raise ... from ...``)
-    and joins each exception's message; implicit ``__context__`` links are not
-    followed, so unrelated suppressed exceptions never leak into the result. For
-    any :class:`grpc.Call` in the chain, the gRPC status code and ``details()``
-    are included, surfacing the server-side reason (such as an unsupported
-    column type) that a generic wrapper message like "failed to finish
-    FetchTableOp operation" omits.
+    A gRPC-aware front for :func:`deephaven_mcp._exception_utils.describe_exception`:
+    for any :class:`grpc.Call` in the chain, the gRPC status code and
+    ``details()`` are included, surfacing the server-side reason (such as
+    an unsupported column type) that a generic wrapper message like
+    "failed to finish FetchTableOp operation" omits.
 
     Usage:
         Client wrappers call this to build the message of an exception raised
@@ -49,25 +66,12 @@ def describe_exception_chain(exc: BaseException) -> str:
         exc (BaseException): The exception to describe.
 
     Returns:
-        str: The exception message followed by each distinct underlying cause,
-            joined by " -> ". A cause is skipped when its message is already
-            contained in the preceding entry.
+        str: The exception's summary followed by each distinct underlying
+            cause, joined by " -> " (exception-group members joined by
+            "; "). A cause is skipped when its text is already contained
+            in the entry it would follow.
     """
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, grpc.Call):
-            code = current.code()
-            code_name = code.name if code is not None else "UNKNOWN"
-            message = f"gRPC {code_name}: {current.details()}"
-        else:
-            message = str(current).strip()
-        if message and (not parts or message not in parts[-1]):
-            parts.append(message)
-        current = current.__cause__
-    return " -> ".join(parts)
+    return describe_exception(exc, render=_render_grpc_leaf)
 
 
 class ClientObjectWrapper[T]:

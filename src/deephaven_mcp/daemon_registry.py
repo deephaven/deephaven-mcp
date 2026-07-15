@@ -4,7 +4,7 @@ The ``dh-mcp-systems-server`` binary can be launched in *daemon
 mode* (``--daemon``) to back the ``dh-mcp`` CLI's per-user local
 daemon. The daemon and the CLI live in different top-level
 packages (``mcp_systems_server`` and ``cli``) but cooperate via a
-small set of artefacts on disk:
+small set of artifacts on disk:
 
 - ``daemon.json`` — a JSON file the daemon writes at startup,
   describing the bound loopback host/port, the auto-generated

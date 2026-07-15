@@ -16,5 +16,6 @@ For the specified document, verify every factual claim against the source code. 
 - **Code examples**: verify syntax is valid and matches the actual API; apply the `_markdown-documentation-standards` skill for JSON/JSON5 code block and placeholder formatting
 - **Port numbers, URLs, environment variable names**: confirm against source or config
 - **Output value vocabularies**: when the doc documents the values of a tool / CLI output field (e.g., enumerating `--origin static|dynamic|discovered` or sample JSON values), apply `_output-serialization-conventions` and confirm the documented values match what the code emits
+- **Spelling**: apply `_markdown-documentation-standards` Prose conventions; verify with `uv run codespell <file>`
 
 For each inaccuracy found, report what the document says, what it should say, and fix it directly in the document.

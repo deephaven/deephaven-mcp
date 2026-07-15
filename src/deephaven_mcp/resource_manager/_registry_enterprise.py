@@ -55,6 +55,7 @@ import time
 from dataclasses import dataclass
 from typing import override
 
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import (
     InternalError,
     RegistryItemNotFoundError,
@@ -211,10 +212,10 @@ async def _fetch_factory_pqs(
         )
 
     except Exception as e:
-        _LOGGER.warning(f"[_fetch_factory_pqs] factory query failed: {e}")
+        _LOGGER.warning(f"[_fetch_factory_pqs] factory query failed: {e!r}")
         return _FactoryQueryError(
             new_client=new_client,
-            error=f"{type(e).__name__}: {e}",
+            error=exception_summary(e),
         )
 
 
@@ -419,7 +420,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             except asyncio.CancelledError:
                 pass
             _LOGGER.info(
-                f"[{self.__class__.__name__}] cancelled background enterprise discovery"
+                f"[{self.__class__.__name__}] canceled background enterprise discovery"
             )
 
         # Step 4: close factory manager via local ref captured under the lock.
@@ -774,7 +775,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             async with self._lock:
                 self._phase = InitializationPhase.FAILED
             _LOGGER.info(
-                f"[{self.__class__.__name__}] enterprise discovery cancelled (shutdown)"
+                f"[{self.__class__.__name__}] enterprise discovery canceled (shutdown)"
             )
             raise
 
@@ -785,7 +786,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 exc_info=True,
             )
             async with self._lock:
-                self._error = f"{type(e).__name__}: {e}"
+                self._error = exception_summary(e)
                 self._phase = InitializationPhase.COMPLETED
 
     # ------------------------------------------------------------------

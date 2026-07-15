@@ -283,7 +283,7 @@ def _validate_cli_args(
         "with --transport, --host, or --port is rejected with a "
         "usage error (the daemon shape is fixed by the registry "
         "wire format). server.json:psk is ignored. An explicit "
-        "--psk is honoured as a testing/debug override; otherwise "
+        "--psk is honored as a testing/debug override; otherwise "
         "a fresh PSK is auto-generated and recorded in the registry."
     ),
 )
@@ -348,7 +348,7 @@ def _command(
     # HTTP via a different planner.
     transport_resolved = transport if transport is not None else server_cfg.transport
     if daemon:
-        # ``--psk`` is honoured by the daemon planner as a debug override,
+        # ``--psk`` is honored by the daemon planner as a debug override,
         # otherwise the planner auto-generates a fresh PSK.
         plan = _plan_daemon(
             multi_config,
@@ -389,7 +389,7 @@ def main(argv: list[str] | None = None) -> None:
             args=argv, prog_name="dh-mcp-systems-server", standalone_mode=False
         )
     except click.exceptions.UsageError as exc:
-        # Mirrors click's default standalone-mode behaviour: render
+        # Mirrors click's default standalone-mode behavior: render
         # the usage message to stderr and exit 2.
         exc.show()
         sys.exit(2)

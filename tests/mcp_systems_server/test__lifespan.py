@@ -7,7 +7,7 @@ hands the per-child evictor lifecycle off to :class:`EvictorPool`, and
 storing the resulting :class:`LifespanContext` on a :class:`ProcessResources`
 holder. The per-MCP-session lifespan from :func:`make_lifespan` only reads
 that holder. These tests cover the orchestrator wiring + teardown
-discipline and the per-session shim; the subsystem behaviours are covered
+discipline and the per-session shim; the subsystem behaviors are covered
 in ``test__evictors.py`` and ``test__idle.py``.
 """
 
@@ -99,7 +99,7 @@ def _patch_subsystems(
     ``EvictorPool`` and ``IdleWatcher`` are patched as *classes* whose
     instances expose explicit ``start`` / ``stop`` AsyncMocks. Tests
     configure those mocks (or supply their own) if they want to assert
-    per-call behaviour.
+    per-call behavior.
     """
     if evictor_pool is None:
         evictor_pool = MagicMock()
@@ -686,7 +686,7 @@ def test_build_registry_handles_missing_sections():
 
 @pytest.mark.asyncio
 async def test_log_teardown_failure_logs_and_swallows(caplog):
-    """``_log_teardown_failure`` logs the labelled failure but never raises."""
+    """``_log_teardown_failure`` logs the labeled failure but never raises."""
 
     async def _boom() -> None:
         raise RuntimeError("teardown boom")

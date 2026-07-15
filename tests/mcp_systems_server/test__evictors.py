@@ -4,7 +4,7 @@ The :class:`EvictorPool` owns the per-child evictor lifecycle: atomic
 startup with rollback, concurrent shutdown with per-evictor error
 isolation. Tests exercise the explicit ``start()`` / ``stop()``
 methods directly; the ``_running_pool`` helper below pairs them in
-the success path so individual tests stay focused on the behaviour
+the success path so individual tests stay focused on the behavior
 they assert on.
 """
 
@@ -101,7 +101,7 @@ def _make_registry(
 
 
 # ---------------------------------------------------------------------------
-# Startup behaviour
+# Startup behavior
 # ---------------------------------------------------------------------------
 
 
@@ -153,7 +153,7 @@ async def test_pool_skips_community_when_config_absent_but_registry_present():
 
 @pytest.mark.asyncio
 async def test_pool_uses_per_section_timers():
-    """Each child receives an Evictor parameterised by its umbrella settings."""
+    """Each child receives an Evictor parameterized by its umbrella settings."""
     mc = _make_multi_config(
         community_idle=100,
         community_sweep=10,
@@ -383,7 +383,7 @@ async def test_pool_stops_all_in_parallel_even_when_one_raises(caplog):
     """Every evictor receives ``stop()`` even when an earlier ``stop()`` raises.
 
     The pool calls ``asyncio.gather(..., return_exceptions=True)`` so a
-    single failure does not block the rest from being cancelled.
+    single failure does not block the rest from being canceled.
     """
     mc = _make_multi_config(
         community_idle=10,

@@ -6,11 +6,11 @@ user-invocable: false
 
 # CLI tool-wrapping conventions
 
-Runtime `dh-mcp` commands (`session`, `system`, `table`, `catalog`, `pq`) wrap MCP tools. This skill is the how; the *why* is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `_cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`_mcp-module-organization`).
+Runtime `dh-mcp` commands (`session`, `system`, `table`, `catalog`, `pq`, `docs`) wrap MCP tools. This skill is the how; the *why* is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `_cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`_mcp-module-organization`).
 
 ## The shared flow
 
-Every wrapper routes through `cli/_commands/_wrapping.py`, never a hand-rolled daemon/MCP dance. Two top-level helpers cover the two output shapes; neither drops a partial-but-successful result's diagnostic siblings (the `partial_result` block from enterprise-session discovery, and a truncating tool's `is_complete: false` flag) — the whole-payload helper carries them in the stdout envelope, the shaping helper re-surfaces them on stderr:
+Every daemon-backed wrapper routes through `cli/_commands/_wrapping.py`, never a hand-rolled daemon/MCP dance (a direct-URL wrapper — category 5 below — skips the acquire flow but still reuses `_wrapping.py`'s fetch/render pieces). Two top-level helpers cover the two output shapes; neither drops a partial-but-successful result's diagnostic siblings (the `partial_result` block from enterprise-session discovery, and a truncating tool's `is_complete: false` flag) — the whole-payload helper carries them in the stdout envelope, the shaping helper re-surfaces them on stderr:
 
 - `call_and_echo(runtime, "<tool>", *, retry_command, arguments)` — whole-payload verb: emit the tool's success payload as-is on stdout (the envelope carries any diagnostics).
 - `call_and_echo_field(runtime, "<tool>", *, retry_command, arguments, field, default)` — shaping verb: emit one payload field (e.g. a `list` verb's array) on stdout, and surface diagnostic siblings on stderr. For a truncating tool, pass `truncation_hint="Raise --max-rows or narrow with --filter."` (naming the verb's own flags) to extend the generic `is_complete: false` warning. Use this instead of hand-rolling `call_for_payload` + `echo_payload`, which would drop the diagnostics.
@@ -41,11 +41,12 @@ A wrapper's help error codes come from `wrapper_error_codes()` in `_wrapping.py`
 - Default: `error_codes=wrapper_error_codes()`.
 - Read-only tool that never reports failure (`system list`, `tool list`): `wrapper_error_codes(tool_error=False)` (drops `tool_returned_error`).
 - Extra command-specific codes go first: `error_codes=(ErrorCode.ARG_PARSE_ERROR, *wrapper_error_codes())`.
+- Direct-URL wrapper (category 5): list the transport codes it can actually raise — `MCP_REQUEST_FAILED`, `MCP_REQUEST_TIMEOUT`, plus `TOOL_RETURNED_ERROR` — and **not** the daemon acquire codes, which its flow cannot raise. Register the command path in `_DIRECT_URL_WRAPPERS` in `tests/cli/test_tool_wrapper_drift.py` so the acquire-codes help check asserts the reduced set.
 - Exit codes: `(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR)`, or drop `TOOL_ERROR` when there is no tool-error path.
 
-`test_wrapper_help_lists_acquire_error_codes` fails a wrapper whose help omits the shared acquire codes.
+`test_wrapper_help_lists_acquire_error_codes` fails a wrapper whose help omits the shared acquire codes (or, for a registered direct-URL wrapper, the transport codes).
 
-## The four wrapper categories
+## The five wrapper categories
 
 These describe how a verb *selects* its tool(s); the output shape (`call_and_echo` vs `call_and_echo_field`, from *The shared flow*) is chosen independently per command. A router picks its tool, then calls a helper with it — `tool = ...; await call_and_echo(runtime, tool, retry_command=..., arguments=...)`.
 
@@ -53,6 +54,7 @@ These describe how a verb *selects* its tool(s); the output shape (`call_and_ech
 2. **Id-router** — one verb; the `id` prefix selects the tool. Set `wraps_tools=("...community...","...enterprise...")`. Parse the `type:system:name` prefix and dispatch.
 3. **System-router** — one verb; the `--system` value's type selects the tool. Set `wraps_tools=(...)` and `router_params=frozenset({"system"})` (`--system` steers dispatch and is forwarded only to the branch that declares it). Group flags by type in help; reject a wrong-type flag.
 4. **Client-side composite** — wrap a tool for data, then act locally (e.g. `session open` → `webbrowser.open`). Set `wraps_tool="..."`; surface only the input args. For browser/host actions, provide a `--print` (or headless/no-`DISPLAY`) fallback and raise a dedicated `ErrorCode` on failure — never hang.
+5. **Direct-URL** — one tool on a *remote* MCP server named by a `cli.json` URL, not the local daemon (no `acquire`, daemon never started). Build the client from config (URL + its own timeout key, passed as `McpClient`'s `timeout_setting` so the timeout hint names the right `cli.json` key), catch `McpRequestTimeoutError` → `mcp_request_timeout` and `McpClientError` → `mcp_request_failed` naming the URL, then reuse `tool_payload` + `require_success` + `echo_payload`. Set `wraps_tool="..."`; state "the local daemon is not involved" in the description. Canonical: `docs ask` (`cli/_commands/docs.py`, `docs_chat` at `docs.url`).
 
 ## Type scoping: never a subgroup
 

@@ -18,12 +18,12 @@ A skill is defined by a `SKILL.md` file at `.agents/skills/<name>/SKILL.md` with
 
 Hierarchy is expressed by reference, not by directory nesting. The directory layout stays flat; the dependency graph is what carries structure.
 
-- **Three-property test.** Every skill is **specialized** (one concern), **self-contained** (invokable without inlining other skills), and **referenced** (invoked by at least one parent — the user, another skill, or both).
+- **Three-property test.** Every skill is **specialized** (one concern), **self-contained** (invocable without inlining other skills), and **referenced** (invoked by at least one parent — the user, another skill, or both).
 - **Extraction trigger.** Two or more skills share more than ~5 lines of substantive guidance → factor a shared sub-skill that both invoke. Mirrors code DRY.
 - **Merge trigger.** A sub-skill is invoked by exactly one parent and has no independent trigger → inline it back into the parent. A single-use abstraction is a bad abstraction.
 - **Pointer rule.** When a skill needs another skill's content, point with `Apply <skill>` or `See <skill> §N`. Never paraphrase another skill's body.
 - **Canonical-implementation rule.** When a rule is grounded in real code, name the file and symbol: ``Canonical implementation: `cli/_format.py` (`OutputMode`, `format_output`)``. Pointers stay accurate when prose drifts.
-- **Compatibility.** A reference sub-skill is invokable by any parent without parent-specific assumptions. If a sub-skill's content makes sense only inside one parent, it is a section, not a skill.
+- **Compatibility.** A reference sub-skill is invocable by any parent without parent-specific assumptions. If a sub-skill's content makes sense only inside one parent, it is a section, not a skill.
 
 ## 3. Frontmatter contract
 

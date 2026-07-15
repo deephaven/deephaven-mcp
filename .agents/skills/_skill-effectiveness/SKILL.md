@@ -31,13 +31,13 @@ The frontmatter `description` is the only text the agent sees at decision time. 
 ## 2. Actionability — when invoked, can the agent act?
 
 - **Workflow steps**: one action per step, one verifiable outcome per step. A step that combines "do X and consider Y" is two steps.
-- **Reference rules**: verb-form (`do X`, `avoid Y`), never adjective-form (`X is preferred`, `Y is generally bad`). Adjective-form rules invite the agent to override them with judgement.
+- **Reference rules**: verb-form (`do X`, `avoid Y`), never adjective-form (`X is preferred`, `Y is generally bad`). Adjective-form rules invite the agent to override them with judgment.
 - **Step indirection limit**: a step should not require the reader to follow more than one cross-reference to act. If step 3 says "apply skill A which says apply skill B which says apply skill C", flatten one level.
 - **Canonical implementation pointers**: when a step or rule has a real exemplar in the codebase, name it: ``Canonical implementation: `cli/_errors.py` (`ErrorCode`)``. Pointers stay accurate when prose drifts.
-- **Closed checklists vs. open-ended judgement.** Different skill genres have different needs:
+- **Closed checklists vs. open-ended judgment.** Different skill genres have different needs:
   - **Action-add skills** (e.g., `cli-command-add`, `mcp-tool-add`, `skill-add`) get **closed checklists** — every step is mandatory and verifiable; missing a step is a bug.
-  - **Review skills** (e.g., `review-python-file`, `skill-review`, `review-changes`) get **enumerated triggers + open-ended judgement empowerment** — list common categories illustratively, then explicitly invite the reviewer to flag *anything else that looks off*. No closed checklist can enumerate every code smell, every security issue, every design problem; pretending otherwise produces false closure (see §6).
-  - **Scope-completeness test for any enumerated list**: ask *"is this list comprehensive for the topic, or does it imply false closure?"* If the topic is genuinely closed (the four `OutputMode` literals, the eight `ErrorCode` members), enumerate exhaustively. If the topic is open-ended (code smells, security risks, design problems), pair the illustrative list with explicit open-ended language: *"or anything else that looks off — trust your judgement."* Canonical implementation: `review-python-file/SKILL.md` step 4.
+  - **Review skills** (e.g., `review-python-file`, `skill-review`, `review-changes`) get **enumerated triggers + open-ended judgment empowerment** — list common categories illustratively, then explicitly invite the reviewer to flag *anything else that looks off*. No closed checklist can enumerate every code smell, every security issue, every design problem; pretending otherwise produces false closure (see §6).
+  - **Scope-completeness test for any enumerated list**: ask *"is this list comprehensive for the topic, or does it imply false closure?"* If the topic is genuinely closed (the four `OutputMode` literals, the eight `ErrorCode` members), enumerate exhaustively. If the topic is open-ended (code smells, security risks, design problems), pair the illustrative list with explicit open-ended language: *"or anything else that looks off — trust your judgment."* Canonical implementation: `review-python-file/SKILL.md` step 4.
 
 ## 3. Outcome orientation — what does success look like?
 
@@ -80,7 +80,7 @@ Walk this list against every reviewed skill. Each bullet names a real failure mo
 - **Decorative prose.** `obviously`, `simply`, `just`, `clean`, `elegant` applied to design choices.
 - **Adjective-form rule.** "X is preferred" when "Prefer X" or "Use X" is shorter and actionable.
 - **Wrong voice.** Workflow written in declarative voice; reference written in imperative voice with imagined caller.
-- **False-closure list.** An enumerated list of examples on an open-ended topic (code smells, security risks, design problems, weird code) with no "or anything else" open-end. The agent will misread the list as exhaustive and miss the long tail. Fix: add explicit open-ended language (*"or anything else that looks off — trust your judgement"*) and an *"illustrative, not exhaustive"* disclaimer. See §2 closed-checklists-vs-open-ended-judgement.
+- **False-closure list.** An enumerated list of examples on an open-ended topic (code smells, security risks, design problems, weird code) with no "or anything else" open-end. The agent will misread the list as exhaustive and miss the long tail. Fix: add explicit open-ended language (*"or anything else that looks off — trust your judgment"*) and an *"illustrative, not exhaustive"* disclaimer. See §2 closed-checklists-vs-open-ended-judgment.
 
 ## 7. Field failure signals — how do we tell a skill isn't working?
 

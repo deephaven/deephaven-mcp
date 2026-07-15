@@ -143,7 +143,7 @@ async def call_tool(
             ``mcp_request_failed`` for everything else.
     """
     try:
-        async with McpClient(
+        async with McpClient.for_daemon(
             handle,
             request_timeout_seconds=runtime.config.cli.request.timeouts.default_seconds,
         ) as client:

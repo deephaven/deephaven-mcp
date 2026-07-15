@@ -31,7 +31,7 @@ _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] Failed to create 
 - `DEBUG` — detailed operational steps useful for diagnosing behavior (loop iterations, intermediate values)
 - `INFO` — significant events: tool invocation, successful completion, notable state changes
 - `WARNING` — degraded but non-fatal conditions
-- `ERROR` — failures and exceptions; when logging a caught exception, include `{e!r}` in the message and `exc_info=True`
+- `ERROR` — failures and exceptions; when logging a caught exception, include `{e!r}` in the message and `exc_info=True`. `{e!r}` is the *log* form only — user-facing strings (payload `error` fields, CLI errors) render exceptions via `deephaven_mcp._exception_utils` (`exception_summary` / `describe_exception`) per `_python-coding-practices` rule 20; do not swap one form for the other.
 
 ## When to Log
 

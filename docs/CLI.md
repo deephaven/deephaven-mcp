@@ -24,6 +24,7 @@ dispatches tool calls — without requiring you to run the server yourself.
   - [`dh-mcp table`](#dh-mcp-table)
   - [`dh-mcp catalog`](#dh-mcp-catalog)
   - [`dh-mcp pq`](#dh-mcp-pq)
+  - [`dh-mcp docs`](#dh-mcp-docs)
   - [`dh-mcp config`](#dh-mcp-config)
   - [`dh-mcp introspect`](#dh-mcp-introspect)
 - [Top-level flags](#top-level-flags)
@@ -179,7 +180,7 @@ subcommand body. Workarounds when you can't run `dh-mcp` itself:
 
 ### `cli.json`
 
-The schema is organized into three top-level domain sections. Each section
+The schema is organized into four top-level domain sections. Each section
 is its own object (Pydantic model); sections that hold time-shaped knobs
 carry a `timeouts:` sub-section reserved from day one, so future timeouts
 slot in without a breaking schema change.
@@ -218,6 +219,13 @@ restarting while end users are still protected.
 |----------------------------------------|---------|---------|--------------------------------------------------|
 | `request.timeouts.default_seconds`     | integer | `60`    | Per-request timeout. Override with `--timeout`.  |
 
+#### `docs.*` — docs MCP server
+
+| Field                          | Type    | Default | Notes                                                                        |
+|--------------------------------|---------|---------|-------------------------------------------------------------------------------|
+| `docs.url`                     | string  | `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp` | Streamable-HTTP endpoint of the docs MCP server the `docs` commands query. Defaults to the Deephaven-hosted production docs server; point it at a self-hosted `dh-mcp-docs-server` to query that instead. |
+| `docs.timeouts.request_seconds`| integer | `120`   | Per-request timeout for docs server calls. Higher than the daemon request default because docs queries are LLM-backed. Override with `--timeout`. |
+
 Example (JSON5; `//` comments are accepted):
 
 ```json5
@@ -240,6 +248,12 @@ Example (JSON5; `//` comments are accepted):
   "request": {
     "timeouts": {
       "default_seconds": 30
+    }
+  },
+  "docs": {
+    "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    "timeouts": {
+      "request_seconds": 120
     }
   }
 }
@@ -511,6 +525,39 @@ dh-mcp pq create weekly --system prod --heap-size-gb 4 --git-script-path IrisQue
 dh-mcp pq restart enterprise:prod:1234567890 --no-wait
 ```
 
+### `dh-mcp docs`
+
+Queries the Deephaven documentation MCP server. These verbs connect
+**directly** to the docs server configured as `docs.url` in `cli.json`
+(default: the Deephaven-hosted production docs server at
+`https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp`) — the local
+daemon is not involved and is never started.
+
+| Verb     | Purpose                                                                                       |
+|----------|-----------------------------------------------------------------------------------------------|
+| `ask`    | Sends a one-shot question (`PROMPT`) to the documentation assistant and prints its answer (an object with a `response` field). Wraps the docs server's `docs_chat` tool. |
+| `status` | Checks that the configured docs server is reachable: initializes an MCP session, lists its tools, and reports `{url, reachable, tools, latency_ms}`. Exits `2` with `mcp_request_failed` when unreachable. |
+
+`ask` accepts `--language` (`python`/`groovy`) to tailor code examples,
+`--core-version VERSION` / `--enterprise-version VERSION` to tailor the
+answer to a Deephaven release, and `--history JSON` — a JSON array of
+objects, each with exactly two fields, `role` (`user` or `assistant`)
+and a string `content`, oldest first — to carry a prior exchange into a
+follow-up question. A malformed `--history` exits `2` with
+`arg_parse_error`; an assistant-reported failure exits `3` with
+`tool_returned_error`.
+
+The assistant is LLM-backed, so answers typically take several seconds;
+the docs request timeout defaults to `docs.timeouts.request_seconds`
+(120) and honors the `--timeout` flag.
+
+```bash
+dh-mcp docs ask "How do I join two tables?"
+dh-mcp docs ask "Show me a ring table example" --language python
+dh-mcp docs ask "What is a liveness scope?" | jq -r .response
+dh-mcp docs status
+```
+
 ### `dh-mcp config`
 
 | Verb        | Purpose                                                                                       |
@@ -585,7 +632,7 @@ command's node never carries them.
 | `--runtime-dir PATH`|                      | Override the runtime directory (where `daemon.json` lives). No per-subdir env var.   |
 |                     | `DH_MCP_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
 | `-o`, `--output`    | `DH_MCP_OUTPUT`      | One of `human`, `json`, `yaml`. Overrides `cli.json`'s `output.format`.              |
-| `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds`.      |
+| `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds` (and `docs.timeouts.request_seconds` for the `docs` commands). |
 | `--introspect`      |                      | Emit the command's manifest node and exit (machine-readable twin of `--help`); available on every command. Rendered in the `-o`/`DH_MCP_OUTPUT` mode, `json` by default. On the root, emits the whole-tree manifest. |
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
@@ -679,7 +726,7 @@ registry programmatically via `dh-mcp introspect errors` (or the
 | `daemon_registry_live`        | `dh-mcp daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dh-mcp daemon stop` first. |
 | `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `daemon.reuse` resolved to `refuse`. Run `dh-mcp daemon restart`, or adjust `daemon.reuse` in `cli.json`. |
 | `mcp_request_failed`          | The MCP transport reported an error (connect, parse, server failure). |
-| `mcp_request_timeout`         | The MCP request timed out waiting for the daemon's response. The daemon may still complete the operation server-side — verify the resulting state before retrying. Allow more time with `--timeout` or `request.timeouts.default_seconds` in `cli.json`. |
+| `mcp_request_timeout`         | The MCP request timed out. The server may still finish the operation — verify the resulting state before retrying. Allow more time with `--timeout`, or raise the timeout in `cli.json`: `request.timeouts.default_seconds` (`docs.timeouts.request_seconds` for the `docs` commands). |
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |

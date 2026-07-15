@@ -34,6 +34,7 @@ from deephaven_enterprise.proto.table_definition_pb2 import (
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import (
     InternalError,
     InvalidSessionNameError,
@@ -819,7 +820,7 @@ async def pq_name_to_id(
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to convert PQ name '{pq_name}' to ID on system '{system_name}': {type(e).__name__}: {e}"
+            f"Failed to convert PQ name '{pq_name}' to ID on system '{system_name}': {exception_summary(e)}"
         )
         result["isError"] = True
 
@@ -981,7 +982,7 @@ async def pq_list(
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to list PQs on system '{system_name}': {type(e).__name__}: {e}"
+            f"Failed to list PQs on system '{system_name}': {exception_summary(e)}"
         )
         result["isError"] = True
 
@@ -1258,9 +1259,7 @@ async def pq_details(
             f"[mcp_systems_server:pq_details] Failed to get PQ details: {e!r}",
             exc_info=True,
         )
-        result["error"] = (
-            f"Failed to get PQ details for '{id}': {type(e).__name__}: {e}"
-        )
+        result["error"] = f"Failed to get PQ details for '{id}': {exception_summary(e)}"
         result["isError"] = True
 
     return result
@@ -1540,11 +1539,7 @@ async def pq_create(
             f"[mcp_systems_server:pq_create] Failed to create PQ '{pq_name}': {e!r}",
             exc_info=True,
         )
-        # Provide descriptive error message with exception type
-        error_msg = str(e) if str(e) else repr(e)
-        result["error"] = (
-            f"Failed to create PQ '{pq_name}': {type(e).__name__}: {error_msg}"
-        )
+        result["error"] = f"Failed to create PQ '{pq_name}': {exception_summary(e)}"
         result["isError"] = True
 
     return result
@@ -1694,9 +1689,7 @@ async def pq_delete(
 
             except Exception as e:
                 # Failure - record error
-                item_result["error"] = (
-                    f"{type(e).__name__}: {str(e) if str(e) else repr(e)}"
-                )
+                item_result["error"] = exception_summary(e)
                 _LOGGER.warning(
                     f"[mcp_systems_server:pq_delete] Failed to delete PQ {pid}: {item_result['error']}"
                 )
@@ -1774,7 +1767,7 @@ async def pq_delete(
             f"[mcp_systems_server:pq_delete] Failed to delete PQ(s): {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to delete PQ(s): {type(e).__name__}: {e}"
+        result["error"] = f"Failed to delete PQ(s): {exception_summary(e)}"
         result["isError"] = True
 
     return result
@@ -1949,7 +1942,7 @@ async def pq_modify(
         try:
             system_name, serial = _parse_pq_id(id)
         except ValueError as e:
-            result["error"] = f"Invalid id '{id}': {type(e).__name__}: {e}"
+            result["error"] = f"Invalid id '{id}': {exception_summary(e)}"
             result["isError"] = True
             return result
 
@@ -2069,8 +2062,7 @@ async def pq_modify(
             f"[mcp_systems_server:pq_modify] Failed to modify PQ: {e!r}",
             exc_info=True,
         )
-        error_msg = str(e) if str(e) else repr(e)
-        result["error"] = f"Failed to modify PQ '{id}': {type(e).__name__}: {error_msg}"
+        result["error"] = f"Failed to modify PQ '{id}': {exception_summary(e)}"
         result["isError"] = True
 
     return result
@@ -2133,7 +2125,7 @@ async def _pq_start_single(
 
     except Exception as e:
         # Failure - record error
-        item_result["error"] = f"{type(e).__name__}: {str(e) if str(e) else repr(e)}"
+        item_result["error"] = exception_summary(e)
         _LOGGER.warning(
             f"[mcp_systems_server:pq_start] Failed to start PQ {pid}: {item_result['error']}"
         )
@@ -2355,7 +2347,7 @@ async def pq_start(
             f"[mcp_systems_server:pq_start] Failed to start PQ: {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to start PQ(s): {type(e).__name__}: {e}"
+        result["error"] = f"Failed to start PQ(s): {exception_summary(e)}"
         result["isError"] = True
 
     return result
@@ -2528,9 +2520,7 @@ async def pq_stop(
 
             except Exception as e:
                 # Failure - record error
-                item_result["error"] = (
-                    f"{type(e).__name__}: {str(e) if str(e) else repr(e)}"
-                )
+                item_result["error"] = exception_summary(e)
                 _LOGGER.warning(
                     f"[mcp_systems_server:pq_stop] Failed to stop PQ {pid}: {item_result['error']}"
                 )
@@ -2609,7 +2599,7 @@ async def pq_stop(
             f"[mcp_systems_server:pq_stop] Failed to stop PQ: {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to stop PQ(s): {type(e).__name__}: {e}"
+        result["error"] = f"Failed to stop PQ(s): {exception_summary(e)}"
         result["isError"] = True
 
     return result
@@ -2793,9 +2783,7 @@ async def pq_restart(
 
             except Exception as e:
                 # Failure - record error
-                item_result["error"] = (
-                    f"{type(e).__name__}: {str(e) if str(e) else repr(e)}"
-                )
+                item_result["error"] = exception_summary(e)
                 _LOGGER.warning(
                     f"[mcp_systems_server:pq_restart] Failed to restart PQ {pid}: {item_result['error']}"
                 )
@@ -2875,7 +2863,7 @@ async def pq_restart(
             f"[mcp_systems_server:pq_restart] Failed to restart PQ: {e!r}",
             exc_info=True,
         )
-        result["error"] = f"Failed to restart PQ(s): {type(e).__name__}: {e}"
+        result["error"] = f"Failed to restart PQ(s): {exception_summary(e)}"
         result["isError"] = True
 
     return result

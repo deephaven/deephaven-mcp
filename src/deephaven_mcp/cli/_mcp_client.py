@@ -7,10 +7,12 @@ async context managers (HTTP client → transport → session); this
 module bundles that into a single :class:`McpClient` async context
 manager so handler code stays focused on UX, not boilerplate.
 
-The wrapper also injects the ``X-Deephaven-PSK`` header on every
-request and applies a per-call timeout that defaults to
-:attr:`RequestTimeouts.default_seconds` but can be overridden per
-``call_tool`` invocation.
+Two construction paths cover the CLI's two server surfaces:
+:meth:`McpClient.for_daemon` connects to the local daemon and injects
+the ``X-Deephaven-PSK`` header on every request; the plain constructor
+takes any streamable-HTTP endpoint URL (e.g. the docs MCP server) with
+optional headers. Both apply a per-call timeout that can be overridden
+per ``call_tool`` invocation.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 from mcp.shared.exceptions import McpError
 from mcp.types import CallToolResult, Tool
 
+from deephaven_mcp._exception_utils import describe_exception
 from deephaven_mcp._exceptions import McpClientError, McpRequestTimeoutError
 from deephaven_mcp.auth.middleware._psk import PSK_HEADER_NAME
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
@@ -41,7 +44,7 @@ class McpClient:
 
     Usage::
 
-        async with McpClient(handle, request_timeout_seconds=60) as client:
+        async with McpClient.for_daemon(handle, request_timeout_seconds=60) as client:
             tools = await client.list_tools()
             result = await client.call_tool("sessions_list", {})
 
@@ -52,12 +55,43 @@ class McpClient:
 
     def __init__(
         self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        request_timeout_seconds: int = 60,
+        timeout_setting: str = "request.timeouts.default_seconds",
+    ) -> None:
+        """Capture the connection parameters; no I/O yet.
+
+        Args:
+            url (str): Full streamable-HTTP endpoint URL of the MCP
+                server (e.g. ``http://127.0.0.1:8000/mcp`` or a remote
+                ``https://...`` docs server endpoint).
+            headers (dict[str, str] | None): Extra HTTP headers sent
+                with every request, or ``None`` for none.
+            request_timeout_seconds (int): Default per-call timeout
+                applied to ``call_tool`` when no override is
+                supplied. Defaults to ``60``.
+            timeout_setting (str): Dotted ``cli.json`` key named in the
+                timeout error's recovery hint. Defaults to the daemon
+                request timeout key.
+        """
+        self._url = url
+        self._headers = dict(headers) if headers else {}
+        self._timeout = timedelta(seconds=request_timeout_seconds)
+        self._timeout_setting = timeout_setting
+        self._stack = AsyncExitStack()
+        self._session: ClientSession | None = None
+
+    @classmethod
+    def for_daemon(
+        cls,
         handle: DaemonRegistryEntry,
         *,
         request_timeout_seconds: int = 60,
         url_path: str = "/mcp",
-    ) -> None:
-        """Capture the connection parameters; no I/O yet.
+    ) -> McpClient:
+        """Build a client for the local daemon's MCP endpoint.
 
         Args:
             handle (DaemonRegistryEntry): The validated registry
@@ -72,24 +106,38 @@ class McpClient:
                 the daemon. The systems server uses ``/mcp`` (the
                 default for ``streamable_http_app``); other servers
                 may differ.
+
+        Returns:
+            McpClient: An unopened client whose requests carry the
+                daemon's ``X-Deephaven-PSK`` header.
         """
-        self._handle = handle
-        self._timeout = timedelta(seconds=request_timeout_seconds)
-        self._url = f"http://{handle.host}:{handle.port}{url_path}"
-        self._stack = AsyncExitStack()
-        self._session: ClientSession | None = None
+        # The PSK is a pydantic SecretStr; this is the single place
+        # in the CLI that needs the plaintext (the daemon's
+        # PSKMiddleware compares the header value with
+        # hmac.compare_digest).
+        return cls(
+            f"http://{handle.host}:{handle.port}{url_path}",
+            headers={PSK_HEADER_NAME: handle.psk.get_secret_value()},
+            request_timeout_seconds=request_timeout_seconds,
+        )
 
     async def __aenter__(self) -> McpClient:
-        """Open the HTTP transport and initialize the MCP session."""
+        """Open the HTTP transport and initialize the MCP session.
+
+        Returns:
+            McpClient: This instance, with the session ready for
+                :meth:`list_tools` / :meth:`call_tool`.
+
+        Raises:
+            McpClientError: When the transport cannot be opened or the
+                MCP session fails to initialize (e.g. the server is
+                unreachable). The partially-entered stack is closed
+                first. Cancellation and other non-``Exception``
+                failures propagate unwrapped.
+        """
         try:
             http_client = await self._stack.enter_async_context(
-                # The PSK is a pydantic SecretStr; this is the
-                # single place in the CLI that needs the plaintext
-                # (the daemon's PSKMiddleware compares the header
-                # value with hmac.compare_digest).
-                create_mcp_http_client(
-                    headers={PSK_HEADER_NAME: self._handle.psk.get_secret_value()}
-                )
+                create_mcp_http_client(headers=self._headers or None)
             )
             read, write, _ = await self._stack.enter_async_context(
                 streamable_http_client(self._url, http_client=http_client)
@@ -102,9 +150,33 @@ class McpClient:
                 f"[_mcp_client:McpClient.__aenter__] Connected to {self._url}"
             )
             return self
-        except BaseException:
-            await self._stack.aclose()
-            raise
+        except BaseException as exc:
+            failure: BaseException = exc
+            try:
+                await self._stack.aclose()
+            except Exception as close_exc:
+                # On a connect failure the transport's anyio task group
+                # cancels its peers (so ``initialize`` sees a bare
+                # CancelledError) and re-raises the real failure (e.g.
+                # ExceptionGroup([ConnectError])) only at unwind time;
+                # prefer it — it names the root cause. An *external*
+                # cancellation re-raises CancelledError here instead,
+                # which is not an Exception and so propagates raw.
+                failure = close_exc
+            # Re-raise already-typed client errors and non-Exception
+            # failures (CancelledError, KeyboardInterrupt — and any
+            # BaseExceptionGroup carrying one, which is not an
+            # Exception) untouched; wrap everything else so callers
+            # can catch a connect failure as McpClientError.
+            if isinstance(failure, McpClientError) or not isinstance(
+                failure, Exception
+            ):
+                if failure is exc:
+                    raise
+                raise failure from exc
+            raise McpClientError(
+                f"Could not connect to {self._url}: {describe_exception(failure)}"
+            ) from failure
 
     async def __aexit__(
         self,
@@ -158,8 +230,8 @@ class McpClient:
             CallToolResult: The fully-typed MCP result.
 
         Raises:
-            McpRequestTimeoutError: When the daemon does not respond
-                within the timeout. The daemon may still complete the
+            McpRequestTimeoutError: When the server does not respond
+                within the timeout. The server may still complete the
                 operation server-side; the message says so and how to
                 allow more time.
             McpClientError: When the call fails for any other reason
@@ -189,9 +261,9 @@ class McpClient:
             ):
                 raise McpRequestTimeoutError(
                     f"call_tool({name!r}) timed out after "
-                    f"{timeout.total_seconds():g} seconds. The daemon may still "
+                    f"{timeout.total_seconds():g} seconds. The server may still "
                     f"complete the operation server-side — verify the resulting "
                     f"state before retrying. To allow more time, pass --timeout "
-                    f"or raise request.timeouts.default_seconds in cli.json."
+                    f"or raise {self._timeout_setting} in cli.json."
                 ) from exc
             raise McpClientError(f"call_tool({name!r}) failed: {exc}") from exc

@@ -452,7 +452,7 @@ def _plan_daemon(
 
     Daemon HTTP is a preset that:
 
-    - **Auto-generates the PSK**: ``--psk`` is honoured as a debug override;
+    - **Auto-generates the PSK**: ``--psk`` is honored as a debug override;
       otherwise a fresh PSK is minted via :func:`_generate_daemon_psk`.
       ``ServerConfig.psk`` is ignored.
     - **Pre-binds a loopback socket** (``127.0.0.1:0``, listening) so the

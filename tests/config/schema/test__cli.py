@@ -15,6 +15,8 @@ from deephaven_mcp.config.schema._cli import (
     DaemonReuseAction,
     DaemonReusePolicy,
     DaemonTimeouts,
+    DocsConfig,
+    DocsTimeouts,
     OutputConfig,
     RequestConfig,
     RequestTimeouts,
@@ -29,6 +31,8 @@ from deephaven_mcp.config.schema._cli import (
 def test_defaults_empty_object() -> None:
     """A missing or empty cli.json yields an all-defaults model."""
     cfg = CliConfig.model_validate({})
+    assert cfg.docs == DocsConfig()
+    assert cfg.docs.timeouts.request_seconds == 120
     assert cfg.output.format == "json"
     assert cfg.daemon.auto_start is True
     assert cfg.daemon.timeouts.startup_deadline_seconds == 30
@@ -269,6 +273,52 @@ def test_request_config_defaults() -> None:
     cfg = RequestConfig()
     assert isinstance(cfg.timeouts, RequestTimeouts)
     assert cfg.timeouts.default_seconds == 60
+
+
+# ---------------------------------------------------------------------------
+# DocsConfig / DocsTimeouts
+# ---------------------------------------------------------------------------
+
+
+def test_docs_config_defaults() -> None:
+    """The default docs endpoint is the Deephaven-hosted production server."""
+    cfg = DocsConfig()
+    assert cfg.url == "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    assert isinstance(cfg.timeouts, DocsTimeouts)
+    assert cfg.timeouts.request_seconds == 120
+
+
+def test_docs_section_accepts_empty_object() -> None:
+    """``docs: {}`` yields all-defaults for that nested level."""
+    cfg = CliConfig.model_validate({"docs": {}})
+    assert cfg.docs == DocsConfig()
+
+
+def test_docs_url_override() -> None:
+    cfg = CliConfig.model_validate({"docs": {"url": "http://localhost:8001/mcp"}})
+    assert cfg.docs.url == "http://localhost:8001/mcp"
+    # The untouched sibling timeout keeps its default.
+    assert cfg.docs.timeouts.request_seconds == 120
+
+
+def test_docs_timeout_override() -> None:
+    cfg = CliConfig.model_validate({"docs": {"timeouts": {"request_seconds": 300}}})
+    assert cfg.docs.timeouts.request_seconds == 300
+
+
+def test_rejects_zero_docs_request_timeout() -> None:
+    with pytest.raises(ValidationError, match="request_seconds"):
+        CliConfig.model_validate({"docs": {"timeouts": {"request_seconds": 0}}})
+
+
+def test_rejects_unknown_field_in_docs_section() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        CliConfig.model_validate({"docs": {"psk": "secret"}})
+
+
+def test_rejects_unknown_field_in_docs_timeouts() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        CliConfig.model_validate({"docs": {"timeouts": {"connect_seconds": 5}}})
 
 
 # ---------------------------------------------------------------------------

@@ -64,7 +64,7 @@ When deciding between the `*-accuracy` and `*-improve` variants, see the "When t
 | `tests-improve` | Comprehensively improve the test suite to 100% per-source-file coverage. |
 | `integration-tests-run` | Run integration tests (Docker / pip / subprocess-based) — encodes the `-s` flag requirement and other silent-failure traps. |
 | `check-deps-fresh` | Dependency freshness check (fresh resolve + mypy + pytest) plus failure diagnosis. |
-| `run-precommit` | Run `precommit.sh` (isort, black, ruff, mypy, markdownlint) — modifies files in place; run before committing. |
+| `run-precommit` | Run `precommit.sh` (isort, black, ruff, mypy, codespell, markdownlint) — modifies files in place; run before committing. |
 
 ## Operations & ad-hoc
 

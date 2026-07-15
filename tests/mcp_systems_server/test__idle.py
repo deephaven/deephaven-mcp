@@ -246,10 +246,10 @@ async def test_idle_watcher_start_creates_task_and_stop_cancels_it():
         assert watcher.task is tasks[0]
     finally:
         await watcher.stop()
-    # After stop(), the task is gone (cancelled and awaited).
+    # After stop(), the task is gone (canceled and awaited).
     tasks = [t for t in asyncio.all_tasks() if t.get_name() == "idle-watcher"]
     assert tasks == []
-    # exit_fn was never called: the watcher was cancelled, not fired.
+    # exit_fn was never called: the watcher was canceled, not fired.
     assert exit_calls == []
 
 

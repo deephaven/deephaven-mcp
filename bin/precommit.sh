@@ -17,6 +17,9 @@ uv run ruff check src --fix --exclude _version.py --exclude .venv
 # Run static type checking with mypy
 uv run mypy src/
 
+# Check spelling (typos + American English) with codespell
+uv run codespell
+
 # Lint markdown files with markdownlint
 npx --yes markdownlint-cli2 --fix
 

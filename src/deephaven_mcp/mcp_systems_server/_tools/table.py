@@ -13,6 +13,7 @@ import logging
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     build_table_data_response,
     check_response_size,
@@ -289,7 +290,7 @@ async def session_tables_list(context: Context, id: str) -> dict:
             exc_info=True,
         )
         return error_response(
-            f"Failed to list tables for session '{id}': {type(e).__name__}: {e}"
+            f"Failed to list tables for session '{id}': {exception_summary(e)}"
         )
 
 
@@ -499,7 +500,7 @@ async def session_table_data(
             f"[mcp_systems_server:session_table_data] Invalid format parameter '{format}' for table '{table_name}' in session '{id}': {e!r}"
         )
         result["error"] = (
-            f"Invalid format parameter '{format}' for table '{table_name}' in session '{id}': {type(e).__name__}: {e}"
+            f"Invalid format parameter '{format}' for table '{table_name}' in session '{id}': {exception_summary(e)}"
         )
         result["isError"] = True
 
@@ -510,7 +511,7 @@ async def session_table_data(
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to get data from table '{table_name}' in session '{id}': {type(e).__name__}: {e}"
+            f"Failed to get data from table '{table_name}' in session '{id}': {exception_summary(e)}"
         )
         result["isError"] = True
 

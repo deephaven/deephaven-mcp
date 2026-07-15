@@ -139,7 +139,7 @@ class EvictorPool:
                     result,
                     exc_info=result,
                 )
-        # Clear the list so re-use of the pool starts clean.
+        # Clear the list so reuse of the pool starts clean.
         self._evictors = []
 
     def _eviction_targets(

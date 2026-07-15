@@ -91,6 +91,7 @@ uv run isort .                             # sort imports
 uv run black .                             # format code
 uv run ruff check src                      # lint
 uv run ruff check src --fix                # lint and apply autofixes
+uv run codespell                           # spelling (typos + American English)
 uv run mypy src/                           # type-check
 ```
 

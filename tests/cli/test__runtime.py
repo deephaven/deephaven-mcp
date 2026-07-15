@@ -7,10 +7,11 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.cli._errors import CliError, ErrorCode
-from deephaven_mcp.cli._runtime import Runtime, load_runtime
+from deephaven_mcp.cli._runtime import Runtime, apply_cli_overrides, load_runtime
 from deephaven_mcp.config.schema import CliConfig
 from deephaven_mcp.config.tree import ConfigTree
 
@@ -85,16 +86,33 @@ async def test_load_runtime_substitutes_defaults_when_cli_absent(
     assert runtime.config.cli == CliConfig()
 
 
+def test_apply_cli_overrides_merges_and_preserves_siblings() -> None:
+    """Nested overrides win at the leaves; untouched siblings survive."""
+    base = CliConfig.model_validate({"docs": {"url": "https://docs.example.test/mcp"}})
+    out = apply_cli_overrides(base, {"docs": {"timeouts": {"request_seconds": 7}}})
+    assert out.docs.timeouts.request_seconds == 7
+    assert out.docs.url == "https://docs.example.test/mcp"
+    # The input model is not mutated.
+    assert base.docs.timeouts.request_seconds == 120
+
+
+def test_apply_cli_overrides_revalidates() -> None:
+    """An out-of-range override fails CliConfig validation."""
+    with pytest.raises(ValidationError):
+        apply_cli_overrides(
+            CliConfig(), {"request": {"timeouts": {"default_seconds": 0}}}
+        )
+
+
 @pytest.mark.asyncio
 async def test_load_runtime_applies_cli_overrides(tmp_path: Path) -> None:
-    """``cli_overrides`` replace the corresponding ``CliConfig`` sub-models."""
+    """``cli_overrides`` deep-merge into the loaded ``CliConfig``."""
     cfg_dir = tmp_path / "cfg"
     _seed_minimal_config_dir(cfg_dir)
-    base = CliConfig()
     runtime = await load_runtime(
         config_dir_override=cfg_dir,
         runtime_dir_override=tmp_path / "rt",
-        cli_overrides={"output": base.output.model_copy(update={"format": "json"})},
+        cli_overrides={"output": {"format": "json"}},
     )
     assert runtime.config.cli.output.format == "json"
     # Other sections stay at defaults.
@@ -112,13 +130,34 @@ async def test_load_runtime_overrides_win_over_disk_value(
     cli_json.write_text(json.dumps({"output": {"format": "yaml"}}))
     os.chmod(cli_json, 0o600)
 
-    base = CliConfig()
     runtime = await load_runtime(
         config_dir_override=cfg_dir,
         runtime_dir_override=tmp_path / "rt",
-        cli_overrides={"output": base.output.model_copy(update={"format": "json"})},
+        cli_overrides={"output": {"format": "json"}},
     )
     assert runtime.config.cli.output.format == "json"
+
+
+@pytest.mark.asyncio
+async def test_load_runtime_overrides_preserve_sibling_fields(
+    tmp_path: Path,
+) -> None:
+    """A nested override keeps on-disk siblings it does not touch."""
+    cfg_dir = tmp_path / "cfg"
+    _seed_minimal_config_dir(cfg_dir)
+    cli_json = cfg_dir / "cli.json"
+    cli_json.write_text(json.dumps({"docs": {"url": "https://docs.example.test/mcp"}}))
+    os.chmod(cli_json, 0o600)
+
+    runtime = await load_runtime(
+        config_dir_override=cfg_dir,
+        runtime_dir_override=tmp_path / "rt",
+        cli_overrides={"docs": {"timeouts": {"request_seconds": 7}}},
+    )
+    # The --timeout-style override lands...
+    assert runtime.config.cli.docs.timeouts.request_seconds == 7
+    # ...without clobbering the configured docs URL.
+    assert runtime.config.cli.docs.url == "https://docs.example.test/mcp"
 
 
 # ---------------------------------------------------------------------------

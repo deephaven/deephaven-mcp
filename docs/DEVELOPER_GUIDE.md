@@ -723,7 +723,7 @@ This repo uses an **agent-skill system** to keep contributions consistent. Two a
 
 The skills you'll reach for most:
 
-- `run-precommit` / [`bin/precommit.sh`](../bin/precommit.sh) — isort, black, ruff, mypy, markdownlint; run before every commit.
+- `run-precommit` / [`bin/precommit.sh`](../bin/precommit.sh) — isort, black, ruff, mypy, codespell, markdownlint; run before every commit.
 - `tests-run` / `tests-run-file` — unit suite with coverage.
 - `review-changes` — deep review of a change set before opening a PR.
 - `mcp-tool-add`, `cli-command-add`, `config-field-add` — add a tool, CLI command, or config field the project's way.
@@ -775,6 +775,15 @@ For fork-and-PR mechanics, see [`CONTRIBUTING.md`](../CONTRIBUTING.md).
   
   > [mypy](https://mypy.readthedocs.io/) provides static type checking for Python code.
 
+- **Spelling:**
+
+  ```sh
+  # Check spelling (typos + American English) with codespell
+  uv run codespell
+  ```
+  
+  > [codespell](https://github.com/codespell-project/codespell) flags common misspellings and, via its en-GB-to-en-US dictionary, British spellings — the project uses American English throughout. Configuration lives in the codespell section of [`pyproject.toml`](../pyproject.toml).
+
 ### Development Commands
 
 #### Code Quality & Pre-commit Checks
@@ -787,6 +796,7 @@ To help maintain a consistent and high-quality codebase, the [`bin/precommit.sh`
 | black        | Format Python code                             | `uv run black . --exclude '(_version.py\|.venv)'` | PEP 8 formatting |
 | ruff         | Lint code, autofix common issues, docstring style (PEP 257) | `uv run ruff check src --fix --exclude _version.py --exclude .venv` | Linting, best practices, PEP 257 docstrings |
 | mypy         | Static type checking                           | `uv run mypy src/`                  | Type correctness |
+| codespell    | Spelling (typos + American English)            | `uv run codespell`                  | Common misspellings; American spelling (en-GB-to-en-US dictionary) |
 | markdownlint | Lint and format markdown documentation         | `npx --yes markdownlint-cli2 --fix` | Markdown style, consistency |
 
 The script will run all of these tools in order. If any step fails, the script will stop and print an error. Fix the reported issues and rerun the script until it completes successfully. Only commit code that passes all code quality checks.

@@ -24,6 +24,8 @@ _EXPECTED_PUBLIC_NAMES = {
     "DaemonReuseAction",
     "DaemonReusePolicy",
     "DaemonTimeouts",
+    "DocsConfig",
+    "DocsTimeouts",
     "OutputConfig",
     "RequestConfig",
     "RequestTimeouts",

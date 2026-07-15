@@ -131,8 +131,9 @@ forward them.)
 
 ## Wrapper categories
 
-Every wrapper is one of four shapes. The `_cli-tool-wrapping` skill
-maps each to a code template; all four route through the shared flow in
+Every wrapper is one of five shapes. The `_cli-tool-wrapping` skill
+maps each to a code template; the first four route through the shared
+flow in
 [`cli/_commands/_wrapping.py`](../../src/deephaven_mcp/cli/_commands/_wrapping.py).
 `call_for_payload` runs the fetch half
 (`acquire` → `call_tool` → `tool_payload` → `require_success`) and feeds
@@ -152,6 +153,16 @@ re-surface a partial-result diagnostic on stderr; see *Output shaping*).
 4. **Client-side composite** — wraps a tool for data, then adds local
    behavior. Example: `session open` fetches the authed URL via
    `session_community_credentials`, then launches a browser.
+5. **Direct-URL** — one tool on a remote MCP server named by a
+   `cli.json` URL; the local daemon is not involved and is never
+   started, so the acquire half (and its error codes) does not apply.
+   The wrapper builds its own `McpClient` from config and reuses the
+   render half (`tool_payload` → `require_success` → `echo_payload`).
+   Example: `docs ask` → `docs_chat` at `docs.url`. The drift test
+   still verifies the `wraps_tool` binding; the wrapper's help lists
+   the transport error codes (`mcp_request_failed`,
+   `mcp_request_timeout`) instead of the acquire codes
+   (`_DIRECT_URL_WRAPPERS` in `tests/cli/test_tool_wrapper_drift.py`).
 
 ### Worked example (passthrough)
 
@@ -194,7 +205,7 @@ Two consequences shaped the helpers:
 
 ## The drift contract
 
-A wrapper re-declares, as click flags, the parameters of the MCP tool it
+A wrapper redeclares, as click flags, the parameters of the MCP tool it
 fronts. That binding can silently rot when a tool's signature changes.
 Two mechanisms keep them honest.
 
@@ -243,6 +254,7 @@ runs the drift check on `_tools/**` or `cli/_commands/**` edits).
 | `table` | `list`→`session_tables_list`; `schema`→`session_tables_schema`; `data`→`session_table_data` |
 | `catalog` | (Enterprise only) `tables`→`catalog_tables_list`; `namespaces`→`catalog_namespaces_list`; `schema`→`catalog_tables_schema`; `sample`→`catalog_table_sample` |
 | `pq` | (Enterprise only) `list`/`details`/`create`/`modify`/`delete`/`start`/`stop`/`restart`/`name-to-id` → `pq_*` |
+| `docs` | (Direct-URL; docs server at `docs.url`, no daemon) `ask`→`docs_chat`; `status`→ connectivity probe (no tool binding) |
 
 Every group above is implemented, each complete (all of a noun's verbs
 are wrapped). Any tool is still reachable directly via `dh-mcp tool call`

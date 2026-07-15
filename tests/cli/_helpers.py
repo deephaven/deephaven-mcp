@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 from pydantic import SecretStr
 
-from deephaven_mcp.cli._runtime import Runtime
+from deephaven_mcp.cli._runtime import Runtime, apply_cli_overrides
 from deephaven_mcp.config.schema import CliConfig, ServerConfig
 from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
@@ -69,8 +69,9 @@ def fake_load_runtime(
 
     This helper closes the gap: the returned coroutine accepts the
     real signature, applies ``cli_overrides`` to the supplied
-    runtime's ``config.cli`` via :meth:`pydantic.BaseModel.model_copy`,
-    and returns a fresh :class:`Runtime`. Tests can therefore pass
+    runtime's ``config.cli`` via the production
+    :func:`~deephaven_mcp.cli._runtime.apply_cli_overrides`, and
+    returns a fresh :class:`Runtime`. Tests can therefore pass
     ``-o json`` and assert on JSON output without constructing a
     JSON-mode runtime upfront.
     """
@@ -83,7 +84,7 @@ def fake_load_runtime(
     ) -> Runtime:
         if not cli_overrides:
             return runtime
-        new_cli = runtime.config.cli.model_copy(update=cli_overrides)
+        new_cli = apply_cli_overrides(runtime.config.cli, cli_overrides)
         new_config = runtime.config.model_copy(update={"cli": new_cli})
         return Runtime(
             config_dir=runtime.config_dir,

@@ -14,6 +14,7 @@ For the specified file or function, verify that all docstrings are factually acc
 - `Returns` section matches what the function actually returns — including the value vocabulary of any documented string field (apply `_output-serialization-conventions`); if the docstring lists possible values, they must match what the code emits
 - `Raises` section lists only exceptions the function actually raises
 - No documented behavior that the code no longer implements
+- Spelling in the docstrings you touch — apply `_python-coding-practices` rule 8; verify with `uv run codespell <file>`
 
 **Pydantic fields** — when the change touches a `StrictSchema` /
 `RedactableSchema` subclass, check the field's trailing PEP 257

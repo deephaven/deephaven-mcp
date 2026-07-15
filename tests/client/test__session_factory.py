@@ -381,7 +381,7 @@ async def test_connect_to_new_worker_python_side_timeout(
     coreplus_session_manager, dummy_session_manager
 ):
     """Python-side ``asyncio.wait_for`` raises ``DeephavenConnectionError`` when the
-    SDK does not honour its own ``timeout_seconds`` argument.
+    SDK does not honor its own ``timeout_seconds`` argument.
 
     The wrapped call is replaced with a slow synchronous function so the
     underlying ``asyncio.to_thread`` would block past ``timeout_seconds``; the

@@ -85,6 +85,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from deephaven_mcp._env import env_int, env_required, env_str
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._health import HEALTH_PATH
 from deephaven_mcp._logging import log_process_state
 
@@ -219,25 +220,25 @@ def _log_lifespan_exception(exc: BaseException) -> None:
     Args:
         exc (BaseException): The individual exception to log.
     """
-    exc_type = type(exc).__name__
+    summary = exception_summary(exc)
     if isinstance(exc, anyio.ClosedResourceError):
-        _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.debug(f"[mcp_docs_server:app_lifespan] {summary}")
         _LOGGER.debug(
             "[mcp_docs_server:app_lifespan] This indicates a client disconnected early (expected behavior)"
         )
     elif isinstance(exc, TimeoutError):
-        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {summary}")
         _LOGGER.error(
             "[mcp_docs_server:app_lifespan] This indicates an operation timed out during server operation"
         )
     elif isinstance(exc, ConnectionError | OSError):
-        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {exc_type}: {exc}")
+        _LOGGER.error(f"[mcp_docs_server:app_lifespan] {summary}")
         _LOGGER.error(
             "[mcp_docs_server:app_lifespan] This indicates a connection or system-level error during server operation"
         )
     else:
         _LOGGER.error(
-            f"[mcp_docs_server:app_lifespan] Unexpected exception type {exc_type}: {exc}"
+            f"[mcp_docs_server:app_lifespan] Unexpected exception type {summary}"
         )
 
 
@@ -357,7 +358,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, object]]:
         # CancelledError. except* Exception does NOT catch CancelledError (BaseException),
         # so we must handle it explicitly to log and re-raise.
         _LOGGER.warning(
-            f"[mcp_docs_server:app_lifespan] Server task(s) cancelled during runtime yield: {eg}"
+            f"[mcp_docs_server:app_lifespan] Server task(s) canceled during runtime yield: {eg}"
         )
         raise
     except* Exception as eg:
@@ -729,7 +730,7 @@ async def docs_chat(
         - **Always includes 'success' field when a dict is returned** - reliable for programmatic error detection
         - **Consistent error format** - predictable structure for error handling logic
         - **Exception note**: ``asyncio.CancelledError`` is re-raised (not returned) when the
-          request is cancelled by the caller or an upstream timeout; all other errors are
+          request is canceled by the caller or an upstream timeout; all other errors are
           returned as structured dict responses.
 
         **Common Error Categories:**
@@ -923,7 +924,7 @@ async def docs_chat(
     except asyncio.CancelledError:
         _elapsed = time.monotonic() - _t_request_start
         _LOGGER.warning(
-            f"[mcp_docs_server:docs_chat] Request cancelled after {_elapsed:.2f}s (client disconnected or upstream timeout)"
+            f"[mcp_docs_server:docs_chat] Request canceled after {_elapsed:.2f}s (client disconnected or upstream timeout)"
         )
         raise
     except OpenAIClientError as exc:
@@ -951,7 +952,7 @@ async def docs_chat(
         _log_docs_chat_generic_exception(exc, _elapsed)
         return {
             "success": False,
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": exception_summary(exc),
             "isError": True,
         }
 

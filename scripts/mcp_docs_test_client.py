@@ -156,8 +156,8 @@ if __name__ == "__main__":
         print("Timed out waiting for main() to complete.", file=sys.stderr)
         sys.exit(5)
     except asyncio.CancelledError:
-        _LOGGER.error("Async operation was cancelled")
-        print("Async operation was cancelled.", file=sys.stderr)
+        _LOGGER.error("Async operation was canceled")
+        print("Async operation was canceled.", file=sys.stderr)
         sys.exit(6)
     except KeyboardInterrupt:
         _LOGGER.info("Interrupted by user")

@@ -14,6 +14,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import (
@@ -60,8 +61,10 @@ _SHORT_REASON_MAX_LEN = 60
 def _short_reason(error_string: str) -> str:
     """Extract a compact, table-friendly reason from an init-error string.
 
-    Enterprise discovery records init errors as ``f"{type(exc).__name__}: {exc}"``
-    (see ``resource_manager/_registry_enterprise.py``), so the prefix
+    Enterprise discovery records init errors in the canonical
+    ``TypeName: message`` form produced by
+    :func:`deephaven_mcp._exception_utils.exception_summary` (see
+    ``resource_manager/_registry_enterprise.py``), so the prefix
     before the first ``": "`` is the exception class name — exactly the
     kubectl-style short code we want in the ``liveness_detail`` column.
     When the input doesn't follow that convention, the original string is
@@ -729,7 +732,7 @@ async def session_enterprise_create(
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to create enterprise session '{session_name}' on system '{system_name}': {type(e).__name__}: {e}"
+            f"Failed to create enterprise session '{session_name}' on system '{system_name}': {exception_summary(e)}"
         )
         result["isError"] = True
 
@@ -1072,7 +1075,7 @@ async def session_enterprise_delete(
         )
         result["error"] = (
             f"Failed to delete enterprise session '{session_display_name}' "
-            f"from system '{system_name}': {type(e).__name__}: {e}"
+            f"from system '{system_name}': {exception_summary(e)}"
         )
         result["isError"] = True
 

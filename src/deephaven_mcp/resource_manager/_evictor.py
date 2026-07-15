@@ -171,7 +171,7 @@ class Evictor:
             _LOGGER.exception(
                 f"[Evictor] Sweeper task for "
                 f"{self._registry.__class__.__name__} raised a non-CancelledError "
-                f"exception while being cancelled; this indicates a bug in the "
+                f"exception while being canceled; this indicates a bug in the "
                 f"sweep loop's CancelledError handling"
             )
         _LOGGER.info(
@@ -180,7 +180,7 @@ class Evictor:
         )
 
     async def _sweep_loop(self) -> None:
-        """Run :meth:`_sweep_once` periodically until cancelled.
+        """Run :meth:`_sweep_once` periodically until canceled.
 
         A single sweep exception is caught and logged; the loop
         continues.  ``asyncio.CancelledError`` is re-raised so the
@@ -209,7 +209,7 @@ class Evictor:
                     _LOGGER.exception("[Evictor] sweep failed; continuing")
         except asyncio.CancelledError:
             _LOGGER.info(
-                f"[Evictor] Sweep loop cancelled for "
+                f"[Evictor] Sweep loop canceled for "
                 f"{self._registry.__class__.__name__}"
             )
             raise
