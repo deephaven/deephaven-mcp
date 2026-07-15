@@ -18,5 +18,11 @@
     "timeouts": {
       "default_seconds": 60
     }
+  },
+  "docs": {
+    "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    "timeouts": {
+      "request_seconds": 120
+    }
   }
 }

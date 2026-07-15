@@ -8,13 +8,15 @@ request timeout, and whether the daemon is auto-started on demand.
 
 Loader: :func:`load_cli`.
 
-The schema is organised into three top-level domain sections:
+The schema is organized into four top-level domain sections:
 
 - :class:`OutputConfig` — presentation knobs (currently ``format``).
 - :class:`DaemonControlConfig` — CLI-side daemon lifecycle settings, including a
   :class:`DaemonTimeouts` sub-section for daemon-lifecycle timeouts.
 - :class:`RequestConfig` — outbound MCP request settings, including a
   :class:`RequestTimeouts` sub-section for request-level timeouts.
+- :class:`DocsConfig` — docs MCP server settings (endpoint URL), including a
+  :class:`DocsTimeouts` sub-section for docs-request timeouts.
 
 Each section has its own ``timeouts:`` sub-section reserved from day one
 (on the sections that have any time-shaped knobs), so future timeouts
@@ -45,6 +47,12 @@ Wire format (JSON5; ``//`` comments are accepted)::
             "timeouts": {
                 "default_seconds": 60
             }
+        },
+        "docs": {
+            "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+            "timeouts": {
+                "request_seconds": 120
+            }
         }
     }
 """
@@ -57,6 +65,8 @@ __all__ = [
     "DaemonReuseAction",
     "DaemonReusePolicy",
     "DaemonTimeouts",
+    "DocsConfig",
+    "DocsTimeouts",
     "OutputConfig",
     "RequestConfig",
     "RequestTimeouts",
@@ -67,8 +77,9 @@ import logging
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from deephaven_mcp._pydantic import RedactableSchema
 from deephaven_mcp.config._loaders import load_named_json
@@ -226,6 +237,80 @@ class RequestConfig(RedactableSchema):
     """Outbound-request timeouts."""
 
 
+class DocsTimeouts(RedactableSchema):
+    """Timeouts the CLI applies to docs MCP server requests."""
+
+    request_seconds: Annotated[int, Field(gt=0)] = 120
+    """Maximum number of seconds to wait for a docs server tool call
+    to complete. Docs queries are answered by an LLM backend, so the
+    default is higher than the daemon request default. Overridden per
+    invocation by ``--timeout``; surfaced as exit code ``2`` when
+    exceeded."""
+
+
+class DocsConfig(RedactableSchema):
+    """Docs MCP server settings for the ``dh-mcp docs`` commands."""
+
+    url: str = "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    """Streamable-HTTP endpoint of the docs MCP server. Must be an
+    ``http://`` or ``https://`` URL with a host. Defaults to the
+    Deephaven-hosted production docs server; point it at another
+    endpoint (e.g. a self-hosted ``dh-mcp-docs-server``) to query that
+    instead."""
+
+    timeouts: DocsTimeouts = Field(default_factory=DocsTimeouts)
+    """Docs-request timeouts."""
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str) -> str:
+        """Reject ``docs.url`` values that are not http(s) URLs with a host.
+
+        The field is a streamable-HTTP endpoint; catching an empty
+        value, a malformed URL, or an unsupported scheme here surfaces
+        the mistake as ``config_invalid`` at load time instead of a
+        later ``mcp_request_failed``.
+
+        Args:
+            value (str): The raw ``url`` field value.
+
+        Returns:
+            str: ``value``, unchanged, when valid.
+
+        Raises:
+            ValueError: When ``value`` is not an ``http://`` or
+                ``https://`` URL with a non-empty host, its port is
+                non-numeric or out of range, or it contains userinfo
+                credentials.
+        """
+        message = (
+            f"docs.url must be an http:// or https:// URL with a host, got {value!r}"
+        )
+        try:
+            parts = urlsplit(value)
+            # ``hostname``, not ``netloc``: a hostless authority such
+            # as ``http://@/mcp`` or ``http://:8000/mcp`` has a
+            # non-empty netloc but no host to connect to. ``port``
+            # raises for a non-numeric or out-of-range port.
+            hostname = parts.hostname
+            _ = parts.port
+        except ValueError as exc:
+            raise ValueError(message) from exc
+        if parts.scheme not in ("http", "https") or not hostname:
+            raise ValueError(message)
+        # The docs transport takes no credentials, and the configured
+        # URL is surfaced verbatim (docs status payload, error
+        # messages) — rejecting userinfo eagerly keeps secrets out of
+        # terminal output and logs.
+        if parts.username is not None or parts.password is not None:
+            raise ValueError(
+                "docs.url must not contain userinfo credentials "
+                "(user:password@); the docs server takes no credentials "
+                "and the URL is echoed in output and error messages"
+            )
+        return value
+
+
 class CliConfig(RedactableSchema):
     """Validated contents of ``cli.json``.
 
@@ -243,6 +328,9 @@ class CliConfig(RedactableSchema):
 
     request: RequestConfig = Field(default_factory=RequestConfig)
     """CLI-side request / RPC settings."""
+
+    docs: DocsConfig = Field(default_factory=DocsConfig)
+    """Docs MCP server settings."""
 
 
 async def load_cli(config_dir: Path) -> CliConfig:

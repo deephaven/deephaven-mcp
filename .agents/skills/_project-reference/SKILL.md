@@ -134,6 +134,7 @@ uv run black --check --diff . --exclude '_version\.py|\.venv'                 # 
 uv run ruff check src --exclude _version.py                                   # linting (~0.015 seconds)
 uv run isort . --check-only --diff --skip _version.py --skip .venv            # import sort (~0.34 seconds)
 uv run mypy src/                                                              # type checking (~15 seconds)
+uv run codespell                                                              # spelling: typos + American English (~1 second)
 npx --yes markdownlint-cli2                                                   # markdown linting (requires node)
 ```
 

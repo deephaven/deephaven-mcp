@@ -114,7 +114,7 @@ class _FakeGrpcCall(grpc.RpcError, grpc.Call):
 
 
 def test_describe_exception_chain_plain():
-    assert describe_exception_chain(ValueError("boom")) == "boom"
+    assert describe_exception_chain(ValueError("boom")) == "ValueError: boom"
 
 
 def test_describe_exception_chain_grpc_detail():
@@ -130,17 +130,33 @@ def test_describe_exception_chain_grpc_detail():
         message = describe_exception_chain(exc)
 
     assert message == (
-        "failed to finish FetchTableOp operation -> "
+        "Exception: failed to finish FetchTableOp operation -> "
         "gRPC INVALID_ARGUMENT: Column Foo has unsupported type"
     )
 
 
-def test_describe_exception_chain_skips_duplicate_substring():
+def test_describe_exception_chain_skips_duplicate_summary():
+    """A cause whose full summary repeats the wrapper's text is dropped."""
     inner = ValueError("root detail")
-    outer = RuntimeError("wrapper: root detail")
+    outer = RuntimeError("wrapper: ValueError: root detail")
     outer.__cause__ = inner
 
-    assert describe_exception_chain(outer) == "wrapper: root detail"
+    assert (
+        describe_exception_chain(outer)
+        == "RuntimeError: wrapper: ValueError: root detail"
+    )
+
+
+def test_describe_exception_chain_keeps_distinct_cause():
+    """A cause with a distinct summary is appended, type name included."""
+    inner = ValueError("root detail")
+    outer = RuntimeError("wrapper failed")
+    outer.__cause__ = inner
+
+    assert (
+        describe_exception_chain(outer)
+        == "RuntimeError: wrapper failed -> ValueError: root detail"
+    )
 
 
 def test_describe_exception_chain_handles_cycle():
@@ -149,7 +165,7 @@ def test_describe_exception_chain_handles_cycle():
     first.__cause__ = second
     second.__cause__ = first
 
-    assert describe_exception_chain(first) == "a -> b"
+    assert describe_exception_chain(first) == "ValueError: a -> ValueError: b"
 
 
 def test_describe_exception_chain_grpc_code_none():

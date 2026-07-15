@@ -326,7 +326,8 @@ async def test_stop_cancels_task():
         task = evictor._sweeper_task
         assert task is not None
         await evictor.stop()
-        assert task.cancelled() or task.done()
+        # asyncio's API spells it Task.cancelled().  # codespell:ignore cancelled
+        assert task.cancelled() or task.done()  # codespell:ignore cancelled
         assert evictor._sweeper_task is None
     finally:
         await reg.close()

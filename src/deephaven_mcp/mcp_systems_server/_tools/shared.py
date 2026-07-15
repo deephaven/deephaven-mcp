@@ -131,7 +131,7 @@ def format_partial_result(
     match phase:
         case InitializationPhase.FAILED:
             detail = (
-                "Enterprise session discovery failed critically (e.g. cancelled "
+                "Enterprise session discovery failed critically (e.g. canceled "
                 "during shutdown). The registry may have partial or no data."
             )
         case InitializationPhase.NOT_STARTED | InitializationPhase.PARTIAL:

@@ -75,6 +75,9 @@ lint = [
     # Type checking and static analysis
     "mypy>=1.6.0",             # Static type checker
     "types-aiofiles",          # Type stubs for aiofiles
+
+    # Spelling
+    "codespell>=2.3.0",        # Misspellings + British-to-American spelling check
 ]
 
 # Full development environment (all features + tools)
@@ -136,6 +139,22 @@ convention = "pep257"  # Same docstring convention previously enforced by pydocs
 # Isort configuration for import sorting
 [tool.isort]
 profile = "black"  # Use black's style for import sorting
+
+# Codespell configuration for spelling (typos + American English enforcement)
+[tool.codespell]
+# "clear" = common typos; "rare" = less-common typos; "en-GB_to_en-US"
+# flags British spellings and suggests the American form (project rule:
+# American English throughout).
+builtin = "clear,rare,en-GB_to_en-US"
+# check-hidden brings the dot-prefixed trees (.agents skills prose,
+# .github workflows) into scope; the noisy or duplicate ones are skipped
+# (.claude/skills symlinks to .agents/skills).
+check-hidden = true
+skip = "./.venv,./.git,./.claude,./.mypy_cache,./.ruff_cache,./.pytest_cache,./node_modules,./coverage.xml,./uv.lock,./src/deephaven_mcp/_version.py,./htmlcov"
+# "unparseable"/"UNPARSEABLE" is an intentional wire-format payload value
+# (see mcp_systems_server/_tools/shared.py); renaming it would be a
+# breaking vocabulary change, and the spelling is valid English.
+ignore-words-list = "unparseable"
 
 # Pytest configuration for testing
 [tool.pytest.ini_options]

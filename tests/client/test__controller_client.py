@@ -1228,7 +1228,7 @@ async def test_subscribe_adopts_existing_vendor_subscription(
 async def test_subscribe_concurrent_callers_subscribe_once(
     coreplus_controller_client, dummy_controller_client
 ):
-    """Concurrent ``subscribe()`` callers are serialised by the lock.
+    """Concurrent ``subscribe()`` callers are serialized by the lock.
 
     Without the ``_subscribe_lock`` two tasks could both pass the
     ``self._subscribed`` check before either sets it to ``True`` and cause a

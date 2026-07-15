@@ -298,7 +298,7 @@ def test_audit_checks_every_path_in_multi_level_tree(tmp_path: Path) -> None:
 def test_audit_reports_unwalkable_subdirectory(clean_dir: Path) -> None:
     """An unlistable subdirectory must be reported, not silently skipped.
 
-    ``os.walk``'s default behaviour swallows ``PermissionError`` from
+    ``os.walk``'s default behavior swallows ``PermissionError`` from
     ``scandir`` calls. A subdir whose mode strips the user's read bit
     (here ``0o100`` — traverse but not list; not group/other accessible
     so it would otherwise pass the bit-mask check) could therefore
@@ -371,7 +371,7 @@ def test_audit_tree_unsupported_os_raises_internal_error(tmp_path: Path) -> None
     """An unknown ``os.name`` must fail loud rather than silently auditing.
 
     Security code does not silently degrade to a default branch on an
-    unrecognised platform; the operator must be told to add an explicit
+    unrecognized platform; the operator must be told to add an explicit
     audit strategy.
     """
     config_dir = tmp_path / "ai"
@@ -451,7 +451,7 @@ def test_harden_private_dir_unsupported_os_raises_internal_error(
 ) -> None:
     """An unknown ``os.name`` must raise rather than silently no-op.
 
-    Security code must refuse on an unrecognised OS instead of creating
+    Security code must refuse on an unrecognized OS instead of creating
     the directory with whatever default mode the umask happened to
     grant and proceeding.
     """

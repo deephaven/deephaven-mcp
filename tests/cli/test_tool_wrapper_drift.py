@@ -4,7 +4,8 @@ Each runtime CLI command that fronts an MCP tool declares the binding
 via ``wraps_tool`` / ``wraps_tools`` on
 :class:`~deephaven_mcp.cli._help.HelpfulCommand`. This test reads those
 bindings off the live click tree, builds every tool's JSON input schema
-in-process from the ``register_tools`` functions, and fails when a
+in-process (from the systems server's ``register_tools`` functions and
+the docs server's module-level FastMCP instance), and fails when a
 wrapper and its tool have drifted:
 
 - **Drift:** a tool requires a parameter the wrapper neither surfaces as
@@ -31,13 +32,16 @@ exact argument dict passed to ``call_tool``, cover that.
 from __future__ import annotations
 
 import asyncio
+import os
 from functools import cache
+from unittest.mock import patch
 
 import click
 import pytest
 from mcp.server.fastmcp import FastMCP
 
 from deephaven_mcp.cli._commands._wrapping import wrapper_error_codes
+from deephaven_mcp.cli._errors import ErrorCode
 from deephaven_mcp.cli._help import HelpfulCommand
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.mcp_systems_server._tools import (
@@ -65,6 +69,12 @@ _TOOL_MODULES = (
 # Click adds a help option to every command; it is never a tool arg.
 _NON_TOOL_PARAMS = frozenset({"help"})
 
+# Wrappers that connect directly to a configured URL (the docs MCP
+# server) rather than acquiring the local daemon. Their help lists the
+# transport error codes but not the daemon acquire codes, which their
+# flow cannot raise.
+_DIRECT_URL_WRAPPERS = frozenset({"dh-mcp docs ask"})
+
 
 @cache
 def _tool_schemas() -> dict[str, dict]:
@@ -78,7 +88,17 @@ def _tool_schemas() -> dict[str, dict]:
     for module in _TOOL_MODULES:
         module.register_tools(server)
     tools = asyncio.run(server.list_tools())
-    return {t.name: t.inputSchema for t in tools}
+    schemas = {t.name: t.inputSchema for t in tools}
+
+    # The docs server registers its tools by decorating them onto its own
+    # module-level FastMCP instance; importing the package requires
+    # INKEEP_API_KEY to be set (the docs server validates it at import
+    # time), so a dummy value is patched in for the import.
+    with patch.dict(os.environ, {"INKEEP_API_KEY": "drift-test-dummy"}):
+        from deephaven_mcp.mcp_docs_server import mcp_server as docs_server
+    docs_tools = asyncio.run(docs_server.list_tools())
+    schemas.update({t.name: t.inputSchema for t in docs_tools})
+    return schemas
 
 
 def _wrapped_commands(
@@ -171,11 +191,12 @@ def test_wrapper_help_lists_acquire_error_codes(path: str, cmd: HelpfulCommand) 
     a new wrapper that forgets to splice it in.
     """
     help_text = cmd.help or ""
-    missing = [
-        ec.value
-        for ec in wrapper_error_codes(tool_error=False)
-        if ec.value not in help_text
-    ]
+    required = (
+        (ErrorCode.MCP_REQUEST_FAILED, ErrorCode.MCP_REQUEST_TIMEOUT)
+        if path in _DIRECT_URL_WRAPPERS
+        else wrapper_error_codes(tool_error=False)
+    )
+    missing = [ec.value for ec in required if ec.value not in help_text]
     assert not missing, (
         f"{path}: help omits acquire error codes {missing}; "
         f"splice *wrapper_error_codes() into the command's error_codes"

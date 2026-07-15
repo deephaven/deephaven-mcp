@@ -129,10 +129,11 @@ class ErrorCode(StrEnum):
     MCP_REQUEST_TIMEOUT = (
         "mcp_request_timeout",
         (
-            "The MCP request timed out waiting for the daemon's response. "
-            "The daemon may still complete the operation server-side — verify "
-            "the resulting state before retrying. Allow more time with "
-            "--timeout or request.timeouts.default_seconds in cli.json."
+            "The MCP request timed out. The server may still finish "
+            "processing the request — if the operation changes state, verify "
+            "the result before retrying. Allow more time with --timeout, or "
+            "raise the timeout in cli.json: request.timeouts.default_seconds "
+            "(docs.timeouts.request_seconds for the 'docs' commands)."
         ),
     )
     TOOL_NOT_FOUND = (

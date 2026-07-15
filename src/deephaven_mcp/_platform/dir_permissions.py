@@ -238,7 +238,7 @@ def _audit_posix(config_dir: Path) -> list[str]:  # noqa: C901
         symlink_paths.add(config_dir)
 
     def _on_walk_error(exc: OSError) -> None:
-        # ``os.walk``'s default behaviour (``onerror=None``) is to
+        # ``os.walk``'s default behavior (``onerror=None``) is to
         # silently drop a directory whose contents cannot be listed
         # (typically ``PermissionError``). That would leave an audit
         # blind spot: the directory itself is still stat-checked at

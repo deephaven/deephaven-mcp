@@ -31,6 +31,7 @@ from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands.catalog import catalog as catalog_group
 from deephaven_mcp.cli._commands.config import config as config_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
+from deephaven_mcp.cli._commands.docs import docs as docs_group
 from deephaven_mcp.cli._commands.introspect import introspect as introspect_group
 from deephaven_mcp.cli._commands.pq import pq as pq_group
 from deephaven_mcp.cli._commands.session import session as session_group
@@ -46,7 +47,6 @@ from deephaven_mcp.cli._format import (
 )
 from deephaven_mcp.cli._help import HelpfulGroup, build_help
 from deephaven_mcp.cli._runtime import load_runtime
-from deephaven_mcp.config.schema import CliConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,32 +58,28 @@ _LOGGER = logging.getLogger(__name__)
 
 def _build_cli_overrides(
     *,
-    template: CliConfig,
     output: OutputMode | None,
     timeout: int | None,
     no_auto_start: bool,
 ) -> dict[str, object]:
     """Build a ``cli_overrides`` dict for :func:`load_runtime`.
 
-    Each top-level CLI flag maps to a fresh sub-model on the
-    matching :class:`CliConfig` section. ``template`` is used only
-    to obtain default sub-model instances when no override is
-    supplied for that section; passing :class:`CliConfig` directly
-    is the canonical caller.
+    Each top-level CLI flag maps to a nested partial dict of raw
+    field values, deep-merged into the loaded ``cli.json`` value by
+    :func:`load_runtime` so untouched sibling fields (e.g. a
+    configured ``docs.url`` or ``daemon.reuse`` policy) survive the
+    override. ``--timeout`` covers both the daemon request timeout
+    and the docs request timeout: it means "this invocation's
+    per-request timeout", whichever server the verb talks to.
     """
     overrides: dict[str, object] = {}
     if output is not None:
-        overrides["output"] = template.output.model_copy(update={"format": output})
+        overrides["output"] = {"format": output}
     if timeout is not None:
-        overrides["request"] = template.request.model_copy(
-            update={
-                "timeouts": template.request.timeouts.model_copy(
-                    update={"default_seconds": timeout}
-                )
-            }
-        )
+        overrides["request"] = {"timeouts": {"default_seconds": timeout}}
+        overrides["docs"] = {"timeouts": {"request_seconds": timeout}}
     if no_auto_start:
-        overrides["daemon"] = template.daemon.model_copy(update={"auto_start": False})
+        overrides["daemon"] = {"auto_start": False}
     return overrides
 
 
@@ -191,7 +187,8 @@ def _quiet_dependency_loggers(verbose: int) -> None:
             "'table', 'catalog', and 'pq' groups to inspect and "
             "operate sessions and Enterprise resources with first-class "
             "flags; 'tool' to list, show, and call any MCP tool directly; "
-            "and 'config' to inspect and validate configuration. "
+            "'docs' to ask the Deephaven documentation assistant a "
+            "question; and 'config' to inspect and validate configuration. "
             "Pass --no-auto-start to require an already-running daemon "
             "instead of spawning one. AI agents should run 'dh-mcp "
             "introspect tree' for a machine-readable manifest of every "
@@ -251,7 +248,8 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     default=None,
     help=(
         "Per-request timeout in seconds. Overrides the "
-        "'request.timeouts.default_seconds' setting in cli.json."
+        "'request.timeouts.default_seconds' setting in cli.json (and "
+        "'docs.timeouts.request_seconds' for the 'docs' commands)."
     ),
 )
 @click.option(
@@ -322,7 +320,6 @@ async def cli(
         return
 
     overrides = _build_cli_overrides(
-        template=CliConfig(),
         output=output,
         timeout=timeout,
         no_auto_start=no_auto_start,
@@ -342,6 +339,7 @@ cli.add_command(system_group)
 cli.add_command(table_group)
 cli.add_command(catalog_group)
 cli.add_command(pq_group)
+cli.add_command(docs_group)
 cli.add_command(config_group)
 cli.add_command(introspect_group)
 
@@ -548,7 +546,7 @@ def _lift_root_options(argv: list[str] | None = None) -> list[str]:
       Note: click only accepts the long ``--opt=value`` form; for
       short options it parses ``-oVALUE`` with no separator, so
       ``-o=human`` fails validation at click regardless of position.
-      The lifter still recognises the shape for symmetry; rejection
+      The lifter still recognizes the shape for symmetry; rejection
       happens at click, same as it would without lifting.
     - The attached short-value form (``-ohuman``, which click *does*
       accept as ``-o human``) is **not** lifted: the lexical pass has

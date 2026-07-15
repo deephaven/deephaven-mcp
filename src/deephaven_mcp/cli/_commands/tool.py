@@ -91,7 +91,7 @@ async def tool_list(runtime: Runtime, show_all: bool) -> None:
     """List MCP tools registered on the daemon."""
     handle = await acquire(runtime, retry_command="dh-mcp tool list")
     try:
-        async with McpClient(
+        async with McpClient.for_daemon(
             handle,
             request_timeout_seconds=runtime.config.cli.request.timeouts.default_seconds,
         ) as client:
@@ -142,7 +142,7 @@ async def tool_show(runtime: Runtime, name: str) -> None:
     """Show one MCP tool's metadata."""
     handle = await acquire(runtime, retry_command="dh-mcp tool show")
     try:
-        async with McpClient(
+        async with McpClient.for_daemon(
             handle,
             request_timeout_seconds=runtime.config.cli.request.timeouts.default_seconds,
         ) as client:

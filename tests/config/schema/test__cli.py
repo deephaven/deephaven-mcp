@@ -15,6 +15,8 @@ from deephaven_mcp.config.schema._cli import (
     DaemonReuseAction,
     DaemonReusePolicy,
     DaemonTimeouts,
+    DocsConfig,
+    DocsTimeouts,
     OutputConfig,
     RequestConfig,
     RequestTimeouts,
@@ -29,6 +31,8 @@ from deephaven_mcp.config.schema._cli import (
 def test_defaults_empty_object() -> None:
     """A missing or empty cli.json yields an all-defaults model."""
     cfg = CliConfig.model_validate({})
+    assert cfg.docs == DocsConfig()
+    assert cfg.docs.timeouts.request_seconds == 120
     assert cfg.output.format == "json"
     assert cfg.daemon.auto_start is True
     assert cfg.daemon.timeouts.startup_deadline_seconds == 30
@@ -269,6 +273,111 @@ def test_request_config_defaults() -> None:
     cfg = RequestConfig()
     assert isinstance(cfg.timeouts, RequestTimeouts)
     assert cfg.timeouts.default_seconds == 60
+
+
+# ---------------------------------------------------------------------------
+# DocsConfig / DocsTimeouts
+# ---------------------------------------------------------------------------
+
+
+def test_docs_config_defaults() -> None:
+    """The default docs endpoint is the Deephaven-hosted production server."""
+    cfg = DocsConfig()
+    assert cfg.url == "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    assert isinstance(cfg.timeouts, DocsTimeouts)
+    assert cfg.timeouts.request_seconds == 120
+
+
+def test_docs_section_accepts_empty_object() -> None:
+    """``docs: {}`` yields all-defaults for that nested level."""
+    cfg = CliConfig.model_validate({"docs": {}})
+    assert cfg.docs == DocsConfig()
+
+
+def test_docs_url_override() -> None:
+    cfg = CliConfig.model_validate({"docs": {"url": "http://localhost:8001/mcp"}})
+    assert cfg.docs.url == "http://localhost:8001/mcp"
+    # The untouched sibling timeout keeps its default.
+    assert cfg.docs.timeouts.request_seconds == 120
+
+
+def test_docs_timeout_override() -> None:
+    cfg = CliConfig.model_validate({"docs": {"timeouts": {"request_seconds": 300}}})
+    assert cfg.docs.timeouts.request_seconds == 300
+
+
+def test_rejects_zero_docs_request_timeout() -> None:
+    with pytest.raises(ValidationError, match="request_seconds"):
+        CliConfig.model_validate({"docs": {"timeouts": {"request_seconds": 0}}})
+
+
+def test_rejects_unknown_field_in_docs_section() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        CliConfig.model_validate({"docs": {"psk": "secret"}})
+
+
+def test_rejects_unknown_field_in_docs_timeouts() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        CliConfig.model_validate({"docs": {"timeouts": {"connect_seconds": 5}}})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "not a url",
+        "localhost:8001/mcp",
+        "ftp://docs.example.test/mcp",
+        "ws://docs.example.test/mcp",
+        "http://",
+        "https:///mcp",
+        # Hostless authorities: netloc is non-empty but no host exists.
+        "http://@/mcp",
+        "http://:8000/mcp",
+        "http://user:pass@/mcp",
+        # urlsplit itself raises ValueError (bracket mismatch).
+        "http://[::1/mcp",
+        # Malformed ports: .port raises for non-numeric / out-of-range.
+        "https://docs.example.test:not-a-port/mcp",
+        "https://docs.example.test:99999/mcp",
+    ],
+)
+def test_rejects_non_http_docs_url(value: str) -> None:
+    """docs.url must fail eager validation, not a later mcp_request_failed."""
+    with pytest.raises(ValidationError, match="http:// or https:// URL"):
+        CliConfig.model_validate({"docs": {"url": value}})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://user:hunter2@docs.example.test/mcp",
+        "https://user@docs.example.test/mcp",
+        "http://:hunter2@docs.example.test:8000/mcp",
+    ],
+)
+def test_rejects_docs_url_with_userinfo(value: str) -> None:
+    """Credentials in docs.url are rejected eagerly so the URL can never
+    reach runtime surfaces (docs status payload, failure messages, logs).
+    The validator's own message must not echo the URL; pydantic's
+    ``input_value`` display is a separate, load-time-local echo of the
+    user's own file."""
+    with pytest.raises(ValidationError, match="userinfo credentials") as exc:
+        CliConfig.model_validate({"docs": {"url": value}})
+    validator_messages = [e["msg"] for e in exc.value.errors()]
+    assert all("hunter2" not in m for m in validator_messages)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://localhost:8001/mcp",
+        "https://docs.example.test/mcp",
+    ],
+)
+def test_accepts_http_and_https_docs_url(value: str) -> None:
+    cfg = CliConfig.model_validate({"docs": {"url": value}})
+    assert cfg.docs.url == value
 
 
 # ---------------------------------------------------------------------------

@@ -79,7 +79,7 @@ def test_unsupported_os_error_propagates(tmp_path: Path) -> None:
     """An unknown ``os.name`` from the audit layer propagates unchanged.
 
     The policy does not swallow the ``InternalError`` the audit raises
-    on an unrecognised platform; security code must fail loud rather
+    on an unrecognized platform; security code must fail loud rather
     than silently degrade.
     """
     config_dir = tmp_path / "ai"

@@ -87,7 +87,7 @@ async def test_call_tool_success(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     expected = CallToolResult(content=[])
     fake = _fake_client(expected)
-    with patch.object(_wrapping, "McpClient", return_value=fake):
+    with patch.object(_wrapping.McpClient, "for_daemon", return_value=fake):
         result = await call_tool(make_entry(), rt, "list_systems", {})
     assert result is expected
     fake.call_tool.assert_awaited_once_with("list_systems", {})
@@ -100,7 +100,7 @@ async def test_call_tool_transport_error_maps_to_mcp_request_failed(
     rt = make_runtime(tmp_path)
     fake = AsyncMock()
     fake.__aenter__.side_effect = McpClientError("boom")
-    with patch.object(_wrapping, "McpClient", return_value=fake):
+    with patch.object(_wrapping.McpClient, "for_daemon", return_value=fake):
         with pytest.raises(CliError) as exc:
             await call_tool(make_entry(), rt, "list_systems", {})
     assert exc.value.code is ErrorCode.MCP_REQUEST_FAILED
@@ -113,7 +113,7 @@ async def test_call_tool_timeout_maps_to_mcp_request_timeout(
     rt = make_runtime(tmp_path)
     fake = AsyncMock()
     fake.__aenter__.side_effect = McpRequestTimeoutError("timed out after 60 seconds")
-    with patch.object(_wrapping, "McpClient", return_value=fake):
+    with patch.object(_wrapping.McpClient, "for_daemon", return_value=fake):
         with pytest.raises(CliError) as exc:
             await call_tool(make_entry(), rt, "pq_delete", {})
     assert exc.value.code is ErrorCode.MCP_REQUEST_TIMEOUT

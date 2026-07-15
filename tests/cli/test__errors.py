@@ -193,13 +193,17 @@ def test_mcp_request_timeout_member() -> None:
     The dynamic sweeps above check structural invariants for every member;
     this pins the specific contract agents rely on: the stable wire string,
     the exit-2 classification, and help text that carries the two remedies
-    (the operation may still complete server-side; how to allow more time).
+    (the server may still finish processing; how to allow more time) with
+    state-verification advice scoped to state-changing operations.
     """
     code = ErrorCode.MCP_REQUEST_TIMEOUT
     assert code.value == "mcp_request_timeout"
     assert code.exit_code == 2
-    assert "may still complete the operation server-side" in code.help_text
+    assert "may still finish processing the request" in code.help_text
+    assert "if the operation changes state" in code.help_text
     assert "--timeout" in code.help_text
+    assert "request.timeouts.default_seconds" in code.help_text
+    assert "docs.timeouts.request_seconds" in code.help_text
 
 
 def test_every_error_code_documented_in_cli_md() -> None:

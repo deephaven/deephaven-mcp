@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import (
     InvalidSessionNameError,
     RegistryItemNotFoundError,
@@ -1113,7 +1114,7 @@ async def session_community_create(
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to create community session '{session_name}': {type(e).__name__}: {e}"
+            f"Failed to create community session '{session_name}': {exception_summary(e)}"
         )
         result["isError"] = True
 
@@ -1376,7 +1377,7 @@ async def session_community_delete(
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to delete community session '{session_name}': {type(e).__name__}: {e}"
+            f"Failed to delete community session '{session_name}': {exception_summary(e)}"
         )
         result["isError"] = True
 

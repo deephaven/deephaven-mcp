@@ -13,6 +13,7 @@ import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
+from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_session_from_context,
 )
@@ -142,7 +143,7 @@ async def session_script_run(
             exc_info=True,
         )
         result["error"] = (
-            f"Script execution failed for session '{id}': {type(e).__name__}: {e}"
+            f"Script execution failed for session '{id}': {exception_summary(e)}"
         )
         result["isError"] = True
     return result
@@ -248,7 +249,7 @@ async def session_pip_list(context: Context, id: str) -> dict:
             exc_info=True,
         )
         result["error"] = (
-            f"Failed to list pip packages for session '{id}': {type(e).__name__}: {e}"
+            f"Failed to list pip packages for session '{id}': {exception_summary(e)}"
         )
         result["isError"] = True
     return result

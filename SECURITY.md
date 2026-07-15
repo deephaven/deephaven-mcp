@@ -25,7 +25,7 @@ Report privately via GitHub Security Advisories:
 
 ### What to expect
 
-- An acknowledgement within a few business days.
+- An acknowledgment within a few business days.
 - A coordinated-disclosure timeline negotiated with you. We will not
   disclose the issue publicly without giving you advance notice.
 - Credit in the release notes for the fix unless you ask to remain

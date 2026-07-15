@@ -177,7 +177,7 @@ def test_resolve_psk_or_exit_treats_empty_cli_psk_as_missing(tmp_path):
 
     The current implementation uses a falsy check (``if cli_psk:``)
     so an empty string from argparse is treated as not-supplied. This
-    test pins that behaviour: an empty CLI PSK with no server.json
+    test pins that behavior: an empty CLI PSK with no server.json
     PSK still hits the error path (rule 4).
     """
     with pytest.raises(SystemExit):
@@ -430,7 +430,7 @@ def test_plan_daemon_auto_generates_psk(tmp_path):
 
 
 def test_plan_daemon_uses_cli_psk_override(tmp_path):
-    """``--psk SECRET`` is honoured as a debug override; auto-gen is skipped."""
+    """``--psk SECRET`` is honored as a debug override; auto-gen is skipped."""
     server_cfg = ServerConfig()
     multi = _operator_multi(server_cfg, config_dir=tmp_path / "cfg")
     plan = http_module._plan_daemon(

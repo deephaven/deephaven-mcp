@@ -2837,7 +2837,7 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             :class:`~deephaven_mcp.auth.credentials.Credentials` object. Keeping
             the two inputs separate means a single ``system_config`` can be reused
             with different identities (password, private key, etc.) and prevents
-            secrets from ending up in dicts that may be logged, serialised,
+            secrets from ending up in dicts that may be logged, serialized,
             or persisted.
 
         Deferred Factory Creation:

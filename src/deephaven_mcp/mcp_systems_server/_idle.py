@@ -163,7 +163,7 @@ async def idle_watcher(
 
     Long-running coroutine. Intended to be created as an
     :func:`asyncio.create_task` during lifespan startup and
-    cancelled during lifespan shutdown.
+    canceled during lifespan shutdown.
 
     The sleep duration is :meth:`IdleTimer.remaining` at each loop
     iteration: when the window is reset by intervening activity,
@@ -296,7 +296,7 @@ class IdleWatcher:
         ``CancelledError`` is the expected clean-shutdown path and
         is swallowed silently. The contract for ``idle_watcher``
         forbids ``exit_fn`` from raising; if it does, the awaited
-        cancelled task re-raises that exception here and we log it
+        canceled task re-raises that exception here and we log it
         once before letting the surrounding shutdown sequence
         continue. Calling :meth:`stop` when the watcher was never
         started (or its timer was disabled) is a no-op.

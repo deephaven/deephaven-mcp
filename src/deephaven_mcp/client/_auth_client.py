@@ -117,7 +117,7 @@ class CorePlusAuthClient(ClientObjectWrapper[AuthClient]):
 
         The request is bounded by ``EnterpriseClientTimeouts.auth_timeout_seconds`` via
         :func:`asyncio.wait_for`; if the upstream RPC does not return within that
-        budget the call is cancelled and a :class:`DeephavenConnectionError` is
+        budget the call is canceled and a :class:`DeephavenConnectionError` is
         raised with a hint to tune the operator JSON config.
 
         Args:

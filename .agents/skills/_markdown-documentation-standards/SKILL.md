@@ -80,7 +80,7 @@ user-invocable: false
 
 1. **Single H1 per file**: Each markdown file has exactly one `#` heading at the top — the document title. All other section headings are H2 (`##`) or deeper. (Enforced by markdownlint MD025 / MD041.)
 2. **No skipped levels**: Do not jump from `##` to `####`. (markdownlint MD001.)
-3. **Title case for H1, sentence case for H2+**: Match the existing style of neighbouring docs (`README.md`, `docs/CONFIGURATION.md`, `docs/DEVELOPER_GUIDE.md`); do not introduce a new convention.
+3. **Title case for H1, sentence case for H2+**: Match the existing style of neighboring docs (`README.md`, `docs/CONFIGURATION.md`, `docs/DEVELOPER_GUIDE.md`); do not introduce a new convention.
 
 ## Table of Contents
 
@@ -138,4 +138,4 @@ Untagged ` ``` ` blocks defeat syntax highlighting and bypass language-specific 
 
 - Plain prose may use Unicode em dashes and curly quotes. The ASCII-only rule applies **only inside JSON / JSON5 code blocks** for copy-paste safety.
 - Emoji are discouraged in production documentation unless explicitly requested by the user. The ASCII-only rule for JSON/JSON5 blocks is strict; the no-emoji preference is the default for prose.
-- American English spelling throughout (matches `_python-coding-practices` rule 8).
+- American English spelling throughout — apply `_python-coding-practices` rule 8 (statement, enforcement, and ignore convention). Markdown-specific delta: in prose, the ignore comment takes the HTML-comment form `<!-- codespell:ignore word1,word2 -->` on the same line, which renders invisibly.

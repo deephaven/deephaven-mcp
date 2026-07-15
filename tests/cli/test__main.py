@@ -50,7 +50,6 @@ def _runtime() -> Runtime:
 def test_build_cli_overrides_no_change_returns_empty_dict() -> None:
     """When no flags are supplied the helper produces no overrides."""
     out = _build_cli_overrides(
-        template=CliConfig(),
         output=None,
         timeout=None,
         no_auto_start=False,
@@ -59,34 +58,27 @@ def test_build_cli_overrides_no_change_returns_empty_dict() -> None:
 
 
 def test_build_cli_overrides_sets_output_and_timeout() -> None:
-    """``-o`` and ``--timeout`` map to fresh ``output`` / ``request`` sub-models."""
+    """``-o`` and ``--timeout`` map to nested partial dicts of raw values."""
     out = _build_cli_overrides(
-        template=CliConfig(),
         output="json",
         timeout=5,
         no_auto_start=False,
     )
-    assert "output" in out
-    assert "request" in out
-    assert "daemon" not in out
-    # Apply via model_copy so we can assert on the resulting CliConfig shape.
-    cli_cfg = CliConfig().model_copy(update=out)
-    assert cli_cfg.output.format == "json"
-    assert cli_cfg.request.timeouts.default_seconds == 5
-    assert cli_cfg.daemon.auto_start is True
+    assert out == {
+        "output": {"format": "json"},
+        "request": {"timeouts": {"default_seconds": 5}},
+        "docs": {"timeouts": {"request_seconds": 5}},
+    }
 
 
 def test_build_cli_overrides_no_auto_start_disables_field() -> None:
     """``--no-auto-start`` disables ``daemon.auto_start`` and nothing else."""
     out = _build_cli_overrides(
-        template=CliConfig(),
         output=None,
         timeout=None,
         no_auto_start=True,
     )
-    cli_cfg = CliConfig().model_copy(update=out)
-    assert cli_cfg.daemon.auto_start is False
-    assert cli_cfg.output.format == "json"
+    assert out == {"daemon": {"auto_start": False}}
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +354,7 @@ def test_help_lists_top_level_nouns() -> None:
         "table",
         "catalog",
         "pq",
+        "docs",
         "config",
         "introspect",
     ):
@@ -383,6 +376,7 @@ def test_main_registers_exactly_the_expected_groups() -> None:
         "table",
         "catalog",
         "pq",
+        "docs",
         "config",
         "introspect",
     }

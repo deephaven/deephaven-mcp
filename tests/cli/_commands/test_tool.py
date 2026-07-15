@@ -54,7 +54,7 @@ def test_tool_list_hides_private_by_default(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "list"], rt)
     assert result.exit_code == 0
@@ -73,7 +73,7 @@ def test_tool_list_empty_shows_registered_message(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "list"], rt)
     assert result.exit_code == 0
@@ -92,7 +92,7 @@ def test_tool_list_all_includes_private(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "list", "--all"], rt)
     assert result.exit_code == 0
@@ -129,7 +129,7 @@ def test_tool_list_mcp_failure(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "list"], rt)
     assert result.exit_code == 2
@@ -152,7 +152,7 @@ def test_tool_show_returns_metadata_in_json(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["-o", "json", "tool", "show", "foo"], rt)
     assert result.exit_code == 0
@@ -176,7 +176,7 @@ def test_tool_show_human_output(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "show", "foo"], rt)
     assert result.exit_code == 0
@@ -196,7 +196,7 @@ def test_tool_show_unknown_name(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "show", "missing"], rt)
     assert result.exit_code == 2
@@ -217,7 +217,7 @@ def test_tool_show_unknown_internal_name_suggests_internal(tmp_path: Path) -> No
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "show", "_missing"], rt)
     assert result.exit_code == 2
@@ -237,7 +237,7 @@ def test_tool_show_unknown_name_no_tools_omits_suggestion(tmp_path: Path) -> Non
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "show", "missing"], rt)
     assert result.exit_code == 2
@@ -274,7 +274,7 @@ def test_tool_show_mcp_failure(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(tool_mod, "McpClient", return_value=fake),
+        patch.object(tool_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "show", "foo"], rt)
     assert result.exit_code == 2
@@ -297,7 +297,7 @@ def test_tool_call_success(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(wrapping_mod, "McpClient", return_value=fake),
+        patch.object(wrapping_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "call", "foo", "--arg", "k=42"], rt)
     assert result.exit_code == 0
@@ -319,7 +319,7 @@ def test_tool_call_returns_3_on_tool_error(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(wrapping_mod, "McpClient", return_value=fake),
+        patch.object(wrapping_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "call", "foo"], rt)
     assert result.exit_code == 3
@@ -361,7 +361,7 @@ def test_tool_call_mcp_failure(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(wrapping_mod, "McpClient", return_value=fake),
+        patch.object(wrapping_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "call", "foo"], rt)
     assert result.exit_code == 2
@@ -375,7 +375,7 @@ def test_tool_call_timeout_maps_to_mcp_request_timeout(tmp_path: Path) -> None:
         patch.object(
             acquire_mod, "get_or_start_daemon", AsyncMock(return_value=make_entry())
         ),
-        patch.object(wrapping_mod, "McpClient", return_value=fake),
+        patch.object(wrapping_mod.McpClient, "for_daemon", return_value=fake),
     ):
         result = _invoke(["tool", "call", "foo"], rt)
     assert result.exit_code == 2

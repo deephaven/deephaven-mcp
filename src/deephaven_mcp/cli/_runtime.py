@@ -31,12 +31,13 @@ because :mod:`deephaven_mcp.cli._main` skips the load on those paths.
 
 from __future__ import annotations
 
-__all__ = ["Runtime", "load_runtime"]
+__all__ = ["Runtime", "apply_cli_overrides", "load_runtime"]
 
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from deephaven_mcp._dictutil import deep_merge
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.config import (
@@ -44,10 +45,36 @@ from deephaven_mcp.config import (
     resolve_config_dir,
     resolve_runtime_dir,
 )
+from deephaven_mcp.config.schema import CliConfig
 from deephaven_mcp.config.tree import ConfigTree, ConfigTreeLoader
 from deephaven_mcp.daemon_registry import DaemonDirectory
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def apply_cli_overrides(cli: CliConfig, cli_overrides: dict[str, object]) -> CliConfig:
+    """Return ``cli`` with per-invocation flag overrides merged in.
+
+    ``cli_overrides`` is a nested partial mapping of raw field values
+    (e.g. ``{"request": {"timeouts": {"default_seconds": 5}}}``). It is
+    deep-merged into ``cli``'s current values and the result is
+    re-validated, so sibling fields the overrides do not touch keep
+    their existing values.
+
+    Args:
+        cli (CliConfig): The loaded ``cli.json`` value.
+        cli_overrides (dict[str, object]): Nested partial mapping of raw
+            field values whose leaves win over ``cli``'s values.
+
+    Returns:
+        CliConfig: A new validated model with the overrides applied.
+
+    Raises:
+        pydantic.ValidationError: When the merged mapping fails
+            :class:`CliConfig` validation.
+    """
+    merged = deep_merge(cli.model_dump(), cli_overrides)
+    return CliConfig.model_validate(merged)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,10 +125,11 @@ async def load_runtime(
     runs inside :class:`ConfigTreeLoader.initialize`.
 
     CLI flag overrides supplied via ``cli_overrides`` are applied to
-    the loaded ``config.cli`` after validation. Each key in the dict
-    must be a sub-section name on :class:`CliConfig` whose value is
-    a :class:`CliConfig` sub-model produced by
-    :mod:`deephaven_mcp.cli._main` from the parsed flag values.
+    the loaded ``config.cli`` after validation. The dict is a nested
+    partial mapping of raw field values (e.g.
+    ``{"request": {"timeouts": {"default_seconds": 5}}}``) deep-merged
+    into the loaded value and re-validated, so sibling fields the
+    flags do not touch keep their on-disk values.
 
     Args:
         config_dir_override (Path | None): Optional explicit config
@@ -112,10 +140,10 @@ async def load_runtime(
             runtime directory. ``None`` falls back to
             ``$DH_MCP_DATA_DIR/runtime`` (or the platform default
             user-data root's ``runtime`` subdirectory).
-        cli_overrides (dict[str, object] | None): Optional sub-model
-            replacements applied to ``config.cli`` after loading.
-            ``None`` (or an empty dict) leaves the on-disk value
-            unchanged.
+        cli_overrides (dict[str, object] | None): Optional nested
+            partial mapping of raw field values deep-merged into
+            ``config.cli`` after loading. ``None`` (or an empty dict)
+            leaves the on-disk value unchanged.
 
     Returns:
         Runtime: The frozen, fully-validated runtime context.
@@ -136,7 +164,7 @@ async def load_runtime(
 
     if cli_overrides:
         tree = tree.model_copy(
-            update={"cli": tree.cli.model_copy(update=cli_overrides)}
+            update={"cli": apply_cli_overrides(tree.cli, cli_overrides)}
         )
 
     _LOGGER.debug(

@@ -78,7 +78,7 @@ max_concurrent_sessions: Annotated[int, Field(ge=0)] = 5
 max_concurrent_sessions: Annotated[int | None, Field(default=5, gt=0)] = 5
 ```
 
-### D. Single source of truth: derive, don't re-declare
+### D. Single source of truth: derive, don't redeclare
 
 If field A is fully derivable from field B, derive it at the
 consumer boundary; do not expose both as independent JSON knobs.
