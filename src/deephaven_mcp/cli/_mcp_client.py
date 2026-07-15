@@ -19,6 +19,7 @@ from __future__ import annotations
 
 __all__ = ["McpClient", "McpClientError", "McpRequestTimeoutError"]
 
+import asyncio
 import logging
 from contextlib import AsyncExitStack
 from datetime import timedelta
@@ -37,6 +38,28 @@ from deephaven_mcp.auth.middleware._psk import PSK_HEADER_NAME
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _is_internal_cancellation(exc: BaseException) -> bool:
+    """Report whether ``exc`` is a cancellation not requested from outside.
+
+    Distinguishes the anyio task-group pattern — a peer failure cancels
+    the host task and the cancel scope absorbs the cancellation (calling
+    ``Task.uncancel``) before the real failure is re-raised at unwind —
+    from an external ``Task.cancel``, whose request is still pending on
+    the current task.
+
+    Args:
+        exc (BaseException): The exception caught during ``__aenter__``.
+
+    Returns:
+        bool: ``True`` when ``exc`` is a :class:`asyncio.CancelledError`
+            and the current task has no pending external cancel request.
+    """
+    if not isinstance(exc, asyncio.CancelledError):
+        return False
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() == 0  # codespell:ignore cancelling
 
 
 class McpClient:
@@ -132,8 +155,11 @@ class McpClient:
             McpClientError: When the transport cannot be opened or the
                 MCP session fails to initialize (e.g. the server is
                 unreachable). The partially-entered stack is closed
-                first. Cancellation and other non-``Exception``
-                failures propagate unwrapped.
+                first. External cancellation and other non-``Exception``
+                failures propagate unwrapped; an internal cancellation
+                (the transport task group canceling its peers on a
+                connect failure) is replaced by the real failure raised
+                at unwind time.
         """
         try:
             http_client = await self._stack.enter_async_context(
@@ -151,6 +177,7 @@ class McpClient:
             )
             return self
         except BaseException as exc:
+            self._session = None
             failure: BaseException = exc
             try:
                 await self._stack.aclose()
@@ -159,10 +186,19 @@ class McpClient:
                 # cancels its peers (so ``initialize`` sees a bare
                 # CancelledError) and re-raises the real failure (e.g.
                 # ExceptionGroup([ConnectError])) only at unwind time;
-                # prefer it — it names the root cause. An *external*
-                # cancellation re-raises CancelledError here instead,
-                # which is not an Exception and so propagates raw.
-                failure = close_exc
+                # prefer it — it names the root cause. Never let an
+                # unwind error displace an *external* cancellation or
+                # another non-Exception entry failure (KeyboardInterrupt,
+                # SystemExit): those must propagate raw per the contract
+                # below.
+                if isinstance(exc, Exception) or _is_internal_cancellation(exc):
+                    failure = close_exc
+                else:
+                    _LOGGER.debug(
+                        f"[_mcp_client:McpClient.__aenter__] Suppressing "
+                        f"unwind error after {type(exc).__name__}: "
+                        f"{describe_exception(close_exc)}"
+                    )
             # Re-raise already-typed client errors and non-Exception
             # failures (CancelledError, KeyboardInterrupt — and any
             # BaseExceptionGroup carrying one, which is not an

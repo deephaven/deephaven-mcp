@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -235,6 +236,31 @@ def test_docs_status_unreachable_exits_2(tmp_path: Path) -> None:
     assert _error_code(result) == "mcp_request_failed"
     assert result.exception.code.exit_code == 2
     assert _DOCS_URL in str(result.exception)
+
+
+def test_docs_status_stalled_probe_times_out_exits_2(tmp_path: Path) -> None:
+    """A server that connects but stalls is bounded by the request timeout.
+
+    Regression: ``list_tools`` applies no read timeout, so the probe
+    used to hang past the configured budget; the whole probe is now
+    bounded and expiry maps to ``mcp_request_timeout``.
+    """
+    rt = make_runtime(tmp_path)
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.__aexit__.return_value = None
+
+    async def _stall() -> None:
+        await asyncio.sleep(30)
+
+    fake.list_tools = AsyncMock(side_effect=_stall)
+    with patch.object(docs_mod, "_docs_client", return_value=fake):
+        result = _invoke(
+            ["--timeout", "1", "docs", "status"], rt, standalone_mode=False
+        )
+    assert _error_code(result) == "mcp_request_timeout"
+    assert result.exception.code.exit_code == 2
+    assert "docs.timeouts.request_seconds" in str(result.exception)
 
 
 # ---------------------------------------------------------------------------

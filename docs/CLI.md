@@ -536,7 +536,7 @@ daemon is not involved and is never started.
 | Verb     | Purpose                                                                                       |
 |----------|-----------------------------------------------------------------------------------------------|
 | `ask`    | Sends a one-shot question (`PROMPT`) to the documentation assistant and prints its answer (an object with a `response` field). Wraps the docs server's `docs_chat` tool. |
-| `status` | Checks that the configured docs server is reachable: initializes an MCP session, lists its tools, and reports `{url, reachable, tools, latency_ms}`. Exits `2` with `mcp_request_failed` when unreachable. |
+| `status` | Checks that the configured docs server is reachable: initializes an MCP session, lists its tools, and reports `{url, reachable, tools, latency_ms}`. Exits `2` with `mcp_request_failed` when unreachable, or with `mcp_request_timeout` when the probe exceeds the request timeout. |
 
 `ask` accepts `--language` (`python`/`groovy`) to tailor code examples,
 `--core-version VERSION` / `--enterprise-version VERSION` to tailor the
@@ -549,7 +549,9 @@ follow-up question. A malformed `--history` exits `2` with
 
 The assistant is LLM-backed, so answers typically take several seconds;
 the docs request timeout defaults to `docs.timeouts.request_seconds`
-(120) and honors the `--timeout` flag.
+(120) and honors the `--timeout` flag. The same budget bounds the whole
+`status` probe (connect + initialize + tool list), so a server that
+connects but stalls still fails within the configured time.
 
 ```bash
 dh-mcp docs ask "How do I join two tables?"

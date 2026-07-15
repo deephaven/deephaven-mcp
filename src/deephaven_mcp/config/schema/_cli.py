@@ -77,8 +77,9 @@ import logging
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from deephaven_mcp._pydantic import RedactableSchema
 from deephaven_mcp.config._loaders import load_named_json
@@ -251,13 +252,42 @@ class DocsConfig(RedactableSchema):
     """Docs MCP server settings for the ``dh-mcp docs`` commands."""
 
     url: str = "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-    """Streamable-HTTP endpoint of the docs MCP server. Defaults to the
+    """Streamable-HTTP endpoint of the docs MCP server. Must be an
+    ``http://`` or ``https://`` URL with a host. Defaults to the
     Deephaven-hosted production docs server; point it at another
     endpoint (e.g. a self-hosted ``dh-mcp-docs-server``) to query that
     instead."""
 
     timeouts: DocsTimeouts = Field(default_factory=DocsTimeouts)
     """Docs-request timeouts."""
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str) -> str:
+        """Reject ``docs.url`` values that are not http(s) URLs with a host.
+
+        The field is a streamable-HTTP endpoint; catching an empty
+        value, a malformed URL, or an unsupported scheme here surfaces
+        the mistake as ``config_invalid`` at load time instead of a
+        later ``mcp_request_failed``.
+
+        Args:
+            value (str): The raw ``url`` field value.
+
+        Returns:
+            str: ``value``, unchanged, when valid.
+
+        Raises:
+            ValueError: When ``value`` is not an ``http://`` or
+                ``https://`` URL with a non-empty host.
+        """
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            raise ValueError(
+                f"docs.url must be an http:// or https:// URL with a host, "
+                f"got {value!r}"
+            )
+        return value
 
 
 class CliConfig(RedactableSchema):

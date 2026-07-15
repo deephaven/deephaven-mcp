@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 from pathlib import Path
+from typing import NoReturn
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -196,6 +197,125 @@ async def test_aenter_cancellation_propagates_unwrapped() -> None:
         mock_http.return_value.__aexit__ = AsyncMock(return_value=None)
         client = McpClient("https://docs.example.test/mcp")
         with pytest.raises(asyncio.CancelledError):
+            await client.__aenter__()
+        assert client._session is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_aenter_initialize_failure_clears_session() -> None:
+    """A failed ``initialize()`` leaves the client unusable, not half-open.
+
+    Regression: the session was assigned before ``initialize()`` ran, so
+    an initialization failure used to leave ``_session`` pointing at a
+    closed session that ``list_tools`` / ``call_tool`` would accept.
+    """
+    fake_session = AsyncMock()
+    fake_session.initialize = AsyncMock(side_effect=RuntimeError("init boom"))
+    with (
+        patch.object(mc, "create_mcp_http_client") as mock_http,
+        patch.object(mc, "streamable_http_client") as mock_transport,
+        patch.object(mc, "ClientSession") as mock_session_cls,
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_http.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_transport.return_value.__aenter__ = AsyncMock(
+            return_value=(MagicMock(), MagicMock(), None)
+        )
+        mock_transport.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=fake_session)
+        mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        client = McpClient("https://docs.example.test/mcp")
+        with pytest.raises(McpClientError, match="RuntimeError: init boom"):
+            await client.__aenter__()
+        assert client._session is None  # noqa: SLF001
+        with pytest.raises(McpClientError, match="before entering"):
+            await client.list_tools()
+
+
+@pytest.mark.asyncio
+async def test_aenter_external_cancellation_not_displaced_by_unwind_error() -> None:
+    """An external cancel propagates raw even when unwinding raises.
+
+    Regression: an ordinary ``Exception`` from ``aclose()`` used to
+    displace the entry failure unconditionally, wrapping the cleanup
+    error as ``McpClientError`` and swallowing the cancellation.
+    """
+    entered = asyncio.Event()
+
+    async def _hang(*_args: object) -> NoReturn:
+        # Instance magic-method mocks receive the mock as first arg.
+        entered.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    with (
+        patch.object(mc, "create_mcp_http_client") as mock_http,
+        patch.object(mc, "streamable_http_client") as mock_transport,
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        # Unwinding the entered HTTP-client context raises an ordinary
+        # Exception; it must not displace the external cancellation.
+        mock_http.return_value.__aexit__ = AsyncMock(
+            side_effect=RuntimeError("cleanup bug")
+        )
+        mock_transport.return_value.__aenter__ = AsyncMock(side_effect=_hang)
+        mock_transport.return_value.__aexit__ = AsyncMock(return_value=None)
+        client = McpClient("https://docs.example.test/mcp")
+        task = asyncio.create_task(client.__aenter__())
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert client._session is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_aenter_internal_cancellation_prefers_unwind_error() -> None:
+    """The anyio peer-cancellation pattern still surfaces the root cause.
+
+    A bare ``CancelledError`` with no pending external cancel request is
+    the transport task group canceling its peers; the real failure
+    raised at unwind time is preferred and wrapped.
+    """
+    unwind_group = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [httpx.ConnectError("All connection attempts failed")],
+    )
+    with (
+        patch.object(mc, "create_mcp_http_client") as mock_http,
+        patch.object(mc, "streamable_http_client") as mock_transport,
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_http.return_value.__aexit__ = AsyncMock(side_effect=unwind_group)
+        mock_transport.return_value.__aenter__ = AsyncMock(
+            side_effect=asyncio.CancelledError()
+        )
+        mock_transport.return_value.__aexit__ = AsyncMock(return_value=None)
+        client = McpClient("https://docs.example.test/mcp")
+        with pytest.raises(
+            McpClientError, match="ConnectError: All connection attempts failed"
+        ):
+            await client.__aenter__()
+        assert client._session is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_aenter_keyboard_interrupt_not_displaced_by_unwind_error() -> None:
+    """A non-Exception entry failure propagates raw despite an unwind error."""
+    with (
+        patch.object(mc, "create_mcp_http_client") as mock_http,
+        patch.object(mc, "streamable_http_client") as mock_transport,
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_http.return_value.__aexit__ = AsyncMock(
+            side_effect=RuntimeError("cleanup bug")
+        )
+        mock_transport.return_value.__aenter__ = AsyncMock(
+            side_effect=KeyboardInterrupt()
+        )
+        mock_transport.return_value.__aexit__ = AsyncMock(return_value=None)
+        client = McpClient("https://docs.example.test/mcp")
+        with pytest.raises(KeyboardInterrupt):
             await client.__aenter__()
         assert client._session is None  # noqa: SLF001
 

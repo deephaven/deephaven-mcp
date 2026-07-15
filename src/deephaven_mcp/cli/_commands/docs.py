@@ -7,6 +7,7 @@ from __future__ import annotations
 
 __all__ = ["docs"]
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -289,8 +290,11 @@ _OUTPUT_STATUS = OutputSpec(
             "cli.json, initializes an MCP session, and lists its tools. Use "
             "this to distinguish an unreachable or misconfigured docs server "
             "from a slow assistant answer when 'docs ask' fails. Exits 2 "
-            "with mcp_request_failed when the server cannot be reached. The "
-            "local daemon is not involved."
+            "with mcp_request_failed when the server cannot be reached, or "
+            "with mcp_request_timeout when the whole probe does not "
+            "complete within the request timeout (--timeout or "
+            "docs.timeouts.request_seconds in cli.json). The local daemon "
+            "is not involved."
         ),
         output=_OUTPUT_STATUS,
         examples=(
@@ -299,7 +303,10 @@ _OUTPUT_STATUS = OutputSpec(
         ),
         see_also=("dh-mcp docs ask PROMPT",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
-        error_codes=(ErrorCode.MCP_REQUEST_FAILED,),
+        error_codes=(
+            ErrorCode.MCP_REQUEST_FAILED,
+            ErrorCode.MCP_REQUEST_TIMEOUT,
+        ),
     ),
 )
 @click.pass_obj
@@ -307,10 +314,22 @@ _OUTPUT_STATUS = OutputSpec(
 async def docs_status(runtime: Runtime) -> None:
     """Check connectivity to the configured docs MCP server."""
     url = runtime.config.cli.docs.url
+    timeout_seconds = runtime.config.cli.docs.timeouts.request_seconds
     started = time.monotonic()
     try:
-        async with _docs_client(runtime) as client:
-            tools = await client.list_tools()
+        # list_tools applies no per-request read timeout, so bound the
+        # whole probe (connect + initialize + tool list) here; a server
+        # that connects but stalls must not exceed the request budget.
+        async with asyncio.timeout(timeout_seconds):
+            async with _docs_client(runtime) as client:
+                tools = await client.list_tools()
+    except TimeoutError as exc:
+        raise CliError(
+            f"docs status probe of {url} timed out after {timeout_seconds} "
+            f"seconds. To allow more time, pass --timeout or raise "
+            f"{_DOCS_TIMEOUT_SETTING} in cli.json.",
+            code=ErrorCode.MCP_REQUEST_TIMEOUT,
+        ) from exc
     except McpClientError as exc:
         raise CliError(
             f"Could not reach the docs server at {url}: {exc}",

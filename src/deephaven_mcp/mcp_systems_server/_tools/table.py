@@ -180,7 +180,7 @@ async def session_tables_schema(
                     {
                         "success": False,
                         "table": table_name,
-                        "error": f"Failed to get schema for table '{table_name}' in session '{id}': {type(table_exc).__name__}: {table_exc}",
+                        "error": f"Failed to get schema for table '{table_name}' in session '{id}': {exception_summary(table_exc)}",
                         "isError": True,
                     }
                 )

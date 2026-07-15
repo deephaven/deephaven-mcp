@@ -321,6 +321,36 @@ def test_rejects_unknown_field_in_docs_timeouts() -> None:
         CliConfig.model_validate({"docs": {"timeouts": {"connect_seconds": 5}}})
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "not a url",
+        "localhost:8001/mcp",
+        "ftp://docs.example.test/mcp",
+        "ws://docs.example.test/mcp",
+        "http://",
+        "https:///mcp",
+    ],
+)
+def test_rejects_non_http_docs_url(value: str) -> None:
+    """docs.url must fail eager validation, not a later mcp_request_failed."""
+    with pytest.raises(ValidationError, match="http:// or https:// URL"):
+        CliConfig.model_validate({"docs": {"url": value}})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://localhost:8001/mcp",
+        "https://docs.example.test/mcp",
+    ],
+)
+def test_accepts_http_and_https_docs_url(value: str) -> None:
+    cfg = CliConfig.model_validate({"docs": {"url": value}})
+    assert cfg.docs.url == value
+
+
 # ---------------------------------------------------------------------------
 # load_cli
 # ---------------------------------------------------------------------------

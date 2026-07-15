@@ -1725,7 +1725,7 @@ async def pq_delete(
                         "serial": serial,
                         "success": False,
                         "name": None,
-                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                        "error": f"Unexpected error: {exception_summary(r)}",
                     }
                 )
             else:
@@ -2305,7 +2305,7 @@ async def pq_start(
                         "name": None,
                         "state": None,
                         "state_category": None,
-                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                        "error": f"Unexpected error: {exception_summary(r)}",
                     }
                 )
             else:
@@ -2557,7 +2557,7 @@ async def pq_stop(
                         "success": False,
                         "name": None,
                         "state": None,
-                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                        "error": f"Unexpected error: {exception_summary(r)}",
                     }
                 )
             else:
@@ -2821,7 +2821,7 @@ async def pq_restart(
                         "name": None,
                         "state": None,
                         "state_category": None,
-                        "error": f"Unexpected error: {type(r).__name__}: {r}",
+                        "error": f"Unexpected error: {exception_summary(r)}",
                     }
                 )
             else:
