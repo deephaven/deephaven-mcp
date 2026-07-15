@@ -946,7 +946,7 @@ async def docs_chat(
             _LOGGER.exception(
                 f"[mcp_docs_server:docs_chat] OpenAI client error after {_elapsed:.2f}s: {exc}"
             )
-        return {"success": False, "error": f"OpenAIClientError: {exc}", "isError": True}
+        return {"success": False, "error": exception_summary(exc), "isError": True}
     except Exception as exc:
         _elapsed = time.monotonic() - _t_request_start
         _log_docs_chat_generic_exception(exc, _elapsed)

@@ -541,12 +541,13 @@ daemon is not involved and is never started.
 `ask` accepts `--language` (`python`/`groovy`) to tailor code examples,
 `--core-version VERSION` / `--enterprise-version VERSION` to tailor the
 answer to a Deephaven release, and `--history JSON` — a JSON array of
-message objects, each with a string `role` (`user` or `assistant`) and
-a string `content`, oldest first — to carry a prior exchange into a
-follow-up question. A `--history` value that is not a JSON array exits
-`2` with `arg_parse_error`; the entries themselves are validated by the
-docs server, and an assistant-reported failure exits `3` with
-`tool_returned_error`.
+message objects, each with a string `role` (e.g. `user` or `assistant`)
+and a string `content`, oldest first — to carry a prior exchange into a
+follow-up question. A `--history` value that does not decode to a JSON
+array of string-valued objects exits `2` with `arg_parse_error`; entry
+semantics (which keys are required, which roles are meaningful) are
+validated by the docs server, and an assistant-reported failure exits
+`3` with `tool_returned_error`.
 
 The assistant is LLM-backed, so answers typically take several seconds;
 the docs request timeout defaults to `docs.timeouts.request_seconds`

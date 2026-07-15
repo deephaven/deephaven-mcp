@@ -74,12 +74,46 @@ def test_parse_history_valid() -> None:
     ]
 
 
-def test_parse_history_forwards_entries_unvalidated() -> None:
-    """Entries pass through untouched; validation is single-homed at the
-    terminal OpenAI call (``OpenAIClient._validate_history``), which e.g.
-    accepts ``system`` roles a client-side copy might wrongly reject."""
-    raw = json.dumps([{"role": "system", "content": "x", "extra": 1}])
-    assert _parse_history(raw) == [{"role": "system", "content": "x", "extra": 1}]
+@pytest.mark.parametrize(
+    "entry",
+    [
+        # 'system' role: the terminal validator accepts it.
+        {"role": "system", "content": "x"},
+        # Extra string-valued key: within the declared wire type.
+        {"role": "user", "content": "x", "extra": "y"},
+        # Missing 'role': wire-type-valid; requiredness is the docs
+        # server's semantic check, not the CLI's.
+        {"content": "x"},
+    ],
+)
+def test_parse_history_forwards_semantics_to_server(entry: dict[str, str]) -> None:
+    """Entry semantics pass through; only the wire type is checked here."""
+    assert _parse_history(json.dumps([entry])) == [entry]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        1,
+        "not an object",
+        ["role", "content"],
+        {"role": "user", "content": 42},
+        {"role": "user", "content": "x", "extra": 1},
+    ],
+)
+def test_parse_history_rejects_wire_type_violations(entry: object) -> None:
+    """Entries outside the declared list[dict[str, str]] fail fast, exit 2."""
+    with pytest.raises(CliError) as exc:
+        _parse_history(json.dumps([entry]))
+    assert exc.value.code is ErrorCode.ARG_PARSE_ERROR
+    assert "entry 0" in str(exc.value)
+
+
+def test_parse_history_names_offending_index() -> None:
+    """The error points at the first bad entry, not just the array."""
+    raw = json.dumps([{"role": "user", "content": "ok"}, 7])
+    with pytest.raises(CliError, match="entry 1"):
+        _parse_history(raw)
 
 
 def test_parse_history_invalid_json() -> None:

@@ -279,7 +279,8 @@ class DocsConfig(RedactableSchema):
 
         Raises:
             ValueError: When ``value`` is not an ``http://`` or
-                ``https://`` URL with a non-empty host.
+                ``https://`` URL with a non-empty host, or its port is
+                non-numeric or out of range.
         """
         message = (
             f"docs.url must be an http:// or https:// URL with a host, got {value!r}"
@@ -288,8 +289,10 @@ class DocsConfig(RedactableSchema):
             parts = urlsplit(value)
             # ``hostname``, not ``netloc``: a hostless authority such
             # as ``http://@/mcp`` or ``http://:8000/mcp`` has a
-            # non-empty netloc but no host to connect to.
+            # non-empty netloc but no host to connect to. ``port``
+            # raises for a non-numeric or out-of-range port.
             hostname = parts.hostname
+            _ = parts.port
         except ValueError as exc:
             raise ValueError(message) from exc
         if parts.scheme not in ("http", "https") or not hostname:

@@ -337,6 +337,9 @@ def test_rejects_unknown_field_in_docs_timeouts() -> None:
         "http://user:pass@/mcp",
         # urlsplit itself raises ValueError (bracket mismatch).
         "http://[::1/mcp",
+        # Malformed ports: .port raises for non-numeric / out-of-range.
+        "https://docs.example.test:not-a-port/mcp",
+        "https://docs.example.test:99999/mcp",
     ],
 )
 def test_rejects_non_http_docs_url(value: str) -> None:

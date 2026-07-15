@@ -103,8 +103,10 @@ async def _call_docs_tool(
 def _parse_history(raw: str) -> list[dict[str, str]]:
     """Parse the ``--history`` JSON payload into the tool argument value.
 
-    Decodes only — message entries are not validated here. The docs
-    server's ``docs_chat`` tool validates them and rejects invalid
+    Validates the declared wire type of the ``docs_chat`` tool's
+    ``history`` parameter — ``list[dict[str, str]]``, a JSON array of
+    objects with string values. Entry semantics (required keys, role
+    vocabulary) are owned by the docs server, which rejects invalid
     messages with a structured error.
 
     Args:
@@ -116,7 +118,8 @@ def _parse_history(raw: str) -> list[dict[str, str]]:
 
     Raises:
         CliError: With :attr:`ErrorCode.ARG_PARSE_ERROR` when ``raw`` is
-            not valid JSON or not a JSON array.
+            not valid JSON, not a JSON array, or an entry is not a JSON
+            object with string values.
     """
     try:
         parsed = json.loads(raw)
@@ -129,11 +132,22 @@ def _parse_history(raw: str) -> list[dict[str, str]]:
             "--history must be a JSON array of {role, content} objects.",
             code=ErrorCode.ARG_PARSE_ERROR,
         )
-    # Do not add per-entry {role, content} checks here: entry
-    # validation is deliberately single-homed at the terminal OpenAI
-    # call (OpenAIClient._validate_history), and a client-side copy
-    # drifts — e.g. the terminal level accepts 'system' roles that a
-    # stricter local check would wrongly reject.
+    for index, entry in enumerate(parsed):
+        if not isinstance(entry, dict) or not all(
+            isinstance(value, str) for value in entry.values()
+        ):
+            raise CliError(
+                f"--history entry {index} must be a JSON object with string "
+                f"values, got {json.dumps(entry)}.",
+                code=ErrorCode.ARG_PARSE_ERROR,
+            )
+    # Only the wire type (the tool parameter's declared
+    # list[dict[str, str]]) is checked here. Entry semantics — which
+    # keys are required, which roles are meaningful — are deliberately
+    # single-homed at the docs server's terminal validator
+    # (OpenAIClient._validate_history); a client-side copy of those
+    # rules drifts (e.g. it would wrongly reject 'system' roles the
+    # terminal level accepts).
     return parsed
 
 
@@ -230,9 +244,9 @@ _OUTPUT_ASK = OutputSpec(
     metavar="JSON",
     help=(
         "Prior conversation turns for a follow-up question: a JSON array of "
-        "message objects — each with a string 'role' ('user' or 'assistant') "
-        "and a string 'content' — oldest first. The docs server validates "
-        "the entries. Omit for a fresh question."
+        "message objects — each with a string 'role' (e.g. 'user' or "
+        "'assistant') and a string 'content' — oldest first. The docs "
+        "server validates entry semantics. Omit for a fresh question."
     ),
 )
 @click.pass_obj
