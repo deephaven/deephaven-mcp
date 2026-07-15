@@ -351,6 +351,26 @@ def test_rejects_non_http_docs_url(value: str) -> None:
 @pytest.mark.parametrize(
     "value",
     [
+        "https://user:hunter2@docs.example.test/mcp",
+        "https://user@docs.example.test/mcp",
+        "http://:hunter2@docs.example.test:8000/mcp",
+    ],
+)
+def test_rejects_docs_url_with_userinfo(value: str) -> None:
+    """Credentials in docs.url are rejected eagerly so the URL can never
+    reach runtime surfaces (docs status payload, failure messages, logs).
+    The validator's own message must not echo the URL; pydantic's
+    ``input_value`` display is a separate, load-time-local echo of the
+    user's own file."""
+    with pytest.raises(ValidationError, match="userinfo credentials") as exc:
+        CliConfig.model_validate({"docs": {"url": value}})
+    validator_messages = [e["msg"] for e in exc.value.errors()]
+    assert all("hunter2" not in m for m in validator_messages)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
         "http://localhost:8001/mcp",
         "https://docs.example.test/mcp",
     ],

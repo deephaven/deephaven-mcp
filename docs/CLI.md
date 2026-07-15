@@ -223,7 +223,7 @@ restarting while end users are still protected.
 
 | Field                          | Type    | Default | Notes                                                                        |
 |--------------------------------|---------|---------|-------------------------------------------------------------------------------|
-| `docs.url`                     | string  | `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp` | Streamable-HTTP endpoint of the docs MCP server the `docs` commands query. Defaults to the Deephaven-hosted production docs server; point it at a self-hosted `dh-mcp-docs-server` to query that instead. |
+| `docs.url`                     | string  | `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp` | Streamable-HTTP endpoint of the docs MCP server the `docs` commands query. Defaults to the Deephaven-hosted production docs server; point it at a self-hosted `dh-mcp-docs-server` to query that instead. Validated eagerly: must be `http://` or `https://` with a host and a well-formed port, and must not contain userinfo credentials (`user:password@`) — the URL is echoed in output and error messages. |
 | `docs.timeouts.request_seconds`| integer | `120`   | Per-request timeout for docs server calls. Higher than the daemon request default because docs queries are LLM-backed. Override with `--timeout`. |
 
 Example (JSON5; `//` comments are accepted):
@@ -551,9 +551,10 @@ validated by the docs server, and an assistant-reported failure exits
 
 The assistant is LLM-backed, so answers typically take several seconds;
 the docs request timeout defaults to `docs.timeouts.request_seconds`
-(120) and honors the `--timeout` flag. The same budget bounds the whole
-`status` probe (connect + initialize + tool list), so a server that
-connects but stalls still fails within the configured time.
+(120) and honors the `--timeout` flag. For both verbs the budget bounds
+the complete operation — connect, MCP initialize, and the tool call or
+tool list — so a server that accepts the connection but stalls still
+fails within the configured time.
 
 ```bash
 dh-mcp docs ask "How do I join two tables?"

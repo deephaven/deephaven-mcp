@@ -10,7 +10,6 @@ __all__ = ["docs"]
 import asyncio
 import json
 import time
-from typing import Any
 
 import click
 from mcp.types import CallToolResult
@@ -70,28 +69,49 @@ def _docs_client(runtime: Runtime) -> McpClient:
 
 
 async def _call_docs_tool(
-    runtime: Runtime, name: str, arguments: dict[str, Any]
+    runtime: Runtime, name: str, arguments: dict[str, object]
 ) -> CallToolResult:
     """Invoke one docs-server MCP tool over a fresh client connection.
+
+    The configured request timeout bounds the complete operation —
+    connect, MCP initialize, and the tool call — so a server that
+    accepts the connection but stalls during initialization still
+    fails within the budget, as in ``docs status``.
 
     Args:
         runtime (Runtime): The active CLI runtime.
         name (str): The MCP tool name to invoke.
-        arguments (dict[str, Any]): The tool arguments.
+        arguments (dict[str, object]): The tool arguments.
 
     Returns:
         CallToolResult: The raw MCP call result.
 
     Raises:
         CliError: When the MCP transport reports an error —
-            ``mcp_request_timeout`` for a request timeout,
+            ``mcp_request_timeout`` when the operation does not
+            complete within the request timeout,
             ``mcp_request_failed`` for everything else.
     """
+    timeout_seconds = runtime.config.cli.docs.timeouts.request_seconds
     try:
-        async with _docs_client(runtime) as client:
-            return await client.call_tool(name, arguments)
+        # call_tool applies the request timeout only to the tool call
+        # itself; bound the whole operation (connect + initialize +
+        # call) so a stall before the call also maps to a timeout.
+        async with asyncio.timeout(timeout_seconds):
+            async with _docs_client(runtime) as client:
+                return await client.call_tool(name, arguments)
     except McpRequestTimeoutError as exc:
         raise CliError(str(exc), code=ErrorCode.MCP_REQUEST_TIMEOUT) from exc
+    except TimeoutError as exc:
+        raise CliError(
+            f"docs tool call {name!r} did not complete within "
+            f"{timeout_seconds} seconds (including connect and "
+            f"initialize). The server may still finish processing the "
+            f"request — if the operation changes state, verify the "
+            f"result before retrying. To allow more time, pass --timeout "
+            f"or raise {_DOCS_TIMEOUT_SETTING} in cli.json.",
+            code=ErrorCode.MCP_REQUEST_TIMEOUT,
+        ) from exc
     except McpClientError as exc:
         raise CliError(
             f"Could not reach the docs server at "
@@ -260,7 +280,7 @@ async def docs_ask(
     history: str | None,
 ) -> None:
     """Ask the documentation assistant a one-shot question."""
-    arguments: dict[str, Any] = {"prompt": prompt}
+    arguments: dict[str, object] = {"prompt": prompt}
     if programming_language is not None:
         arguments["programming_language"] = programming_language
     if deephaven_core_version is not None:

@@ -279,8 +279,9 @@ class DocsConfig(RedactableSchema):
 
         Raises:
             ValueError: When ``value`` is not an ``http://`` or
-                ``https://`` URL with a non-empty host, or its port is
-                non-numeric or out of range.
+                ``https://`` URL with a non-empty host, its port is
+                non-numeric or out of range, or it contains userinfo
+                credentials.
         """
         message = (
             f"docs.url must be an http:// or https:// URL with a host, got {value!r}"
@@ -297,6 +298,16 @@ class DocsConfig(RedactableSchema):
             raise ValueError(message) from exc
         if parts.scheme not in ("http", "https") or not hostname:
             raise ValueError(message)
+        # The docs transport takes no credentials, and the configured
+        # URL is surfaced verbatim (docs status payload, error
+        # messages) — rejecting userinfo eagerly keeps secrets out of
+        # terminal output and logs.
+        if parts.username is not None or parts.password is not None:
+            raise ValueError(
+                "docs.url must not contain userinfo credentials "
+                "(user:password@); the docs server takes no credentials "
+                "and the URL is echoed in output and error messages"
+            )
         return value
 
 

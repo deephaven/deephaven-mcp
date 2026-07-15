@@ -220,6 +220,31 @@ def test_docs_ask_timeout_exits_2(tmp_path: Path) -> None:
     assert result.exception.code.exit_code == 2
 
 
+def test_docs_ask_stalled_connect_times_out_exits_2(tmp_path: Path) -> None:
+    """The budget bounds the whole operation, not just the tool call.
+
+    Regression: the per-request timeout starts inside ``call_tool``, so
+    a server that accepted the connection but stalled during MCP
+    initialization used to hang ``docs ask`` past the configured budget.
+    """
+    rt = make_runtime(tmp_path)
+    fake = AsyncMock()
+
+    async def _stall() -> None:
+        await asyncio.sleep(30)
+
+    fake.__aenter__.side_effect = _stall
+    fake.__aexit__.return_value = None
+    with patch.object(docs_mod, "_docs_client", return_value=fake):
+        result = _invoke(
+            ["--timeout", "1", "docs", "ask", "q"], rt, standalone_mode=False
+        )
+    assert _error_code(result) == "mcp_request_timeout"
+    assert result.exception.code.exit_code == 2
+    assert "including connect and initialize" in str(result.exception)
+    assert "docs.timeouts.request_seconds" in str(result.exception)
+
+
 def test_docs_ask_bad_history_exits_2(tmp_path: Path) -> None:
     """Malformed --history fails before any connection is attempted."""
     rt = make_runtime(tmp_path)
