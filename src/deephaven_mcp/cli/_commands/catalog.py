@@ -85,7 +85,10 @@ _OUTPUT_TABLES = OutputSpec(
         arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
         output=_OUTPUT_TABLES,
         examples=("$ dh-mcp catalog tables enterprise:prod:rpt",),
-        see_also=("dh-mcp catalog namespaces ID", "dh-mcp catalog schema ID"),
+        see_also=(
+            "dh-mcp catalog namespaces ID",
+            "dh-mcp catalog schema ID NAMESPACE TABLE",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -297,7 +300,10 @@ _OUTPUT_TABULAR = OutputSpec(
             "$ dh-mcp catalog sample enterprise:prod:rpt Market Trades",
             "$ dh-mcp catalog sample enterprise:prod:rpt Market Trades --max-rows 20 --tail",
         ),
-        see_also=("dh-mcp catalog tables ID", "dh-mcp catalog schema ID"),
+        see_also=(
+            "dh-mcp catalog tables ID",
+            "dh-mcp catalog schema ID NAMESPACE TABLE",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),

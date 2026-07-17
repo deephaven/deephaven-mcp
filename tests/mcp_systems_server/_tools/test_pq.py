@@ -596,7 +596,7 @@ def test_format_pq_config_long_min_value_sentinel(mock_restart_enum):
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
 def test_format_pq_config_empty_worker_kind(mock_restart_enum):
-    """Test _format_pq_config converts an empty workerKind to None."""
+    """Test _format_pq_config omits worker_kind when workerKind is empty."""
     mock_restart_enum.Name.return_value = "RU_ADMIN"
     mock_config = MagicMock()
     mock_pb = MagicMock()
@@ -629,7 +629,7 @@ def test_format_pq_config_empty_worker_kind(mock_restart_enum):
     mock_pb.completedStatus = ""
     mock_pb.expirationTimeNanos = 0
     mock_pb.kubernetesControl = ""
-    mock_pb.workerKind = ""  # Empty -> None
+    mock_pb.workerKind = ""  # Empty -> key omitted
     mock_pb.createdTimeNanos = 0
     mock_pb.replicaCount = 0
     mock_pb.spareCount = 0
@@ -642,7 +642,7 @@ def test_format_pq_config_empty_worker_kind(mock_restart_enum):
 
     result = _format_pq_config(mock_config)
 
-    assert result["worker_kind"] is None
+    assert "worker_kind" not in result
 
 
 @pytest.mark.asyncio

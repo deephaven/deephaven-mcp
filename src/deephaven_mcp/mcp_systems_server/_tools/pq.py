@@ -136,6 +136,8 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
     Extracts ALL 38 fields from PersistentQueryConfigMessage protobuf and formats them
     for MCP API responses. Applies consistent field naming (snake_case) and converts
     empty/zero values to None for optional fields to produce cleaner JSON.
+    ``worker_kind`` is sparse: the key is omitted entirely when the protobuf
+    field is empty.
 
     Protobuf reference:
     https://docs.deephaven.io/protodoc/latest/#io.deephaven.proto.persistent_query.PersistentQueryConfigMessage
@@ -156,7 +158,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
 
     Returns:
         dict[str, object]: All 38 config fields formatted for MCP API, with optional fields
-            converted to None when empty
+            converted to None when empty and ``worker_kind`` omitted when empty
     """
     pb = config.pb
 
@@ -210,7 +212,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
             pb.expirationTimeNanos if pb.expirationTimeNanos else None
         ),
         "kubernetes_control": pb.kubernetesControl if pb.kubernetesControl else None,
-        "worker_kind": pb.workerKind if pb.workerKind else None,
+        **({"worker_kind": pb.workerKind} if pb.workerKind else {}),
         "created_time_nanos": (
             pb.createdTimeNanos
             if (pb.createdTimeNanos and pb.createdTimeNanos != _NULL_LONG)

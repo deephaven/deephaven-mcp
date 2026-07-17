@@ -542,6 +542,7 @@ def test_pip_list_failure_exits_3(tmp_path: Path) -> None:
 
 _CREDS = {
     "success": True,
+    "id": _SID,
     "auth_type": "PSK",
     "auth_token": "tok-123",
     "connection_url": "http://localhost:45123",

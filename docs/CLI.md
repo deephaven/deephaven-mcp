@@ -349,7 +349,7 @@ the right backend by the id's prefix; `create` chooses the backend from
 | `delete <id>`                 | Deletes a session, routing by the id prefix. Wraps `session_community_delete` / `session_enterprise_delete`. |
 | `exec <id>`                   | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. Wraps `session_script_run`. |
 | `pip-list <id>`               | Lists the session's installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
-| `credentials <id>`            | Prints a Community session's browser-login credentials (`auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
+| `credentials <id>`            | Prints a Community session's browser-login credentials (`id`, `auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
 | `url <id>`                    | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly. |
 | `open <id>`                   | Opens the authenticated URL in the default browser; `--print` prints it instead (headless-safe). |
 

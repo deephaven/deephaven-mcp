@@ -61,6 +61,9 @@ from deephaven_mcp.sessions import CommunitySessionConfig
 
 _LOGGER = logging.getLogger(__name__)
 
+LaunchMethod = Literal["docker", "python"]
+"""Closed vocabulary for how a dynamic community session is launched."""
+
 _PSK_AUTH_HANDLER = "io.deephaven.authentication.psk.PskAuthenticationHandler"
 """Fully-qualified class name (FQCN) of the Deephaven worker-side Java
 authentication handler for Pre-Shared Key (PSK) auth.
@@ -148,7 +151,7 @@ async def _check_session_limit(
 
 
 def _validate_launch_method_params(
-    launch_method: str,
+    launch_method: LaunchMethod,
     programming_language: str | None,
     docker_image: str | None,
     docker_memory_limit_gb: float | None,
@@ -163,7 +166,7 @@ def _validate_launch_method_params(
     mutually exclusive parameters are not used together.
 
     Args:
-        launch_method (str): Launch method ("docker" or "python").
+        launch_method (LaunchMethod): Launch method ("docker" or "python").
         programming_language (str | None): Docker-only parameter.
         docker_image (str | None): Docker-only parameter.
         docker_memory_limit_gb (float | None): Docker-only parameter.
@@ -254,7 +257,7 @@ def _resolve_docker_image(
 class _ResolvedSessionParams:
     """Fully resolved community session creation parameters."""
 
-    launch_method: Literal["docker", "python"]
+    launch_method: LaunchMethod
     """Resolved launch method."""
 
     programming_language: str
@@ -304,7 +307,7 @@ class _ResolvedSessionParams:
 
 
 def _resolve_community_session_parameters(
-    launch_method: str | None,
+    launch_method: LaunchMethod | None,
     programming_language: str | None,
     auth_token: str | None,
     heap_size_gb: float | int | None,
@@ -328,7 +331,7 @@ def _resolve_community_session_parameters(
     docstring for the rationale.
 
     Args:
-        launch_method (str | None): Launch method ("docker" or "python"), or None to use default
+        launch_method (LaunchMethod | None): Launch method ("docker" or "python"), or None to use default
         programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
         auth_token (str | None): Authentication token, or None to auto-generate for PSK auth
         heap_size_gb (float | int | None): JVM heap size in GB (e.g., 4 or 2.5), or None to use default
@@ -350,9 +353,10 @@ def _resolve_community_session_parameters(
             workers, a parameter is used with the wrong launch method,
             or the programming language is unsupported.
     """
-    # Resolve and validate launch method
+    # Resolve and validate launch method (runtime validation retained for
+    # untyped callers; typed callers are constrained by LaunchMethod)
     method_str = (launch_method or defaults.launch_method).lower()
-    resolved_launch_method: Literal["docker", "python"]
+    resolved_launch_method: LaunchMethod
     if method_str == "docker":
         resolved_launch_method = "docker"
     elif method_str == "python":
@@ -639,7 +643,7 @@ async def _register_session_manager(
 
 async def _launch_process_and_wait_for_ready(
     session_name: str,
-    resolved_launch_method: Literal["docker", "python"],
+    resolved_launch_method: LaunchMethod,
     resolved_auth_token: str | None,
     resolved_heap_size_gb: float | int,
     resolved_extra_jvm_args: list[str],
@@ -661,7 +665,7 @@ async def _launch_process_and_wait_for_ready(
 
     Args:
         session_name (str): Name for the session.
-        resolved_launch_method (Literal["docker", "python"]): Launch method.
+        resolved_launch_method (LaunchMethod): Launch method.
         resolved_auth_token (str | None): PSK authentication token, or None for anonymous.
         resolved_heap_size_gb (float | int): JVM heap size in gigabytes (e.g., 4 or 2.5).
         resolved_extra_jvm_args (list[str]): Additional JVM arguments.
@@ -746,7 +750,7 @@ def _build_success_response(
     session_name: str,
     connection_url: str,
     resolved_auth_type: str,
-    resolved_launch_method: Literal["docker", "python"],
+    resolved_launch_method: LaunchMethod,
     port: int,
     launched_session: LaunchedSession,
 ) -> dict:
@@ -849,7 +853,7 @@ async def _check_display_name_conflict_fast(
 async def session_community_create(
     context: Context,
     session_name: str,
-    launch_method: str | None = None,
+    launch_method: LaunchMethod | None = None,
     programming_language: str | None = None,
     auth_token: str | None = None,
     heap_size_gb: float | int | None = None,
@@ -896,7 +900,7 @@ async def session_community_create(
             existing session display names. It is also the hash input that the registry
             uses as the session's :class:`SessionId`. The final ``id``
             returned to the caller has the form ``"community:community:<session_name>"``.
-        launch_method (str | None): How to launch the session ("docker" or "python", case-insensitive).
+        launch_method (LaunchMethod | None): How to launch the session ("docker" or "python").
             - "docker": Uses Docker containers (requires Docker daemon running)
             - "python": Uses Python-launched deephaven-server (requires: pip install deephaven-server)
             Defaults to configuration value or "docker".
@@ -1548,6 +1552,7 @@ async def session_community_credentials(
 
         On Success (success=True):
             - success (bool): Always True
+            - id (str): The fully qualified session id, echoed back
             - auth_type (str): Authentication type string (uppercased). For dynamic sessions,
                 derived from the launched session's auth type (e.g., "PSK", "ANONYMOUS").
                 For static sessions, the raw config ``auth_type`` value uppercased
@@ -1569,6 +1574,7 @@ async def session_community_credentials(
     Example Success Response (PSK Authentication):
         {
             "success": True,
+            "id": "community:community:my-session",
             "auth_type": "PSK",
             "auth_token": "abc123xyz789...",
             "connection_url": "http://localhost:45123",
@@ -1578,6 +1584,7 @@ async def session_community_credentials(
     Example Success Response (ANONYMOUS Authentication):
         {
             "success": True,
+            "id": "community:community:my-session",
             "auth_type": "ANONYMOUS",
             "auth_token": "",
             "connection_url": "http://localhost:45123",
@@ -1651,8 +1658,36 @@ async def session_community_credentials(
         if not isinstance(mgr, CommunitySessionManager):
             return error_response(f"Session '{id}' is not a community session")
 
-        # Determine session type
-        is_dynamic = isinstance(mgr, DynamicCommunitySessionManager)
+        # Determine session type and extract its credentials view. Unknown
+        # subtypes must fail loudly here, before any mode check can
+        # misclassify them as static.
+        if isinstance(mgr, DynamicCommunitySessionManager):
+            # Dynamic session - get from launched_session
+            is_dynamic = True
+            auth_token = (
+                mgr.launched_session.auth_token
+                if mgr.launched_session.auth_token
+                else ""
+            )
+            connection_url = mgr.connection_url
+            connection_url_with_auth = mgr.connection_url_with_auth
+            auth_type = mgr.launched_session.auth_type.upper()
+        elif isinstance(mgr, StaticCommunitySessionManager):
+            # Static session - reads directly from the typed declaration
+            # carried on the manager (no legacy ``_config`` dict here).
+            is_dynamic = False
+            (
+                auth_type,
+                auth_token,
+                connection_url,
+                connection_url_with_auth,
+            ) = _static_credentials_view(mgr)
+        else:
+            raise InternalError(
+                f"Unhandled CommunitySessionManager subtype "
+                f"{type(mgr).__name__}; session_community_credentials must be "
+                f"extended whenever a manager subtype is added."
+            )
         is_static = not is_dynamic
 
         # Check mode-specific permissions
@@ -1681,35 +1716,9 @@ async def session_community_credentials(
             f"[mcp_systems_server:session_community_credentials] SECURITY: Credential retrieval ALLOWED (mode='{credential_retrieval_mode}', type='{session_type_str}') for id '{id}'"
         )
 
-        # Get credentials based on session type
-        if isinstance(mgr, DynamicCommunitySessionManager):
-            # Dynamic session - get from launched_session
-            auth_token = (
-                mgr.launched_session.auth_token
-                if mgr.launched_session.auth_token
-                else ""
-            )
-            connection_url = mgr.connection_url
-            connection_url_with_auth = mgr.connection_url_with_auth
-            auth_type = mgr.launched_session.auth_type.upper()
-        elif isinstance(mgr, StaticCommunitySessionManager):
-            # Static session - reads directly from the typed declaration
-            # carried on the manager (no legacy ``_config`` dict here).
-            (
-                auth_type,
-                auth_token,
-                connection_url,
-                connection_url_with_auth,
-            ) = _static_credentials_view(mgr)
-        else:
-            raise InternalError(
-                f"Unhandled CommunitySessionManager subtype "
-                f"{type(mgr).__name__}; session_community_credentials must be "
-                f"extended whenever a manager subtype is added."
-            )
-
         result = {
             "success": True,
+            "id": id,
             "auth_type": auth_type,
             "auth_token": auth_token,
             "connection_url": connection_url,

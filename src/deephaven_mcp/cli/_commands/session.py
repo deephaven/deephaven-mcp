@@ -48,6 +48,7 @@ _CREDENTIALS_TOOL = "session_community_credentials"
 """MCP tool backing the credentials / url / open verbs (Community-only)."""
 
 _CREDENTIAL_FIELDS = (
+    "id",
     "auth_type",
     "auth_token",
     "connection_url",
@@ -796,6 +797,7 @@ async def session_pip_list(runtime: Runtime, id: str) -> None:
 _OUTPUT_CREDENTIALS = OutputSpec(
     "object",
     (
+        OutputField("id", "string", "The session id, echoed back."),
         OutputField("auth_type", "string", "Authentication type, uppercased."),
         OutputField("auth_token", "string", "Plaintext auth token (empty if anon)."),
         OutputField("connection_url", "string", "Base server URL without auth."),

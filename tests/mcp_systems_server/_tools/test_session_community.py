@@ -2125,6 +2125,42 @@ async def test_session_community_credentials_unknown_manager_subtype():
 
 
 @pytest.mark.asyncio
+async def test_session_community_credentials_unknown_manager_subtype_dynamic_only():
+    """Unknown subtypes hit the InternalError guard before any mode check.
+
+    With mode='dynamic_only', a naive ``is_static = not is_dynamic``
+    classification would misreport an unknown subtype as a denied static
+    session; the guard must fire instead.
+    """
+    from deephaven_mcp.resource_manager._manager import CommunitySessionManager
+
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    config = {"security": {"credential_retrieval_mode": "dynamic_only"}}
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    mock_session_registry._community_settings = config
+
+    # Base-class mock: passes neither DynamicCommunitySessionManager nor
+    # StaticCommunitySessionManager isinstance checks.
+    manager = MagicMock(spec=CommunitySessionManager)
+    mock_session_registry.get = AsyncMock(return_value=manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_session_registry,
+        }
+    )
+    result = await session_community_credentials(context, id="community:community:x")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Unhandled CommunitySessionManager subtype" in result["error"]
+    assert "static" not in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_session_community_credentials_invalid_session_id():
     """Test when id has invalid format."""
     mock_config_manager = MagicMock()
