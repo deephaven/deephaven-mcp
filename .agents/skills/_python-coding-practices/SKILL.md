@@ -44,14 +44,14 @@ user-invocable: false
         ```
 
         `if/elif` chains that fall through to a silent default are forbidden under this rule.
-    - **Pair `Literal` with the runtime tuple.** Derive the runtime collection from the `Literal` via `typing.get_args` so they cannot drift:
+    - **Pair `Literal` with a `get_args`-derived runtime collection.** Derive the runtime collection from the `Literal` via `typing.get_args` so they cannot drift — the bare tuple when order matters, or wrapped in `set` / `frozenset` when the consumer is a membership check:
 
         ```python
         OutputMode = Literal["human", "json", "yaml"]
         OUTPUT_MODES: tuple[OutputMode, ...] = get_args(OutputMode)
         ```
 
-        Canonical implementation: `cli/_format.py` (`OutputMode`, `format_output`).
+        Canonical implementations: `cli/_format.py` (`OutputMode`, `format_output`); `VALID_FORMATS = set(get_args(TableFormat))` in `formatters/__init__.py`.
     - **Enum members with per-member metadata** (help text, exit codes, …) bind metadata via `__new__` so a member without it fails class construction at import time. Canonical implementation: `cli/_errors.py` (`ErrorCode`).
     - **Internal class hierarchies** dispatched via `isinstance` chains cannot be closed for mypy, so `assert_never` does not apply. Give every known subtype an explicit `isinstance` arm and make the final `else` raise `InternalError` naming the unhandled type. Never let the last subtype ride an implicit `else` — a new subtype then silently inherits that branch's behavior instead of failing loudly. Canonical implementations: `_build_success_response` (`LaunchedSession` dispatch) and `session_community_credentials` (`CommunitySessionManager` dispatch), both in `mcp_systems_server/_tools/session_community.py`.
     - **Open-set carve-out**: dispatches on genuinely open inputs (rendering arbitrary user payloads, dispatching on a third-party class hierarchy that may grow) get an explicit fallback that *logs or raises*. Silent `repr(value)` / "guess JSON" fallbacks are forbidden, but a documented open-set fallback is not.

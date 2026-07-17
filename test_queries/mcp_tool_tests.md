@@ -86,7 +86,7 @@ Setup:
 
 1. Call session_tables_list with id="community:community:mcp-test-tables". Verify success==true. Verify both "trades" and "orders" appear in table_names.
 
-2. Call session_table_schema with id="community:community:mcp-test-tables" and table_name="trades". Verify success==true. Verify columns TradeID (int), Symbol (string), Price (double) appear in the schema entries and column_count matches.
+2. Call session_table_schema with id="community:community:mcp-test-tables" and table_name="trades". Verify success==true. Verify columns TradeID (int), Symbol (java.lang.String), Price (double) appear in the schema entries and column_count matches.
 
 3. Call session_table_schema with id="community:community:mcp-test-tables" and table_name="orders". Verify success==true. Verify each schema entry uses snake_case keys 'name' and 'type', and that ordinary columns do not carry 'column_type'.
 
@@ -252,7 +252,7 @@ Setup: Call session_enterprise_create with session_name="mcp-test-ent-shared". V
 
 2. Call session_tables_list with the id from Setup. Verify success==true. Verify "ent_test" appears in the table list.
 
-3. Call session_table_schema with the id from Setup and table_name="ent_test". Verify success==true. Verify columns ID (int) and Label (string) are present.
+3. Call session_table_schema with the id from Setup and table_name="ent_test". Verify success==true. Verify columns ID (int) and Label (java.lang.String) are present.
 
 4. Call session_table_data with the id from Setup and table_name="ent_test". Verify success==true. Verify 3 rows are returned with correct values.
 

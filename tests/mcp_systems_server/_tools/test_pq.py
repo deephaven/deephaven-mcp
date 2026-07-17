@@ -2323,15 +2323,12 @@ def test_convert_gather_results_exception_becomes_error_dict():
     }
 
 
-def test_convert_gather_results_base_exception():
-    """A BaseException (e.g. CancelledError) is converted, not re-raised."""
+def test_convert_gather_results_base_exception_reraised():
+    """A non-Exception BaseException (e.g. CancelledError) is re-raised."""
     parsed = [("enterprise:system:1", 1)]
 
-    results = _convert_gather_results([asyncio.CancelledError("canceled")], parsed)
-
-    assert results[0]["success"] is False
-    assert "name" not in results[0]
-    assert "CancelledError" in results[0]["error"]
+    with pytest.raises(asyncio.CancelledError):
+        _convert_gather_results([asyncio.CancelledError("canceled")], parsed)
 
 
 # Note: ``test_parse_pq_id_*`` variants live further down in this module;
@@ -4570,7 +4567,7 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pq_delete_base_exception_escapes_to_gather(monkeypatch):
-    """Test pq_delete converts BaseException gather results (e.g. CancelledError) to error dicts."""
+    """Test pq_delete re-raises BaseException gather results (e.g. CancelledError)."""
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
@@ -4607,20 +4604,14 @@ async def test_pq_delete_base_exception_escapes_to_gather(monkeypatch):
 
     monkeypatch.setattr(asyncio, "gather", patched_gather)
 
-    result = await pq_delete(
-        context,
-        id=[
-            "enterprise:system:1",
-            "enterprise:system:2",
-        ],
-    )
-
-    assert result["success"] is True
-    assert len(result["results"]) == 2
-    assert result["results"][0]["success"] is True
-    assert result["results"][1]["success"] is False
-    assert "Unexpected error" in result["results"][1]["error"]
-    assert "CancelledError" in result["results"][1]["error"]
+    with pytest.raises(asyncio.CancelledError):
+        await pq_delete(
+            context,
+            id=[
+                "enterprise:system:1",
+                "enterprise:system:2",
+            ],
+        )
 
 
 @pytest.mark.asyncio

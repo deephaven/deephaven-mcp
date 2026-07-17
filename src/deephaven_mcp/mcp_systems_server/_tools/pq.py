@@ -685,14 +685,23 @@ def _convert_gather_results(
 
     Returns:
         list[dict[str, object]]: One dict per PQ. Dict results pass through
-            unchanged; an escaped exception becomes an error dict containing
-            only ``id``, ``serial``, ``success=False``, and an ``error``
-            message rendering the exception. Result-payload keys that would
-            carry values on success (``name``, ``state``, ...) are omitted.
+            unchanged; an escaped ``Exception`` becomes an error dict
+            containing only ``id``, ``serial``, ``success=False``, and an
+            ``error`` message rendering the exception. Result-payload keys
+            that would carry values on success (``name``, ``state``, ...)
+            are omitted.
+
+    Raises:
+        BaseException: A non-``Exception`` result (``asyncio.CancelledError``,
+            ``KeyboardInterrupt``, ``SystemExit``) is re-raised so
+            cancellation and shutdown signals propagate instead of being
+            recorded as per-item failures.
     """
     results: list[dict[str, object]] = []
     for i, r in enumerate(raw_results):
         if isinstance(r, BaseException):
+            if not isinstance(r, Exception):
+                raise r
             pid, serial = parsed_pqs[i]
             error_entry: dict[str, object] = {
                 "id": pid,
