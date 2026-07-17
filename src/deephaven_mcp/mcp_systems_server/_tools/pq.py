@@ -672,7 +672,6 @@ def _validate_and_parse_pq_ids(
 def _convert_gather_results(
     raw_results: list[dict[str, object] | BaseException],
     parsed_pqs: list[tuple[str, CorePlusQuerySerial]],
-    none_keys: tuple[str, ...],
 ) -> list[dict[str, object]]:
     """Convert ``asyncio.gather`` batch results into per-PQ result dicts.
 
@@ -681,15 +680,13 @@ def _convert_gather_results(
             ``asyncio.gather(..., return_exceptions=True)``, one per PQ.
         parsed_pqs (list[tuple[str, CorePlusQuerySerial]]): Parsed
             ``(id, serial)`` pairs positionally aligned with ``raw_results``.
-        none_keys (tuple[str, ...]): Payload keys emitted with value ``None``
-            in the error dict built for an escaped exception.
 
     Returns:
         list[dict[str, object]]: One dict per PQ. Dict results pass through
-            unchanged; an escaped exception becomes an error dict with
-            ``id``, ``serial``, ``success=False``, each ``none_keys`` entry
-            set to ``None``, and an ``error`` message rendering the
-            exception.
+            unchanged; an escaped exception becomes an error dict containing
+            only ``id``, ``serial``, ``success=False``, and an ``error``
+            message rendering the exception. Result-payload keys that would
+            carry values on success (``name``, ``state``, ...) are omitted.
     """
     results: list[dict[str, object]] = []
     for i, r in enumerate(raw_results):
@@ -699,10 +696,8 @@ def _convert_gather_results(
                 "id": pid,
                 "serial": serial,
                 "success": False,
+                "error": f"Unexpected error: {exception_summary(r)}",
             }
-            for key in none_keys:
-                error_entry[key] = None
-            error_entry["error"] = f"Unexpected error: {exception_summary(r)}"
             results.append(error_entry)
         else:
             results.append(r)
@@ -1686,7 +1681,7 @@ async def pq_delete(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = _convert_gather_results(raw_results, parsed_pqs, ("name",))
+        results = _convert_gather_results(raw_results, parsed_pqs)
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -2239,9 +2234,7 @@ async def pq_start(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = _convert_gather_results(
-            raw_results, parsed_pqs, ("name", "state", "state_category")
-        )
+        results = _convert_gather_results(raw_results, parsed_pqs)
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -2466,7 +2459,7 @@ async def pq_stop(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = _convert_gather_results(raw_results, parsed_pqs, ("name", "state"))
+        results = _convert_gather_results(raw_results, parsed_pqs)
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -2704,9 +2697,7 @@ async def pq_restart(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results = _convert_gather_results(
-            raw_results, parsed_pqs, ("name", "state", "state_category")
-        )
+        results = _convert_gather_results(raw_results, parsed_pqs)
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])

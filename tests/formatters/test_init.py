@@ -26,6 +26,28 @@ def create_test_table(rows: int) -> pa.Table:
     )
 
 
+# === __all__ surface-contract tests ===
+
+
+def test_all_is_exact_expected_set():
+    """__all__ is exactly the intended public surface."""
+    import deephaven_mcp.formatters as formatters
+
+    assert set(formatters.__all__) == {
+        "format_table_data",
+        "TableFormat",
+        "VALID_FORMATS",
+    }
+
+
+def test_all_exports_resolve():
+    """Every name in __all__ resolves to an attribute on the package."""
+    import deephaven_mcp.formatters as formatters
+
+    for symbol in formatters.__all__:
+        assert hasattr(formatters, symbol)
+
+
 # === VALID_FORMATS constant tests ===
 
 

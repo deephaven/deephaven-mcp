@@ -97,7 +97,7 @@ _OUTPUT_SCHEMA = OutputSpec(
             "sparse column_type ('Partitioning' or 'Grouping'; omitted for "
             "Normal columns).",
         ),
-        OutputField("column_count", "number", "Number of columns."),
+        OutputField("column_count", "integer", "Number of columns."),
     ),
     note="Schema for the one named table.",
 )

@@ -461,6 +461,8 @@ async def get_session_from_context(
             configured child registry.
         RegistryItemNotFoundError: If ``session_id`` is not present in
             the routed registry.
+        Exception: Any other exception raised by the registry lookup or
+            the session connection propagates unchanged.
     """
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Accessing session registry "
@@ -510,6 +512,8 @@ async def get_enterprise_session(
             configured child registry.
         RegistryItemNotFoundError: If ``session_id`` is not present in
             the routed registry.
+        Exception: Any other exception raised by the registry lookup or
+            the session connection propagates unchanged.
     """
     session = await get_session_from_context(function_name, context, session_id)
 

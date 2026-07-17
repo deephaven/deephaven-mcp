@@ -59,7 +59,10 @@ def _filter_option(f: Any) -> Any:
 
 _OUTPUT_TABLES = OutputSpec(
     "list",
-    (),
+    (
+        OutputField("namespace", "string", "The catalog namespace."),
+        OutputField("table_name", "string", "The table name."),
+    ),
     note=(
         "Array of {namespace, table_name} entries, one per catalog table. When "
         "the list is truncated by --max-rows, a warning is written to stderr."
@@ -205,7 +208,7 @@ _OUTPUT_SCHEMA = OutputSpec(
             "sparse column_type ('Partitioning' or 'Grouping'; omitted for "
             "Normal columns).",
         ),
-        OutputField("column_count", "number", "Number of columns."),
+        OutputField("column_count", "integer", "Number of columns."),
     ),
     note="Schema for the one named catalog table.",
 )
