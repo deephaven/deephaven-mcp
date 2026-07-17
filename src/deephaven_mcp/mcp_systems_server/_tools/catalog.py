@@ -27,6 +27,13 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_ENTRY_OVERHEAD_BYTES = 48
+"""Per-entry serialization allowance added to Arrow buffer sizes when
+estimating the ``tables`` payload: each ``{"namespace": ..., "table_name":
+...}`` entry repeats both key names plus quotes, colons, braces, and
+delimiters (~38 characters), none of which ``pyarrow.Table.nbytes``
+counts."""
+
 
 def _catalog_failure_error(tool_name: str, id: str, e: Exception) -> dict[str, object]:
     """Log (with traceback) and build the error response for a failed catalog operation.
@@ -174,7 +181,9 @@ async def catalog_tables_list(
         # Only the identity columns survive; drop the rest before sizing.
         subset = arrow_table.select(["Namespace", "TableName"])
 
-        estimated_size = subset.nbytes
+        # Arrow buffer bytes undercount the serialized list-of-dicts form,
+        # so add a per-entry envelope allowance on top.
+        estimated_size = subset.nbytes + _ENTRY_OVERHEAD_BYTES * subset.num_rows
         limits = get_response_limits(context, id)
         size_check_result = check_response_size(
             "catalog_tables_list", estimated_size, limits

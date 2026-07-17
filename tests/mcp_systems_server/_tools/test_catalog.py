@@ -73,10 +73,11 @@ from deephaven_mcp.resource_manager import (
 )
 
 
-def _mock_catalog_arrow(entries, nbytes=1000):
+def _mock_catalog_arrow(entries, nbytes=1000, num_rows=None):
     """Mock catalog arrow table whose Namespace/TableName selection yields ``entries``."""
     subset = MagicMock()
     subset.nbytes = nbytes
+    subset.num_rows = len(entries) if num_rows is None else num_rows
     subset.to_pylist.return_value = entries
     table = MagicMock()
     table.select.return_value = subset
@@ -239,6 +240,26 @@ async def test_catalog_tables_size_limit_exceeded():
     context = _catalog_context(MagicMock(spec=CorePlusSession))
     # Namespace/TableName subset already exceeds the 50MB limit
     mock_arrow = _mock_catalog_arrow([], nbytes=60_000_000)
+
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        mock_get_catalog.return_value = (mock_arrow, False)
+
+        result = await catalog_tables_list(context, "enterprise:prod:1")
+
+        assert result["success"] is False
+        assert "50MB" in result["error"] or "max" in result["error"].lower()
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_tables_size_limit_counts_serialization_overhead():
+    """Arrow bytes under the limit still fail when per-entry overhead pushes the estimate over."""
+    context = _catalog_context(MagicMock(spec=CorePlusSession))
+    # 49MB of Arrow buffers passes alone, but 100k entries add
+    # 48 bytes of key/delimiter overhead each (+4.8MB), exceeding 50MB.
+    mock_arrow = _mock_catalog_arrow([], nbytes=49_000_000, num_rows=100_000)
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
