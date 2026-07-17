@@ -577,7 +577,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a web-
 4. **Connect to the MCP server**:
    - Open the Inspector in your browser (URL shown in terminal, typically `http://localhost:6274`)
    - In the Inspector UI, select "Connect" and enter the server URL: `http://127.0.0.1:8000/mcp` (and add the request header `X-Deephaven-PSK: <psk>` to match `server.json`).
-   - Explore and invoke tools like `list_systems`, `sessions_list`, `session_tables_schema` and `session_script_run`.
+   - Explore and invoke tools like `list_systems`, `sessions_list`, `session_table_schema` and `session_script_run`.
 
 #### MCP Inspector with Docs Server
 

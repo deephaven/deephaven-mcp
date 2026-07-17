@@ -530,7 +530,7 @@ in the PQ id (form `<system>:<serial>`).
 
 - `catalog_tables_list(id, ...)` - List catalog tables
 - `catalog_namespaces_list(id, ...)` - Browse catalog namespaces
-- `catalog_tables_schema(id, ...)` - Get catalog table schemas
+- `catalog_table_schema(id, ...)` - Get one catalog table's schema
 - `catalog_table_sample(id, ...)` - Sample catalog table data
 
 *Session & table operations (any session, community or enterprise):*
@@ -538,7 +538,7 @@ in the PQ id (form `<system>:<serial>`).
 - `sessions_list` - List all sessions
 - `session_details(id)` - Get detailed session information
 - `session_tables_list(id)` - List available tables
-- `session_tables_schema(id, ...)` - Get table schema information
+- `session_table_schema(id, ...)` - Get one table's schema
 - `session_table_data(id, ...)` - Retrieve table data with formatting options
 - `session_script_run(id, ...)` - Execute Python/Groovy scripts
 - `session_pip_list(id)` - Query installed packages

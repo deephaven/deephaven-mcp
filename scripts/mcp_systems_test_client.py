@@ -205,7 +205,7 @@ async def _run_session(
     Args:
         session: The :class:`mcp.ClientSession` to drive (not yet initialized).
         demo_session_id: Fully qualified community session id to use as the
-            ``session_id`` argument for demo tool calls.
+            ``id`` argument for demo tool calls.
         strict: When ``True``, abort on the first failed tool call.
 
     Returns:
@@ -314,7 +314,7 @@ async def test_tools(
     Args:
         session: An initialized :class:`mcp.ClientSession`.
         demo_session_id: Fully qualified community session id passed to
-            tools that require a ``session_id`` argument. Expected
+            tools that require an ``id`` argument. Expected
             grammar: ``community:community:<session_name>``.
         strict: When ``True``, raise :class:`_ToolFailure` on the first
             tool error so the caller can short-circuit.
@@ -337,55 +337,62 @@ async def test_tools(
 
     print("\n--- Community-side session tools ---")
     _LOGGER.info("Testing tool: session_details")
-    print(f"\nCalling tool: session_details (session_id={demo_session_id})")
+    print(f"\nCalling tool: session_details (id={demo_session_id})")
     result = await call_tool(
         session,
         "session_details",
-        {"session_id": demo_session_id},
+        {"id": demo_session_id},
         strict=strict,
         failures=failures,
     )
     print(f"Result for session_details: {result}")
 
     _LOGGER.info("Testing tool: session_tables_list")
-    print(f"\nCalling tool: session_tables_list (session_id={demo_session_id})")
+    print(f"\nCalling tool: session_tables_list (id={demo_session_id})")
     result = await call_tool(
         session,
         "session_tables_list",
-        {"session_id": demo_session_id},
+        {"id": demo_session_id},
         strict=strict,
         failures=failures,
     )
     print(f"Result for session_tables_list: {result}")
 
-    _LOGGER.info("Testing tool: session_tables_schema")
-    print(f"\nCalling tool: session_tables_schema (session_id={demo_session_id})")
-    result = await call_tool(
-        session,
-        "session_tables_schema",
-        {"session_id": demo_session_id},
-        strict=strict,
-        failures=failures,
-    )
-    print(f"Result for session_tables_schema: {result}")
-
     _LOGGER.info("Testing tool: session_script_run")
-    print(f"\nCalling tool: session_script_run (session_id={demo_session_id})")
+    print(f"\nCalling tool: session_script_run (id={demo_session_id})")
     result = await call_tool(
         session,
         "session_script_run",
-        {"session_id": demo_session_id, "script": "print('hello world')"},
+        {
+            "id": demo_session_id,
+            "script": (
+                "from deephaven import empty_table\n"
+                "demo_table = empty_table(3).update('X = i')\n"
+                "print('hello world')"
+            ),
+        },
         strict=strict,
         failures=failures,
     )
     print(f"Result for session_script_run: {result}")
 
+    _LOGGER.info("Testing tool: session_table_schema")
+    print(f"\nCalling tool: session_table_schema (id={demo_session_id})")
+    result = await call_tool(
+        session,
+        "session_table_schema",
+        {"id": demo_session_id, "table_name": "demo_table"},
+        strict=strict,
+        failures=failures,
+    )
+    print(f"Result for session_table_schema: {result}")
+
     _LOGGER.info("Testing tool: session_pip_list")
-    print(f"\nCalling tool: session_pip_list (session_id={demo_session_id})")
+    print(f"\nCalling tool: session_pip_list (id={demo_session_id})")
     result = await call_tool(
         session,
         "session_pip_list",
-        {"session_id": demo_session_id},
+        {"id": demo_session_id},
         strict=strict,
         failures=failures,
     )

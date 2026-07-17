@@ -667,8 +667,8 @@ async def session_delete(runtime: Runtime, id: str) -> None:
 
 _OUTPUT_EXEC = OutputSpec(
     "object",
-    (),
-    note="Empty object on success; on failure the command exits 3 with the error.",
+    (OutputField("id", "string", "The session id, echoed back."),),
+    note="On failure the command exits 3 with the error.",
 )
 
 

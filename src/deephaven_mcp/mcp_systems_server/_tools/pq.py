@@ -16,7 +16,8 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 import asyncio
 import logging
-from typing import Annotated, cast
+from dataclasses import dataclass
+from typing import Annotated
 
 from deephaven_enterprise.proto.common_pb2 import ExceptionDetailsMessage
 from deephaven_enterprise.proto.controller_common_pb2 import NamedStringList
@@ -35,10 +36,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
 from deephaven_mcp._exception_utils import exception_summary
-from deephaven_mcp._exceptions import (
-    InternalError,
-    InvalidSessionNameError,
-)
+from deephaven_mcp._exceptions import InvalidSessionNameError
 from deephaven_mcp.client import (
     PQ_STATES,
     CorePlusControllerClient,
@@ -212,7 +210,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
             pb.expirationTimeNanos if pb.expirationTimeNanos else None
         ),
         "kubernetes_control": pb.kubernetesControl if pb.kubernetesControl else None,
-        "worker_kind": pb.workerKind,
+        "worker_kind": pb.workerKind if pb.workerKind else None,
         "created_time_nanos": (
             pb.createdTimeNanos
             if (pb.createdTimeNanos and pb.createdTimeNanos != _NULL_LONG)
@@ -562,21 +560,32 @@ def _format_pq_states(states: list[CorePlusQueryState]) -> list[dict[str, object
     return [f for f in formatted if f is not None]
 
 
+@dataclass(frozen=True)
+class _BatchPqSetup:
+    """Validated inputs shared by the batch PQ operations."""
+
+    parsed_pqs: list[tuple[str, CorePlusQuerySerial]]
+    """Parsed ``(id, serial)`` pairs, one per requested PQ."""
+
+    controller: CorePlusControllerClient
+    """Controller client for the enterprise system named in the ids."""
+
+    max_concurrent: int
+    """Validated maximum number of concurrent per-PQ operations."""
+
+    system_name: str
+    """Enterprise system name shared by every id in the batch."""
+
+
 async def _setup_batch_pq_operation(
     context: Context,
     id: str | list[str],
     function_name: str,
     max_concurrent: int,
-) -> tuple[
-    list[tuple[str, CorePlusQuerySerial]] | None,
-    CorePlusControllerClient | None,
-    int | None,
-    str,
-    dict[str, object] | None,
-]:
+) -> _BatchPqSetup:
     """Set up common infrastructure for batch PQ operations.
 
-    Validates ids and parameters and returns controller client.
+    Validates ids and parameters and returns the controller client.
     Consolidates validation and setup boilerplate across pq_delete, pq_start, pq_stop, pq_restart.
 
     Args:
@@ -586,63 +595,24 @@ async def _setup_batch_pq_operation(
         max_concurrent (int): Maximum concurrent operations (must be >= 1)
 
     Returns:
-        tuple: (parsed_pqs, controller, validated_max_concurrent, system_name, error_response)
-               On success: (parsed_list, controller_client, max_concurrent_int, system_name, None)
-               On failure: (None, None, None, system_name, {"success": False, "error": "...", "isError": True})
+        _BatchPqSetup: Validated batch inputs with the connected
+            controller client.
 
-    Example::
-
-        parsed_pqs, controller, max_conc, system_name, error = await _setup_batch_pq_operation(...)
-        if error:
-            return error
-        # Type narrowing: all returned values except error are non-None here
+    Raises:
+        ValueError: If ``max_concurrent`` is not >= 1.
+        InvalidSessionNameError: If the ids are empty, malformed, name
+            more than one enterprise system, or name a system that is
+            not configured.
     """
     # Validate max_concurrent before touching the registry so a bad value
     # surfaces a clean error even when the ids are also malformed.
-    try:
-        validated_max_concurrent = _validate_max_concurrent(
-            max_concurrent, function_name
-        )
-    except ValueError as e:
-        return (
-            None,
-            None,
-            None,
-            "",
-            {"success": False, "error": str(e), "isError": True},
-        )
+    validated_max_concurrent = _validate_max_concurrent(max_concurrent, function_name)
 
     # Parse ids; system_name is derived from them.
-    parsed_pqs, system_name, parse_error = _validate_and_parse_pq_ids(id)
-    if parse_error:
-        return (
-            None,
-            None,
-            None,
-            "",
-            {"success": False, "error": parse_error, "isError": True},
-        )
-    # parse_error is None implies system_name is set
-    if system_name is None:
-        raise InternalError(
-            "Internal invariant violated: _validate_and_parse_pq_ids returned "
-            "system_name=None without an error."
-        )
+    system_name, parsed_pqs = _validate_and_parse_pq_ids(id)
 
     # Resolve registry for the system named in the ids.
-    try:
-        session_registry = get_enterprise_registry(context, system_name)
-    except InvalidSessionNameError as e:
-        return (
-            None,
-            None,
-            None,
-            system_name,
-            {"success": False, "error": str(e), "isError": True},
-        )
-
-    # Type narrowing: when parse_error is None, parsed_pqs is guaranteed non-None
-    parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
+    session_registry = get_enterprise_registry(context, system_name)
 
     factory_manager = session_registry.factory_manager
     _LOGGER.debug(
@@ -653,61 +623,90 @@ async def _setup_batch_pq_operation(
         f"[mcp_systems_server:{function_name}] Connected to enterprise factory"
     )
 
-    # Get controller client
-    controller = factory.controller_client
-
-    return (
-        parsed_pqs,
-        controller,
-        validated_max_concurrent,
-        system_name,
-        None,
+    return _BatchPqSetup(
+        parsed_pqs=parsed_pqs,
+        controller=factory.controller_client,
+        max_concurrent=validated_max_concurrent,
+        system_name=system_name,
     )
 
 
 def _validate_and_parse_pq_ids(
     id: str | list[str],
-) -> tuple[
-    list[tuple[str, CorePlusQuerySerial]] | None,
-    str | None,
-    str | None,
-]:
+) -> tuple[str, list[tuple[str, CorePlusQuerySerial]]]:
     """Validate and parse id(s) for batch operations.
 
     Thin adapter over
-    :func:`deephaven_mcp.mcp_systems_server._tools.shared.resolve_pq_ids_to_single_system`
-    that preserves the batch-tool return convention (parsed list,
-    system name, optional error string). The shared helper guarantees
-    every id parses cleanly and all of them name the same enterprise
-    system; mixed-system batches are rejected up front so the caller
-    cannot accidentally fan a batch out across systems.
+    :func:`deephaven_mcp.mcp_systems_server._tools.shared.resolve_pq_ids_to_single_system`.
+    The shared helper guarantees every id parses cleanly and all of
+    them name the same enterprise system; mixed-system batches are
+    rejected up front so the caller cannot accidentally fan a batch
+    out across systems.
 
     Args:
         id (str | list[str]): Single id string or list of id
             strings in format ``'enterprise:<system_name>:<serial>'``.
 
     Returns:
-        tuple[list[tuple[str, CorePlusQuerySerial]] | None, str | None, str | None]:
-            ``(parsed_pqs, system_name, error_message)``.
+        tuple[str, list[tuple[str, CorePlusQuerySerial]]]:
+            ``(system_name, [(id, serial), ...])``.
 
-            - On success: ``([(id, serial), ...], system_name, None)``.
-            - On failure: ``(None, None, error_string)``.
+    Raises:
+        InvalidSessionNameError: If no ids are provided, an id is
+            malformed, or the ids name more than one enterprise system.
     """
     ids = [id] if isinstance(id, str) else list(id)
 
     if not ids:
-        return (None, None, "At least one id must be provided")
+        raise InvalidSessionNameError("At least one id must be provided")
 
-    try:
-        system_name, serials = resolve_pq_ids_to_single_system(ids)
-    except InvalidSessionNameError as exc:
-        return (None, None, str(exc))
+    system_name, serials = resolve_pq_ids_to_single_system(ids)
 
     parsed_pqs: list[tuple[str, CorePlusQuerySerial]] = [
         (pid, CorePlusQuerySerial(serial))
         for pid, serial in zip(ids, serials, strict=True)
     ]
-    return (parsed_pqs, system_name, None)
+    return (system_name, parsed_pqs)
+
+
+def _convert_gather_results(
+    raw_results: list[dict[str, object] | BaseException],
+    parsed_pqs: list[tuple[str, CorePlusQuerySerial]],
+    none_keys: tuple[str, ...],
+) -> list[dict[str, object]]:
+    """Convert ``asyncio.gather`` batch results into per-PQ result dicts.
+
+    Args:
+        raw_results (list[dict[str, object] | BaseException]): Results from
+            ``asyncio.gather(..., return_exceptions=True)``, one per PQ.
+        parsed_pqs (list[tuple[str, CorePlusQuerySerial]]): Parsed
+            ``(id, serial)`` pairs positionally aligned with ``raw_results``.
+        none_keys (tuple[str, ...]): Payload keys emitted with value ``None``
+            in the error dict built for an escaped exception.
+
+    Returns:
+        list[dict[str, object]]: One dict per PQ. Dict results pass through
+            unchanged; an escaped exception becomes an error dict with
+            ``id``, ``serial``, ``success=False``, each ``none_keys`` entry
+            set to ``None``, and an ``error`` message rendering the
+            exception.
+    """
+    results: list[dict[str, object]] = []
+    for i, r in enumerate(raw_results):
+        if isinstance(r, BaseException):
+            pid, serial = parsed_pqs[i]
+            error_entry: dict[str, object] = {
+                "id": pid,
+                "serial": serial,
+                "success": False,
+            }
+            for key in none_keys:
+                error_entry[key] = None
+            error_entry["error"] = f"Unexpected error: {exception_summary(r)}"
+            results.append(error_entry)
+        else:
+            results.append(r)
+    return results
 
 
 def _pq_state_category(state_name: str) -> str:
@@ -862,10 +861,10 @@ async def pq_list(
     - Never write `if status == "RUNNING"` — use `if status_category == "ACTIVE"` instead
     - The same id works with the session tools: while a PQ is running, pass it verbatim to the
       session tools (session_details, session_tables_list, etc.)
-    - Filter results by status, owner, worker_kind, configuration_type, or script_language
+    - Filter results by status, status_category, enabled, or owner
     - Use pq_details(id) to get full configuration and state for a specific PQ
+      (heap size, worker kind, groups, scheduling, script language, failure counts, etc.)
     - Empty pqs list is valid - indicates no PQs configured on the system
-    - num_failures is the cumulative lifetime failure count for the PQ (not reset on restart)
 
     Args:
         context (Context): MCP context object
@@ -884,16 +883,7 @@ async def pq_list(
                     "status": "RUNNING",
                     "status_category": "ACTIVE",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
                     "enabled": True,
-                    "owner": "admin_user",
-                    "heap_size_gb": 8.0,
-                    "worker_kind": "DeephavenCommunity",
-                    "configuration_type": "Script",
-                    "script_language": "Python",
-                    "server_name": "QueryServer_1",
-                    "admin_groups": ["admins", "data-team"],
-                    "viewer_groups": ["analysts"],
-                    "is_scheduled": True,
-                    "num_failures": 0
+                    "owner": "admin_user"
                 }
             ]
         }
@@ -937,13 +927,12 @@ async def pq_list(
         pqs = []
         for serial, pq_info in pq_map.items():
             config_pb = pq_info.config.pb
-            state_pb = pq_info.state.pb if pq_info.state else None
             pq_name = config_pb.name
             id = _make_pq_id(serial, system_name)
             status_obj = pq_info.state.status if pq_info.state else None
             status = status_obj.name if status_obj is not None else "UNKNOWN"
 
-            pq_data = {
+            pq_data: dict[str, object] = {
                 "id": id,
                 "serial": serial,
                 "name": pq_name,
@@ -951,15 +940,6 @@ async def pq_list(
                 "status_category": _pq_state_category(status),
                 "enabled": config_pb.enabled,
                 "owner": config_pb.owner,
-                "heap_size_gb": config_pb.heapSizeGb,
-                "worker_kind": config_pb.workerKind,
-                "configuration_type": config_pb.configurationType,
-                "script_language": config_pb.scriptLanguage,
-                "server_name": config_pb.serverName or None,
-                "admin_groups": list(config_pb.adminGroups),
-                "viewer_groups": list(config_pb.viewerGroups),
-                "is_scheduled": bool(config_pb.scheduling),
-                "num_failures": state_pb.numFailures if state_pb else 0,
             }
 
             pqs.append(pq_data)
@@ -1636,20 +1616,12 @@ async def pq_delete(
                 context
             ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
-        (
-            parsed_pqs,
-            controller,
-            validated_max_concurrent,
-            _system_name,
-            setup_error,
-        ) = await _setup_batch_pq_operation(context, id, "pq_delete", max_concurrent)
-        if setup_error:
-            return setup_error
-
-        # Type narrowing: when setup_error is None, all values are guaranteed non-None
-        parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        controller = cast(CorePlusControllerClient, controller)
-        validated_max_concurrent = cast(int, validated_max_concurrent)
+        setup = await _setup_batch_pq_operation(
+            context, id, "pq_delete", max_concurrent
+        )
+        parsed_pqs = setup.parsed_pqs
+        controller = setup.controller
+        validated_max_concurrent = setup.max_concurrent
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller API supports batch deletion, but we process with parallel
@@ -1714,23 +1686,7 @@ async def pq_delete(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results: list[dict[str, object]] = []
-        for i, r in enumerate(raw_results):
-            if isinstance(r, Exception):
-                # Unexpected exception - convert to error dict
-                pid, serial = parsed_pqs[i]
-                results.append(
-                    {
-                        "id": pid,
-                        "serial": serial,
-                        "success": False,
-                        "name": None,
-                        "error": f"Unexpected error: {exception_summary(r)}",
-                    }
-                )
-            else:
-                # Normal dict result from operation function
-                results.append(cast(dict[str, object], r))
+        results = _convert_gather_results(raw_results, parsed_pqs, ("name",))
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -2248,20 +2204,11 @@ async def pq_start(
                 context
             ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
-        (
-            parsed_pqs,
-            controller,
-            validated_max_concurrent,
-            system_name,
-            setup_error,
-        ) = await _setup_batch_pq_operation(context, id, "pq_start", max_concurrent)
-        if setup_error:
-            return setup_error
-
-        # Type narrowing: when setup_error is None, all values are guaranteed non-None
-        parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        controller = cast(CorePlusControllerClient, controller)
-        validated_max_concurrent = cast(int, validated_max_concurrent)
+        setup = await _setup_batch_pq_operation(context, id, "pq_start", max_concurrent)
+        parsed_pqs = setup.parsed_pqs
+        controller = setup.controller
+        validated_max_concurrent = setup.max_concurrent
+        system_name = setup.system_name
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller start_and_wait() only accepts single serial (no batch support)
@@ -2292,25 +2239,9 @@ async def pq_start(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results: list[dict[str, object]] = []
-        for i, r in enumerate(raw_results):
-            if isinstance(r, Exception):
-                # Unexpected exception - convert to error dict
-                pid, serial = parsed_pqs[i]
-                results.append(
-                    {
-                        "id": pid,
-                        "serial": serial,
-                        "success": False,
-                        "name": None,
-                        "state": None,
-                        "state_category": None,
-                        "error": f"Unexpected error: {exception_summary(r)}",
-                    }
-                )
-            else:
-                # Normal dict result from operation function
-                results.append(cast(dict[str, object], r))
+        results = _convert_gather_results(
+            raw_results, parsed_pqs, ("name", "state", "state_category")
+        )
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -2457,20 +2388,10 @@ async def pq_stop(
                 context
             ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
-        (
-            parsed_pqs,
-            controller,
-            validated_max_concurrent,
-            _system_name,
-            setup_error,
-        ) = await _setup_batch_pq_operation(context, id, "pq_stop", max_concurrent)
-        if setup_error:
-            return setup_error
-
-        # Type narrowing: when setup_error is None, all values are guaranteed non-None
-        parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        controller = cast(CorePlusControllerClient, controller)
-        validated_max_concurrent = cast(int, validated_max_concurrent)
+        setup = await _setup_batch_pq_operation(context, id, "pq_stop", max_concurrent)
+        parsed_pqs = setup.parsed_pqs
+        controller = setup.controller
+        validated_max_concurrent = setup.max_concurrent
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller stop_query() supports batch, but we process with parallel
@@ -2545,24 +2466,7 @@ async def pq_stop(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results: list[dict[str, object]] = []
-        for i, r in enumerate(raw_results):
-            if isinstance(r, Exception):
-                # Unexpected exception - convert to error dict
-                pid, serial = parsed_pqs[i]
-                results.append(
-                    {
-                        "id": pid,
-                        "serial": serial,
-                        "success": False,
-                        "name": None,
-                        "state": None,
-                        "error": f"Unexpected error: {exception_summary(r)}",
-                    }
-                )
-            else:
-                # Normal dict result from operation function
-                results.append(cast(dict[str, object], r))
+        results = _convert_gather_results(raw_results, parsed_pqs, ("name", "state"))
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])
@@ -2717,20 +2621,12 @@ async def pq_restart(
                 context
             ).pq_tools.default_max_concurrent
         # Common setup and validation for batch operations
-        (
-            parsed_pqs,
-            controller,
-            validated_max_concurrent,
-            system_name,
-            setup_error,
-        ) = await _setup_batch_pq_operation(context, id, "pq_restart", max_concurrent)
-        if setup_error:
-            return setup_error
-
-        # Type narrowing: when setup_error is None, all values are guaranteed non-None
-        parsed_pqs = cast(list[tuple[str, CorePlusQuerySerial]], parsed_pqs)
-        controller = cast(CorePlusControllerClient, controller)
-        validated_max_concurrent = cast(int, validated_max_concurrent)
+        setup = await _setup_batch_pq_operation(
+            context, id, "pq_restart", max_concurrent
+        )
+        parsed_pqs = setup.parsed_pqs
+        controller = setup.controller
+        validated_max_concurrent = setup.max_concurrent
 
         # Process each PQ with controlled parallelism (best-effort)
         # Note: Controller restart_query() supports batch, but we process with parallel
@@ -2808,25 +2704,9 @@ async def pq_restart(
         )
 
         # Handle any unexpected exceptions that weren't caught in the operation functions
-        results: list[dict[str, object]] = []
-        for i, r in enumerate(raw_results):
-            if isinstance(r, Exception):
-                # Unexpected exception - convert to error dict
-                pid, serial = parsed_pqs[i]
-                results.append(
-                    {
-                        "id": pid,
-                        "serial": serial,
-                        "success": False,
-                        "name": None,
-                        "state": None,
-                        "state_category": None,
-                        "error": f"Unexpected error: {exception_summary(r)}",
-                    }
-                )
-            else:
-                # Normal dict result from operation function
-                results.append(cast(dict[str, object], r))
+        results = _convert_gather_results(
+            raw_results, parsed_pqs, ("name", "state", "state_category")
+        )
 
         # Calculate summary
         succeeded = sum(1 for r in results if r["success"])

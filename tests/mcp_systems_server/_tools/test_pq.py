@@ -124,7 +124,7 @@ def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
 
 import deephaven_mcp.mcp_systems_server._tools.pq as _pq_module
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import InternalError
+from deephaven_mcp._exceptions import InvalidSessionNameError
 
 # Capture real protobuf class at collection time — before any session-scoped fixture
 # patches sys.modules["deephaven_enterprise.proto"] with a mock module.
@@ -136,6 +136,7 @@ except Exception:
     _PQConfigMessage = None
 from deephaven_mcp.config.schema import PqToolsConfig
 from deephaven_mcp.mcp_systems_server._tools.pq import (
+    _convert_gather_results,
     _format_column_definition,
     _format_connection_details,
     _format_exception_details,
@@ -1608,21 +1609,17 @@ async def test_pq_list_success():
     assert pq1["status_category"] == "ACTIVE"
     assert pq1["enabled"] is True
     assert pq1["owner"] == "test_user"
-    assert pq1["heap_size_gb"] == 8.0
-    assert pq1["worker_kind"] == "DeephavenCommunity"
-    assert pq1["configuration_type"] == "Script"
-    assert pq1["script_language"] == "Python"
-    assert pq1["server_name"] is None  # Empty string -> None
-    assert pq1["admin_groups"] == []
-    assert pq1["viewer_groups"] == []
-    assert pq1["is_scheduled"] is False
-    assert pq1["num_failures"] == 0
 
-    # Verify trimmed response does NOT include full config/state_details/replicas/spares
-    assert "config" not in pq1
-    assert "state_details" not in pq1
-    assert "replicas" not in pq1
-    assert "spares" not in pq1
+    # Verify lean response contains exactly the summary field set
+    assert set(pq1) == {
+        "id",
+        "serial",
+        "name",
+        "status",
+        "status_category",
+        "enabled",
+        "owner",
+    }
 
     # Verify PQ2 summary data
     pq2 = result["pqs"][1]
@@ -1632,10 +1629,6 @@ async def test_pq_list_success():
     assert pq2["status_category"] == "TERMINAL"
     assert pq2["enabled"] is True
     assert pq2["owner"] == "test_user"
-    assert pq2["heap_size_gb"] == 4.0
-    assert pq2["worker_kind"] == "DeephavenCommunity"
-    assert pq2["configuration_type"] == "Script"
-    assert pq2["script_language"] == "Python"
 
 
 @pytest.mark.asyncio
@@ -2192,26 +2185,21 @@ async def test_pq_create_exception():
 def test_validate_and_parse_pq_ids_single():
     """``_validate_and_parse_pq_ids`` returns a single parsed pair.
 
-    The helper now returns a 3-tuple
-    ``(parsed_pqs, system_name, error)``; each parsed entry is
-    ``(<original id string>, <serial>)``.
+    The helper returns ``(system_name, parsed_pqs)``; each parsed entry
+    is ``(<original id string>, <serial>)``.
     """
-    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
-        "enterprise:system:12345"
-    )
+    system_name, parsed_pqs = _validate_and_parse_pq_ids("enterprise:system:12345")
 
-    assert error is None
     assert system_name == "system"
     assert parsed_pqs == [("enterprise:system:12345", 12345)]
 
 
 def test_validate_and_parse_pq_ids_multiple():
     """``_validate_and_parse_pq_ids`` parses a list of same-system pq ids."""
-    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
+    system_name, parsed_pqs = _validate_and_parse_pq_ids(
         ["enterprise:system:12345", "enterprise:system:67890"]
     )
 
-    assert error is None
     assert system_name == "system"
     assert parsed_pqs == [
         ("enterprise:system:12345", 12345),
@@ -2221,31 +2209,85 @@ def test_validate_and_parse_pq_ids_multiple():
 
 def test_validate_and_parse_pq_ids_rejects_mixed_systems():
     """Batches must all target the same enterprise system."""
-    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
-        ["enterprise:system:12345", "enterprise:other:67890"]
-    )
-    assert parsed_pqs is None
-    assert system_name is None
-    assert error is not None
-    assert "same" in error.lower()
+    with pytest.raises(InvalidSessionNameError, match="same"):
+        _validate_and_parse_pq_ids(
+            ["enterprise:system:12345", "enterprise:other:67890"]
+        )
+
+
+def test_validate_and_parse_pq_ids_rejects_empty_list():
+    """An empty id list is rejected with ``InvalidSessionNameError``."""
+    with pytest.raises(InvalidSessionNameError, match="At least one id"):
+        _validate_and_parse_pq_ids([])
 
 
 @pytest.mark.asyncio
-async def test_setup_batch_pq_operation_raises_on_none_system_name_without_error():
-    """``_setup_batch_pq_operation`` raises ``InternalError`` when the parser
-    returns ``system_name=None`` with no parse error — a broken invariant."""
-    with patch.object(
-        _pq_module,
-        "_validate_and_parse_pq_ids",
-        return_value=([("enterprise:system:12345", 12345)], None, None),
-    ):
-        with pytest.raises(InternalError, match="Internal invariant violated"):
-            await _setup_batch_pq_operation(
-                MagicMock(),
-                "enterprise:system:12345",
-                "pq_delete",
-                max_concurrent=1,
-            )
+async def test_setup_batch_pq_operation_raises_on_invalid_max_concurrent():
+    """``_setup_batch_pq_operation`` raises ``ValueError`` before touching the registry."""
+    with pytest.raises(ValueError, match="max_concurrent"):
+        await _setup_batch_pq_operation(
+            MagicMock(),
+            "enterprise:system:12345",
+            "pq_delete",
+            max_concurrent=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_setup_batch_pq_operation_raises_on_invalid_id():
+    """``_setup_batch_pq_operation`` raises ``InvalidSessionNameError`` for bad ids."""
+    with pytest.raises(InvalidSessionNameError):
+        await _setup_batch_pq_operation(
+            MagicMock(),
+            "not-a-valid-id",
+            "pq_delete",
+            max_concurrent=1,
+        )
+
+
+def test_convert_gather_results_passthrough():
+    """Dict results pass through unchanged, in order."""
+    ok1: dict[str, object] = {"id": "enterprise:system:1", "success": True}
+    ok2: dict[str, object] = {"id": "enterprise:system:2", "success": True}
+    parsed = [("enterprise:system:1", 1), ("enterprise:system:2", 2)]
+
+    results = _convert_gather_results([ok1, ok2], parsed, ("name",))
+
+    assert results == [ok1, ok2]
+
+
+def test_convert_gather_results_exception_becomes_error_dict():
+    """An escaped Exception is converted to an error dict with None placeholders."""
+    ok: dict[str, object] = {"id": "enterprise:system:1", "success": True}
+    parsed = [("enterprise:system:1", 1), ("enterprise:system:2", 2)]
+
+    results = _convert_gather_results(
+        [ok, RuntimeError("boom")], parsed, ("name", "state", "state_category")
+    )
+
+    assert results[0] == ok
+    assert results[1] == {
+        "id": "enterprise:system:2",
+        "serial": 2,
+        "success": False,
+        "name": None,
+        "state": None,
+        "state_category": None,
+        "error": "Unexpected error: RuntimeError: boom",
+    }
+
+
+def test_convert_gather_results_base_exception():
+    """A BaseException (e.g. CancelledError) is converted, not re-raised."""
+    parsed = [("enterprise:system:1", 1)]
+
+    results = _convert_gather_results(
+        [asyncio.CancelledError("canceled")], parsed, ("name",)
+    )
+
+    assert results[0]["success"] is False
+    assert results[0]["name"] is None
+    assert "CancelledError" in results[0]["error"]
 
 
 # Note: ``test_parse_pq_id_*`` variants live further down in this module;
@@ -4480,6 +4522,61 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     assert "Unexpected error" in result["results"][1]["error"]
     assert "RuntimeError" in result["results"][1]["error"]
     assert result["results"][2]["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_pq_delete_base_exception_escapes_to_gather(monkeypatch):
+    """Test pq_delete converts BaseException gather results (e.g. CancelledError) to error dicts."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    mock_controller.delete_query = AsyncMock()
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "STOPPED")
+    )
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    # Monkeypatch asyncio.gather to inject a BaseException (not an Exception)
+    # into the results, as gather(return_exceptions=True) can when a task
+    # is canceled.
+    original_gather = asyncio.gather
+
+    async def patched_gather(*args, **kwargs):
+        results = await original_gather(*args, **kwargs)
+        results_list = list(results)
+        if len(results_list) > 1:
+            results_list[1] = asyncio.CancelledError("canceled mid-batch")
+        return results_list
+
+    monkeypatch.setattr(asyncio, "gather", patched_gather)
+
+    result = await pq_delete(
+        context,
+        id=[
+            "enterprise:system:1",
+            "enterprise:system:2",
+        ],
+    )
+
+    assert result["success"] is True
+    assert len(result["results"]) == 2
+    assert result["results"][0]["success"] is True
+    assert result["results"][1]["success"] is False
+    assert "Unexpected error" in result["results"][1]["error"]
+    assert "CancelledError" in result["results"][1]["error"]
 
 
 @pytest.mark.asyncio

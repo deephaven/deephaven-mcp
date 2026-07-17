@@ -17,13 +17,16 @@ from conftest import (
 
 from deephaven_mcp._exceptions import (
     CommunityNotConfiguredError,
+    InternalError,
     RegistryItemNotFoundError,
+    SessionCreationError,
 )
 from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.config.schema import CommunitySessionCreationDefaults
 from deephaven_mcp.mcp_systems_server._tools.session_community import (
     _ANONYMOUS_AUTH_HANDLER,
     _PSK_AUTH_HANDLER,
+    _build_success_response,
     _credentials_to_auth_type,
     _register_session_manager,
     _resolve_community_session_parameters,
@@ -36,6 +39,7 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    LaunchedSession,
     PythonLaunchedSession,
     QualifiedSessionId,
     ResourceLivenessStatus,
@@ -2091,6 +2095,36 @@ async def test_session_community_credentials_static_session_unsupported_creds():
 
 
 @pytest.mark.asyncio
+async def test_session_community_credentials_unknown_manager_subtype():
+    """A manager that is neither dynamic nor static surfaces the InternalError guard."""
+    from deephaven_mcp.resource_manager._manager import CommunitySessionManager
+
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    config = {"security": {"credential_retrieval_mode": "all"}}
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    mock_session_registry._community_settings = config
+
+    # Base-class mock: passes neither DynamicCommunitySessionManager nor
+    # StaticCommunitySessionManager isinstance checks.
+    manager = MagicMock(spec=CommunitySessionManager)
+    mock_session_registry.get = AsyncMock(return_value=manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_session_registry,
+        }
+    )
+    result = await session_community_credentials(context, id="community:community:x")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Unhandled CommunitySessionManager subtype" in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_session_community_credentials_invalid_session_id():
     """Test when id has invalid format."""
     mock_config_manager = MagicMock()
@@ -2293,27 +2327,21 @@ async def test_session_community_credentials_all_allows_both():
 
 def test_credentials_to_auth_type_none_defaults_to_psk():
     """None credentials default to the PSK handler (historical default)."""
-    result, error = _credentials_to_auth_type(None)
-    assert error is None
-    assert result == _PSK_AUTH_HANDLER
+    assert _credentials_to_auth_type(None) == _PSK_AUTH_HANDLER
 
 
 def test_credentials_to_auth_type_psk():
     """PSKCredentials maps to the PSK handler FQCN."""
     from deephaven_mcp.auth.credentials import PSKCredentials
 
-    result, error = _credentials_to_auth_type(PSKCredentials(token="t"))
-    assert error is None
-    assert result == _PSK_AUTH_HANDLER
+    assert _credentials_to_auth_type(PSKCredentials(token="t")) == _PSK_AUTH_HANDLER
 
 
 def test_credentials_to_auth_type_anonymous():
     """AnonymousCredentials maps to ``"Anonymous"``."""
     from deephaven_mcp.auth.credentials import AnonymousCredentials
 
-    result, error = _credentials_to_auth_type(AnonymousCredentials())
-    assert error is None
-    assert result == _ANONYMOUS_AUTH_HANDLER
+    assert _credentials_to_auth_type(AnonymousCredentials()) == _ANONYMOUS_AUTH_HANDLER
 
 
 def test_credentials_to_auth_type_custom_passthrough():
@@ -2323,9 +2351,7 @@ def test_credentials_to_auth_type_custom_passthrough():
     creds = CustomTokenCredentials(
         auth_type="com.example.CustomAuth", auth_token="opaque"
     )
-    result, error = _credentials_to_auth_type(creds)
-    assert error is None
-    assert result == "com.example.CustomAuth"
+    assert _credentials_to_auth_type(creds) == "com.example.CustomAuth"
 
 
 def test_credentials_to_auth_type_password_rejected():
@@ -2333,11 +2359,11 @@ def test_credentials_to_auth_type_password_rejected():
     from deephaven_mcp.auth.credentials import PasswordCredentials
 
     creds = PasswordCredentials(username="u", password="p")
-    result, error = _credentials_to_auth_type(creds)
-    assert result == ""
-    assert error is not None
-    assert "Basic authentication is not supported" in error
-    assert "dynamically-launched" in error
+    with pytest.raises(
+        SessionCreationError, match="Basic authentication is not supported"
+    ) as exc_info:
+        _credentials_to_auth_type(creds)
+    assert "dynamically-launched" in str(exc_info.value)
 
 
 def test_resolve_community_session_parameters_password_credentials_rejected():
@@ -2360,26 +2386,120 @@ def test_resolve_community_session_parameters_password_credentials_rejected():
         startup_check_interval_seconds=2.0,
         startup_retries=3,
     )
-    resolved_params, error = _resolve_community_session_parameters(
-        launch_method=None,
-        programming_language=None,
-        auth_token=None,
-        heap_size_gb=None,
-        extra_jvm_args=None,
-        environment_vars=None,
+    with pytest.raises(
+        SessionCreationError, match="Basic authentication is not supported"
+    ):
+        _resolve_community_session_parameters(
+            launch_method=None,
+            programming_language=None,
+            auth_token=None,
+            heap_size_gb=None,
+            extra_jvm_args=None,
+            environment_vars=None,
+            docker_image=None,
+            docker_memory_limit_gb=None,
+            docker_cpu_limit=None,
+            docker_volumes=None,
+            python_venv_path=None,
+            defaults=defaults,
+        )
+
+
+def test_resolve_community_session_parameters_rejects_unknown_launch_method():
+    """An unrecognized launch_method fails fast with a clear error."""
+    from deephaven_mcp.auth.credentials import AnonymousCredentials
+
+    defaults = CommunitySessionCreationDefaults.model_construct(
+        launch_method="docker",
+        credentials=AnonymousCredentials(),
+        programming_language="Python",
         docker_image=None,
         docker_memory_limit_gb=None,
         docker_cpu_limit=None,
         docker_volumes=None,
         python_venv_path=None,
-        defaults=defaults,
+        heap_size_gb=4.0,
+        extra_jvm_args=None,
+        environment_vars=None,
+        startup_timeout_seconds=60.0,
+        startup_check_interval_seconds=2.0,
+        startup_retries=3,
+    )
+    with pytest.raises(
+        SessionCreationError, match="Invalid launch_method 'podman'"
+    ) as exc_info:
+        _resolve_community_session_parameters(
+            launch_method="podman",
+            programming_language=None,
+            auth_token=None,
+            heap_size_gb=None,
+            extra_jvm_args=None,
+            environment_vars=None,
+            docker_image=None,
+            docker_memory_limit_gb=None,
+            docker_cpu_limit=None,
+            docker_volumes=None,
+            python_venv_path=None,
+            defaults=defaults,
+        )
+    assert "'docker', 'python'" in str(exc_info.value)
+
+
+def test_build_success_response_docker_session():
+    """A DockerLaunchedSession contributes its container_id to the response."""
+    launched = MagicMock(spec=DockerLaunchedSession)
+    launched.container_id = "abc123"
+
+    result = _build_success_response(
+        "community:community:x",
+        "x",
+        "http://localhost:10000",
+        _ANONYMOUS_AUTH_HANDLER,
+        "docker",
+        10000,
+        launched,
     )
 
-    assert resolved_params == {}
-    assert error is not None
-    assert error["success"] is False
-    assert error["isError"] is True
-    assert "Basic authentication is not supported" in error["error"]
+    assert result["success"] is True
+    assert result["id"] == "community:community:x"
+    assert result["launch_method"] == "docker"
+    assert result["container_id"] == "abc123"
+    assert "process_id" not in result
+
+
+def test_build_success_response_python_session():
+    """A PythonLaunchedSession contributes its process pid to the response."""
+    launched = MagicMock(spec=PythonLaunchedSession)
+    launched.process = MagicMock(pid=4242)
+
+    result = _build_success_response(
+        "community:community:x",
+        "x",
+        "http://localhost:10000",
+        _ANONYMOUS_AUTH_HANDLER,
+        "python",
+        10000,
+        launched,
+    )
+
+    assert result["success"] is True
+    assert result["launch_method"] == "python"
+    assert result["process_id"] == 4242
+    assert "container_id" not in result
+
+
+def test_build_success_response_unknown_session_type_raises():
+    """An unrecognized LaunchedSession subtype raises InternalError."""
+    with pytest.raises(InternalError, match="Unhandled LaunchedSession subtype"):
+        _build_success_response(
+            "community:community:x",
+            "x",
+            "http://localhost:10000",
+            _ANONYMOUS_AUTH_HANDLER,
+            "docker",
+            10000,
+            MagicMock(spec=LaunchedSession),
+        )
 
 
 @pytest.mark.asyncio
@@ -2677,8 +2797,8 @@ async def test_session_community_create_default_programming_language_in_config()
         assert captured_config.programming_language == "Python"
 
 
-def test_credentials_to_auth_type_unrecognized_kind_returns_error():
-    """An unrecognized credentials object yields a structured error.
+def test_credentials_to_auth_type_unrecognized_kind_raises():
+    """An unrecognized credentials object raises SessionCreationError.
 
     Covers the fallthrough branch in ``_credentials_to_auth_type`` for
     credential kinds outside the documented ``CredentialsUnion``.
@@ -2687,11 +2807,11 @@ def test_credentials_to_auth_type_unrecognized_kind_returns_error():
     class _BogusCreds:
         pass
 
-    result, error = _credentials_to_auth_type(_BogusCreds())  # type: ignore[arg-type]
-    assert result == ""
-    assert error is not None
-    assert "Unsupported credentials kind" in error
-    assert "_BogusCreds" in error
+    with pytest.raises(
+        SessionCreationError, match="Unsupported credentials kind"
+    ) as exc_info:
+        _credentials_to_auth_type(_BogusCreds())  # type: ignore[arg-type]
+    assert "_BogusCreds" in str(exc_info.value)
 
 
 def test_resolve_auth_token_non_psk_returns_none():

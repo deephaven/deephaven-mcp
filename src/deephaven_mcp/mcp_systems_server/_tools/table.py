@@ -2,7 +2,7 @@
 
 Provides MCP tools for working with tables in Deephaven sessions:
 - session_tables_list: List all available tables in a session
-- session_tables_schema: Get schema information for tables
+- session_table_schema: Get schema information for one table
 - session_table_data: Export and retrieve table data in various formats
 
 These tools work with both Community and Enterprise sessions.
@@ -14,11 +14,12 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
 from deephaven_mcp._exception_utils import exception_summary
+from deephaven_mcp.formatters import TableFormat
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     build_table_data_response,
     check_response_size,
     error_response,
-    format_meta_table_result,
+    format_schema_result,
     get_response_limits,
     get_session_from_context,
 )
@@ -26,19 +27,12 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
 _LOGGER = logging.getLogger(__name__)
 
 
-async def session_tables_schema(
-    context: Context, id: str, table_names: list[str] | None = None
-) -> dict:
-    """MCP Tool: Retrieve table schemas as TABULAR METADATA from a Deephaven session.
+async def session_table_schema(context: Context, id: str, table_name: str) -> dict:
+    """MCP Tool: Retrieve the schema of one table in a Deephaven session.
 
-    **Returns**: Schema information formatted as TABULAR DATA where each row represents a column
-    in the source table. This tabular metadata should be displayed as a table to users for easy
-    comprehension of table structure.
-
-    Returns complete metadata information for the specified tables including column names, data types,
-    and all metadata properties. If no table_names are provided, returns schemas for all available
-    tables in the session. This provides the FULL schema with all metadata properties, not just
-    simplified name/type pairs.
+    Returns the column definitions for a single named table. Deliberately
+    single-table: discover table names with session_tables_list first, then
+    fetch schemas one table per call (calls can run in parallel).
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -49,161 +43,80 @@ async def session_tables_schema(
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
 
-    Table Rendering:
-    - **This tool returns TABULAR METADATA that MUST be displayed as a table to users**
-    - Each row in the result represents one column from the source table
-    - The table shows column properties: Name, DataType, IsPartitioning, ComponentType, etc.
-    - Present schema data in tabular format (table or grid) for easy comprehension
-    - Do NOT present schema data as plain text or unstructured lists
-
     AI Agent Usage:
-    - Call with no table_names to discover all available tables and their full schemas
-    - Call with specific table_names list when you know which tables you need
-    - Always check the 'success' field in each schema result before using the schema data
-    - The 'data' field contains full metadata with properties like Name, DataType, IsPartitioning, etc.
-    - Use the returned metadata to construct valid queries and understand table structure
-    - Essential before calling session_table_data or session_script_run to understand table structure
-    - Individual table failures don't stop processing of other tables
-    - This returns FULL metadata, not simplified schema - use for complete table understanding
+    - Use session_tables_list first to discover table names, then call this per table
+    - Essential before session_table_data or session_script_run to understand table structure
+    - 'type' values are Deephaven type names (e.g. "java.lang.String", "int"), not
+      PyArrow names - session_table_data's schema field uses PyArrow names instead
+    - 'column_type' is omitted from ordinary columns; its absence means a
+      Normal column
 
     Args:
         context (Context): The MCP context object.
         id (str): Fully qualified id of the session to query ('type:system:name',
-            as returned by sessions_list). This argument is required.
-        table_names (list[str], optional): List of table names to retrieve schemas for.
-            If None, all available tables will be queried. Defaults to None.
+            as returned by sessions_list).
+        table_name (str): Name of the table whose schema to retrieve.
 
     Returns:
         dict: Structured result object with keys:
-            - 'success' (bool): True if the operation completed, False if it failed entirely.
-            - 'schemas' (list[dict], optional): List of per-table results if operation completed. Each contains:
-                - 'success' (bool): True if this table's schema was retrieved successfully
-                - 'table' (str): Table name
-                - 'data' (list[dict], optional): Full metadata rows if successful. Each dict contains:
-                    - 'Name' (str): Column name
-                    - 'DataType' (str): Deephaven data type
-                    - 'IsPartitioning' (bool, optional): Whether column is used for partitioning
-                    - 'ComponentType' (str, optional): Component type for array/vector columns
-                    - Additional metadata properties depending on column type
-                - 'meta_columns' (list[dict], optional): Schema of the metadata table itself
-                - 'row_count' (int, optional): Number of columns in the table
-                - 'error' (str, optional): Error message if this table's schema retrieval failed
-                - 'isError' (bool, optional): Present and True if this table had an error
-            - 'count' (int, optional): Total number of table results in schemas list if operation completed.
-            - 'error' (str, optional): Error message if the entire operation failed.
+            - 'success' (bool): True if the schema was retrieved, False on error.
+            - 'id' (str, optional): The session id echoed back if successful.
+            - 'table_name' (str, optional): The table name if successful.
+            - 'schema' (list[dict], optional): One entry per column if successful.
+              Each contains 'name' (str) and 'type' (str, Deephaven type name),
+              plus one sparse key: 'column_type' (str, e.g. 'Partitioning' or
+              'Grouping'; omitted for Normal columns).
+            - 'column_count' (int, optional): Number of columns if successful.
+            - 'error' (str, optional): Error message if retrieval failed.
             - 'isError' (bool, optional): Present and True if this is an error response.
 
-    Example Successful Response (mixed results):
+    Example Successful Response:
         {
             'success': True,
-            'schemas': [
-                {
-                    'success': True,
-                    'table': 'MyTable',
-                    'data': [{'Name': 'Col1', 'DataType': 'int', ...}, ...],
-                    'row_count': 3
-                },
-                {'success': False, 'table': 'MissingTable', 'error': 'Table not found', 'isError': True}
-            ]
+            'id': 'community:community:main-worker',
+            'table_name': 'trades',
+            'schema': [
+                {'name': 'Date', 'type': 'java.lang.String', 'column_type': 'Partitioning'},
+                {'name': 'Prices', 'type': 'double[]'},
+                {'name': 'Symbol', 'type': 'java.lang.String'}
+            ],
+            'column_count': 3
         }
 
-    Example Error Response (total failure):
-        {'success': False, 'error': 'Failed to connect to session: ...', 'isError': True}
-
-    Example Usage:
-        # Get full schemas for all tables in the session
-        Tool: session_tables_schema
-        Parameters: {
-            "id": "community:community:local"
-        }
-
-        # Get full schemas for specific tables
-        Tool: session_tables_schema
-        Parameters: {
-            "id": "community:community:local",
-            "table_names": ["trades", "quotes", "orders"]
-        }
-
-        # Get full schema for a single table
-        Tool: session_tables_schema
-        Parameters: {
-            "id": "enterprise:prod:analytics",
-            "table_names": ["market_data"]
-        }
+    Example Error Response:
+        {'success': False, 'error': "Failed to get schema for table 'missing' ...", 'isError': True}
     """
     _LOGGER.info(
-        f"[mcp_systems_server:session_tables_schema] Invoked: id={id!r}, table_names={table_names!r}"
+        f"[mcp_systems_server:session_table_schema] Invoked: id={id!r}, "
+        f"table_name={table_name!r}"
     )
-    schemas = []
     try:
-        # Use helper to get session from context
-        session = await get_session_from_context("session_tables_schema", context, id)
+        session = await get_session_from_context("session_table_schema", context, id)
 
-        if table_names is not None:
-            selected_table_names = table_names
-            _LOGGER.info(
-                f"[mcp_systems_server:session_tables_schema] Fetching schemas for specified tables: {selected_table_names!r}"
-            )
-        else:
-            _LOGGER.debug(
-                f"[mcp_systems_server:session_tables_schema] Discovering available tables in session '{id}'"
-            )
-            selected_table_names = await session.tables()
-            _LOGGER.info(
-                f"[mcp_systems_server:session_tables_schema] Fetching schemas for all tables in session: {selected_table_names!r}"
-            )
-
-        for table_name in selected_table_names:
-            _LOGGER.debug(
-                f"[mcp_systems_server:session_tables_schema] Processing table '{table_name}' in session '{id}'"
-            )
-            try:
-                meta_arrow_table = await queries.get_session_meta_table(
-                    session, table_name
-                )
-
-                # Use helper to format result (no namespace for session tables)
-                result = format_meta_table_result(
-                    meta_arrow_table, table_name, namespace=None
-                )
-                schemas.append(result)
-
-                _LOGGER.info(
-                    f"[mcp_systems_server:session_tables_schema] Success: Retrieved full schema for table '{table_name}' ({result['row_count']} columns)"
-                )
-            except Exception as table_exc:
-                _LOGGER.error(
-                    f"[mcp_systems_server:session_tables_schema] Failed to get schema for table '{table_name}' in session '{id}': {table_exc!r}",
-                    exc_info=True,
-                )
-                schemas.append(
-                    {
-                        "success": False,
-                        "table": table_name,
-                        "error": f"Failed to get schema for table '{table_name}' in session '{id}': {exception_summary(table_exc)}",
-                        "isError": True,
-                    }
-                )
+        meta_arrow_table = await queries.get_session_meta_table(session, table_name)
+        result = format_schema_result(meta_arrow_table, id, table_name, namespace=None)
 
         _LOGGER.info(
-            f"[mcp_systems_server:session_tables_schema] Returning {len(schemas)} table results"
+            f"[mcp_systems_server:session_table_schema] Success: Retrieved schema for "
+            f"table '{table_name}' ({result['column_count']} columns)"
         )
-        return {"success": True, "schemas": schemas, "count": len(schemas)}
+        return result
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:session_tables_schema] Failed for session: '{id}', error: {e!r}",
+            f"[mcp_systems_server:session_table_schema] Failed for session '{id}', "
+            f"table '{table_name}': {e!r}",
             exc_info=True,
         )
-        return error_response(str(e))
+        return error_response(
+            f"Failed to get schema for table '{table_name}' in session '{id}': {exception_summary(e)}"
+        )
 
 
 async def session_tables_list(context: Context, id: str) -> dict:
     """MCP Tool: Retrieve the names of all tables in a Deephaven session.
 
-    Returns a simple list of table names without schemas or metadata. This is a lightweight
-    alternative to session_tables_schema when you only need to discover what tables exist in
-    a session. Much faster than session_tables_schema since it doesn't fetch schema
-    information for each table.
+    Returns a simple list of table names without schemas or metadata. This is a
+    lightweight discovery operation that doesn't fetch schema information.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -216,8 +129,7 @@ async def session_tables_list(context: Context, id: str) -> dict:
 
     AI Agent Usage:
     - Use this for quick table discovery when you don't need schema details
-    - Much faster than session_tables_schema for large sessions with many tables
-    - Follow up with session_tables_schema for specific tables you're interested in
+    - Follow up with session_table_schema for each table you're interested in
     - Works with both Community and Enterprise sessions
     - Check 'count' field to see how many tables exist
     - Always check 'success' field before accessing 'table_names'
@@ -300,7 +212,7 @@ async def session_table_data(
     table_name: str,
     max_rows: int | None = 1000,
     head: bool = True,
-    format: str = "optimize-rendering",
+    format: TableFormat = "optimize-rendering",
 ) -> dict:
     r"""
     MCP Tool: Retrieve TABULAR DATA from a specified Deephaven session table.
@@ -339,7 +251,7 @@ async def session_table_data(
                                         Set to None to retrieve entire table (use with caution for large tables).
         head (bool, optional): Direction of row retrieval. If True (default), retrieve from beginning.
                               If False, retrieve from end (most recent rows for time-series data).
-        format (str, optional): Output format selection. Defaults to "optimize-rendering" for best table display.
+        format (TableFormat, optional): Output format selection. Defaults to "optimize-rendering" for best table display.
                                Options:
                                - "optimize-rendering": (DEFAULT) Always use markdown-table (best for AI agent table display)
                                - "optimize-accuracy": Always use markdown-kv (best comprehension, more tokens)
@@ -356,6 +268,7 @@ async def session_table_data(
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): Always present. True if table data was retrieved successfully, False on any error.
+            - 'id' (str, optional): The session id echoed back if successful.
             - 'table_name' (str, optional): Name of the retrieved table if successful.
             - 'format' (str, optional): Actual format used for the data if successful. May differ from request when using optimization strategies.
             - 'schema' (list[dict], optional): Array of column definitions if successful. Each dict contains:
@@ -485,7 +398,7 @@ async def session_table_data(
             f"[mcp_systems_server:session_table_data] Formatting data with format='{format}'"
         )
         response = build_table_data_response(
-            arrow_table, is_complete, format, table_name=table_name
+            arrow_table, is_complete, format, id, table_name=table_name
         )
         result.update(response)
 
@@ -526,6 +439,6 @@ def register_tools(server: FastMCP) -> None:
     Args:
         server (FastMCP): The server to register tools with.
     """
-    server.tool()(session_tables_schema)
+    server.tool()(session_table_schema)
     server.tool()(session_tables_list)
     server.tool()(session_table_data)

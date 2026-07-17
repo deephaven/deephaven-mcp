@@ -440,11 +440,12 @@ Inspects tables in a session. All verbs take a fully qualified
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
 | `list <id>`                   | Lists the session's table names. Wraps `session_tables_list`. |
-| `schema <id> [TABLE...]`      | Column definitions for the named tables (all tables when none named). Wraps `session_tables_schema`. |
+| `schema <id> <table>`         | Column definitions for one table: name and type per column, plus `column_type` where meaningful. Wraps `session_table_schema`. |
 | `data <id> <table>`           | Row data: `--max-rows N`, `--head/--tail` (default head). Wraps `session_table_data`. |
 
 ```bash
 dh-mcp table list community:community:dev
+dh-mcp table schema community:community:dev trades
 dh-mcp table data community:community:dev trades --max-rows 50 --tail
 ```
 
@@ -455,13 +456,14 @@ dh-mcp table data community:community:dev trades --max-rows 50 --tail
 
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
-| `tables <id>`                         | Catalog table metadata. `--max-rows`, `--filter` (repeatable). Wraps `catalog_tables_list`. |
-| `namespaces <id>`                     | Lists the catalog's namespace names. Same options as `tables`. Wraps `catalog_namespaces_list`. When the list is truncated by `--max-rows`, a warning is written to stderr. |
-| `schema <id> [TABLE...]`              | Catalog table schemas. `--namespace`, `--filter` (repeatable), `--max-tables`. Wraps `catalog_tables_schema`. |
+| `tables <id>`                         | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
+| `namespaces <id>`                     | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
+| `schema <id> <namespace> <table>`     | Column definitions for one catalog table: name and type per column, plus `column_type` where meaningful. Wraps `catalog_table_schema`. |
 | `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 
 ```bash
 dh-mcp catalog tables enterprise:prod:42
+dh-mcp catalog schema enterprise:prod:42 Market Trades
 dh-mcp catalog sample enterprise:prod:42 Market Trades --max-rows 20
 ```
 

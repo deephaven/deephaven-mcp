@@ -72,7 +72,11 @@ _OUTPUT_LIST = OutputSpec(
         OutputField("owner", "string", "Owning user."),
         OutputField("enabled", "boolean", "Whether the PQ is enabled."),
     ),
-    note="Array of PQ summaries (extra per-PQ fields may be present).",
+    note=(
+        "Array of PQ summaries. Full configuration and state (heap size, "
+        "worker kind, groups, scheduling, failure counts, ...) come from "
+        "'pq details'."
+    ),
 )
 
 

@@ -57,30 +57,30 @@ def _filter_option(f: Any) -> Any:
 # tables
 # ---------------------------------------------------------------------------
 
-_OUTPUT_TABULAR = OutputSpec(
-    "object",
+_OUTPUT_TABLES = OutputSpec(
+    "list",
     (),
     note=(
-        "Tabular result envelope from the tool (columns + rows). In -o human, "
-        "the format and columns fields are omitted as noise; -o json / -o yaml "
-        "keep the full envelope."
+        "Array of {namespace, table_name} entries, one per catalog table. When "
+        "the list is truncated by --max-rows, a warning is written to stderr."
     ),
 )
 
 
 @catalog.command(
     "tables",
-    output_spec=_OUTPUT_TABULAR,
+    output_spec=_OUTPUT_TABLES,
     wraps_tool="catalog_tables_list",
     help=build_help(
         summary="List tables in the Enterprise catalog.",
         description=(
-            "Enterprise (Core+) only. Returns catalog table metadata as tabular "
-            "data. Narrow with repeatable --filter expressions and cap rows with "
-            "--max-rows."
+            "Enterprise (Core+) only. Prints one {namespace, table_name} entry "
+            "per catalog table. Narrow with repeatable --filter expressions and "
+            "cap rows with --max-rows. Follow up with 'catalog schema' or "
+            "'catalog sample' for a specific table."
         ),
         arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
-        output=_OUTPUT_TABULAR,
+        output=_OUTPUT_TABLES,
         examples=("$ dh-mcp catalog tables enterprise:prod:rpt",),
         see_also=("dh-mcp catalog namespaces ID", "dh-mcp catalog schema ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -105,16 +105,19 @@ async def catalog_tables(
     filters: tuple[str, ...],
 ) -> None:
     """List tables in the Enterprise catalog."""
-    arguments: dict[str, Any] = {"id": id, "format": "json-row"}
+    arguments: dict[str, Any] = {"id": id}
     if max_rows is not None:
         arguments["max_rows"] = max_rows
     if filters:
         arguments["filters"] = list(filters)
-    await call_and_echo_table(
+    await call_and_echo_field(
         runtime,
         "catalog_tables_list",
         retry_command="dh-mcp catalog tables",
         arguments=arguments,
+        field="tables",
+        default=[],
+        truncation_hint="Raise --max-rows or narrow with --filter.",
     )
 
 
@@ -191,70 +194,66 @@ async def catalog_namespaces(
 
 _OUTPUT_SCHEMA = OutputSpec(
     "object",
-    (OutputField("schemas", "array", "Per-table column definitions."),),
-    note="Schemas for the requested catalog tables.",
+    (
+        OutputField("id", "string", "The session id, echoed back."),
+        OutputField("namespace", "string", "The catalog namespace."),
+        OutputField("table_name", "string", "The table name."),
+        OutputField(
+            "schema",
+            "array",
+            "One entry per column: name and type (Deephaven type name), plus "
+            "sparse column_type ('Partitioning' or 'Grouping'; omitted for "
+            "Normal columns).",
+        ),
+        OutputField("column_count", "number", "Number of columns."),
+    ),
+    note="Schema for the one named catalog table.",
 )
 
 
 @catalog.command(
     "schema",
     output_spec=_OUTPUT_SCHEMA,
-    wraps_tool="catalog_tables_schema",
+    wraps_tool="catalog_table_schema",
     help=build_help(
-        summary="Show column definitions for catalog tables.",
+        summary="Show column definitions for one catalog table.",
         description=(
-            "Enterprise (Core+) only. Returns schemas for the named catalog "
-            "tables, optionally scoped to a --namespace and capped at "
-            "--max-tables."
+            "Enterprise (Core+) only. Returns the schema (column names and "
+            "types) for a single catalog table. Discover namespace/table pairs "
+            "with 'catalog tables' first."
         ),
         arguments=(
             HelpEntry("ID", "Enterprise session id. Run 'session list'."),
-            HelpEntry("TABLE_NAMES", "Zero or more catalog table names."),
+            HelpEntry("NAMESPACE", "The catalog namespace."),
+            HelpEntry("TABLE_NAME", "The catalog table whose schema to show."),
         ),
         output=_OUTPUT_SCHEMA,
-        examples=(
-            "$ dh-mcp catalog schema enterprise:prod:rpt --namespace Market",
-            "$ dh-mcp catalog schema enterprise:prod:rpt Trades Quotes",
-        ),
+        examples=("$ dh-mcp catalog schema enterprise:prod:rpt Market Trades",),
         see_also=("dh-mcp catalog tables ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
 )
 @click.argument("id")
-@click.argument("table_names", nargs=-1)
-@click.option("--namespace", "namespace", default=None, help="Limit to one namespace.")
-@_filter_option
-@click.option(
-    "--max-tables",
-    "max_tables",
-    type=int,
-    default=None,
-    help="Table cap (default: 100).",
-)
+@click.argument("namespace")
+@click.argument("table_name")
 @click.pass_obj
 @run_async
 async def catalog_schema(
     runtime: Runtime,
     id: str,
-    table_names: tuple[str, ...],
-    namespace: str | None,
-    filters: tuple[str, ...],
-    max_tables: int | None,
+    namespace: str,
+    table_name: str,
 ) -> None:
-    """Show column definitions for catalog tables."""
-    arguments: dict[str, Any] = {"id": id}
-    if table_names:
-        arguments["table_names"] = list(table_names)
-    if namespace is not None:
-        arguments["namespace"] = namespace
-    if filters:
-        arguments["filters"] = list(filters)
-    if max_tables is not None:
-        arguments["max_tables"] = max_tables
+    """Show column definitions for one catalog table."""
+    arguments: dict[str, Any] = {
+        "id": id,
+        "namespace": namespace,
+        "table_name": table_name,
+    }
     await call_and_echo(
         runtime,
-        "catalog_tables_schema",
+        "catalog_table_schema",
         retry_command="dh-mcp catalog schema",
         arguments=arguments,
     )
@@ -263,6 +262,16 @@ async def catalog_schema(
 # ---------------------------------------------------------------------------
 # sample
 # ---------------------------------------------------------------------------
+
+_OUTPUT_TABULAR = OutputSpec(
+    "object",
+    (),
+    note=(
+        "Tabular result envelope from the tool (columns + rows, including the "
+        "session id echoed back). In -o human, the format and columns fields "
+        "are omitted as noise; -o json / -o yaml keep the full envelope."
+    ),
+)
 
 
 @catalog.command(

@@ -9,14 +9,18 @@ These tools work with Deephaven Community (Core) sessions only.
 """
 
 import logging
-from typing import Any, Literal, cast
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import (
+    InternalError,
     InvalidSessionNameError,
     RegistryItemNotFoundError,
+    SessionCreationError,
+    SessionLaunchError,
 )
 from deephaven_mcp._names import validate_resource_name
 from deephaven_mcp.auth.credentials import (
@@ -47,6 +51,7 @@ from deephaven_mcp.resource_manager import (
     QualifiedSessionId,
     SessionId,
     SessionOrigin,
+    StaticCommunitySessionManager,
     SystemType,
     find_available_port,
     generate_auth_token,
@@ -84,17 +89,20 @@ value for sessions backed by :class:`AnonymousCredentials`.
 
 def _get_session_creation_config(
     settings: CommunitySettings,
-) -> tuple[CommunitySessionCreationDefaults | None, int | None, dict | None]:
+) -> tuple[CommunitySessionCreationDefaults, int | None]:
     """Extract the typed session-creation defaults from ``CommunitySettings``.
 
     Args:
         settings: The validated :class:`CommunitySettings` model.
 
     Returns:
-        Tuple of (defaults_model, max_concurrent_sessions, error_dict).
+        Tuple of (defaults_model, max_concurrent_sessions).
         ``max_concurrent_sessions`` is ``None`` when the operator
-        disabled the cap (unbounded). On error, error_dict is set and
-        other values are placeholders.
+        disabled the cap (unbounded).
+
+    Raises:
+        SessionCreationError: If ``community/settings.json`` has no
+            ``session_creation`` block.
     """
     session_creation = settings.session_creation
     if session_creation is None:
@@ -103,12 +111,11 @@ def _get_session_creation_config(
             "community/settings.json (missing 'session_creation' block)."
         )
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return None, None, error_response(error_msg)
+        raise SessionCreationError(error_msg)
 
     return (
         session_creation.defaults,
         session_creation.max_concurrent_sessions,
-        None,
     )
 
 
@@ -148,7 +155,7 @@ def _validate_launch_method_params(
     docker_cpu_limit: float | None,
     docker_volumes: list[str] | None,
     python_venv_path: str | None,
-) -> dict | None:
+) -> None:
     """Validate that method-specific parameters are only used with their respective launch methods.
 
     Ensures docker-only parameters are not used with python launch method,
@@ -164,9 +171,10 @@ def _validate_launch_method_params(
         docker_volumes (list[str] | None): Docker-only parameter.
         python_venv_path (str | None): Python-only parameter.
 
-    Returns:
-        dict | None: Error dict with 'success', 'error', 'isError' keys if validation fails,
-            None if validation passes.
+    Raises:
+        SessionCreationError: If a parameter is used with the wrong
+            launch method, or mutually exclusive parameters are
+            combined.
     """
     # Docker-only parameters
     docker_only_params = [
@@ -181,28 +189,26 @@ def _validate_launch_method_params(
         if param_value and launch_method != "docker":
             error_msg = f"'{param_name}' parameter only applies to docker launch method, not '{launch_method}'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            return error_response(error_msg)
+            raise SessionCreationError(error_msg)
 
     # Python-only parameters
     if python_venv_path and launch_method != "python":
         error_msg = f"'python_venv_path' parameter only applies to python launch method, not '{launch_method}'"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return error_response(error_msg)
+        raise SessionCreationError(error_msg)
 
     # Check mutual exclusivity
     if programming_language and docker_image:
         error_msg = "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-        return error_response(error_msg)
-
-    return None
+        raise SessionCreationError(error_msg)
 
 
 def _resolve_docker_image(
     programming_language: str | None,
     docker_image: str | None,
     defaults: CommunitySessionCreationDefaults,
-) -> tuple[str, dict | None]:
+) -> str:
     """Resolve docker image from programming language or explicit image parameter.
 
     This function implements the following priority for Docker image selection:
@@ -217,32 +223,84 @@ def _resolve_docker_image(
         defaults (dict): Configuration defaults that may contain 'programming_language' or 'docker_image'
 
     Returns:
-        tuple[str, dict | None]: Two-element tuple:
-            - First element: Resolved Docker image name (empty string on error)
-            - Second element: Error dict with 'success', 'error', 'isError' keys, or None on success
+        str: Resolved Docker image name.
 
-    Note:
-        Returns error if programming_language (param or config) is not "Python" or "Groovy" (case-insensitive).
+    Raises:
+        SessionCreationError: If ``programming_language`` is not
+            "Python" or "Groovy" (case-insensitive).
     """
     if docker_image:
-        return docker_image, None
+        return docker_image
 
     if programming_language:
         lang_lower = programming_language.lower()
         if lang_lower == "python":
-            return defaults.docker.images.python, None
+            return defaults.docker.images.python
         elif lang_lower == "groovy":
-            return defaults.docker.images.groovy, None
+            return defaults.docker.images.groovy
         else:
             error_msg = f"Unsupported programming_language: '{programming_language}'. Must be 'Python' or 'Groovy'"
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            return "", error_response(error_msg)
+            raise SessionCreationError(error_msg)
 
     # Use config defaults (programming_language is a Literal
     # validated by Pydantic, so it is always "Python" or "Groovy").
     if defaults.programming_language == "Python":
-        return defaults.docker.images.python, None
-    return defaults.docker.images.groovy, None
+        return defaults.docker.images.python
+    return defaults.docker.images.groovy
+
+
+@dataclass(frozen=True)
+class _ResolvedSessionParams:
+    """Fully resolved community session creation parameters."""
+
+    launch_method: Literal["docker", "python"]
+    """Resolved launch method."""
+
+    programming_language: str
+    """Resolved programming language."""
+
+    auth_type: str
+    """Worker-side auth handler FQCN, or the anonymous sentinel."""
+
+    auth_token: str | None
+    """Resolved or auto-generated auth token; None for anonymous."""
+
+    auto_generated_token: bool
+    """True if the auth token was auto-generated."""
+
+    heap_size_gb: float | int
+    """JVM heap size in gigabytes."""
+
+    docker_image: str
+    """Resolved docker image; empty string for python launch."""
+
+    docker_memory_limit_gb: float | None
+    """Docker memory limit in GB, or None for no limit."""
+
+    docker_cpu_limit: float | None
+    """Docker CPU limit in cores, or None for no limit."""
+
+    docker_volumes: list[str]
+    """Docker volume mounts; empty for python launch."""
+
+    python_venv_path: str | None
+    """Python venv path; None for docker launch."""
+
+    extra_jvm_args: list[str]
+    """Additional JVM arguments."""
+
+    environment_vars: dict[str, str]
+    """Environment variables for the worker process."""
+
+    startup_timeout_seconds: float
+    """Health-check timeout in seconds."""
+
+    startup_check_interval_seconds: float
+    """Health-check poll interval in seconds."""
+
+    startup_retries: int
+    """Maximum retries per health check."""
 
 
 def _resolve_community_session_parameters(
@@ -258,7 +316,7 @@ def _resolve_community_session_parameters(
     docker_volumes: list[str] | None,
     python_venv_path: str | None,
     defaults: CommunitySessionCreationDefaults,
-) -> tuple[dict[str, Any], dict | None]:
+) -> _ResolvedSessionParams:
     """Resolve all community session creation parameters from tool args, config defaults, and hardcoded defaults.
 
     This function implements the parameter resolution priority: tool parameter > config default > hardcoded default.
@@ -284,36 +342,35 @@ def _resolve_community_session_parameters(
         defaults (dict): Configuration defaults from ``community/settings.json`` (in your configuration directory)
 
     Returns:
-        tuple[dict[str, Any], dict | None]: Two-element tuple:
-            - First element: Dict of resolved parameters with keys:
-                - launch_method (str): Resolved launch method (lowercase)
-                - programming_language (str): Resolved programming language
-                - auth_type (str): Normalized auth type (full class name)
-                - auth_token (str | None): Resolved or generated auth token
-                - auto_generated_token (bool): True if token was auto-generated
-                - heap_size_gb (float | int): Resolved heap size
-                - docker_image (str): Resolved docker image (empty for python launch)
-                - docker_memory_limit_gb (float | None): Resolved memory limit
-                - docker_cpu_limit (float | None): Resolved CPU limit
-                - docker_volumes (list[str]): Resolved volume mounts
-                - python_venv_path (str | None): Resolved venv path
-                - extra_jvm_args (list[str]): Resolved JVM args
-                - environment_vars (dict[str, str]): Resolved environment variables
-                - startup_timeout_seconds (int): Resolved startup timeout
-                - startup_check_interval_seconds (float): Resolved check interval
-                - startup_retries (int): Resolved retry count
-            - Second element: Error dict with 'success', 'error', 'isError' keys, or None on success
+        _ResolvedSessionParams: The fully resolved creation parameters.
+
+    Raises:
+        SessionCreationError: If the launch method is unrecognized, the
+            configured credentials kind is unsupported for dynamic
+            workers, a parameter is used with the wrong launch method,
+            or the programming language is unsupported.
     """
-    # Resolve launch method and auth type
-    resolved_launch_method = (launch_method or defaults.launch_method).lower()
+    # Resolve and validate launch method
+    method_str = (launch_method or defaults.launch_method).lower()
+    resolved_launch_method: Literal["docker", "python"]
+    if method_str == "docker":
+        resolved_launch_method = "docker"
+    elif method_str == "python":
+        resolved_launch_method = "python"
+    else:
+        error_msg = (
+            f"Invalid launch_method '{method_str}'. Valid options: 'docker', 'python'."
+        )
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
+        raise SessionCreationError(error_msg)
+
+    # Resolve auth type
     # Derive worker-side auth handler FQCN from credentials kind (single
     # source of truth; no parallel auth_type knob to drift out of sync).
-    resolved_auth_type, auth_error = _credentials_to_auth_type(defaults.credentials)
-    if auth_error:
-        return {}, error_response(auth_error)
+    resolved_auth_type = _credentials_to_auth_type(defaults.credentials)
 
     # Validate method-specific parameters
-    validation_error = _validate_launch_method_params(
+    _validate_launch_method_params(
         resolved_launch_method,
         programming_language,
         docker_image,
@@ -322,8 +379,6 @@ def _resolve_community_session_parameters(
         docker_volumes,
         python_venv_path,
     )
-    if validation_error:
-        return {}, validation_error
 
     # Resolve programming_language for both launch methods
     # This determines both the Docker image selection (for docker) and the
@@ -334,11 +389,9 @@ def _resolve_community_session_parameters(
 
     # Resolve docker image (only for docker launch method)
     if resolved_launch_method == "docker":
-        resolved_docker_image, image_error = _resolve_docker_image(
+        resolved_docker_image = _resolve_docker_image(
             programming_language, docker_image, defaults
         )
-        if image_error:
-            return {}, image_error
     else:
         # For python launch, ensure no docker image is set
         resolved_docker_image = ""
@@ -373,29 +426,29 @@ def _resolve_community_session_parameters(
         resolved_auth_type, auth_token, defaults
     )
 
-    return {
-        "launch_method": resolved_launch_method,
-        "programming_language": resolved_programming_language,
-        "auth_type": resolved_auth_type,
-        "auth_token": resolved_auth_token,
-        "auto_generated_token": auto_generated_token,
-        "heap_size_gb": resolved_heap_size_gb,
-        "docker_image": resolved_docker_image,
-        "docker_memory_limit_gb": resolved_docker_memory_limit,
-        "docker_cpu_limit": resolved_docker_cpu_limit,
-        "docker_volumes": resolved_docker_volumes,
-        "python_venv_path": resolved_python_venv_path,
-        "extra_jvm_args": resolved_extra_jvm_args,
-        "environment_vars": resolved_environment_vars,
-        "startup_timeout_seconds": resolved_startup_timeout,
-        "startup_check_interval_seconds": resolved_startup_interval,
-        "startup_retries": resolved_startup_retries,
-    }, None
+    return _ResolvedSessionParams(
+        launch_method=resolved_launch_method,
+        programming_language=resolved_programming_language,
+        auth_type=resolved_auth_type,
+        auth_token=resolved_auth_token,
+        auto_generated_token=auto_generated_token,
+        heap_size_gb=resolved_heap_size_gb,
+        docker_image=resolved_docker_image,
+        docker_memory_limit_gb=resolved_docker_memory_limit,
+        docker_cpu_limit=resolved_docker_cpu_limit,
+        docker_volumes=resolved_docker_volumes,
+        python_venv_path=resolved_python_venv_path,
+        extra_jvm_args=resolved_extra_jvm_args,
+        environment_vars=resolved_environment_vars,
+        startup_timeout_seconds=resolved_startup_timeout,
+        startup_check_interval_seconds=resolved_startup_interval,
+        startup_retries=resolved_startup_retries,
+    )
 
 
 def _credentials_to_auth_type(
     credentials: CredentialsUnion | None,
-) -> tuple[str, str | None]:
+) -> str:
     """Derive the worker-side Java auth handler FQCN from typed credentials.
 
     The handler class the worker is launched with is uniquely
@@ -415,36 +468,36 @@ def _credentials_to_auth_type(
             ``community/settings.json``'s ``session_creation.defaults``.
 
     Returns:
-        tuple[str, str | None]: ``(auth_type, error_message)``.
-            - On success: ``(handler_fqcn, None)``.
-            - On failure: ``("", error_message_string)``. Today the
-              only failure case is :class:`PasswordCredentials`,
-              which the dynamic launcher cannot use because freshly
-              launched workers have no pre-configured user database
-              for Basic auth to validate against. Static community
-              sessions (declared under ``community/sessions/``) and
-              enterprise systems still accept password credentials.
+        str: The worker-side auth handler FQCN (or the anonymous
+            sentinel).
+
+    Raises:
+        SessionCreationError: If the credentials kind cannot back a
+            dynamically-launched worker. Today that is
+            :class:`PasswordCredentials` — freshly launched workers
+            have no pre-configured user database for Basic auth to
+            validate against (static community sessions and
+            enterprise systems still accept password credentials) —
+            or an unrecognized credentials class.
     """
     if credentials is None or isinstance(credentials, PSKCredentials):
-        return _PSK_AUTH_HANDLER, None
+        return _PSK_AUTH_HANDLER
     if isinstance(credentials, AnonymousCredentials):
-        return _ANONYMOUS_AUTH_HANDLER, None
+        return _ANONYMOUS_AUTH_HANDLER
     if isinstance(credentials, CustomTokenCredentials):
-        return credentials.auth_type, None
+        return credentials.auth_type
     if isinstance(credentials, PasswordCredentials):
-        return (
-            "",
+        raise SessionCreationError(
             "Basic authentication is not supported for dynamically-"
             "launched workers because they have no pre-configured "
             "user database for Basic to validate against. Use PSK or "
             "anonymous credentials here, or declare a static session "
             "under community/sessions/ if you have a pre-existing "
-            "worker with Basic auth set up.",
+            "worker with Basic auth set up."
         )
-    return (
-        "",
+    raise SessionCreationError(
         f"Unsupported credentials kind for dynamic community session: "
-        f"{type(credentials).__name__}",
+        f"{type(credentials).__name__}"
     )
 
 
@@ -596,13 +649,11 @@ async def _launch_process_and_wait_for_ready(
     resolved_docker_cpu_limit: float | None,
     resolved_docker_volumes: list[str],
     resolved_python_venv_path: str | None,
-    resolved_startup_timeout: int,
+    resolved_startup_timeout: float,
     resolved_startup_interval: float,
     resolved_startup_retries: int,
     instance_tracker: InstanceTracker,
-) -> tuple[
-    DockerLaunchedSession | PythonLaunchedSession | None, int | None, dict | None
-]:
+) -> tuple[DockerLaunchedSession | PythonLaunchedSession, int]:
     """Launch Docker container or Python process and wait for health check.
 
     Finds an available port, launches the session using the specified method,
@@ -620,15 +671,20 @@ async def _launch_process_and_wait_for_ready(
         resolved_docker_cpu_limit (float | None): Docker CPU limit (docker only).
         resolved_docker_volumes (list[str]): Docker volume mounts (docker only).
         resolved_python_venv_path (str | None): Python venv path (python only).
-        resolved_startup_timeout (int): Health check timeout in seconds.
+        resolved_startup_timeout (float): Health check timeout in seconds.
         resolved_startup_interval (float): Health check interval in seconds.
         resolved_startup_retries (int): Max retries per health check.
         instance_tracker (InstanceTracker): Tracker for orphan cleanup.
 
     Returns:
-        tuple[DockerLaunchedSession | PythonLaunchedSession | None, int | None, dict | None]: Tuple of
-            (launched_session, port, error_dict). On success, error_dict is None.
-            On failure, launched_session and port may be None.
+        tuple[DockerLaunchedSession | PythonLaunchedSession, int]: The
+            launched session and its assigned port.
+
+    Raises:
+        SessionLaunchError: If the session does not pass its health
+            check within the startup timeout (the launched process is
+            stopped best-effort first), or if the launcher itself
+            fails to start the session.
     """
     port = find_available_port()
     _LOGGER.debug(
@@ -676,14 +732,13 @@ async def _launch_process_and_wait_for_ready(
                 f"[mcp_systems_server:session_community_create] Failed to cleanup failed session: {e}"
             )
 
-        error_msg = (
+        raise SessionLaunchError(
             f"Session failed to start within {resolved_startup_timeout} seconds. "
             f"To allow more time, increase community/settings.json: "
             f"session_creation.defaults.startup_timeout_seconds in the operator config."
         )
-        return None, None, error_response(error_msg)
 
-    return launched_session, port, None
+    return launched_session, port
 
 
 def _build_success_response(
@@ -691,7 +746,7 @@ def _build_success_response(
     session_name: str,
     connection_url: str,
     resolved_auth_type: str,
-    resolved_launch_method: str,
+    resolved_launch_method: Literal["docker", "python"],
     port: int,
     launched_session: LaunchedSession,
 ) -> dict:
@@ -699,6 +754,11 @@ def _build_success_response(
 
     Returns:
         Success response dict with session details.
+
+    Raises:
+        InternalError: If ``launched_session`` is neither a
+            :class:`DockerLaunchedSession` nor a
+            :class:`PythonLaunchedSession`.
     """
     result = {
         "success": True,
@@ -711,12 +771,16 @@ def _build_success_response(
     }
 
     # Add launch-method-specific details
-    if resolved_launch_method == "docker":
-        docker_session = cast(DockerLaunchedSession, launched_session)
-        result["container_id"] = docker_session.container_id
-    elif resolved_launch_method == "python":
-        python_session = cast(PythonLaunchedSession, launched_session)
-        result["process_id"] = python_session.process.pid
+    if isinstance(launched_session, DockerLaunchedSession):
+        result["container_id"] = launched_session.container_id
+    elif isinstance(launched_session, PythonLaunchedSession):
+        result["process_id"] = launched_session.process.pid
+    else:
+        raise InternalError(
+            f"Unhandled LaunchedSession subtype "
+            f"{type(launched_session).__name__}; _build_success_response "
+            f"must be extended whenever a launch method is added."
+        )
 
     return result
 
@@ -980,18 +1044,7 @@ async def session_community_create(
         session_registry = get_community_registry(context)
 
         # Get and validate configuration
-        defaults, max_concurrent_sessions, config_error = _get_session_creation_config(
-            settings
-        )
-        if config_error or defaults is None:
-            # ``_get_session_creation_config`` returns ``defaults is None``
-            # exactly when it also returns a ``config_error``; the narrowing
-            # here is for mypy's benefit.
-            return (
-                config_error
-                if config_error is not None
-                else error_response("Community session creation not configured")
-            )
+        defaults, max_concurrent_sessions = _get_session_creation_config(settings)
 
         # Check session limit
         limit_error = await _check_session_limit(
@@ -1001,7 +1054,7 @@ async def session_community_create(
             return limit_error
 
         # Resolve all session parameters
-        params, params_error = _resolve_community_session_parameters(
+        params = _resolve_community_session_parameters(
             launch_method,
             programming_language,
             auth_token,
@@ -1015,26 +1068,24 @@ async def session_community_create(
             python_venv_path,
             defaults,
         )
-        if params_error:
-            return params_error
 
         # Extract resolved parameters
-        resolved_launch_method = params["launch_method"]
-        resolved_programming_language = params["programming_language"]
-        resolved_auth_type = params["auth_type"]
-        resolved_auth_token = params["auth_token"]
-        auto_generated_token = params["auto_generated_token"]
-        resolved_heap_size_gb = params["heap_size_gb"]
-        resolved_docker_image = params["docker_image"]
-        resolved_docker_memory_limit = params["docker_memory_limit_gb"]
-        resolved_docker_cpu_limit = params["docker_cpu_limit"]
-        resolved_docker_volumes = params["docker_volumes"]
-        resolved_python_venv_path = params["python_venv_path"]
-        resolved_extra_jvm_args = params["extra_jvm_args"]
-        resolved_environment_vars = params["environment_vars"]
-        resolved_startup_timeout = params["startup_timeout_seconds"]
-        resolved_startup_interval = params["startup_check_interval_seconds"]
-        resolved_startup_retries = params["startup_retries"]
+        resolved_launch_method = params.launch_method
+        resolved_programming_language = params.programming_language
+        resolved_auth_type = params.auth_type
+        resolved_auth_token = params.auth_token
+        auto_generated_token = params.auto_generated_token
+        resolved_heap_size_gb = params.heap_size_gb
+        resolved_docker_image = params.docker_image
+        resolved_docker_memory_limit = params.docker_memory_limit_gb
+        resolved_docker_cpu_limit = params.docker_cpu_limit
+        resolved_docker_volumes = params.docker_volumes
+        resolved_python_venv_path = params.python_venv_path
+        resolved_extra_jvm_args = params.extra_jvm_args
+        resolved_environment_vars = params.environment_vars
+        resolved_startup_timeout = params.startup_timeout_seconds
+        resolved_startup_interval = params.startup_check_interval_seconds
+        resolved_startup_retries = params.startup_retries
 
         # Fast-fail display-name conflict check (best-effort; the atomic
         # guarantee is in ``add_dynamic_session``).
@@ -1055,9 +1106,9 @@ async def session_community_create(
         )
 
         # Launch session and wait for readiness
-        launched_session, port, launch_error = await _launch_process_and_wait_for_ready(
+        launched_session, port = await _launch_process_and_wait_for_ready(
             session_name,
-            cast(Literal["docker", "python"], resolved_launch_method),
+            resolved_launch_method,
             resolved_auth_token,
             resolved_heap_size_gb,
             resolved_extra_jvm_args,
@@ -1072,8 +1123,6 @@ async def session_community_create(
             resolved_startup_retries,
             instance_tracker,
         )
-        if launch_error or launched_session is None or port is None:
-            return launch_error or error_response("Session launch failed")
 
         # Create and register session manager. The registry assigns the
         # SessionId; we read the full canonical id back.
@@ -1108,6 +1157,12 @@ async def session_community_create(
             launched_session,
         )
 
+    except SessionCreationError as e:
+        # Raised by the config / parameter-resolution / launch helpers
+        # (SessionLaunchError is a subclass). The message is already
+        # user-facing; surface it without additional wrapping.
+        _LOGGER.error(f"[mcp_systems_server:session_community_create] {e}")
+        return error_response(str(e))
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:session_community_create] Failed to create session '{session_name}': {e!r}",
@@ -1385,7 +1440,7 @@ async def session_community_delete(
 
 
 def _static_credentials_view(
-    mgr: "CommunitySessionManager",
+    mgr: StaticCommunitySessionManager,
 ) -> tuple[str, str, str, str]:
     """Return ``(auth_type, auth_token, connection_url, connection_url_with_auth)``.
 
@@ -1627,18 +1682,17 @@ async def session_community_credentials(
         )
 
         # Get credentials based on session type
-        if is_dynamic:
+        if isinstance(mgr, DynamicCommunitySessionManager):
             # Dynamic session - get from launched_session
-            dynamic_mgr = cast(DynamicCommunitySessionManager, mgr)
             auth_token = (
-                dynamic_mgr.launched_session.auth_token
-                if dynamic_mgr.launched_session.auth_token
+                mgr.launched_session.auth_token
+                if mgr.launched_session.auth_token
                 else ""
             )
-            connection_url = dynamic_mgr.connection_url
-            connection_url_with_auth = dynamic_mgr.connection_url_with_auth
-            auth_type = dynamic_mgr.launched_session.auth_type.upper()
-        else:
+            connection_url = mgr.connection_url
+            connection_url_with_auth = mgr.connection_url_with_auth
+            auth_type = mgr.launched_session.auth_type.upper()
+        elif isinstance(mgr, StaticCommunitySessionManager):
             # Static session - reads directly from the typed declaration
             # carried on the manager (no legacy ``_config`` dict here).
             (
@@ -1647,6 +1701,12 @@ async def session_community_credentials(
                 connection_url,
                 connection_url_with_auth,
             ) = _static_credentials_view(mgr)
+        else:
+            raise InternalError(
+                f"Unhandled CommunitySessionManager subtype "
+                f"{type(mgr).__name__}; session_community_credentials must be "
+                f"extended whenever a manager subtype is added."
+            )
 
         result = {
             "success": True,

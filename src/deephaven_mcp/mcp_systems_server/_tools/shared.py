@@ -12,7 +12,7 @@ Provides common helpers used across the MCP tool modules:
 - Session retrieval: :func:`get_session_from_context`,
   :func:`get_enterprise_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
-  :func:`build_table_data_response`, :func:`format_meta_table_result`.
+  :func:`build_table_data_response`, :func:`format_schema_result`.
 - Partial-result formatting: :func:`format_partial_result`.
 - JSON redaction: :func:`redact_json_sensitive_fields`.
 
@@ -38,6 +38,7 @@ from deephaven_mcp._exceptions import (
     EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
+    UnsupportedOperationError,
 )
 from deephaven_mcp._redaction import REDACTED
 from deephaven_mcp.client import BaseSession, CorePlusSession
@@ -47,7 +48,7 @@ from deephaven_mcp.config.schema import (
     ResponseLimits,
 )
 from deephaven_mcp.config.tree import ConfigTree
-from deephaven_mcp.formatters import format_table_data
+from deephaven_mcp.formatters import TableFormat, format_table_data
 from deephaven_mcp.mcp_systems_server._lifespan import LifespanContext
 from deephaven_mcp.resource_manager import (
     CommunitySessionRegistry,
@@ -65,8 +66,8 @@ __all__ = [
     "check_response_size",
     "check_session_limit",
     "error_response",
-    "format_meta_table_result",
     "format_partial_result",
+    "format_schema_result",
     "get_community_registry",
     "get_community_settings",
     "get_enterprise_registry",
@@ -488,7 +489,7 @@ async def get_session_from_context(
 
 async def get_enterprise_session(
     function_name: str, context: Context, session_id: str
-) -> tuple[CorePlusSession | None, dict[str, object] | None]:
+) -> CorePlusSession:
     """Get and validate an enterprise (Core+) session from context.
 
     Args:
@@ -498,28 +499,29 @@ async def get_enterprise_session(
         session_id (str): Session id (e.g. ``"enterprise:prod:analytics"``).
 
     Returns:
-        tuple[CorePlusSession | None, dict[str, object] | None]:
-            ``(session, error)``. On success the session is non-``None``
-            and ``error`` is ``None``; on failure ``session`` is
-            ``None`` and ``error`` is a structured error dict produced
-            by :func:`error_response`.
+        CorePlusSession: The active enterprise session connection.
+
+    Raises:
+        UnsupportedOperationError: If ``session_id`` resolves to a
+            session that is not an enterprise (Core+) session.
+        InternalError: If the registry is missing from the lifespan
+            context.
+        InvalidSessionNameError: If ``session_id`` does not route to a
+            configured child registry.
+        RegistryItemNotFoundError: If ``session_id`` is not present in
+            the routed registry.
     """
-    try:
-        session = await get_session_from_context(function_name, context, session_id)
+    session = await get_session_from_context(function_name, context, session_id)
 
-        if not isinstance(session, CorePlusSession):
-            error_msg = (
-                f"{function_name} only works with enterprise (Core+) sessions, "
-                f"but session '{session_id}' is {type(session).__name__}"
-            )
-            _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-            return None, error_response(error_msg)
-
-        return session, None
-    except Exception as e:
-        error_msg = f"Failed to get session '{session_id}': {e}"
+    if not isinstance(session, CorePlusSession):
+        error_msg = (
+            f"{function_name} only works with enterprise (Core+) sessions, "
+            f"but session '{session_id}' is {type(session).__name__}"
+        )
         _LOGGER.error(f"[mcp_systems_server:{function_name}] {error_msg}")
-        return None, error_response(error_msg)
+        raise UnsupportedOperationError(error_msg)
+
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -658,49 +660,65 @@ async def check_session_limit(
 # ---------------------------------------------------------------------------
 
 
-def format_meta_table_result(
+def format_schema_result(
     arrow_meta_table: pyarrow.Table,
+    id: str,
     table_name: str,
     namespace: str | None = None,
 ) -> dict:
-    """Format a PyArrow meta table into a standardized result dictionary.
+    """Format a PyArrow meta table into a lean single-table schema result.
 
     A "meta table" in Deephaven is a table that describes another
     table's structure: each row represents one column from the original
     table.
 
+    Each ``schema`` entry is a snake_case dict with ``name`` and ``type``
+    always present, plus one sparse key carried only when meaningful:
+    ``column_type`` (the meta table's ``ColumnType``, e.g. ``"Partitioning"``
+    or ``"Grouping"``; omitted for ``"Normal"`` columns).
+
     Args:
         arrow_meta_table (pyarrow.Table): The PyArrow meta table.
+        id (str): Fully qualified session id to echo back.
         table_name (str): Name of the table being described.
         namespace (str | None): Optional namespace for catalog tables.
 
     Returns:
-        dict: ``{"success": True, "table": ..., "format": "json-row",
-            "data": [...], "meta_columns": [...], "row_count": ...,
-            "namespace": ... (if provided)}``.
+        dict: ``{"success": True, "id": ..., "namespace": ... (if provided),
+            "table_name": ..., "schema": [...], "column_count": ...}``. The
+            ``type`` values are Deephaven type names from the meta table
+            (e.g. ``"java.lang.String"``, ``"int"``), not PyArrow names.
+
+    Raises:
+        KeyError: If a meta-table row lacks the ``Name`` or ``DataType``
+            column (malformed meta table); callers convert this to a
+            structured error response.
     """
-    meta_data = arrow_meta_table.to_pylist()
-    meta_schema = [
-        {"name": field.name, "type": str(field.type)}
-        for field in arrow_meta_table.schema
-    ]
-    result: dict[str, object] = {
-        "success": True,
-        "table": table_name,
-        "format": "json-row",
-        "data": meta_data,
-        "meta_columns": meta_schema,
-        "row_count": len(arrow_meta_table),
-    }
+    meta_rows = arrow_meta_table.to_pylist()
+    schema: list[dict[str, object]] = []
+    for row in meta_rows:
+        column: dict[str, object] = {
+            "name": row["Name"],
+            "type": row["DataType"],
+        }
+        column_type = row.get("ColumnType")
+        if column_type and column_type != "Normal":
+            column["column_type"] = column_type
+        schema.append(column)
+    result: dict[str, object] = {"success": True, "id": id}
     if namespace is not None:
         result["namespace"] = namespace
+    result["table_name"] = table_name
+    result["schema"] = schema
+    result["column_count"] = len(meta_rows)
     return result
 
 
 def build_table_data_response(
     arrow_table: pyarrow.Table,
     is_complete: bool,
-    format: str,
+    format: TableFormat,
+    id: str,
     table_name: str | None = None,
     namespace: str | None = None,
 ) -> dict:
@@ -711,12 +729,13 @@ def build_table_data_response(
             data.
         is_complete (bool): Whether the entire table was retrieved
             (``False`` if truncated by ``max_rows``).
-        format (str): Desired output format.
+        format (TableFormat): Desired output format.
+        id (str): Fully qualified session id to echo back.
         table_name (str | None): Optional table name to include.
         namespace (str | None): Optional namespace (for catalog tables).
 
     Returns:
-        dict: ``{"success": True, "format": ..., "schema": [...],
+        dict: ``{"success": True, "id": ..., "format": ..., "schema": [...],
             "row_count": ..., "is_complete": ..., "data": ...,
             "table_name": ... (optional), "namespace": ... (optional)}``.
     """
@@ -724,7 +743,7 @@ def build_table_data_response(
         {"name": field.name, "type": str(field.type)} for field in arrow_table.schema
     ]
     actual_format, formatted_data = format_table_data(arrow_table, format_type=format)
-    response: dict[str, object] = {"success": True}
+    response: dict[str, object] = {"success": True, "id": id}
     if namespace is not None:
         response["namespace"] = namespace
     if table_name is not None:

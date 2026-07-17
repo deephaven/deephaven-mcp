@@ -7,7 +7,7 @@ Covers the helpers used by every tool:
 - Identifier parser and formatter (``parse_pq_id``, ``make_pq_id``).
 - Session retrieval (``get_session_from_context``, ``get_enterprise_session``).
 - Response shapers / size guards (``error_response``, ``check_response_size``,
-  ``format_meta_table_result``, ``build_table_data_response``).
+  ``format_schema_result``, ``build_table_data_response``).
 - ``format_partial_result``, ``redact_json_sensitive_fields``.
 """
 
@@ -24,6 +24,7 @@ from deephaven_mcp._exceptions import (
     EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
+    UnsupportedOperationError,
 )
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.mcp_systems_server._tools import shared
@@ -341,9 +342,8 @@ async def test_get_enterprise_session_success():
     registry = MagicMock(get=AsyncMock(return_value=manager))
 
     ctx = _ctx(registry=registry)
-    sess, err = await shared.get_enterprise_session("tool", ctx, "enterprise:prod:1")
+    sess = await shared.get_enterprise_session("tool", ctx, "enterprise:prod:1")
     assert sess is enterprise_session
-    assert err is None
 
 
 @pytest.mark.asyncio
@@ -353,13 +353,8 @@ async def test_get_enterprise_session_rejects_non_enterprise():
     registry = MagicMock(get=AsyncMock(return_value=manager))
 
     ctx = _ctx(registry=registry)
-    sess, err = await shared.get_enterprise_session(
-        "tool", ctx, "community:community:1"
-    )
-    assert sess is None
-    assert err is not None
-    assert err["success"] is False
-    assert "enterprise" in err["error"].lower()
+    with pytest.raises(UnsupportedOperationError, match="enterprise"):
+        await shared.get_enterprise_session("tool", ctx, "community:community:1")
 
 
 @pytest.mark.asyncio
@@ -367,10 +362,8 @@ async def test_get_enterprise_session_propagates_lookup_error():
     registry = MagicMock(get=AsyncMock(side_effect=RuntimeError("nope")))
     ctx = _ctx(registry=registry)
 
-    sess, err = await shared.get_enterprise_session("tool", ctx, "enterprise:prod:999")
-    assert sess is None
-    assert err is not None
-    assert "Failed to get session" in err["error"]
+    with pytest.raises(RuntimeError, match="nope"):
+        await shared.get_enterprise_session("tool", ctx, "enterprise:prod:999")
 
 
 # ---------------------------------------------------------------------------
@@ -462,24 +455,76 @@ def _arrow_table() -> pa.Table:
     return pa.table({"a": [1, 2, 3], "b": ["x", "y", "z"]})
 
 
-def test_format_meta_table_result_no_namespace():
-    out = shared.format_meta_table_result(_arrow_table(), "T")
-    assert out["success"] is True
-    assert out["table"] == "T"
-    assert out["row_count"] == 3
-    assert "namespace" not in out
+def _meta_table() -> pa.Table:
+    return pa.table(
+        {
+            "Name": ["Date", "Prices", "Symbol"],
+            "DataType": ["java.lang.String", "double[]", "java.lang.String"],
+            "ColumnType": ["Partitioning", "Normal", "Normal"],
+        }
+    )
 
 
-def test_format_meta_table_result_with_namespace():
-    out = shared.format_meta_table_result(_arrow_table(), "T", namespace="ns")
+def test_format_schema_result_sparse_shape():
+    """column_type appears only when meaningful; keys are snake_case."""
+    out = shared.format_schema_result(_meta_table(), "community:community:s1", "T")
+    assert out == {
+        "success": True,
+        "id": "community:community:s1",
+        "table_name": "T",
+        "schema": [
+            {"name": "Date", "type": "java.lang.String", "column_type": "Partitioning"},
+            {"name": "Prices", "type": "double[]"},
+            {"name": "Symbol", "type": "java.lang.String"},
+        ],
+        "column_count": 3,
+    }
+
+
+def test_format_schema_result_grouping_column():
+    """A Grouping ColumnType is surfaced, not collapsed to a boolean."""
+    meta = pa.table(
+        {
+            "Name": ["Sym"],
+            "DataType": ["java.lang.String"],
+            "ColumnType": ["Grouping"],
+        }
+    )
+    out = shared.format_schema_result(meta, "community:community:s1", "T")
+    assert out["schema"] == [
+        {"name": "Sym", "type": "java.lang.String", "column_type": "Grouping"}
+    ]
+
+
+def test_format_schema_result_without_optional_meta_columns():
+    """Meta tables lacking ColumnType still format cleanly."""
+    meta = pa.table({"Name": ["A"], "DataType": ["int"]})
+    out = shared.format_schema_result(meta, "community:community:s1", "T")
+    assert out["schema"] == [{"name": "A", "type": "int"}]
+
+
+def test_format_schema_result_with_namespace():
+    out = shared.format_schema_result(
+        _meta_table(), "enterprise:prod:s1", "T", namespace="ns"
+    )
+    assert out["id"] == "enterprise:prod:s1"
     assert out["namespace"] == "ns"
+    assert out["table_name"] == "T"
+
+
+def test_format_schema_result_malformed_row_raises():
+    """Rows missing Name/DataType fail loudly rather than emitting None entries."""
+    malformed = pa.table({"foo": ["bar"]})
+    with pytest.raises(KeyError):
+        shared.format_schema_result(malformed, "community:community:s1", "T")
 
 
 def test_build_table_data_response_minimal():
     out = shared.build_table_data_response(
-        _arrow_table(), is_complete=True, format="json-row"
+        _arrow_table(), is_complete=True, format="json-row", id="community:community:s1"
     )
     assert out["success"] is True
+    assert out["id"] == "community:community:s1"
     assert out["row_count"] == 3
     assert out["is_complete"] is True
     assert "namespace" not in out and "table_name" not in out
@@ -490,6 +535,7 @@ def test_build_table_data_response_with_namespace_and_name():
         _arrow_table(),
         is_complete=False,
         format="json-row",
+        id="enterprise:prod:s1",
         table_name="T",
         namespace="ns",
     )
@@ -504,11 +550,13 @@ def test_build_table_data_response_reading_order():
         _arrow_table(),
         is_complete=True,
         format="json-row",
+        id="enterprise:prod:s1",
         table_name="T",
         namespace="ns",
     )
     assert list(out) == [
         "success",
+        "id",
         "namespace",
         "table_name",
         "row_count",

@@ -407,7 +407,9 @@ def test_delete_tool_failure_exits_3(tmp_path: Path) -> None:
 
 def test_exec_inline_script(tmp_path: Path) -> None:
     result, call = _run(
-        ["session", "exec", _SID, "--script", "print(1)"], {"success": True}, tmp_path
+        ["session", "exec", _SID, "--script", "print(1)"],
+        {"success": True, "id": _SID},
+        tmp_path,
     )
     assert result.exit_code == 0
     assert call.await_args.args[2] == "session_script_run"

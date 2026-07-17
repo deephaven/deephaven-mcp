@@ -406,6 +406,7 @@ async def test_session_script_run_success():
 
     # Verify results
     assert result["success"] is True
+    assert result["id"] == "community:community:worker"
     assert DummySession.called == "print(1)"
 
 
@@ -629,6 +630,7 @@ async def test_session_pip_list_success():
 
         # Verify results
         assert result["success"] is True
+        assert result["id"] == "community:community:test_worker"
         assert len(result["packages"]) == 2
         assert result["packages"][0]["package"] == "numpy"
         assert result["packages"][0]["version"] == "1.25.0"
