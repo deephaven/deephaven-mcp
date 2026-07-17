@@ -31,6 +31,7 @@ __all__ = [
     "CommunityTimeouts",
     "DockerImages",
     "DockerLaunchOptions",
+    "LaunchMethod",
     "PythonLaunchOptions",
     "load_community",
 ]
@@ -55,6 +56,9 @@ from deephaven_mcp.sessions import CommunitySessionConfig
 from ._response_limits import ResponseLimits
 
 _LOGGER = logging.getLogger(__name__)
+
+LaunchMethod = Literal["docker", "python"]
+"""Closed vocabulary for how a dynamic community session is launched."""
 
 
 class CommunityTimeouts(StrictSchema):
@@ -174,7 +178,7 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     bearer material for those sessions.
     """
 
-    launch_method: Literal["docker", "python"] = "docker"
+    launch_method: LaunchMethod = "docker"
     """How dynamic community sessions are launched. ``"docker"`` starts
     a fresh Deephaven server container per session (configured by the
     ``docker`` block); ``"python"`` starts the server in-process via

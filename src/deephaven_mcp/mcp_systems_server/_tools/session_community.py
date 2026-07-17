@@ -10,7 +10,7 @@ These tools work with Deephaven Community (Core) sessions only.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, cast, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -33,6 +33,7 @@ from deephaven_mcp.auth.credentials import (
 from deephaven_mcp.config.schema import (
     CommunitySessionCreationDefaults,
     CommunitySettings,
+    LaunchMethod,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_session_limit,
@@ -61,8 +62,8 @@ from deephaven_mcp.sessions import CommunitySessionConfig
 
 _LOGGER = logging.getLogger(__name__)
 
-LaunchMethod = Literal["docker", "python"]
-"""Closed vocabulary for how a dynamic community session is launched."""
+_VALID_LAUNCH_METHODS: frozenset[str] = frozenset(get_args(LaunchMethod))
+"""Runtime membership set for ``LaunchMethod``, derived via ``typing.get_args``."""
 
 _PSK_AUTH_HANDLER = "io.deephaven.authentication.psk.PskAuthenticationHandler"
 """Fully-qualified class name (FQCN) of the Deephaven worker-side Java
@@ -356,17 +357,16 @@ def _resolve_community_session_parameters(
     # Resolve and validate launch method (runtime validation retained for
     # untyped callers; typed callers are constrained by LaunchMethod)
     method_str = (launch_method or defaults.launch_method).lower()
-    resolved_launch_method: LaunchMethod
-    if method_str == "docker":
-        resolved_launch_method = "docker"
-    elif method_str == "python":
-        resolved_launch_method = "python"
-    else:
+    if method_str not in _VALID_LAUNCH_METHODS:
+        valid_options = ", ".join(f"'{m}'" for m in sorted(_VALID_LAUNCH_METHODS))
         error_msg = (
-            f"Invalid launch_method '{method_str}'. Valid options: 'docker', 'python'."
+            f"Invalid launch_method '{method_str}'. Valid options: {valid_options}."
         )
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
         raise SessionCreationError(error_msg)
+    # Safe: membership in the get_args-derived set proves method_str is a
+    # LaunchMethod member.
+    resolved_launch_method = cast(LaunchMethod, method_str)
 
     # Resolve auth type
     # Derive worker-side auth handler FQCN from credentials kind (single

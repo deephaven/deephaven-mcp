@@ -39,6 +39,7 @@ __all__ = [
     "EnterpriseConfig",
     "EnterpriseSettings",
     "EnterpriseTimeouts",
+    "LaunchMethod",
     "OutputConfig",
     "PqToolsConfig",
     "PythonLaunchOptions",
@@ -74,6 +75,7 @@ from ._community import (
     CommunityTimeouts,
     DockerImages,
     DockerLaunchOptions,
+    LaunchMethod,
     PythonLaunchOptions,
     load_community,
 )

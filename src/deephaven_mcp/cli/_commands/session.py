@@ -174,7 +174,7 @@ async def _fetch_credentials(
         retry_command (str): Command rendered into the corrupt-registry hint.
 
     Returns:
-        dict[str, Any]: The credential payload (``auth_type``,
+        dict[str, Any]: The credential payload (``id``, ``auth_type``,
             ``auth_token``, ``connection_url``, ``connection_url_with_auth``).
 
     Raises:
