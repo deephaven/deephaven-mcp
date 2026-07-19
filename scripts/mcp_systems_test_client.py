@@ -9,8 +9,9 @@ Features
 - Lists every registered tool.
 - Calls a representative read-only subset of community-side and
   enterprise-side tools with sample arguments. The one minor
-  side-effect is ``session_script_run``, which executes
-  ``print('hello world')`` on the targeted community session.
+  side-effect is ``session_script_run``, which executes a hello-world
+  script on the targeted community session, in the session's own
+  language (Python or Groovy, read from ``session_details``).
 - Exits with code ``0`` when every tool call returned without
   raising, or ``1`` when at least one call failed — suitable as a CI
   smoke check or post-deploy ping.
@@ -53,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import shlex
 import sys
@@ -150,6 +152,42 @@ def parse_args() -> argparse.Namespace:
 
 class _ToolFailure(Exception):
     """Raised internally to abort a strict run on the first tool failure."""
+
+
+_DEMO_SCRIPTS = {
+    "python": (
+        "from deephaven import empty_table\n"
+        "demo_table = empty_table(3).update('X = i')\n"
+        "print('hello world')"
+    ),
+    "groovy": ('demo_table = emptyTable(3).update("X = i")\n' 'println "hello world"'),
+}
+"""Language-appropriate demo scripts; each creates ``demo_table`` for the
+schema check that follows and prints a hello-world line."""
+
+
+def _extract_programming_language(session_details_text: str) -> str:
+    """Extract the session's programming language from ``session_details`` output.
+
+    Args:
+        session_details_text: Raw text returned by the ``session_details``
+            tool call (JSON on success, an error string otherwise).
+
+    Returns:
+        str: The lowercased language (``"python"`` or ``"groovy"``),
+        defaulting to ``"python"`` when the payload cannot be parsed or
+        omits the field.
+    """
+    try:
+        details = json.loads(session_details_text)
+        language = details["session"]["programming_language"]
+        return str(language).lower()
+    except (json.JSONDecodeError, KeyError, TypeError):
+        _LOGGER.warning(
+            "Could not determine programming language from session_details; "
+            "assuming 'python'"
+        )
+        return "python"
 
 
 async def call_tool(
@@ -347,6 +385,11 @@ async def test_tools(
     )
     print(f"Result for session_details: {result}")
 
+    # Later calls are language-sensitive: the demo script must use the
+    # session's own syntax, and pip introspection is Python-only.
+    programming_language = _extract_programming_language(result)
+    _LOGGER.info(f"Demo session programming language: {programming_language}")
+
     _LOGGER.info("Testing tool: session_tables_list")
     print(f"\nCalling tool: session_tables_list (id={demo_session_id})")
     result = await call_tool(
@@ -360,17 +403,11 @@ async def test_tools(
 
     _LOGGER.info("Testing tool: session_script_run")
     print(f"\nCalling tool: session_script_run (id={demo_session_id})")
+    demo_script = _DEMO_SCRIPTS.get(programming_language, _DEMO_SCRIPTS["python"])
     result = await call_tool(
         session,
         "session_script_run",
-        {
-            "id": demo_session_id,
-            "script": (
-                "from deephaven import empty_table\n"
-                "demo_table = empty_table(3).update('X = i')\n"
-                "print('hello world')"
-            ),
-        },
+        {"id": demo_session_id, "script": demo_script},
         strict=strict,
         failures=failures,
     )
@@ -387,16 +424,26 @@ async def test_tools(
     )
     print(f"Result for session_table_schema: {result}")
 
-    _LOGGER.info("Testing tool: session_pip_list")
-    print(f"\nCalling tool: session_pip_list (id={demo_session_id})")
-    result = await call_tool(
-        session,
-        "session_pip_list",
-        {"id": demo_session_id},
-        strict=strict,
-        failures=failures,
-    )
-    print(f"Result for session_pip_list: {result}")
+    if programming_language == "python":
+        _LOGGER.info("Testing tool: session_pip_list")
+        print(f"\nCalling tool: session_pip_list (id={demo_session_id})")
+        result = await call_tool(
+            session,
+            "session_pip_list",
+            {"id": demo_session_id},
+            strict=strict,
+            failures=failures,
+        )
+        print(f"Result for session_pip_list: {result}")
+    else:
+        _LOGGER.info(
+            f"Skipping session_pip_list: Python-only tool, session is "
+            f"{programming_language}"
+        )
+        print(
+            f"\nSkipping tool: session_pip_list (Python-only; session is "
+            f"{programming_language})"
+        )
 
     print("\n--- Enterprise-side status ---")
     _LOGGER.info("Testing tool: enterprise_systems_status")
