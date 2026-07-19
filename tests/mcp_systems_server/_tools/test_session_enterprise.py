@@ -2691,6 +2691,27 @@ def test_register_tools_registers_all_enterprise_tools():
     }
 
 
+@pytest.mark.asyncio
+async def test_session_enterprise_create_input_schema_advertises_programming_language():
+    """The MCP inputSchema advertises the exact enum for programming_language.
+
+    Regression guard: if the parameter reverts to a bare ``str``, AI
+    agents lose the vocabulary from the tool schema and uncanonical
+    values flow verbatim to the controller's ``scriptLanguage`` field.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    server = FastMCP("test-enterprise-server")
+    register_tools(server)
+    (tool,) = [
+        t for t in await server.list_tools() if t.name == "session_enterprise_create"
+    ]
+    props = tool.inputSchema["properties"]
+
+    language_variants = props["programming_language"]["anyOf"]
+    assert {"enum": ["Python", "Groovy"], "type": "string"} in language_variants
+
+
 # ---------------------------------------------------------------------------
 # enterprise_systems_status with system=None (aggregation)
 # ---------------------------------------------------------------------------

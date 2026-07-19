@@ -61,7 +61,7 @@ __all__ = [
     "CommunitySessionConfig",
 ]
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import field_validator, model_validator
 
@@ -73,6 +73,8 @@ from deephaven_mcp._pydantic import (
 )
 from deephaven_mcp.auth.credentials import CredentialsUnion
 from deephaven_mcp.auth.tls import TlsConfig
+
+from ._types import ProgrammingLanguage
 
 
 class CommunitySessionConfig(RedactableSchema):
@@ -96,7 +98,7 @@ class CommunitySessionConfig(RedactableSchema):
     """Optional Deephaven Community server port. ``None`` falls back
     to the upstream client's default (typically ``10000``)."""
 
-    programming_language: Literal["Python", "Groovy"] | None = None
+    programming_language: ProgrammingLanguage | None = None
     """Optional scripting language for the worker session: ``"Python"``
     or ``"Groovy"`` (case-insensitive on input; normalized to title
     case). ``None`` falls back to the upstream client's default. The

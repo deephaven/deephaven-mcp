@@ -26,7 +26,7 @@ Conventions:
 | `_mcp-module-organization` | Module placement and design patterns for MCP tool modules under `src/deephaven_mcp/mcp_systems_server/_tools/`. |
 | `_output-serialization-conventions` | Project conventions for serializing values into user-facing output (MCP tool return dicts and CLI output fields). The hub where output-value rules accrete — enum-value casing and MCP-layer payload shape. |
 | `_project-reference` | High-level project map: architecture, server entry points and ports, config layout, code-quality check commands, test clients. |
-| `_python-coding-practices` | Project-wide Python style and conventions (private-symbol access, MCP-tool docstring rules, f-strings, `Any`/`hasattr` policy, etc.). |
+| `_python-coding-practices` | Project-wide Python style and conventions — apply before writing or reviewing any Python under `src/` or `tests/`, including docstring-only edits. |
 | `_skill-authoring-standards` | Structural standards for skill files: composition hierarchy, frontmatter contract, `_`-prefix rule for human-invocability, body shape, length budgets, lifecycle, precedence. |
 | `_skill-effectiveness` | Content-quality standards for any agent-facing prose: triggerability, actionability, outcome orientation, pattern density, clarity, hedge-word audit, anti-patterns, field failure signals. |
 

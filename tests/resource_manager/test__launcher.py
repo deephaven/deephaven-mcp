@@ -37,7 +37,7 @@ class TestLaunchedSessionValidation:
         # Call LaunchedSession.__init__ directly with an invalid launch_method
         session = object.__new__(DockerLaunchedSession)
         with pytest.raises(
-            ValueError, match="launch_method must be 'docker' or 'python'"
+            ValueError, match="launch_method must be one of 'docker', 'python'"
         ):
             LaunchedSession.__init__(
                 session,

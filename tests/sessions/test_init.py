@@ -15,6 +15,8 @@ _EXPECTED_PUBLIC_NAMES = {
     "EnterpriseSessionCreation",
     "EnterpriseSessionCreationDefaults",
     "EnterpriseSystemConfig",
+    "LaunchMethod",
+    "ProgrammingLanguage",
 }
 
 

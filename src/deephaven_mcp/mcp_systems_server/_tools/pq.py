@@ -53,6 +53,7 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     redact_json_sensitive_fields,
     resolve_pq_ids_to_single_system,
 )
+from deephaven_mcp.sessions import ProgrammingLanguage
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1258,7 +1259,7 @@ async def pq_create(
     heap_size_gb: float | int,
     script_body: str | None = None,
     script_path: str | None = None,
-    programming_language: str = "Python",
+    programming_language: ProgrammingLanguage = "Python",
     configuration_type: str = "Script",
     enabled: bool = True,
     schedule: list[str] | None = None,
@@ -1326,7 +1327,7 @@ async def pq_create(
       default — it will already be acquiring a worker. Use ``pq_details`` to observe the
       state transition.
     - Returns id and serial number for use with other PQ management tools
-    - programming_language is case-insensitive: "Python"/"python" or "Groovy"/"groovy"
+    - programming_language takes exactly "Python" or "Groovy" (exact case)
     - auto_delete_timeout=None (default) or 0 creates a permanent PQ; a positive value creates a
       temporary PQ deleted after that many seconds of inactivity
     - auto_delete_timeout installs its own scheduler, so it is mutually exclusive with schedule;
@@ -1390,7 +1391,7 @@ async def pq_create(
         heap_size_gb (float | int): JVM heap size in GB (e.g., 8.0 or 16)
         script_body (str | None): Inline script code to execute (mutually exclusive with script_path)
         script_path (str | None): Path to script in Git repository (mutually exclusive with script_body)
-        programming_language (str): Script language - "Python" or "Groovy", case-insensitive (default: "Python")
+        programming_language (ProgrammingLanguage): Script language - "Python" or "Groovy", exact case (default: "Python")
         configuration_type (str): Query type - "Script" (live) or "RunAndDone" (batch), default: "Script"
         enabled (bool): Whether query can be executed (default: True)
         schedule (list[str] | None): Scheduling config as ["Key=Value", ...] (e.g., ["SchedulerType=...", "StartTime=08:00:00"])
@@ -1743,7 +1744,7 @@ async def pq_modify(
     heap_size_gb: float | int | None = None,
     script_body: str | None = None,
     script_path: str | None = None,
-    programming_language: str | None = None,
+    programming_language: ProgrammingLanguage | None = None,
     configuration_type: str | None = None,
     enabled: bool | None = None,
     schedule: list[str] | None = None,
@@ -1815,7 +1816,7 @@ async def pq_modify(
     - pq_name: Renames the PQ (does not affect serial number or id)
     - heap_size_gb: Changes JVM heap allocation (requires restart to apply)
     - script_body/script_path: Mutually exclusive - specifying one clears the other
-    - programming_language: "Python" or "Groovy" (case-insensitive)
+    - programming_language: "Python" or "Groovy" (exact case)
     - configuration_type: "Script" (interactive) or "RunAndDone" (batch)
     - enabled: Whether PQ can be executed (true/false)
     - schedule: List of "Key=Value" strings for scheduling (replaces entire schedule)
@@ -1835,7 +1836,7 @@ async def pq_modify(
         heap_size_gb (float | int | None): JVM heap size in GB (e.g., 8.0 or 16)
         script_body (str | None): Inline script code (mutually exclusive with script_path)
         script_path (str | None): Path to script in Git repository (mutually exclusive with script_body)
-        programming_language (str | None): "Python" or "Groovy", case-insensitive
+        programming_language (ProgrammingLanguage | None): "Python" or "Groovy", exact case
         configuration_type (str | None): "Script" (live) or "RunAndDone" (batch)
         enabled (bool | None): Whether query can be executed
         schedule (list[str] | None): Scheduling config as ["Key=Value", ...] (replaces current)

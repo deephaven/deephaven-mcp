@@ -576,14 +576,11 @@ async def test_session_community_delete_not_dynamic():
 
 
 @pytest.mark.asyncio
-async def test_session_community_create_case_insensitive_params():
-    """Test that launch_method, programming_language, and auth_type are case-insensitive."""
-    pass  # no longer needed
-
+async def test_session_community_create_rejects_mixed_case_programming_language():
+    """Mixed-case programming_language values are rejected (exact-case closed vocabulary)."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
-    # Mock config with session creation enabled
     mock_config_manager.get_config = AsyncMock(
         return_value={
             "session_creation": {
@@ -592,26 +589,15 @@ async def test_session_community_create_case_insensitive_params():
             }
         }
     )
-    # Stash for conftest's lifespan adapter — same shape as the
-    # ``get_config`` return value so the tool resolves
-    # ``session_creation`` correctly.
     mock_session_registry._community_settings = {
         "session_creation": {"defaults": {}, "max_concurrent_sessions": 5}
     }
-
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
 
-    # Test case: Mixed case parameters should be normalized
-    # Docker + Python + PSK with various casings
-    test_cases = [
-        ("Docker", "Python"),  # Title case
-        ("DOCKER", "PYTHON"),  # Various cases
-        ("docker", "python"),  # Lower + title
-        ("PIP", None),  # Pip with anonymous (upper)
-        ("Pip", None),  # Pip with anonymous (title)
-    ]
-
-    for launch_method, prog_lang in test_cases:
+    for prog_lang in ("PYTHON", "python", "groovy", "GROOVY"):
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
@@ -620,23 +606,128 @@ async def test_session_community_create_case_insensitive_params():
             }
         )
 
-        # This should NOT raise validation errors - parameters should be normalized
-        # We expect it to fail later (e.g., Docker not available), but NOT on parameter validation
         result = await session_community_create(
             context,
-            session_name=f"test-{launch_method.lower()}",
-            launch_method=launch_method,
+            session_name="test-mixed-case-lang",
+            launch_method="docker",
             programming_language=prog_lang,
         )
 
-        # If it fails on validation (not Docker/pip issues), test fails
-        if not result["success"]:
-            error = result.get("error", "")
-            # These are validation errors we DON'T want to see (means normalization failed)
-            assert (
-                "'programming_language' parameter only applies to docker" not in error
-            ), f"Case normalization failed for {launch_method=}, {prog_lang=}"
-            # Other errors (like Docker not available) are OK for this test
+        assert result["success"] is False
+        assert f"Invalid programming_language '{prog_lang}'" in result["error"]
+        assert "'Python'" in result["error"] and "'Groovy'" in result["error"]
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_rejects_mixed_case_launch_method():
+    """Mixed-case launch_method values are rejected (exact-case closed vocabulary)."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
+            }
+        }
+    )
+    mock_session_registry._community_settings = {
+        "session_creation": {"defaults": {}, "max_concurrent_sessions": 5}
+    }
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_create(
+        context,
+        session_name="test-mixed-case",
+        launch_method="Docker",
+        programming_language="Python",
+    )
+
+    assert result["success"] is False
+    assert "Invalid launch_method 'Docker'" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_python_launch_success():
+    """launch_method="python" succeeds end-to-end and reports a process_id."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},
+        }
+    }
+    mock_config_manager.get_config = AsyncMock(return_value=community_config)
+    mock_session_registry._community_settings = community_config
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:py-launch")
+    )
+
+    mock_launched_session = MagicMock(spec=PythonLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "python"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
+    mock_launched_session.process = MagicMock(pid=4242)
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.generate_auth_token",
+            return_value="test_token",
+        ),
+        patch.object(
+            mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)
+        ),
+    ):
+        mock_launch_session.return_value = mock_launched_session
+
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await session_community_create(
+            context,
+            session_name="py-launch",
+            launch_method="python",
+        )
+
+        assert result["success"] is True
+        assert result["launch_method"] == "python"
+        assert result["process_id"] == 4242
+        assert "container_id" not in result
+        assert mock_launch_session.call_args.kwargs["launch_method"] == "python"
 
 
 @pytest.mark.asyncio
@@ -1440,7 +1531,7 @@ async def test_session_community_create_unsupported_programming_language():
     )
 
     assert result["success"] is False
-    assert "Unsupported programming_language" in result["error"]
+    assert "Invalid programming_language" in result["error"]
     assert "JavaScript" in result["error"]
     assert "Python" in result["error"] and "Groovy" in result["error"]
 
@@ -2881,3 +2972,57 @@ def test_register_tools_registers_community_tools():
     assert "session_community_create" in tools
     assert "session_community_delete" in tools
     assert "session_community_credentials" in tools
+
+
+def test_docker_image_for_language_maps_every_language():
+    """Each ProgrammingLanguage member maps to its configured Docker image."""
+    from deephaven_mcp.config.schema import DockerImages
+    from deephaven_mcp.mcp_systems_server._tools.session_community import (
+        _docker_image_for_language,
+    )
+
+    images = DockerImages(python="img-py", groovy="img-groovy")
+    assert _docker_image_for_language("Python", images) == "img-py"
+    assert _docker_image_for_language("Groovy", images) == "img-groovy"
+
+
+def test_docker_image_for_language_asserts_on_unknown_language():
+    """The assert_never fallthrough raises for values outside the Literal."""
+    from deephaven_mcp.config.schema import DockerImages
+    from deephaven_mcp.mcp_systems_server._tools.session_community import (
+        _docker_image_for_language,
+    )
+
+    images = DockerImages()
+    with pytest.raises(AssertionError):
+        _docker_image_for_language("JavaScript", images)  # type: ignore[arg-type]
+    # Suppression justified: deliberately constructing a value the
+    # ``Literal`` rejects so the runtime ``assert_never`` branch is
+    # covered. Bracketed ``arg-type`` names what is silenced; mypy
+    # still flags any *unintentional* misuse at real call sites.
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_input_schema_advertises_closed_vocabularies():
+    """The MCP inputSchema advertises the exact enums for launch_method and programming_language.
+
+    Regression guard: if either parameter reverts to a bare ``str``, AI
+    agents lose the vocabulary from the tool schema and invalid values
+    reach the tool body instead of being rejected at the protocol layer.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    from deephaven_mcp.mcp_systems_server._tools.session_community import register_tools
+
+    server = FastMCP("test-community-server")
+    register_tools(server)
+    (tool,) = [
+        t for t in await server.list_tools() if t.name == "session_community_create"
+    ]
+    props = tool.inputSchema["properties"]
+
+    launch_variants = props["launch_method"]["anyOf"]
+    assert {"enum": ["docker", "python"], "type": "string"} in launch_variants
+
+    language_variants = props["programming_language"]["anyOf"]
+    assert {"enum": ["Python", "Groovy"], "type": "string"} in language_variants

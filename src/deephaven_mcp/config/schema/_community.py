@@ -32,6 +32,7 @@ __all__ = [
     "DockerImages",
     "DockerLaunchOptions",
     "LaunchMethod",
+    "ProgrammingLanguage",
     "PythonLaunchOptions",
     "load_community",
 ]
@@ -51,14 +52,15 @@ from deephaven_mcp.auth.credentials import CredentialsUnion
 from deephaven_mcp.client._timeouts import CommunityClientTimeouts
 from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
-from deephaven_mcp.sessions import CommunitySessionConfig
+from deephaven_mcp.sessions import (
+    CommunitySessionConfig,
+    LaunchMethod,
+    ProgrammingLanguage,
+)
 
 from ._response_limits import ResponseLimits
 
 _LOGGER = logging.getLogger(__name__)
-
-LaunchMethod = Literal["docker", "python"]
-"""Closed vocabulary for how a dynamic community session is launched."""
 
 
 class CommunityTimeouts(StrictSchema):
@@ -201,7 +203,7 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     credentials. Unwrapped at validation time from the wire-format
     ``auth.credentials`` sub-block."""
 
-    programming_language: Literal["Python", "Groovy"] = "Python"
+    programming_language: ProgrammingLanguage = "Python"
     """Default scripting language for dynamic community sessions.
     Selects between Python and Groovy worker images / venv layouts."""
 

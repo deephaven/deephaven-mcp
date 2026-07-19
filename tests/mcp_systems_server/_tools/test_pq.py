@@ -4906,6 +4906,31 @@ def test_register_tools_registers_all_pq_tools():
     assert expected <= set(tools.keys())
 
 
+@pytest.mark.asyncio
+async def test_pq_tools_input_schema_advertises_programming_language():
+    """pq_create/pq_modify advertise the exact programming_language enum.
+
+    Regression guard: if the parameter reverts to a bare ``str``, AI
+    agents lose the vocabulary from the tool schema.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    from deephaven_mcp.mcp_systems_server._tools.pq import register_tools
+
+    server = FastMCP("test-pq-schema")
+    register_tools(server)
+    tools = {t.name: t for t in await server.list_tools()}
+
+    create_schema = tools["pq_create"].inputSchema["properties"]["programming_language"]
+    assert create_schema["enum"] == ["Python", "Groovy"]
+    assert create_schema["default"] == "Python"
+
+    modify_variants = tools["pq_modify"].inputSchema["properties"][
+        "programming_language"
+    ]["anyOf"]
+    assert {"enum": ["Python", "Groovy"], "type": "string"} in modify_variants
+
+
 @pytest.mark.parametrize(
     "tool_name", ["pq_delete", "pq_start", "pq_stop", "pq_restart"]
 )

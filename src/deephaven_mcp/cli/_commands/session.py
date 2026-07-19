@@ -456,7 +456,7 @@ _OUTPUT_CREATE = OutputSpec(
 @click.option(
     "--launch-method",
     "launch_method",
-    type=click.Choice(["docker", "python"]),
+    type=click.Choice(["docker", "python"], case_sensitive=False),
     default=None,
     help="[Community] How to launch the worker.",
 )

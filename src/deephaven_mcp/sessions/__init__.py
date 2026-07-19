@@ -29,6 +29,8 @@ __all__ = [
     "EnterpriseSessionCreation",
     "EnterpriseSessionCreationDefaults",
     "EnterpriseSystemConfig",
+    "LaunchMethod",
+    "ProgrammingLanguage",
 ]
 
 from ._community import CommunitySessionConfig
@@ -37,3 +39,4 @@ from ._enterprise import (
     EnterpriseSessionCreationDefaults,
     EnterpriseSystemConfig,
 )
+from ._types import LaunchMethod, ProgrammingLanguage

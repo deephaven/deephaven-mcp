@@ -42,6 +42,7 @@ __all__ = [
     "LaunchMethod",
     "OutputConfig",
     "PqToolsConfig",
+    "ProgrammingLanguage",
     "PythonLaunchOptions",
     "RequestConfig",
     "RequestTimeouts",
@@ -76,6 +77,7 @@ from ._community import (
     DockerImages,
     DockerLaunchOptions,
     LaunchMethod,
+    ProgrammingLanguage,
     PythonLaunchOptions,
     load_community,
 )

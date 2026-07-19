@@ -10,7 +10,7 @@ These tools work with Deephaven Community (Core) sessions only.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, cast, get_args
+from typing import Any, assert_never, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -33,7 +33,9 @@ from deephaven_mcp.auth.credentials import (
 from deephaven_mcp.config.schema import (
     CommunitySessionCreationDefaults,
     CommunitySettings,
+    DockerImages,
     LaunchMethod,
+    ProgrammingLanguage,
 )
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_session_limit,
@@ -64,6 +66,9 @@ _LOGGER = logging.getLogger(__name__)
 
 _VALID_LAUNCH_METHODS: frozenset[str] = frozenset(get_args(LaunchMethod))
 """Runtime membership set for ``LaunchMethod``, derived via ``typing.get_args``."""
+
+_VALID_PROGRAMMING_LANGUAGES: frozenset[str] = frozenset(get_args(ProgrammingLanguage))
+"""Runtime membership set for ``ProgrammingLanguage``, derived via ``typing.get_args``."""
 
 _PSK_AUTH_HANDLER = "io.deephaven.authentication.psk.PskAuthenticationHandler"
 """Fully-qualified class name (FQCN) of the Deephaven worker-side Java
@@ -153,7 +158,7 @@ async def _check_session_limit(
 
 def _validate_launch_method_params(
     launch_method: LaunchMethod,
-    programming_language: str | None,
+    programming_language: ProgrammingLanguage | None,
     docker_image: str | None,
     docker_memory_limit_gb: float | None,
     docker_cpu_limit: float | None,
@@ -168,7 +173,7 @@ def _validate_launch_method_params(
 
     Args:
         launch_method (LaunchMethod): Launch method ("docker" or "python").
-        programming_language (str | None): Docker-only parameter.
+        programming_language (ProgrammingLanguage | None): Docker-only parameter.
         docker_image (str | None): Docker-only parameter.
         docker_memory_limit_gb (float | None): Docker-only parameter.
         docker_cpu_limit (float | None): Docker-only parameter.
@@ -208,8 +213,36 @@ def _validate_launch_method_params(
         raise SessionCreationError(error_msg)
 
 
+def _docker_image_for_language(
+    programming_language: ProgrammingLanguage,
+    images: DockerImages,
+) -> str:
+    """Map a programming language to its configured Docker image.
+
+    Args:
+        programming_language (ProgrammingLanguage): Programming language
+            ("Python" or "Groovy").
+        images (DockerImages): Per-language image names from the
+            community session-creation defaults.
+
+    Returns:
+        str: The Docker image name configured for the language.
+
+    Raises:
+        AssertionError: If ``programming_language`` is not a member of
+            ``ProgrammingLanguage``.
+    """
+    match programming_language:
+        case "Python":
+            return images.python
+        case "Groovy":
+            return images.groovy
+        case _ as unexpected:
+            assert_never(unexpected)
+
+
 def _resolve_docker_image(
-    programming_language: str | None,
+    programming_language: ProgrammingLanguage | None,
     docker_image: str | None,
     defaults: CommunitySessionCreationDefaults,
 ) -> str:
@@ -222,7 +255,7 @@ def _resolve_docker_image(
     4. Use docker_image from config defaults (if language-based selection not applicable)
 
     Args:
-        programming_language (str | None): Programming language ("Python" or "Groovy"), or None
+        programming_language (ProgrammingLanguage | None): Programming language ("Python" or "Groovy"), or None
         docker_image (str | None): Explicit Docker image name, or None for auto-selection
         defaults (dict): Configuration defaults that may contain 'programming_language' or 'docker_image'
 
@@ -231,27 +264,26 @@ def _resolve_docker_image(
 
     Raises:
         SessionCreationError: If ``programming_language`` is not
-            "Python" or "Groovy" (case-insensitive).
+            "Python" or "Groovy".
     """
     if docker_image:
         return docker_image
 
     if programming_language:
-        lang_lower = programming_language.lower()
-        if lang_lower == "python":
-            return defaults.docker.images.python
-        elif lang_lower == "groovy":
-            return defaults.docker.images.groovy
-        else:
-            error_msg = f"Unsupported programming_language: '{programming_language}'. Must be 'Python' or 'Groovy'"
+        # Runtime validation retained for untyped callers; typed callers
+        # are constrained by ProgrammingLanguage.
+        if programming_language not in _VALID_PROGRAMMING_LANGUAGES:
+            valid_options = ", ".join(
+                f"'{v}'" for v in sorted(_VALID_PROGRAMMING_LANGUAGES)
+            )
+            error_msg = f"Invalid programming_language '{programming_language}'. Valid options: {valid_options}."
             _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
             raise SessionCreationError(error_msg)
+        return _docker_image_for_language(programming_language, defaults.docker.images)
 
-    # Use config defaults (programming_language is a Literal
-    # validated by Pydantic, so it is always "Python" or "Groovy").
-    if defaults.programming_language == "Python":
-        return defaults.docker.images.python
-    return defaults.docker.images.groovy
+    return _docker_image_for_language(
+        defaults.programming_language, defaults.docker.images
+    )
 
 
 @dataclass(frozen=True)
@@ -261,7 +293,7 @@ class _ResolvedSessionParams:
     launch_method: LaunchMethod
     """Resolved launch method."""
 
-    programming_language: str
+    programming_language: ProgrammingLanguage
     """Resolved programming language."""
 
     auth_type: str
@@ -309,7 +341,7 @@ class _ResolvedSessionParams:
 
 def _resolve_community_session_parameters(
     launch_method: LaunchMethod | None,
-    programming_language: str | None,
+    programming_language: ProgrammingLanguage | None,
     auth_token: str | None,
     heap_size_gb: float | int | None,
     extra_jvm_args: list[str] | None,
@@ -333,7 +365,7 @@ def _resolve_community_session_parameters(
 
     Args:
         launch_method (LaunchMethod | None): Launch method ("docker" or "python"), or None to use default
-        programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
+        programming_language (ProgrammingLanguage | None): Programming language ("Python" or "Groovy"), or None to use default
         auth_token (str | None): Authentication token, or None to auto-generate for PSK auth
         heap_size_gb (float | int | None): JVM heap size in GB (e.g., 4 or 2.5), or None to use default
         extra_jvm_args (list[str] | None): Additional JVM arguments, or None to use default
@@ -356,17 +388,12 @@ def _resolve_community_session_parameters(
     """
     # Resolve and validate launch method (runtime validation retained for
     # untyped callers; typed callers are constrained by LaunchMethod)
-    method_str = (launch_method or defaults.launch_method).lower()
-    if method_str not in _VALID_LAUNCH_METHODS:
+    resolved_launch_method = launch_method or defaults.launch_method
+    if resolved_launch_method not in _VALID_LAUNCH_METHODS:
         valid_options = ", ".join(f"'{m}'" for m in sorted(_VALID_LAUNCH_METHODS))
-        error_msg = (
-            f"Invalid launch_method '{method_str}'. Valid options: {valid_options}."
-        )
+        error_msg = f"Invalid launch_method '{resolved_launch_method}'. Valid options: {valid_options}."
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
         raise SessionCreationError(error_msg)
-    # Safe: membership in the get_args-derived set proves method_str is a
-    # LaunchMethod member.
-    resolved_launch_method = cast(LaunchMethod, method_str)
 
     # Resolve auth type
     # Derive worker-side auth handler FQCN from credentials kind (single
@@ -555,7 +582,7 @@ def _resolve_auth_token(
 async def _register_session_manager(
     session_name: str,
     port: int,
-    programming_language: str,
+    programming_language: ProgrammingLanguage,
     resolved_auth_type: str,
     resolved_auth_token: str | None,
     launched_session: DockerLaunchedSession | PythonLaunchedSession,
@@ -572,8 +599,8 @@ async def _register_session_manager(
     Args:
         session_name (str): Simple session name (not full id).
         port (int): Port number where the session is listening.
-        programming_language (str): Programming language for the session
-            (``"Python"`` or ``"Groovy"``).
+        programming_language (ProgrammingLanguage): Programming language for
+            the session (``"Python"`` or ``"Groovy"``).
         resolved_auth_type (str): Normalized authentication type
             (full class name).
         resolved_auth_token (str | None): Authentication token if
@@ -854,7 +881,7 @@ async def session_community_create(
     context: Context,
     session_name: str,
     launch_method: LaunchMethod | None = None,
-    programming_language: str | None = None,
+    programming_language: ProgrammingLanguage | None = None,
     auth_token: str | None = None,
     heap_size_gb: float | int | None = None,
     extra_jvm_args: list[str] | None = None,
@@ -904,7 +931,7 @@ async def session_community_create(
             - "docker": Uses Docker containers (requires Docker daemon running)
             - "python": Uses Python-launched deephaven-server (requires: pip install deephaven-server)
             Defaults to configuration value or "docker".
-        programming_language (str | None): Programming language ("Python" or "Groovy", case-insensitive).
+        programming_language (ProgrammingLanguage | None): Programming language ("Python" or "Groovy", exact case).
             Only applies to docker launch method - raises error if used with python launch.
             Automatically selects the appropriate Docker image:
             - "Python" → ghcr.io/deephaven/server:latest
@@ -952,7 +979,7 @@ async def session_community_create(
             - 'connection_url' (str): Base HTTP URL without authentication
             - 'auth_type' (str): Normalized authentication type as full class name
                 (e.g., "io.deephaven.authentication.psk.PskAuthenticationHandler", "Anonymous")
-            - 'launch_method' (str): "docker" or "python" (normalized to lowercase)
+            - 'launch_method' (str): "docker" or "python"
             - 'port' (int): Port number where session is listening
             - 'container_id' (str, optional): Docker container ID (only for docker launch)
             - 'process_id' (int, optional): Process ID of deephaven server (only for python launch)
@@ -1163,8 +1190,11 @@ async def session_community_create(
 
     except SessionCreationError as e:
         # Raised by the config / parameter-resolution / launch helpers
-        # (SessionLaunchError is a subclass). The message is already
-        # user-facing; surface it without additional wrapping.
+        # (SessionLaunchError is a subclass). The message is a complete
+        # user-facing string authored by this codebase, so it is adopted
+        # verbatim per the rule-20 translation carve-out
+        # (_python-coding-practices): an exception_summary() prefix would
+        # stack wrapper noise onto an already-rendered message.
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {e}")
         return error_response(str(e))
     except Exception as e:

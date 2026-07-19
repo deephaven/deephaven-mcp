@@ -67,6 +67,8 @@ from deephaven_mcp._pydantic import (
 )
 from deephaven_mcp.auth.credentials import CredentialsUnion
 
+from ._types import ProgrammingLanguage
+
 
 class EnterpriseSessionCreationDefaults(StrictSchema):
     """Defaults applied when creating enterprise sessions.
@@ -127,7 +129,7 @@ class EnterpriseSessionCreationDefaults(StrictSchema):
     verbatim to the upstream controller (typically read by the
     worker's user code). ``None`` sends no extra arguments."""
 
-    programming_language: Literal["Python", "Groovy"] = "Python"
+    programming_language: ProgrammingLanguage = "Python"
     """Scripting language the worker exposes to clients. Affects the
     set of available APIs but not the JVM/engine choice (which is
     controlled by ``engine``)."""

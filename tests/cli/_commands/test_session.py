@@ -209,6 +209,34 @@ def test_create_community_minimal(tmp_path: Path) -> None:
     }
 
 
+def test_create_normalizes_flag_casing_to_canonical(tmp_path: Path) -> None:
+    """Mixed-case flag input is normalized by click.Choice before it hits the wire.
+
+    The MCP tools take exact-case closed vocabularies (``"docker"`` /
+    ``"python"``; ``"Python"`` / ``"Groovy"``); the CLI stays forgiving
+    but must only ever send canonical values.
+    """
+    result, call = _run(
+        [
+            "session",
+            "create",
+            "dev",
+            "--launch-method",
+            "DOCKER",
+            "--language",
+            "groovy",
+        ],
+        _CREATED,
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {
+        "session_name": "dev",
+        "launch_method": "docker",
+        "programming_language": "Groovy",
+    }
+
+
 def test_create_community_shared_opts_and_env(tmp_path: Path) -> None:
     result, call = _run(
         [
