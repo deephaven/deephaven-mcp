@@ -209,6 +209,34 @@ def test_create_community_minimal(tmp_path: Path) -> None:
     }
 
 
+def test_create_normalizes_flag_casing_to_canonical(tmp_path: Path) -> None:
+    """Mixed-case flag input is normalized by click.Choice before it hits the wire.
+
+    The MCP tools take exact-case closed vocabularies (``"docker"`` /
+    ``"python"``; ``"Python"`` / ``"Groovy"``); the CLI stays forgiving
+    but must only ever send canonical values.
+    """
+    result, call = _run(
+        [
+            "session",
+            "create",
+            "dev",
+            "--launch-method",
+            "DOCKER",
+            "--language",
+            "groovy",
+        ],
+        _CREATED,
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {
+        "session_name": "dev",
+        "launch_method": "docker",
+        "programming_language": "Groovy",
+    }
+
+
 def test_create_community_shared_opts_and_env(tmp_path: Path) -> None:
     result, call = _run(
         [
@@ -407,7 +435,9 @@ def test_delete_tool_failure_exits_3(tmp_path: Path) -> None:
 
 def test_exec_inline_script(tmp_path: Path) -> None:
     result, call = _run(
-        ["session", "exec", _SID, "--script", "print(1)"], {"success": True}, tmp_path
+        ["session", "exec", _SID, "--script", "print(1)"],
+        {"success": True, "id": _SID},
+        tmp_path,
     )
     assert result.exit_code == 0
     assert call.await_args.args[2] == "session_script_run"
@@ -540,6 +570,7 @@ def test_pip_list_failure_exits_3(tmp_path: Path) -> None:
 
 _CREDS = {
     "success": True,
+    "id": _SID,
     "auth_type": "PSK",
     "auth_token": "tok-123",
     "connection_url": "http://localhost:45123",

@@ -48,6 +48,7 @@ _CREDENTIALS_TOOL = "session_community_credentials"
 """MCP tool backing the credentials / url / open verbs (Community-only)."""
 
 _CREDENTIAL_FIELDS = (
+    "id",
     "auth_type",
     "auth_token",
     "connection_url",
@@ -173,7 +174,7 @@ async def _fetch_credentials(
         retry_command (str): Command rendered into the corrupt-registry hint.
 
     Returns:
-        dict[str, Any]: The credential payload (``auth_type``,
+        dict[str, Any]: The credential payload (``id``, ``auth_type``,
             ``auth_token``, ``connection_url``, ``connection_url_with_auth``).
 
     Raises:
@@ -455,7 +456,7 @@ _OUTPUT_CREATE = OutputSpec(
 @click.option(
     "--launch-method",
     "launch_method",
-    type=click.Choice(["docker", "python"]),
+    type=click.Choice(["docker", "python"], case_sensitive=False),
     default=None,
     help="[Community] How to launch the worker.",
 )
@@ -667,8 +668,8 @@ async def session_delete(runtime: Runtime, id: str) -> None:
 
 _OUTPUT_EXEC = OutputSpec(
     "object",
-    (),
-    note="Empty object on success; on failure the command exits 3 with the error.",
+    (OutputField("id", "string", "The session id, echoed back."),),
+    note="On failure the command exits 3 with the error.",
 )
 
 
@@ -796,6 +797,7 @@ async def session_pip_list(runtime: Runtime, id: str) -> None:
 _OUTPUT_CREDENTIALS = OutputSpec(
     "object",
     (
+        OutputField("id", "string", "The session id, echoed back."),
         OutputField("auth_type", "string", "Authentication type, uppercased."),
         OutputField("auth_token", "string", "Plaintext auth token (empty if anon)."),
         OutputField("connection_url", "string", "Base server URL without auth."),

@@ -60,11 +60,11 @@ Apply `_python-coding-practices` rule 16 before using version-gated syntax (PEP 
 
 ## Python Code
 
-Before writing or editing Python source under `src/` or `tests/` — including docstring-only edits — load `_python-coding-practices` and apply its rules. The most-violated are rule 12 (docstrings state *what*, not *why*) and rule 14 (per-field trailing docstrings on value classes, never a class-level `Attributes:` / `Members:` block).
+Before writing or editing Python source under `src/` or `tests/` — including docstring-only edits — load `_python-coding-practices` and apply its rules. The most-violated are rule 12 (docstrings state *what*, not *why*), rule 14 (per-field trailing docstrings on value classes, never a class-level `Attributes:` / `Members:` block), and rule 18 (closed-set dispatch is `match` + `assert_never` — never an `if`/`elif` with a silent default branch).
 
 ## Output conventions
 
-Apply `_output-serialization-conventions` when authoring or changing any user-facing string field or payload shape in an MCP tool return or CLI output. The skill owns the value-vocabulary rules, casing rules, known carve-outs, field-specific exceptions, and the MCP-layer payload-shape rules (domain-named arrays, echo-back key vocabulary, truncation semantics).
+Apply `_output-serialization-conventions` when authoring or changing any user-facing string field or payload shape in an MCP tool return or CLI output. The skill owns the value-vocabulary rules, casing rules, known carve-outs, field-specific exceptions, and the MCP-layer payload-shape rules (domain-named arrays, sparse optional keys, echo-back key vocabulary, bounded output, truncation semantics, among others).
 
 ## Build & Distribution
 

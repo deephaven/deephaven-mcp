@@ -43,6 +43,8 @@ _EXPECTED_PUBLIC_NAMES = {
     "CommunityTimeouts",
     "DockerImages",
     "DockerLaunchOptions",
+    "LaunchMethod",
+    "ProgrammingLanguage",
     "PythonLaunchOptions",
     "load_community",
     # enterprise/
@@ -77,6 +79,8 @@ def test_reexports_are_same_objects_as_internal_definitions() -> None:
     assert schema_pkg.load_server is _server.load_server
     assert schema_pkg.CommunityConfig is _community.CommunityConfig
     assert schema_pkg.CommunitySettings is _community.CommunitySettings
+    assert schema_pkg.LaunchMethod is _community.LaunchMethod
+    assert schema_pkg.ProgrammingLanguage is _community.ProgrammingLanguage
     assert schema_pkg.load_community is _community.load_community
     assert schema_pkg.EnterpriseConfig is _enterprise.EnterpriseConfig
     assert schema_pkg.EnterpriseSettings is _enterprise.EnterpriseSettings

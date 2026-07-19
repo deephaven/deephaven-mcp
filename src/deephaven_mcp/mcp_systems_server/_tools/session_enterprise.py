@@ -15,7 +15,10 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exception_utils import exception_summary
-from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
+from deephaven_mcp._exceptions import (
+    InvalidSessionNameError,
+    RegistryItemNotFoundError,
+)
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import (
     CorePlusQueryConfig,
@@ -28,6 +31,7 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     format_partial_result,
     get_enterprise_registry,
     get_multi_config,
+    validate_programming_language,
 )
 from deephaven_mcp.resource_manager import (
     EnterpriseSessionManager,
@@ -43,6 +47,7 @@ from deephaven_mcp.resource_manager import (
 from deephaven_mcp.sessions import (
     EnterpriseSessionCreationDefaults,
     EnterpriseSystemConfig,
+    ProgrammingLanguage,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -427,7 +432,7 @@ async def session_enterprise_create(
     system: str,
     session_name: str | None = None,
     heap_size_gb: float | int | None = None,
-    programming_language: str | None = None,
+    programming_language: ProgrammingLanguage | None = None,
     auto_delete_timeout: int | None = None,
     server: str | None = None,
     engine: str | None = None,
@@ -471,8 +476,8 @@ async def session_enterprise_create(
             a timestamp-based name like "mcp-{username}-20241126-1130".
         heap_size_gb (float | int | None): JVM heap size in gigabytes (e.g., 8 or 2.5 for -Xmx8g or -Xmx2.5g). If None, uses
             config default or Deephaven default.
-        programming_language (str | None): Programming language for the session.
-            Supported values: "Python" (default) or "Groovy". If None, uses config default or "Python".
+        programming_language (ProgrammingLanguage | None): Programming language for the session.
+            Supported values (exact case): "Python" (default) or "Groovy". If None, uses config default or "Python".
         auto_delete_timeout (int | None): Seconds of inactivity before automatic session deletion.
             If None, uses config default or the Deephaven server built-in default.
         server (str | None): Specific server to run session on.
@@ -649,7 +654,7 @@ async def session_enterprise_create(
         # Create configuration transformer based on programming language
         configuration_transformer = None
         programming_lang = resolved_config["programming_language"]
-        if programming_lang and programming_lang.lower() != "python":
+        if programming_lang and programming_lang != "Python":
 
             def language_transformer(
                 config: CorePlusQueryConfig,
@@ -749,7 +754,7 @@ def _resolve_session_parameters(
     admin_groups: list[str] | None,
     viewer_groups: list[str] | None,
     session_arguments: dict[str, Any] | None,
-    programming_language: str | None,
+    programming_language: ProgrammingLanguage | None,
     defaults: EnterpriseSessionCreationDefaults,
 ) -> dict:
     """Resolve session parameters with priority: tool param -> typed config default.
@@ -766,14 +771,23 @@ def _resolve_session_parameters(
         admin_groups (list[str] | None): Tool parameter value for admin user groups.
         viewer_groups (list[str] | None): Tool parameter value for viewer user groups.
         session_arguments (dict[str, Any] | None): Tool parameter value for pydeephaven.Session constructor.
-        programming_language (str | None): Tool parameter value for session language ("Python" or "Groovy").
+        programming_language (ProgrammingLanguage | None): Tool parameter value for session language ("Python" or "Groovy").
         defaults (EnterpriseSessionCreationDefaults): Typed defaults
             block from the enterprise system's ``session_creation``
             config; every field carries its schema-level default.
 
     Returns:
         dict: Resolved configuration with all parameters using priority order.
+
+    Raises:
+        SessionCreationError: If ``programming_language`` is not
+            "Python" or "Groovy".
     """
+    # Runtime validation retained for untyped callers; typed callers
+    # are constrained by ProgrammingLanguage.
+    if programming_language is not None:
+        validate_programming_language(programming_language, "session_enterprise_create")
+
     return {
         "heap_size_gb": heap_size_gb or defaults.heap_size_gb,
         "auto_delete_timeout": (

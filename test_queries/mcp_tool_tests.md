@@ -86,11 +86,11 @@ Setup:
 
 1. Call session_tables_list with id="community:community:mcp-test-tables". Verify success==true. Verify both "trades" and "orders" appear in table_names.
 
-2. Call session_tables_schema with id="community:community:mcp-test-tables" and no table_names (fetch all). Verify success==true. Verify schemas for "trades" and "orders" are present. For "trades", verify columns TradeID (int), Symbol (string), Price (double) appear.
+2. Call session_table_schema with id="community:community:mcp-test-tables" and table_name="trades". Verify success==true. Verify columns TradeID (int), Symbol (java.lang.String), Price (double) appear in the schema entries and column_count matches.
 
-3. Call session_tables_schema with id="community:community:mcp-test-tables" and table_names=["trades"]. Verify success==true and only the "trades" schema is returned.
+3. Call session_table_schema with id="community:community:mcp-test-tables" and table_name="orders". Verify success==true. Verify each schema entry uses snake_case keys 'name' and 'type', and that ordinary columns do not carry 'column_type'.
 
-4. Call session_tables_schema with id="community:community:mcp-test-tables" and table_names=["does_not_exist_xyz"]. Note whether the overall success is true or false and whether the individual table entry shows an error.
+4. Call session_table_schema with id="community:community:mcp-test-tables" and table_name="does_not_exist_xyz". Verify success==false and an error message is returned.
 
 CLEANUP: Call session_community_delete with id="community:community:mcp-test-tables". Verify success==true.
 
@@ -238,7 +238,7 @@ Report: PASS/FAIL for each numbered step with a one-line explanation. Include th
 ## Prompt 11: Enterprise Shared Tools (Script, Tables, Data, Pip)
 
 ```text
-Test session_script_run, session_tables_list, session_tables_schema, session_table_data, and session_pip_list via an enterprise session. Requires the enterprise system to be ONLINE (verify with Prompt 8 first). Do the following steps in order and report results.
+Test session_script_run, session_tables_list, session_table_schema, session_table_data, and session_pip_list via an enterprise session. Requires the enterprise system to be ONLINE (verify with Prompt 8 first). Do the following steps in order and report results.
 
 Pre-cleanup (idempotent): Call sessions_list. If a session named "mcp-test-ent-shared" is present, note its id and call session_enterprise_delete with it. Ignore any error.
 
@@ -252,7 +252,7 @@ Setup: Call session_enterprise_create with session_name="mcp-test-ent-shared". V
 
 2. Call session_tables_list with the id from Setup. Verify success==true. Verify "ent_test" appears in the table list.
 
-3. Call session_tables_schema with the id from Setup and table_names=["ent_test"]. Verify success==true. Verify columns ID (int) and Label (string) are present.
+3. Call session_table_schema with the id from Setup and table_name="ent_test". Verify success==true. Verify columns ID (int) and Label (java.lang.String) are present.
 
 4. Call session_table_data with the id from Setup and table_name="ent_test". Verify success==true. Verify 3 rows are returned with correct values.
 
@@ -329,13 +329,13 @@ Setup:
 
 1. Call catalog_namespaces_list with the id from Setup. Verify success==true. Record the count of namespaces returned (may be 0 if no catalog is configured — that is acceptable).
 
-2. Call catalog_tables_list with the id from Setup. Verify success==true. Record the count of catalog tables returned (may be 0).
+2. Call catalog_tables_list with the id from Setup. Verify success==true. Verify each entry in 'tables' contains only 'namespace' and 'table_name'. Record the count of catalog tables returned (may be 0).
 
-3. (Skip if step 2 returned zero tables.) Pick any table from the catalog_tables_list result. Record its namespace and table name separately. Call catalog_tables_schema with the id from Setup, namespace set to the recorded namespace, and table_names set to a list containing just the recorded table name. Verify success==true. Note the column count in the schema.
+3. (Skip if step 2 returned zero tables.) Pick any table from the catalog_tables_list result. Record its namespace and table name separately. Call catalog_table_schema with the id from Setup, namespace set to the recorded namespace, and table_name set to the recorded table name. Verify success==true. Note the column_count in the response.
 
 4. (Skip if step 2 returned zero tables.) Call catalog_table_sample with the id from Setup, namespace and table_name from step 3, and max_rows=3. Verify success==true. Note the number of rows returned (may be 0 for empty tables).
 
-5. Call catalog_tables_schema with the id from Setup, namespace="nonexistent_ns_xyz", and table_names=["nonexistent_table_xyz"]. Note whether success==true (with per-table error info) or success==false. Either behavior is acceptable — record which occurred.
+5. Call catalog_table_schema with the id from Setup, namespace="nonexistent_ns_xyz", and table_name="nonexistent_table_xyz". Verify success==false and an error message is returned.
 
 CLEANUP: If you created a new session in Setup, call session_enterprise_delete with that id. Verify success==true.
 

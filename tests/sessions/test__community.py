@@ -69,18 +69,13 @@ def test_construct_psk_session_with_literal_token():
     assert cfg.port == 10000
 
 
-def test_programming_language_lowercase_normalized():
-    cfg = CommunitySessionConfig.model_validate(
-        _session_payload(programming_language="python")
-    )
-    assert cfg.programming_language == "Python"
-
-
-def test_programming_language_uppercase_normalized():
-    cfg = CommunitySessionConfig.model_validate(
-        _session_payload(programming_language="GROOVY")
-    )
-    assert cfg.programming_language == "Groovy"
+@pytest.mark.parametrize("wrong_case", ["python", "GROOVY"])
+def test_programming_language_wrong_case_rejected(wrong_case):
+    """The vocabulary is exact-case: config files must say "Python"/"Groovy"."""
+    with pytest.raises(ValidationError):
+        CommunitySessionConfig.model_validate(
+            _session_payload(programming_language=wrong_case)
+        )
 
 
 def test_programming_language_invalid_value_rejected():

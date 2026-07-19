@@ -29,6 +29,15 @@ def _settings_with_defaults(defaults: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("invalid", ["python", "GROOVY", "rust"])
+def test_defaults_programming_language_rejects_non_members(invalid: str):
+    """The vocabulary is exact-case: wrong case and unknown values both fail."""
+    with pytest.raises(ValidationError):
+        CommunitySettings.model_validate(
+            _settings_with_defaults({"programming_language": invalid})
+        )
+
+
 def test_defaults_non_dict_input_passes_through_to_pydantic():
     """The mode='before' validator on defaults returns non-dicts unchanged."""
     with pytest.raises(ValidationError):

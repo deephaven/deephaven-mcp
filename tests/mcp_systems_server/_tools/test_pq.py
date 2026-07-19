@@ -124,7 +124,7 @@ def create_mock_pq_info(serial, name, state="RUNNING", heap_size=8.0):
 
 import deephaven_mcp.mcp_systems_server._tools.pq as _pq_module
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import InternalError
+from deephaven_mcp._exceptions import InvalidSessionNameError
 
 # Capture real protobuf class at collection time — before any session-scoped fixture
 # patches sys.modules["deephaven_enterprise.proto"] with a mock module.
@@ -136,6 +136,7 @@ except Exception:
     _PQConfigMessage = None
 from deephaven_mcp.config.schema import PqToolsConfig
 from deephaven_mcp.mcp_systems_server._tools.pq import (
+    _convert_gather_results,
     _format_column_definition,
     _format_connection_details,
     _format_exception_details,
@@ -591,6 +592,57 @@ def test_format_pq_config_long_min_value_sentinel(mock_restart_enum):
     result = _format_pq_config(mock_config)
 
     assert result["created_time_nanos"] is None
+
+
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
+def test_format_pq_config_empty_worker_kind(mock_restart_enum):
+    """Test _format_pq_config omits worker_kind when workerKind is empty."""
+    mock_restart_enum.Name.return_value = "RU_ADMIN"
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.serial = 12345
+    mock_pb.version = 1
+    mock_pb.name = "test"
+    mock_pb.owner = "owner"
+    mock_pb.enabled = True
+    mock_pb.heapSizeGb = 8.0
+    mock_pb.bufferPoolToHeapRatio = 0.0
+    mock_pb.detailedGCLoggingEnabled = False
+    mock_pb.extraJvmArguments = []
+    mock_pb.extraEnvironmentVariables = []
+    mock_pb.classPathAdditions = []
+    mock_pb.serverName = ""
+    mock_pb.adminGroups = []
+    mock_pb.viewerGroups = []
+    mock_pb.restartUsers = 1
+    mock_pb.scriptCode = ""
+    mock_pb.scriptPath = ""
+    mock_pb.scriptLanguage = "Python"
+    mock_pb.configurationType = "Script"
+    mock_pb.typeSpecificFieldsJson = ""
+    mock_pb.scheduling = []
+    mock_pb.timeoutNanos = 0
+    mock_pb.jvmProfile = ""
+    mock_pb.lastModifiedByAuthenticated = ""
+    mock_pb.lastModifiedByEffective = ""
+    mock_pb.lastModifiedTimeNanos = 0
+    mock_pb.completedStatus = ""
+    mock_pb.expirationTimeNanos = 0
+    mock_pb.kubernetesControl = ""
+    mock_pb.workerKind = ""  # Empty -> key omitted
+    mock_pb.createdTimeNanos = 0
+    mock_pb.replicaCount = 0
+    mock_pb.spareCount = 0
+    mock_pb.assignmentPolicy = ""
+    mock_pb.assignmentPolicyParams = ""
+    mock_pb.additionalMemoryGb = 0.0
+    mock_pb.pythonControl = ""
+    mock_pb.genericWorkerControl = ""
+    mock_config.pb = mock_pb
+
+    result = _format_pq_config(mock_config)
+
+    assert "worker_kind" not in result
 
 
 @pytest.mark.asyncio
@@ -1608,21 +1660,17 @@ async def test_pq_list_success():
     assert pq1["status_category"] == "ACTIVE"
     assert pq1["enabled"] is True
     assert pq1["owner"] == "test_user"
-    assert pq1["heap_size_gb"] == 8.0
-    assert pq1["worker_kind"] == "DeephavenCommunity"
-    assert pq1["configuration_type"] == "Script"
-    assert pq1["script_language"] == "Python"
-    assert pq1["server_name"] is None  # Empty string -> None
-    assert pq1["admin_groups"] == []
-    assert pq1["viewer_groups"] == []
-    assert pq1["is_scheduled"] is False
-    assert pq1["num_failures"] == 0
 
-    # Verify trimmed response does NOT include full config/state_details/replicas/spares
-    assert "config" not in pq1
-    assert "state_details" not in pq1
-    assert "replicas" not in pq1
-    assert "spares" not in pq1
+    # Verify lean response contains exactly the summary field set
+    assert set(pq1) == {
+        "id",
+        "serial",
+        "name",
+        "status",
+        "status_category",
+        "enabled",
+        "owner",
+    }
 
     # Verify PQ2 summary data
     pq2 = result["pqs"][1]
@@ -1632,10 +1680,6 @@ async def test_pq_list_success():
     assert pq2["status_category"] == "TERMINAL"
     assert pq2["enabled"] is True
     assert pq2["owner"] == "test_user"
-    assert pq2["heap_size_gb"] == 4.0
-    assert pq2["worker_kind"] == "DeephavenCommunity"
-    assert pq2["configuration_type"] == "Script"
-    assert pq2["script_language"] == "Python"
 
 
 @pytest.mark.asyncio
@@ -2192,26 +2236,21 @@ async def test_pq_create_exception():
 def test_validate_and_parse_pq_ids_single():
     """``_validate_and_parse_pq_ids`` returns a single parsed pair.
 
-    The helper now returns a 3-tuple
-    ``(parsed_pqs, system_name, error)``; each parsed entry is
-    ``(<original id string>, <serial>)``.
+    The helper returns ``(system_name, parsed_pqs)``; each parsed entry
+    is ``(<original id string>, <serial>)``.
     """
-    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
-        "enterprise:system:12345"
-    )
+    system_name, parsed_pqs = _validate_and_parse_pq_ids("enterprise:system:12345")
 
-    assert error is None
     assert system_name == "system"
     assert parsed_pqs == [("enterprise:system:12345", 12345)]
 
 
 def test_validate_and_parse_pq_ids_multiple():
     """``_validate_and_parse_pq_ids`` parses a list of same-system pq ids."""
-    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
+    system_name, parsed_pqs = _validate_and_parse_pq_ids(
         ["enterprise:system:12345", "enterprise:system:67890"]
     )
 
-    assert error is None
     assert system_name == "system"
     assert parsed_pqs == [
         ("enterprise:system:12345", 12345),
@@ -2221,31 +2260,75 @@ def test_validate_and_parse_pq_ids_multiple():
 
 def test_validate_and_parse_pq_ids_rejects_mixed_systems():
     """Batches must all target the same enterprise system."""
-    parsed_pqs, system_name, error = _validate_and_parse_pq_ids(
-        ["enterprise:system:12345", "enterprise:other:67890"]
-    )
-    assert parsed_pqs is None
-    assert system_name is None
-    assert error is not None
-    assert "same" in error.lower()
+    with pytest.raises(InvalidSessionNameError, match="same"):
+        _validate_and_parse_pq_ids(
+            ["enterprise:system:12345", "enterprise:other:67890"]
+        )
+
+
+def test_validate_and_parse_pq_ids_rejects_empty_list():
+    """An empty id list is rejected with ``InvalidSessionNameError``."""
+    with pytest.raises(InvalidSessionNameError, match="At least one id"):
+        _validate_and_parse_pq_ids([])
 
 
 @pytest.mark.asyncio
-async def test_setup_batch_pq_operation_raises_on_none_system_name_without_error():
-    """``_setup_batch_pq_operation`` raises ``InternalError`` when the parser
-    returns ``system_name=None`` with no parse error — a broken invariant."""
-    with patch.object(
-        _pq_module,
-        "_validate_and_parse_pq_ids",
-        return_value=([("enterprise:system:12345", 12345)], None, None),
-    ):
-        with pytest.raises(InternalError, match="Internal invariant violated"):
-            await _setup_batch_pq_operation(
-                MagicMock(),
-                "enterprise:system:12345",
-                "pq_delete",
-                max_concurrent=1,
-            )
+async def test_setup_batch_pq_operation_raises_on_invalid_max_concurrent():
+    """``_setup_batch_pq_operation`` raises ``ValueError`` before touching the registry."""
+    with pytest.raises(ValueError, match="max_concurrent"):
+        await _setup_batch_pq_operation(
+            MagicMock(),
+            "enterprise:system:12345",
+            "pq_delete",
+            max_concurrent=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_setup_batch_pq_operation_raises_on_invalid_id():
+    """``_setup_batch_pq_operation`` raises ``InvalidSessionNameError`` for bad ids."""
+    with pytest.raises(InvalidSessionNameError):
+        await _setup_batch_pq_operation(
+            MagicMock(),
+            "not-a-valid-id",
+            "pq_delete",
+            max_concurrent=1,
+        )
+
+
+def test_convert_gather_results_passthrough():
+    """Dict results pass through unchanged, in order."""
+    ok1: dict[str, object] = {"id": "enterprise:system:1", "success": True}
+    ok2: dict[str, object] = {"id": "enterprise:system:2", "success": True}
+    parsed = [("enterprise:system:1", 1), ("enterprise:system:2", 2)]
+
+    results = _convert_gather_results([ok1, ok2], parsed)
+
+    assert results == [ok1, ok2]
+
+
+def test_convert_gather_results_exception_becomes_error_dict():
+    """An escaped Exception is converted to a sparse error dict."""
+    ok: dict[str, object] = {"id": "enterprise:system:1", "success": True}
+    parsed = [("enterprise:system:1", 1), ("enterprise:system:2", 2)]
+
+    results = _convert_gather_results([ok, RuntimeError("boom")], parsed)
+
+    assert results[0] == ok
+    assert results[1] == {
+        "id": "enterprise:system:2",
+        "serial": 2,
+        "success": False,
+        "error": "Unexpected error: RuntimeError: boom",
+    }
+
+
+def test_convert_gather_results_base_exception_reraised():
+    """A non-Exception BaseException (e.g. CancelledError) is re-raised."""
+    parsed = [("enterprise:system:1", 1)]
+
+    with pytest.raises(asyncio.CancelledError):
+        _convert_gather_results([asyncio.CancelledError("canceled")], parsed)
 
 
 # Note: ``test_parse_pq_id_*`` variants live further down in this module;
@@ -4483,6 +4566,55 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pq_delete_base_exception_escapes_to_gather(monkeypatch):
+    """Test pq_delete re-raises BaseException gather results (e.g. CancelledError)."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    mock_controller.delete_query = AsyncMock()
+    mock_controller.get = AsyncMock(
+        side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "STOPPED")
+    )
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    # Monkeypatch asyncio.gather to inject a BaseException (not an Exception)
+    # into the results, as gather(return_exceptions=True) can when a task
+    # is canceled.
+    original_gather = asyncio.gather
+
+    async def patched_gather(*args, **kwargs):
+        results = await original_gather(*args, **kwargs)
+        results_list = list(results)
+        if len(results_list) > 1:
+            results_list[1] = asyncio.CancelledError("canceled mid-batch")
+        return results_list
+
+    monkeypatch.setattr(asyncio, "gather", patched_gather)
+
+    with pytest.raises(asyncio.CancelledError):
+        await pq_delete(
+            context,
+            id=[
+                "enterprise:system:1",
+                "enterprise:system:2",
+            ],
+        )
+
+
+@pytest.mark.asyncio
 async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     """Test pq_start handles raw Exception objects from asyncio.gather."""
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
@@ -4772,6 +4904,31 @@ def test_register_tools_registers_all_pq_tools():
         "pq_restart",
     }
     assert expected <= set(tools.keys())
+
+
+@pytest.mark.asyncio
+async def test_pq_tools_input_schema_advertises_programming_language():
+    """pq_create/pq_modify advertise the exact programming_language enum.
+
+    Regression guard: if the parameter reverts to a bare ``str``, AI
+    agents lose the vocabulary from the tool schema.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    from deephaven_mcp.mcp_systems_server._tools.pq import register_tools
+
+    server = FastMCP("test-pq-schema")
+    register_tools(server)
+    tools = {t.name: t for t in await server.list_tools()}
+
+    create_schema = tools["pq_create"].inputSchema["properties"]["programming_language"]
+    assert create_schema["enum"] == ["Python", "Groovy"]
+    assert create_schema["default"] == "Python"
+
+    modify_variants = tools["pq_modify"].inputSchema["properties"][
+        "programming_language"
+    ]["anyOf"]
+    assert {"enum": ["Python", "Groovy"], "type": "string"} in modify_variants
 
 
 @pytest.mark.parametrize(

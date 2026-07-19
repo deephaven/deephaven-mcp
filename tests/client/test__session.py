@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import grpc
 import pyarrow as pa
+import pydantic
 import pytest
 
 from deephaven_mcp._exceptions import (
@@ -996,14 +997,13 @@ def test_core_session_from_config_programming_language():
         assert session.programming_language == "Groovy"
 
 
-def test_core_session_from_config_programming_language_lowercase_normalized():
-    """Lowercase ``"groovy"`` is normalized to ``"Groovy"`` by the field validator."""
-    from deephaven_mcp.client._session import CoreSession
+def test_core_session_from_config_programming_language_lowercase_rejected():
+    """Lowercase ``"groovy"`` fails config validation: the vocabulary is exact-case."""
+    from deephaven_mcp.sessions import CommunitySessionConfig
 
-    with patch("deephaven_mcp.client._session.Session", DummyPDHSession):
-        config = _cfg(host="localhost", port=10000, programming_language="groovy")
-        session = asyncio.run(_from_config(config))
-        assert session.programming_language == "Groovy"
+    config = _cfg(host="localhost", port=10000, programming_language="groovy")
+    with pytest.raises(pydantic.ValidationError):
+        CommunitySessionConfig.model_validate({"name": "test", **config})
 
 
 def test_core_plus_session_programming_language():

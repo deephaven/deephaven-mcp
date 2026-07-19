@@ -14,7 +14,10 @@ from pydantic import ValidationError
 
 from deephaven_mcp._redaction import REDACTED
 from deephaven_mcp.auth.credentials import PasswordCredentials
-from deephaven_mcp.sessions import EnterpriseSystemConfig
+from deephaven_mcp.sessions import (
+    EnterpriseSessionCreationDefaults,
+    EnterpriseSystemConfig,
+)
 
 _BASE_CREDENTIALS = {
     "type": "password",
@@ -37,6 +40,15 @@ def _password_payload(**overrides) -> dict:
 # ---------------------------------------------------------------------------
 # Top-level validation
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("invalid", ["python", "GROOVY", "rust"])
+def test_defaults_programming_language_rejects_non_members(invalid: str):
+    """The vocabulary is exact-case: wrong case and unknown values both fail."""
+    with pytest.raises(ValidationError):
+        EnterpriseSessionCreationDefaults.model_validate(
+            {"programming_language": invalid}
+        )
 
 
 def test_non_dict_input_passes_through_to_pydantic():

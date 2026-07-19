@@ -17,13 +17,16 @@ from conftest import (
 
 from deephaven_mcp._exceptions import (
     CommunityNotConfiguredError,
+    InternalError,
     RegistryItemNotFoundError,
+    SessionCreationError,
 )
 from deephaven_mcp.client import CommunityClientTimeouts
 from deephaven_mcp.config.schema import CommunitySessionCreationDefaults
 from deephaven_mcp.mcp_systems_server._tools.session_community import (
     _ANONYMOUS_AUTH_HANDLER,
     _PSK_AUTH_HANDLER,
+    _build_success_response,
     _credentials_to_auth_type,
     _register_session_manager,
     _resolve_community_session_parameters,
@@ -36,6 +39,7 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    LaunchedSession,
     PythonLaunchedSession,
     QualifiedSessionId,
     ResourceLivenessStatus,
@@ -572,14 +576,11 @@ async def test_session_community_delete_not_dynamic():
 
 
 @pytest.mark.asyncio
-async def test_session_community_create_case_insensitive_params():
-    """Test that launch_method, programming_language, and auth_type are case-insensitive."""
-    pass  # no longer needed
-
+async def test_session_community_create_rejects_mixed_case_programming_language():
+    """Mixed-case programming_language values are rejected (exact-case closed vocabulary)."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
-    # Mock config with session creation enabled
     mock_config_manager.get_config = AsyncMock(
         return_value={
             "session_creation": {
@@ -588,26 +589,15 @@ async def test_session_community_create_case_insensitive_params():
             }
         }
     )
-    # Stash for conftest's lifespan adapter — same shape as the
-    # ``get_config`` return value so the tool resolves
-    # ``session_creation`` correctly.
     mock_session_registry._community_settings = {
         "session_creation": {"defaults": {}, "max_concurrent_sessions": 5}
     }
-
     mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
 
-    # Test case: Mixed case parameters should be normalized
-    # Docker + Python + PSK with various casings
-    test_cases = [
-        ("Docker", "Python"),  # Title case
-        ("DOCKER", "PYTHON"),  # Various cases
-        ("docker", "python"),  # Lower + title
-        ("PIP", None),  # Pip with anonymous (upper)
-        ("Pip", None),  # Pip with anonymous (title)
-    ]
-
-    for launch_method, prog_lang in test_cases:
+    for prog_lang in ("PYTHON", "python", "groovy", "GROOVY"):
         context = MockContext(
             {
                 "config_manager": mock_config_manager,
@@ -616,23 +606,128 @@ async def test_session_community_create_case_insensitive_params():
             }
         )
 
-        # This should NOT raise validation errors - parameters should be normalized
-        # We expect it to fail later (e.g., Docker not available), but NOT on parameter validation
         result = await session_community_create(
             context,
-            session_name=f"test-{launch_method.lower()}",
-            launch_method=launch_method,
+            session_name="test-mixed-case-lang",
+            launch_method="docker",
             programming_language=prog_lang,
         )
 
-        # If it fails on validation (not Docker/pip issues), test fails
-        if not result["success"]:
-            error = result.get("error", "")
-            # These are validation errors we DON'T want to see (means normalization failed)
-            assert (
-                "'programming_language' parameter only applies to docker" not in error
-            ), f"Case normalization failed for {launch_method=}, {prog_lang=}"
-            # Other errors (like Docker not available) are OK for this test
+        assert result["success"] is False
+        assert f"Invalid programming_language '{prog_lang}'" in result["error"]
+        assert "'Python'" in result["error"] and "'Groovy'" in result["error"]
+        assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_rejects_mixed_case_launch_method():
+    """Mixed-case launch_method values are rejected (exact-case closed vocabulary)."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
+            "session_creation": {
+                "defaults": {},
+                "max_concurrent_sessions": 5,
+            }
+        }
+    )
+    mock_session_registry._community_settings = {
+        "session_creation": {"defaults": {}, "max_concurrent_sessions": 5}
+    }
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_session_registry,
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+    result = await session_community_create(
+        context,
+        session_name="test-mixed-case",
+        launch_method="Docker",
+        programming_language="Python",
+    )
+
+    assert result["success"] is False
+    assert "Invalid launch_method 'Docker'" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_python_launch_success():
+    """launch_method="python" succeeds end-to-end and reports a process_id."""
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    community_config = {
+        "session_creation": {
+            "max_concurrent_sessions": 5,
+            "defaults": {},
+        }
+    }
+    mock_config_manager.get_config = AsyncMock(return_value=community_config)
+    mock_session_registry._community_settings = community_config
+    mock_session_registry.count_added_sessions = AsyncMock(return_value=0)
+    mock_session_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("not found")
+    )
+    mock_session_registry.add_dynamic_session = AsyncMock(
+        return_value=MagicMock(qualified_session_id="community:community:py-launch")
+    )
+
+    mock_launched_session = MagicMock(spec=PythonLaunchedSession)
+    mock_launched_session.port = 10000
+    mock_launched_session.launch_method = "python"
+    mock_launched_session.connection_url = "http://localhost:10000"
+    mock_launched_session.connection_url_with_auth = (
+        "http://localhost:10000/?psk=test_token"
+    )
+    mock_launched_session.process = MagicMock(pid=4242)
+    mock_launched_session.auth_type = "psk"
+    mock_launched_session.auth_token = "test_token"
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.launch_session"
+        ) as mock_launch_session,
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.find_available_port",
+            return_value=10000,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.session_community.generate_auth_token",
+            return_value="test_token",
+        ),
+        patch.object(
+            mock_launched_session, "wait_until_ready", new=AsyncMock(return_value=True)
+        ),
+    ):
+        mock_launch_session.return_value = mock_launched_session
+
+        context = MockContext(
+            {
+                "config_manager": mock_config_manager,
+                "registry": mock_session_registry,
+                "instance_tracker": create_mock_instance_tracker(),
+            }
+        )
+
+        result = await session_community_create(
+            context,
+            session_name="py-launch",
+            launch_method="python",
+        )
+
+        assert result["success"] is True
+        assert result["launch_method"] == "python"
+        assert result["process_id"] == 4242
+        assert "container_id" not in result
+        assert mock_launch_session.call_args.kwargs["launch_method"] == "python"
 
 
 @pytest.mark.asyncio
@@ -1436,7 +1531,7 @@ async def test_session_community_create_unsupported_programming_language():
     )
 
     assert result["success"] is False
-    assert "Unsupported programming_language" in result["error"]
+    assert "Invalid programming_language" in result["error"]
     assert "JavaScript" in result["error"]
     assert "Python" in result["error"] and "Groovy" in result["error"]
 
@@ -2091,6 +2186,72 @@ async def test_session_community_credentials_static_session_unsupported_creds():
 
 
 @pytest.mark.asyncio
+async def test_session_community_credentials_unknown_manager_subtype():
+    """A manager that is neither dynamic nor static surfaces the InternalError guard."""
+    from deephaven_mcp.resource_manager._manager import CommunitySessionManager
+
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    config = {"security": {"credential_retrieval_mode": "all"}}
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    mock_session_registry._community_settings = config
+
+    # Base-class mock: passes neither DynamicCommunitySessionManager nor
+    # StaticCommunitySessionManager isinstance checks.
+    manager = MagicMock(spec=CommunitySessionManager)
+    mock_session_registry.get = AsyncMock(return_value=manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_session_registry,
+        }
+    )
+    result = await session_community_credentials(context, id="community:community:x")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Unhandled CommunitySessionManager subtype" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_session_community_credentials_unknown_manager_subtype_dynamic_only():
+    """Unknown subtypes hit the InternalError guard before any mode check.
+
+    With mode='dynamic_only', a naive ``is_static = not is_dynamic``
+    classification would misreport an unknown subtype as a denied static
+    session; the guard must fire instead.
+    """
+    from deephaven_mcp.resource_manager._manager import CommunitySessionManager
+
+    mock_config_manager = MagicMock()
+    mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
+
+    config = {"security": {"credential_retrieval_mode": "dynamic_only"}}
+    mock_config_manager.get_config = AsyncMock(return_value=config)
+    mock_session_registry._community_settings = config
+
+    # Base-class mock: passes neither DynamicCommunitySessionManager nor
+    # StaticCommunitySessionManager isinstance checks.
+    manager = MagicMock(spec=CommunitySessionManager)
+    mock_session_registry.get = AsyncMock(return_value=manager)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_session_registry,
+        }
+    )
+    result = await session_community_credentials(context, id="community:community:x")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "Unhandled CommunitySessionManager subtype" in result["error"]
+    assert "static" not in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_session_community_credentials_invalid_session_id():
     """Test when id has invalid format."""
     mock_config_manager = MagicMock()
@@ -2293,27 +2454,21 @@ async def test_session_community_credentials_all_allows_both():
 
 def test_credentials_to_auth_type_none_defaults_to_psk():
     """None credentials default to the PSK handler (historical default)."""
-    result, error = _credentials_to_auth_type(None)
-    assert error is None
-    assert result == _PSK_AUTH_HANDLER
+    assert _credentials_to_auth_type(None) == _PSK_AUTH_HANDLER
 
 
 def test_credentials_to_auth_type_psk():
     """PSKCredentials maps to the PSK handler FQCN."""
     from deephaven_mcp.auth.credentials import PSKCredentials
 
-    result, error = _credentials_to_auth_type(PSKCredentials(token="t"))
-    assert error is None
-    assert result == _PSK_AUTH_HANDLER
+    assert _credentials_to_auth_type(PSKCredentials(token="t")) == _PSK_AUTH_HANDLER
 
 
 def test_credentials_to_auth_type_anonymous():
     """AnonymousCredentials maps to ``"Anonymous"``."""
     from deephaven_mcp.auth.credentials import AnonymousCredentials
 
-    result, error = _credentials_to_auth_type(AnonymousCredentials())
-    assert error is None
-    assert result == _ANONYMOUS_AUTH_HANDLER
+    assert _credentials_to_auth_type(AnonymousCredentials()) == _ANONYMOUS_AUTH_HANDLER
 
 
 def test_credentials_to_auth_type_custom_passthrough():
@@ -2323,9 +2478,7 @@ def test_credentials_to_auth_type_custom_passthrough():
     creds = CustomTokenCredentials(
         auth_type="com.example.CustomAuth", auth_token="opaque"
     )
-    result, error = _credentials_to_auth_type(creds)
-    assert error is None
-    assert result == "com.example.CustomAuth"
+    assert _credentials_to_auth_type(creds) == "com.example.CustomAuth"
 
 
 def test_credentials_to_auth_type_password_rejected():
@@ -2333,11 +2486,11 @@ def test_credentials_to_auth_type_password_rejected():
     from deephaven_mcp.auth.credentials import PasswordCredentials
 
     creds = PasswordCredentials(username="u", password="p")
-    result, error = _credentials_to_auth_type(creds)
-    assert result == ""
-    assert error is not None
-    assert "Basic authentication is not supported" in error
-    assert "dynamically-launched" in error
+    with pytest.raises(
+        SessionCreationError, match="Basic authentication is not supported"
+    ) as exc_info:
+        _credentials_to_auth_type(creds)
+    assert "dynamically-launched" in str(exc_info.value)
 
 
 def test_resolve_community_session_parameters_password_credentials_rejected():
@@ -2360,26 +2513,120 @@ def test_resolve_community_session_parameters_password_credentials_rejected():
         startup_check_interval_seconds=2.0,
         startup_retries=3,
     )
-    resolved_params, error = _resolve_community_session_parameters(
-        launch_method=None,
-        programming_language=None,
-        auth_token=None,
-        heap_size_gb=None,
-        extra_jvm_args=None,
-        environment_vars=None,
+    with pytest.raises(
+        SessionCreationError, match="Basic authentication is not supported"
+    ):
+        _resolve_community_session_parameters(
+            launch_method=None,
+            programming_language=None,
+            auth_token=None,
+            heap_size_gb=None,
+            extra_jvm_args=None,
+            environment_vars=None,
+            docker_image=None,
+            docker_memory_limit_gb=None,
+            docker_cpu_limit=None,
+            docker_volumes=None,
+            python_venv_path=None,
+            defaults=defaults,
+        )
+
+
+def test_resolve_community_session_parameters_rejects_unknown_launch_method():
+    """An unrecognized launch_method fails fast with a clear error."""
+    from deephaven_mcp.auth.credentials import AnonymousCredentials
+
+    defaults = CommunitySessionCreationDefaults.model_construct(
+        launch_method="docker",
+        credentials=AnonymousCredentials(),
+        programming_language="Python",
         docker_image=None,
         docker_memory_limit_gb=None,
         docker_cpu_limit=None,
         docker_volumes=None,
         python_venv_path=None,
-        defaults=defaults,
+        heap_size_gb=4.0,
+        extra_jvm_args=None,
+        environment_vars=None,
+        startup_timeout_seconds=60.0,
+        startup_check_interval_seconds=2.0,
+        startup_retries=3,
+    )
+    with pytest.raises(
+        SessionCreationError, match="Invalid launch_method 'podman'"
+    ) as exc_info:
+        _resolve_community_session_parameters(
+            launch_method="podman",
+            programming_language=None,
+            auth_token=None,
+            heap_size_gb=None,
+            extra_jvm_args=None,
+            environment_vars=None,
+            docker_image=None,
+            docker_memory_limit_gb=None,
+            docker_cpu_limit=None,
+            docker_volumes=None,
+            python_venv_path=None,
+            defaults=defaults,
+        )
+    assert "'docker', 'python'" in str(exc_info.value)
+
+
+def test_build_success_response_docker_session():
+    """A DockerLaunchedSession contributes its container_id to the response."""
+    launched = MagicMock(spec=DockerLaunchedSession)
+    launched.container_id = "abc123"
+
+    result = _build_success_response(
+        "community:community:x",
+        "x",
+        "http://localhost:10000",
+        _ANONYMOUS_AUTH_HANDLER,
+        "docker",
+        10000,
+        launched,
     )
 
-    assert resolved_params == {}
-    assert error is not None
-    assert error["success"] is False
-    assert error["isError"] is True
-    assert "Basic authentication is not supported" in error["error"]
+    assert result["success"] is True
+    assert result["id"] == "community:community:x"
+    assert result["launch_method"] == "docker"
+    assert result["container_id"] == "abc123"
+    assert "process_id" not in result
+
+
+def test_build_success_response_python_session():
+    """A PythonLaunchedSession contributes its process pid to the response."""
+    launched = MagicMock(spec=PythonLaunchedSession)
+    launched.process = MagicMock(pid=4242)
+
+    result = _build_success_response(
+        "community:community:x",
+        "x",
+        "http://localhost:10000",
+        _ANONYMOUS_AUTH_HANDLER,
+        "python",
+        10000,
+        launched,
+    )
+
+    assert result["success"] is True
+    assert result["launch_method"] == "python"
+    assert result["process_id"] == 4242
+    assert "container_id" not in result
+
+
+def test_build_success_response_unknown_session_type_raises():
+    """An unrecognized LaunchedSession subtype raises InternalError."""
+    with pytest.raises(InternalError, match="Unhandled LaunchedSession subtype"):
+        _build_success_response(
+            "community:community:x",
+            "x",
+            "http://localhost:10000",
+            _ANONYMOUS_AUTH_HANDLER,
+            "docker",
+            10000,
+            MagicMock(spec=LaunchedSession),
+        )
 
 
 @pytest.mark.asyncio
@@ -2677,8 +2924,8 @@ async def test_session_community_create_default_programming_language_in_config()
         assert captured_config.programming_language == "Python"
 
 
-def test_credentials_to_auth_type_unrecognized_kind_returns_error():
-    """An unrecognized credentials object yields a structured error.
+def test_credentials_to_auth_type_unrecognized_kind_raises():
+    """An unrecognized credentials object raises SessionCreationError.
 
     Covers the fallthrough branch in ``_credentials_to_auth_type`` for
     credential kinds outside the documented ``CredentialsUnion``.
@@ -2687,11 +2934,11 @@ def test_credentials_to_auth_type_unrecognized_kind_returns_error():
     class _BogusCreds:
         pass
 
-    result, error = _credentials_to_auth_type(_BogusCreds())  # type: ignore[arg-type]
-    assert result == ""
-    assert error is not None
-    assert "Unsupported credentials kind" in error
-    assert "_BogusCreds" in error
+    with pytest.raises(
+        SessionCreationError, match="Unsupported credentials kind"
+    ) as exc_info:
+        _credentials_to_auth_type(_BogusCreds())  # type: ignore[arg-type]
+    assert "_BogusCreds" in str(exc_info.value)
 
 
 def test_resolve_auth_token_non_psk_returns_none():
@@ -2725,3 +2972,57 @@ def test_register_tools_registers_community_tools():
     assert "session_community_create" in tools
     assert "session_community_delete" in tools
     assert "session_community_credentials" in tools
+
+
+def test_docker_image_for_language_maps_every_language():
+    """Each ProgrammingLanguage member maps to its configured Docker image."""
+    from deephaven_mcp.config.schema import DockerImages
+    from deephaven_mcp.mcp_systems_server._tools.session_community import (
+        _docker_image_for_language,
+    )
+
+    images = DockerImages(python="img-py", groovy="img-groovy")
+    assert _docker_image_for_language("Python", images) == "img-py"
+    assert _docker_image_for_language("Groovy", images) == "img-groovy"
+
+
+def test_docker_image_for_language_asserts_on_unknown_language():
+    """The assert_never fallthrough raises for values outside the Literal."""
+    from deephaven_mcp.config.schema import DockerImages
+    from deephaven_mcp.mcp_systems_server._tools.session_community import (
+        _docker_image_for_language,
+    )
+
+    images = DockerImages()
+    with pytest.raises(AssertionError):
+        _docker_image_for_language("JavaScript", images)  # type: ignore[arg-type]
+    # Suppression justified: deliberately constructing a value the
+    # ``Literal`` rejects so the runtime ``assert_never`` branch is
+    # covered. Bracketed ``arg-type`` names what is silenced; mypy
+    # still flags any *unintentional* misuse at real call sites.
+
+
+@pytest.mark.asyncio
+async def test_session_community_create_input_schema_advertises_closed_vocabularies():
+    """The MCP inputSchema advertises the exact enums for launch_method and programming_language.
+
+    Regression guard: if either parameter reverts to a bare ``str``, AI
+    agents lose the vocabulary from the tool schema and invalid values
+    reach the tool body instead of being rejected at the protocol layer.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    from deephaven_mcp.mcp_systems_server._tools.session_community import register_tools
+
+    server = FastMCP("test-community-server")
+    register_tools(server)
+    (tool,) = [
+        t for t in await server.list_tools() if t.name == "session_community_create"
+    ]
+    props = tool.inputSchema["properties"]
+
+    launch_variants = props["launch_method"]["anyOf"]
+    assert {"enum": ["docker", "python"], "type": "string"} in launch_variants
+
+    language_variants = props["programming_language"]["anyOf"]
+    assert {"enum": ["Python", "Groovy"], "type": "string"} in language_variants

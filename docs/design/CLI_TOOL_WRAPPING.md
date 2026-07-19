@@ -251,8 +251,8 @@ runs the drift check on `_tools/**` or `cli/_commands/**` edits).
 |-------|---------------------|
 | `session` | `list`→`sessions_list`; `show`→`session_details`; `create --system`→`session_community_create`\|`session_enterprise_create`; `delete`→`session_community_delete`\|`session_enterprise_delete`; `exec`→`session_script_run`; `pip-list`→`session_pip_list`; `credentials`/`url`/`open`→`session_community_credentials` |
 | `system` | `list`→`list_systems`; `status`→`enterprise_systems_status` |
-| `table` | `list`→`session_tables_list`; `schema`→`session_tables_schema`; `data`→`session_table_data` |
-| `catalog` | (Enterprise only) `tables`→`catalog_tables_list`; `namespaces`→`catalog_namespaces_list`; `schema`→`catalog_tables_schema`; `sample`→`catalog_table_sample` |
+| `table` | `list`→`session_tables_list`; `schema`→`session_table_schema`; `data`→`session_table_data` |
+| `catalog` | (Enterprise only) `tables`→`catalog_tables_list`; `namespaces`→`catalog_namespaces_list`; `schema`→`catalog_table_schema`; `sample`→`catalog_table_sample` |
 | `pq` | (Enterprise only) `list`/`details`/`create`/`modify`/`delete`/`start`/`stop`/`restart`/`name-to-id` → `pq_*` |
 | `docs` | (Direct-URL; docs server at `docs.url`, no daemon) `ask`→`docs_chat`; `status`→ connectivity probe (no tool binding) |
 

@@ -31,7 +31,7 @@ user-invocable: false
 5. **Registering New Tool Modules**:
    - **CRITICAL**: Every tool module must define a `register_tools(server: FastMCP) -> None` function
    - This function calls `server.tool()(tool_fn)` for each tool in the module
-   - After creating a new module, add a `module.register_tools(server)` call to `_register_tools()` in `src/deephaven_mcp/mcp_systems_server/_fastmcp.py`. **Registration is not gated by configuration** — every tool module registers unconditionally, so the tool surface is stable and self-describing across all deployment shapes (and matches the static `dh-mcp` CLI command tree). A tool that needs a configuration section the deployment lacks **self-reports applicability when invoked**: it returns an empty result where one is meaningful (e.g. `enterprise_systems_status` → `{"systems": []}`) or a clean user-facing error otherwise. The section accessors enforce this — `get_enterprise_settings` raises `EnterpriseNotConfiguredError` and `get_community_settings`/`get_community_registry` raise `CommunityNotConfiguredError` (both `ConfigurationError` subclasses), which each tool's `except` handler converts to a `success=False` response. Do **not** gate registration on `multi_config.community`/`multi_config.enterprise`. See `_register_tools` in `mcp_systems_server/_fastmcp.py`.
+   - After creating a new module, add a `module.register_tools(server)` call to `_register_tools()` in `src/deephaven_mcp/mcp_systems_server/_fastmcp.py`. **Registration is not gated by configuration** — every tool module registers unconditionally, so the tool surface is stable and self-describing across all deployment shapes (and matches the static `dh-mcp` CLI command tree). A tool that needs a configuration section the deployment lacks **self-reports applicability when invoked**: it returns an empty result where one is meaningful (e.g. `enterprise_systems_status` → `{"systems": []}`) or a structured user-facing error otherwise. The section accessors enforce this — `get_enterprise_settings` raises `EnterpriseNotConfiguredError` and `get_community_settings`/`get_community_registry` raise `CommunityNotConfiguredError` (both `ConfigurationError` subclasses), which each tool's `except` handler converts to a `success=False` response. Do **not** gate registration on `multi_config.community`/`multi_config.enterprise`. See `_register_tools` in `mcp_systems_server/_fastmcp.py`.
 
 ## Required Pattern for MCP Tool Modules
 
@@ -60,14 +60,20 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_multi_config,                 # Get the merged ConfigTree from context
     get_community_registry,           # Get CommunitySessionRegistry from context
     get_enterprise_registry,          # Get EnterpriseSessionRegistry from context
-    get_session_from_context,         # Get session from MCP context
+    get_session_from_context,         # Get session from MCP context (any type)
     get_enterprise_session,           # Get + validate Enterprise session
     check_response_size,              # Validate response size limits
-    format_meta_table_result,         # Format metadata tables
+    format_schema_result,             # Format a single-table schema result
     build_table_data_response,        # Build a table data response dict
     redact_json_sensitive_fields,     # Redact sensitive fields from JSON strings
 )
 ```
+
+Session acquisition: a tool that works with any session type calls `get_session_from_context`; an enterprise-only tool calls `get_enterprise_session`, which validates the type up front and returns the `CorePlusSession` directly. On a non-enterprise session it raises `UnsupportedOperationError`; the tool's `except` handler converts that to the error dict. Do not acquire a generic session and rely on a downstream `queries` helper to reject the wrong type: the resulting error names an internal function instead of the tool the agent called. Canonical implementations: all four tools in `_tools/catalog.py`.
+
+Helper failure contract: a `_tools` helper that produces a value the tool then uses (acquisition, resolution, parsing) raises a named exception on failure, which the calling tool's `except` handler converts to the error dict. Never mirror a failure through a `(value, error)` tuple and `cast()` past the `None` — `cast` is unchecked, so mypy cannot catch a broken invariant. Guard helpers are exempt: a helper whose entire product *is* a ready-made error dict (`check_response_size` in `_tools/shared.py`, `_check_session_limit` in `_tools/session_community.py`) returns `dict | None`, and the tool returns the dict verbatim when present — there is no separate value to mirror. Canonical implementations: `get_enterprise_session` in `_tools/shared.py`; `_setup_batch_pq_operation` in `_tools/pq.py` (raises, returns a frozen dataclass with non-optional fields).
+
+Closed-vocabulary parameters: a tool parameter that accepts a fixed set of string values is typed as a `Literal` alias, never bare `str` — the values then surface in the tool's MCP inputSchema, so agents pick valid values without a trial-and-error round trip. Pair the alias with its runtime collection per `_python-coding-practices` rule 18: derive the collection from the `Literal` via `typing.get_args`. Canonical implementation: `TableFormat` in `formatters/__init__.py` (`VALID_FORMATS = set(get_args(TableFormat))`), used by `session_table_data` and `catalog_table_sample`.
 
 Id parsing: call `QualifiedSessionId.from_str` (from `deephaven_mcp.resource_manager`) to parse and validate a fully qualified id — it raises `InvalidSessionNameError` rather than substituting a default. For PQ ids, `parse_pq_id` / `make_pq_id` in `shared.py` add the enterprise-scope and integer-serial refinement on top.
 

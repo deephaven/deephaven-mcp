@@ -15,7 +15,10 @@ from conftest import (
 )
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp._exceptions import (
+    RegistryItemNotFoundError,
+    SessionCreationError,
+)
 from deephaven_mcp.client import CorePlusQuerySerial
 from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _SHORT_REASON_MAX_LEN,
@@ -1919,6 +1922,35 @@ def test_env_vars_to_list_helper_round_trip():
     assert sorted(out) == sorted(["FOO=1", "BAR=two"])
 
 
+@pytest.mark.parametrize("bad_language", ["python", "GROOVY", "Rust"])
+def test_resolve_session_parameters_rejects_invalid_programming_language(
+    bad_language,
+):
+    """Untyped callers get a friendly error, never silent wrong-case forwarding."""
+    from deephaven_mcp.sessions import EnterpriseSessionCreationDefaults
+
+    defaults = EnterpriseSessionCreationDefaults.model_validate({})
+
+    with pytest.raises(
+        SessionCreationError,
+        match=f"Invalid programming_language '{bad_language}'. "
+        "Valid options: 'Groovy', 'Python'.",
+    ):
+        _resolve_session_parameters(
+            heap_size_gb=None,
+            auto_delete_timeout=None,
+            server=None,
+            engine=None,
+            extra_jvm_args=None,
+            environment_vars=None,
+            admin_groups=None,
+            viewer_groups=None,
+            session_arguments=None,
+            programming_language=bad_language,  # type: ignore[arg-type]  # exercising the untyped-caller guard
+            defaults=defaults,
+        )
+
+
 def test_resolve_session_parameters():
     """Test _resolve_session_parameters helper function."""
     from deephaven_mcp.sessions import EnterpriseSessionCreationDefaults
@@ -2689,6 +2721,27 @@ def test_register_tools_registers_all_enterprise_tools():
         "session_enterprise_create",
         "session_enterprise_delete",
     }
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_create_input_schema_advertises_programming_language():
+    """The MCP inputSchema advertises the exact enum for programming_language.
+
+    Regression guard: if the parameter reverts to a bare ``str``, AI
+    agents lose the vocabulary from the tool schema and uncanonical
+    values flow verbatim to the controller's ``scriptLanguage`` field.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    server = FastMCP("test-enterprise-server")
+    register_tools(server)
+    (tool,) = [
+        t for t in await server.list_tools() if t.name == "session_enterprise_create"
+    ]
+    props = tool.inputSchema["properties"]
+
+    language_variants = props["programming_language"]["anyOf"]
+    assert {"enum": ["Python", "Groovy"], "type": "string"} in language_variants
 
 
 # ---------------------------------------------------------------------------

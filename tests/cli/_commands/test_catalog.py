@@ -32,11 +32,25 @@ def _run(args: list[str], payload: dict, tmp_path: Path):
         return CliRunner().invoke(cli, args), call
 
 
+_TABLES = {
+    "success": True,
+    "id": _SID,
+    "tables": [
+        {"namespace": "Market", "table_name": "Trades"},
+        {"namespace": "Market", "table_name": "Quotes"},
+    ],
+    "count": 2,
+    "is_complete": True,
+}
+
+
 def test_tables_minimal(tmp_path: Path) -> None:
-    result, call = _run(["catalog", "tables", _SID], {"success": True}, tmp_path)
+    result, call = _run(["-o", "json", "catalog", "tables", _SID], _TABLES, tmp_path)
     assert result.exit_code == 0
+    # stdout is the bare tables array, not the tool envelope.
+    assert json.loads(result.stdout) == _TABLES["tables"]
     assert call.await_args.args[2] == "catalog_tables_list"
-    assert call.await_args.args[3] == {"id": _SID, "format": "json-row"}
+    assert call.await_args.args[3] == {"id": _SID}
 
 
 def test_tables_with_options(tmp_path: Path) -> None:
@@ -52,7 +66,7 @@ def test_tables_with_options(tmp_path: Path) -> None:
             "--filter",
             "b<2",
         ],
-        {"success": True},
+        _TABLES,
         tmp_path,
     )
     assert result.exit_code == 0
@@ -60,7 +74,6 @@ def test_tables_with_options(tmp_path: Path) -> None:
         "id": _SID,
         "max_rows": 5,
         "filters": ["a>1", "b<2"],
-        "format": "json-row",
     }
 
 
@@ -104,39 +117,36 @@ def test_namespaces_truncated_warns_on_stderr(tmp_path: Path) -> None:
     assert "truncated" in result.stderr
 
 
-def test_schema_with_namespace_and_names(tmp_path: Path) -> None:
+_SCHEMA = {
+    "success": True,
+    "id": _SID,
+    "namespace": "Market",
+    "table_name": "Trades",
+    "schema": [],
+    "column_count": 0,
+}
+
+
+def test_schema_single_table(tmp_path: Path) -> None:
     result, call = _run(
-        [
-            "catalog",
-            "schema",
-            _SID,
-            "Trades",
-            "--namespace",
-            "Market",
-            "--filter",
-            "x",
-            "--max-tables",
-            "10",
-        ],
-        {"success": True, "schemas": []},
-        tmp_path,
+        ["catalog", "schema", _SID, "Market", "Trades"], _SCHEMA, tmp_path
     )
     assert result.exit_code == 0
+    assert call.await_args.args[2] == "catalog_table_schema"
     assert call.await_args.args[3] == {
         "id": _SID,
-        "table_names": ["Trades"],
         "namespace": "Market",
-        "filters": ["x"],
-        "max_tables": 10,
+        "table_name": "Trades",
     }
 
 
-def test_schema_minimal(tmp_path: Path) -> None:
-    result, call = _run(
-        ["catalog", "schema", _SID], {"success": True, "schemas": []}, tmp_path
+def test_schema_full_flag_is_removed(tmp_path: Path) -> None:
+    """Sparse column_type is always included; no full mode."""
+    result, _ = _run(
+        ["catalog", "schema", _SID, "Market", "Trades", "--full"], _SCHEMA, tmp_path
     )
-    assert result.exit_code == 0
-    assert call.await_args.args[3] == {"id": _SID}
+    assert result.exit_code == 2
+    assert "no such option" in result.output.lower()
 
 
 def test_sample_defaults(tmp_path: Path) -> None:
@@ -183,6 +193,15 @@ def test_sample_options(tmp_path: Path) -> None:
     }
 
 
+def test_tables_truncated_warns_on_stderr(tmp_path: Path) -> None:
+    """`is_complete: false` warns on stderr; stdout stays the bare array."""
+    payload = dict(_TABLES, is_complete=False)
+    result, _ = _run(["-o", "json", "catalog", "tables", _SID], payload, tmp_path)
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == _TABLES["tables"]
+    assert "truncated" in result.stderr
+
+
 def test_tables_failure_exits_3(tmp_path: Path) -> None:
     result, _ = _run(
         ["catalog", "tables", _SID],
@@ -194,8 +213,6 @@ def test_tables_failure_exits_3(tmp_path: Path) -> None:
 
 def test_format_flag_is_removed(tmp_path: Path) -> None:
     """The tool's data encoding is not a user knob; -o owns presentation."""
-    result, _ = _run(
-        ["catalog", "tables", _SID, "--format", "csv"], {"success": True}, tmp_path
-    )
+    result, _ = _run(["catalog", "tables", _SID, "--format", "csv"], _TABLES, tmp_path)
     assert result.exit_code == 2
     assert "no such option" in result.output.lower()

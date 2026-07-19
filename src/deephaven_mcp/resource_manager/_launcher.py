@@ -79,6 +79,7 @@ import aiohttp
 
 from deephaven_mcp._exceptions import SessionLaunchError
 from deephaven_mcp._redaction import REDACTED
+from deephaven_mcp.sessions import VALID_LAUNCH_METHODS, LaunchMethod
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -229,7 +230,7 @@ class LaunchedSession(ABC):
     method factory and stop() for cleanup.
 
     Attributes:
-        launch_method (Literal["docker", "python"]): How the session was launched.
+        launch_method (LaunchMethod): How the session was launched.
         host (str): The host the session is listening on (typically "localhost").
         port (int): The port the session is listening on.
         auth_type (Literal["anonymous", "psk"]): Authentication type.
@@ -238,7 +239,7 @@ class LaunchedSession(ABC):
 
     def __init__(
         self,
-        launch_method: Literal["docker", "python"],
+        launch_method: LaunchMethod,
         host: str,
         port: int,
         auth_type: Literal["anonymous", "psk"],
@@ -251,7 +252,7 @@ class LaunchedSession(ABC):
         are only checked statically by type checkers.
 
         Args:
-            launch_method (Literal["docker", "python"]): How the session was launched.
+            launch_method (LaunchMethod): How the session was launched.
                 Must be exactly "docker" or "python" (runtime validated).
             host (str): The host the session is listening on (typically "localhost").
             port (int): The port the session is listening on.
@@ -268,9 +269,10 @@ class LaunchedSession(ABC):
                 - auth_type="anonymous" but auth_token is provided
         """
         # Validate launch_method (runtime check, Literal is only static)
-        if launch_method not in ("docker", "python"):
+        if launch_method not in VALID_LAUNCH_METHODS:
+            valid_options = ", ".join(f"'{m}'" for m in sorted(VALID_LAUNCH_METHODS))
             raise ValueError(
-                f"launch_method must be 'docker' or 'python', got '{launch_method}'"
+                f"launch_method must be one of {valid_options}, got '{launch_method}'"
             )
 
         # Validate auth_type (runtime check, Literal is only static)
@@ -1143,7 +1145,7 @@ class PythonLaunchedSession(LaunchedSession):
 
 
 async def launch_session(
-    launch_method: Literal["docker", "python"],
+    launch_method: LaunchMethod,
     session_name: str,
     port: int,
     auth_token: str | None,
@@ -1164,7 +1166,7 @@ async def launch_session(
     launch() method based on the launch_method parameter.
 
     Args:
-        launch_method (Literal["docker", "python"]): The launch method.
+        launch_method (LaunchMethod): The launch method.
         session_name (str): Name for the session.
         port (int): Port to bind the session to.
         auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.

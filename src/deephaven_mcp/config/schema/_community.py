@@ -31,6 +31,8 @@ __all__ = [
     "CommunityTimeouts",
     "DockerImages",
     "DockerLaunchOptions",
+    "LaunchMethod",
+    "ProgrammingLanguage",
     "PythonLaunchOptions",
     "load_community",
 ]
@@ -50,7 +52,11 @@ from deephaven_mcp.auth.credentials import CredentialsUnion
 from deephaven_mcp.client._timeouts import CommunityClientTimeouts
 from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
-from deephaven_mcp.sessions import CommunitySessionConfig
+from deephaven_mcp.sessions import (
+    CommunitySessionConfig,
+    LaunchMethod,
+    ProgrammingLanguage,
+)
 
 from ._response_limits import ResponseLimits
 
@@ -174,7 +180,7 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     bearer material for those sessions.
     """
 
-    launch_method: Literal["docker", "python"] = "docker"
+    launch_method: LaunchMethod = "docker"
     """How dynamic community sessions are launched. ``"docker"`` starts
     a fresh Deephaven server container per session (configured by the
     ``docker`` block); ``"python"`` starts the server in-process via
@@ -197,9 +203,10 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     credentials. Unwrapped at validation time from the wire-format
     ``auth.credentials`` sub-block."""
 
-    programming_language: Literal["Python", "Groovy"] = "Python"
-    """Default scripting language for dynamic community sessions.
-    Selects between Python and Groovy worker images / venv layouts."""
+    programming_language: ProgrammingLanguage = "Python"
+    """Default scripting language for dynamic community sessions:
+    exactly ``"Python"`` or ``"Groovy"``. Selects between Python and
+    Groovy worker images / venv layouts."""
 
     heap_size_gb: Annotated[float, Field(gt=0)] = 4.0
     """JVM heap size in gigabytes for the worker process. Increase

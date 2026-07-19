@@ -61,7 +61,7 @@ _OUTPUT_LIST = OutputSpec(
         arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_LIST,
         examples=("$ dh-mcp table list community:community:dev",),
-        see_also=("dh-mcp table schema ID", "dh-mcp table data ID TABLE"),
+        see_also=("dh-mcp table schema ID TABLE", "dh-mcp table data ID TABLE"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -87,47 +87,53 @@ async def table_list(runtime: Runtime, id: str) -> None:
 
 _OUTPUT_SCHEMA = OutputSpec(
     "object",
-    (OutputField("schemas", "array", "Per-table column definitions."),),
-    note="Schemas for the requested tables (all tables when none are named).",
+    (
+        OutputField("id", "string", "The session id, echoed back."),
+        OutputField("table_name", "string", "The table name."),
+        OutputField(
+            "schema",
+            "array",
+            "One entry per column: name and type (Deephaven type name), plus "
+            "sparse column_type ('Partitioning' or 'Grouping'; omitted for "
+            "Normal columns).",
+        ),
+        OutputField("column_count", "integer", "Number of columns."),
+    ),
+    note="Schema for the one named table.",
 )
 
 
 @table.command(
     "schema",
     output_spec=_OUTPUT_SCHEMA,
-    wraps_tool="session_tables_schema",
+    wraps_tool="session_table_schema",
     help=build_help(
-        summary="Show column definitions for tables in a session.",
+        summary="Show column definitions for one table in a session.",
         description=(
-            "Returns the schema (column names, types, properties) for the named "
-            "tables, or for every table when none are named."
+            "Returns the schema (column names and types) for a single table. "
+            "Discover table names with 'table list' first."
         ),
         arguments=(
             HelpEntry("ID", "Fully qualified id. Run 'session list'."),
-            HelpEntry("TABLE_NAMES", "Zero or more table names (default: all tables)."),
+            HelpEntry("TABLE_NAME", "The table whose schema to show."),
         ),
         output=_OUTPUT_SCHEMA,
-        examples=(
-            "$ dh-mcp table schema community:community:dev",
-            "$ dh-mcp table schema community:community:dev trades quotes",
-        ),
+        examples=("$ dh-mcp table schema community:community:dev trades",),
         see_also=("dh-mcp table list ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
 )
 @click.argument("id")
-@click.argument("table_names", nargs=-1)
+@click.argument("table_name")
 @click.pass_obj
 @run_async
-async def table_schema(runtime: Runtime, id: str, table_names: tuple[str, ...]) -> None:
-    """Show column definitions for tables in a session."""
-    arguments: dict[str, Any] = {"id": id}
-    if table_names:
-        arguments["table_names"] = list(table_names)
+async def table_schema(runtime: Runtime, id: str, table_name: str) -> None:
+    """Show column definitions for one table in a session."""
+    arguments: dict[str, Any] = {"id": id, "table_name": table_name}
     await call_and_echo(
         runtime,
-        "session_tables_schema",
+        "session_table_schema",
         retry_command="dh-mcp table schema",
         arguments=arguments,
     )
@@ -140,7 +146,8 @@ async def table_schema(runtime: Runtime, id: str, table_names: tuple[str, ...]) 
 _OUTPUT_DATA = OutputSpec(
     "object",
     (),
-    note="Tabular row data for the table (columns + rows envelope from the tool).",
+    note="Tabular row data for the table (columns + rows envelope from the "
+    "tool, including the session id echoed back).",
 )
 
 
@@ -163,7 +170,7 @@ _OUTPUT_DATA = OutputSpec(
             "$ dh-mcp table data community:community:dev trades",
             "$ dh-mcp table data community:community:dev trades --max-rows 50 --tail",
         ),
-        see_also=("dh-mcp table list ID", "dh-mcp table schema ID"),
+        see_also=("dh-mcp table list ID", "dh-mcp table schema ID TABLE"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),

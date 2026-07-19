@@ -90,6 +90,10 @@ def _normalize_programming_language(language: str) -> str:
     Accepts case-insensitive input and returns the canonical capitalized form expected by
     the Deephaven Enterprise controller API.
 
+    The MCP tool layer advertises exact-case ``ProgrammingLanguage`` values
+    in its schemas; this client-layer tolerance is intentionally retained as
+    a safety net for untyped callers, not a second public contract.
+
     Args:
         language (str): Programming language string, case-insensitive
             (e.g., "python", "Python", "PYTHON", "groovy", "Groovy").

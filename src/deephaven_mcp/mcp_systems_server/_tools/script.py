@@ -64,11 +64,12 @@ async def session_script_run(
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): True if the script executed successfully, False otherwise.
+            - 'id' (str, optional): The session id echoed back if successful.
             - 'error' (str, optional): Error message if execution failed. Omitted on success.
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
     Example Successful Response:
-        {'success': True}
+        {'success': True, 'id': 'community:community:local'}
 
     Example Error Responses:
         {'success': False, 'error': 'Must provide either script or script_path.', 'isError': True}
@@ -78,14 +79,14 @@ async def session_script_run(
         # Execute inline Python script
         Tool: session_script_run
         Parameters: {
-            "id": "community:localhost:10000",
+            "id": "community:community:local",
             "script": "from deephaven import new_table\nfrom deephaven.column import int_col\nmy_table = new_table([int_col('ID', [1, 2, 3])])"
         }
 
         # Execute script from file
         Tool: session_script_run
         Parameters: {
-            "id": "community:localhost:10000",
+            "id": "community:community:local",
             "script_path": "/path/to/analysis_script.py"
         }
     """
@@ -137,6 +138,7 @@ async def session_script_run(
             f"[mcp_systems_server:session_script_run] Script executed successfully on session: '{id}'"
         )
         result["success"] = True
+        result["id"] = id
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:session_script_run] Failed for session: '{id}', error: {e!r}",
@@ -189,6 +191,7 @@ async def session_pip_list(context: Context, id: str) -> dict:
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): True if the packages were retrieved successfully, False otherwise.
+            - 'id' (str, optional): The session id echoed back if successful.
             - 'packages' (list[dict], optional): List of pip package dicts if successful. Each contains:
                 - 'package' (str): Package name
                 - 'version' (str): Package version
@@ -196,7 +199,7 @@ async def session_pip_list(context: Context, id: str) -> dict:
             - 'isError' (bool, optional): Present and True if this is an error response (i.e., success is False).
 
     Example Successful Response:
-        {'success': True, 'packages': [{"package": "numpy", "version": "1.25.0"}, ...]}
+        {'success': True, 'id': 'community:community:local', 'packages': [{"package": "numpy", "version": "1.25.0"}, ...]}
 
     Example Error Response:
         {'success': False, 'error': "Failed to list pip packages for session '<id>': <ExceptionType>: <message>", 'isError': True}
@@ -242,6 +245,7 @@ async def session_pip_list(context: Context, id: str) -> dict:
                 packages.append({"package": pkg["Package"], "version": pkg["Version"]})
 
         result["success"] = True
+        result["id"] = id
         result["packages"] = packages
     except Exception as e:
         _LOGGER.error(

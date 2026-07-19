@@ -40,25 +40,38 @@ def test_list_emits_table_names(tmp_path: Path) -> None:
     assert call.await_args.args[2] == "session_tables_list"
 
 
-def test_schema_all_tables(tmp_path: Path) -> None:
+def test_schema_single_table(tmp_path: Path) -> None:
     result, call = _run(
-        ["table", "schema", _SID], {"success": True, "schemas": []}, tmp_path
-    )
-    assert result.exit_code == 0
-    assert call.await_args.args[3] == {"id": _SID}
-
-
-def test_schema_named_tables(tmp_path: Path) -> None:
-    result, call = _run(
-        ["table", "schema", _SID, "trades", "quotes"],
-        {"success": True, "schemas": []},
+        ["table", "schema", _SID, "trades"],
+        {
+            "success": True,
+            "id": _SID,
+            "table_name": "trades",
+            "schema": [],
+            "column_count": 0,
+        },
         tmp_path,
     )
     assert result.exit_code == 0
-    assert call.await_args.args[3] == {
-        "id": _SID,
-        "table_names": ["trades", "quotes"],
-    }
+    assert call.await_args.args[2] == "session_table_schema"
+    assert call.await_args.args[3] == {"id": _SID, "table_name": "trades"}
+
+
+def test_schema_full_flag_is_removed(tmp_path: Path) -> None:
+    """Sparse column_type is always included; no full mode."""
+    result, _ = _run(
+        ["table", "schema", _SID, "trades", "--full"],
+        {
+            "success": True,
+            "id": _SID,
+            "table_name": "trades",
+            "schema": [],
+            "column_count": 0,
+        },
+        tmp_path,
+    )
+    assert result.exit_code == 2
+    assert "no such option" in result.output.lower()
 
 
 def test_data_defaults(tmp_path: Path) -> None:
