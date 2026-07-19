@@ -10,7 +10,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 import logging
 from datetime import datetime
-from typing import Any, get_args
+from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -18,7 +18,6 @@ from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import (
     InvalidSessionNameError,
     RegistryItemNotFoundError,
-    SessionCreationError,
 )
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import (
@@ -32,6 +31,7 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     format_partial_result,
     get_enterprise_registry,
     get_multi_config,
+    validate_programming_language,
 )
 from deephaven_mcp.resource_manager import (
     EnterpriseSessionManager,
@@ -51,9 +51,6 @@ from deephaven_mcp.sessions import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-_VALID_PROGRAMMING_LANGUAGES: frozenset[str] = frozenset(get_args(ProgrammingLanguage))
-"""Runtime membership set for ``ProgrammingLanguage``, derived via ``typing.get_args``."""
 
 # Probe-supplied detail strings that carry no actionable information.
 # When the probe falls back to one of these and the registry recorded an
@@ -788,16 +785,8 @@ def _resolve_session_parameters(
     """
     # Runtime validation retained for untyped callers; typed callers
     # are constrained by ProgrammingLanguage.
-    if (
-        programming_language is not None
-        and programming_language not in _VALID_PROGRAMMING_LANGUAGES
-    ):
-        valid_options = ", ".join(
-            f"'{v}'" for v in sorted(_VALID_PROGRAMMING_LANGUAGES)
-        )
-        error_msg = f"Invalid programming_language '{programming_language}'. Valid options: {valid_options}."
-        _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] {error_msg}")
-        raise SessionCreationError(error_msg)
+    if programming_language is not None:
+        validate_programming_language(programming_language, "session_enterprise_create")
 
     return {
         "heap_size_gb": heap_size_gb or defaults.heap_size_gb,

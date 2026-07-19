@@ -73,18 +73,15 @@ import os
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal, get_args, override
+from typing import Literal, override
 
 import aiohttp
 
 from deephaven_mcp._exceptions import SessionLaunchError
 from deephaven_mcp._redaction import REDACTED
-from deephaven_mcp.sessions import LaunchMethod
+from deephaven_mcp.sessions import VALID_LAUNCH_METHODS, LaunchMethod
 
 _LOGGER = logging.getLogger(__name__)
-
-_VALID_LAUNCH_METHODS: frozenset[str] = frozenset(get_args(LaunchMethod))
-"""Runtime membership set for ``LaunchMethod``, derived via ``typing.get_args``."""
 
 
 def _redact_auth_token_from_command(cmd: list[str], auth_token: str | None) -> str:
@@ -272,8 +269,8 @@ class LaunchedSession(ABC):
                 - auth_type="anonymous" but auth_token is provided
         """
         # Validate launch_method (runtime check, Literal is only static)
-        if launch_method not in _VALID_LAUNCH_METHODS:
-            valid_options = ", ".join(f"'{m}'" for m in sorted(_VALID_LAUNCH_METHODS))
+        if launch_method not in VALID_LAUNCH_METHODS:
+            valid_options = ", ".join(f"'{m}'" for m in sorted(VALID_LAUNCH_METHODS))
             raise ValueError(
                 f"launch_method must be one of {valid_options}, got '{launch_method}'"
             )

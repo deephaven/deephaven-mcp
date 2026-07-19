@@ -204,8 +204,9 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     ``auth.credentials`` sub-block."""
 
     programming_language: ProgrammingLanguage = "Python"
-    """Default scripting language for dynamic community sessions.
-    Selects between Python and Groovy worker images / venv layouts."""
+    """Default scripting language for dynamic community sessions:
+    exactly ``"Python"`` or ``"Groovy"``. Selects between Python and
+    Groovy worker images / venv layouts."""
 
     heap_size_gb: Annotated[float, Field(gt=0)] = 4.0
     """JVM heap size in gigabytes for the worker process. Increase

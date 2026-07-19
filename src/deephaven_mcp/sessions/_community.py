@@ -99,12 +99,11 @@ class CommunitySessionConfig(RedactableSchema):
     to the upstream client's default (typically ``10000``)."""
 
     programming_language: ProgrammingLanguage | None = None
-    """Optional scripting language for the worker session: ``"Python"``
-    or ``"Groovy"`` (case-insensitive on input; normalized to title
-    case). ``None`` falls back to the upstream client's default. The
-    capitalized form is the canonical wire format and matches the
-    enterprise side; consumers that talk to ``pydeephaven`` lowercase
-    at the call boundary."""
+    """Optional scripting language for the worker session: exactly
+    ``"Python"`` or ``"Groovy"``. ``None`` falls back to the upstream
+    client's default. The title-case form is the canonical wire format
+    and matches the enterprise side; consumers that talk to
+    ``pydeephaven`` lowercase at the call boundary."""
 
     never_timeout: bool | None = None
     """Optional flag disabling the worker-side session idle timeout.
@@ -134,16 +133,6 @@ class CommunitySessionConfig(RedactableSchema):
         config-load time before they reach the registry.
         """
         validate_resource_name(value, field="name")
-        return value
-
-    @field_validator("programming_language", mode="before")
-    @classmethod
-    def _normalize_programming_language(cls, value: Any) -> Any:
-        """Accept ``"python"``/``"PYTHON"``/etc. and normalize to ``"Python"``."""
-        if isinstance(value, str):
-            normalized = value.strip().title()
-            if normalized in ("Python", "Groovy"):
-                return normalized
         return value
 
     @model_validator(mode="before")

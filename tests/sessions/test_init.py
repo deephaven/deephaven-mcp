@@ -11,6 +11,8 @@ import deephaven_mcp.sessions as sessions_pkg
 from deephaven_mcp.sessions import _community, _enterprise
 
 _EXPECTED_PUBLIC_NAMES = {
+    "VALID_LAUNCH_METHODS",
+    "VALID_PROGRAMMING_LANGUAGES",
     "CommunitySessionConfig",
     "EnterpriseSessionCreation",
     "EnterpriseSessionCreationDefaults",

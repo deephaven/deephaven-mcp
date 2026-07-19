@@ -10,7 +10,7 @@ These tools work with Deephaven Community (Core) sessions only.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, assert_never, get_args
+from typing import Any, assert_never
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -42,6 +42,7 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     error_response,
     get_community_registry,
     get_community_settings,
+    validate_programming_language,
 )
 from deephaven_mcp.resource_manager import (
     CommunitySessionManager,
@@ -60,15 +61,12 @@ from deephaven_mcp.resource_manager import (
     generate_auth_token,
     launch_session,
 )
-from deephaven_mcp.sessions import CommunitySessionConfig
+from deephaven_mcp.sessions import (
+    VALID_LAUNCH_METHODS,
+    CommunitySessionConfig,
+)
 
 _LOGGER = logging.getLogger(__name__)
-
-_VALID_LAUNCH_METHODS: frozenset[str] = frozenset(get_args(LaunchMethod))
-"""Runtime membership set for ``LaunchMethod``, derived via ``typing.get_args``."""
-
-_VALID_PROGRAMMING_LANGUAGES: frozenset[str] = frozenset(get_args(ProgrammingLanguage))
-"""Runtime membership set for ``ProgrammingLanguage``, derived via ``typing.get_args``."""
 
 _PSK_AUTH_HANDLER = "io.deephaven.authentication.psk.PskAuthenticationHandler"
 """Fully-qualified class name (FQCN) of the Deephaven worker-side Java
@@ -272,13 +270,7 @@ def _resolve_docker_image(
     if programming_language:
         # Runtime validation retained for untyped callers; typed callers
         # are constrained by ProgrammingLanguage.
-        if programming_language not in _VALID_PROGRAMMING_LANGUAGES:
-            valid_options = ", ".join(
-                f"'{v}'" for v in sorted(_VALID_PROGRAMMING_LANGUAGES)
-            )
-            error_msg = f"Invalid programming_language '{programming_language}'. Valid options: {valid_options}."
-            _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
-            raise SessionCreationError(error_msg)
+        validate_programming_language(programming_language, "session_community_create")
         return _docker_image_for_language(programming_language, defaults.docker.images)
 
     return _docker_image_for_language(
@@ -389,8 +381,8 @@ def _resolve_community_session_parameters(
     # Resolve and validate launch method (runtime validation retained for
     # untyped callers; typed callers are constrained by LaunchMethod)
     resolved_launch_method = launch_method or defaults.launch_method
-    if resolved_launch_method not in _VALID_LAUNCH_METHODS:
-        valid_options = ", ".join(f"'{m}'" for m in sorted(_VALID_LAUNCH_METHODS))
+    if resolved_launch_method not in VALID_LAUNCH_METHODS:
+        valid_options = ", ".join(f"'{m}'" for m in sorted(VALID_LAUNCH_METHODS))
         error_msg = f"Invalid launch_method '{resolved_launch_method}'. Valid options: {valid_options}."
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {error_msg}")
         raise SessionCreationError(error_msg)
@@ -1041,8 +1033,8 @@ async def session_community_create(
         - Docker resource with python: "'docker_cpu_limit' parameter only applies to docker launch method, not 'python'"
         - Docker resource with python: "'docker_volumes' parameter only applies to docker launch method, not 'python'"
         - Invalid parameters: "Cannot specify both 'programming_language' and 'docker_image' - use one or the other"
-        - Unsupported language: "Unsupported programming_language: '{language}'. Must be 'Python' or 'Groovy'"
-        - Invalid config language: "Invalid programming_language in config: '{language}'. Must be 'Python' or 'Groovy'"
+        - Invalid language: "Invalid programming_language '{language}'. Valid options: 'Groovy', 'Python'."
+        - Invalid launch method: "Invalid launch_method '{method}'. Valid options: 'docker', 'python'."
         - Display-name conflict: "A community session named '{name}' already exists"
         - Startup timeout: "Session failed to start within {timeout} seconds"
 

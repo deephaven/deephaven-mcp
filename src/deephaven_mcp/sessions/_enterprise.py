@@ -130,9 +130,10 @@ class EnterpriseSessionCreationDefaults(StrictSchema):
     worker's user code). ``None`` sends no extra arguments."""
 
     programming_language: ProgrammingLanguage = "Python"
-    """Scripting language the worker exposes to clients. Affects the
-    set of available APIs but not the JVM/engine choice (which is
-    controlled by ``engine``)."""
+    """Scripting language the worker exposes to clients: exactly
+    ``"Python"`` or ``"Groovy"``. Affects the set of available APIs
+    but not the JVM/engine choice (which is controlled by
+    ``engine``)."""
 
 
 class EnterpriseSessionCreation(StrictSchema):

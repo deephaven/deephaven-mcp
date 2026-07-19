@@ -298,7 +298,7 @@ One file per static community session. Fields:
 | -------------------- | ------- | -------- | --------------------------------------------------------------------------- |
 | `host`               | str     | no       | Hostname; defaults to whatever the SDK derives.                             |
 | `port`               | int     | no       | Port number.                                                                |
-| `programming_language` | enum  | no       | `"Python"` or `"Groovy"` (case-insensitive on input; normalized to title case). |
+| `programming_language` | enum  | no       | Exactly `"Python"` or `"Groovy"`.                                            |
 | `never_timeout`      | bool    | no       | Disables client-side idle timeout.                                          |
 | `tls`                | object  | no       | Presence enables TLS. See [TLS](#tls).                                      |
 | `auth.credentials`   | object  | **yes**  | One of the credential kinds below.                                          |

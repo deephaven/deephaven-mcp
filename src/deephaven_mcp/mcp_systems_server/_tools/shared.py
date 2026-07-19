@@ -13,6 +13,7 @@ Provides common helpers used across the MCP tool modules:
   :func:`get_enterprise_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
   :func:`build_table_data_response`, :func:`format_schema_result`.
+- Parameter guards: :func:`validate_programming_language`.
 - Partial-result formatting: :func:`format_partial_result`.
 - JSON redaction: :func:`redact_json_sensitive_fields`.
 
@@ -38,6 +39,7 @@ from deephaven_mcp._exceptions import (
     EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
+    SessionCreationError,
     UnsupportedOperationError,
 )
 from deephaven_mcp._redaction import REDACTED
@@ -59,6 +61,7 @@ from deephaven_mcp.resource_manager import (
     SessionId,
     SystemType,
 )
+from deephaven_mcp.sessions import VALID_PROGRAMMING_LANGUAGES
 
 __all__ = [
     "ParsedPqId",
@@ -82,6 +85,7 @@ __all__ = [
     "parse_pq_id",
     "redact_json_sensitive_fields",
     "resolve_pq_ids_to_single_system",
+    "validate_programming_language",
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -102,6 +106,32 @@ def error_response(msg: str) -> dict[str, object]:
         dict[str, object]: ``{"success": False, "error": msg, "isError": True}``.
     """
     return {"success": False, "error": msg, "isError": True}
+
+
+def validate_programming_language(programming_language: str, tool_name: str) -> None:
+    """Reject a ``programming_language`` value outside the closed vocabulary.
+
+    Runtime guard for untyped callers of the session-creation tools;
+    typed callers are constrained by
+    :data:`deephaven_mcp.sessions.ProgrammingLanguage`, and MCP traffic
+    is validated against the advertised schema before it reaches the
+    tool body.
+
+    Args:
+        programming_language (str): Candidate value to check against
+            the exact-case vocabulary ("Python" or "Groovy").
+        tool_name (str): Tool name used in the log prefix
+            (e.g. ``"session_community_create"``).
+
+    Raises:
+        SessionCreationError: If ``programming_language`` is not
+            "Python" or "Groovy".
+    """
+    if programming_language not in VALID_PROGRAMMING_LANGUAGES:
+        valid_options = ", ".join(f"'{v}'" for v in sorted(VALID_PROGRAMMING_LANGUAGES))
+        error_msg = f"Invalid programming_language '{programming_language}'. Valid options: {valid_options}."
+        _LOGGER.error(f"[mcp_systems_server:{tool_name}] {error_msg}")
+        raise SessionCreationError(error_msg)
 
 
 def format_partial_result(

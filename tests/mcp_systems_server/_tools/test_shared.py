@@ -24,6 +24,7 @@ from deephaven_mcp._exceptions import (
     EnterpriseNotConfiguredError,
     InternalError,
     InvalidSessionNameError,
+    SessionCreationError,
     UnsupportedOperationError,
 )
 from deephaven_mcp.client import BaseSession, CorePlusSession
@@ -66,6 +67,23 @@ def test_error_response_shape():
         "error": "boom",
         "isError": True,
     }
+
+
+@pytest.mark.parametrize("valid", ["Python", "Groovy"])
+def test_validate_programming_language_accepts_members(valid):
+    """Exact-case vocabulary members pass silently."""
+    shared.validate_programming_language(valid, "session_community_create")
+
+
+@pytest.mark.parametrize("invalid", ["python", "GROOVY", "rust", ""])
+def test_validate_programming_language_rejects_non_members(invalid):
+    """Anything outside the exact-case vocabulary raises with the options listed."""
+    with pytest.raises(
+        SessionCreationError,
+        match=f"Invalid programming_language '{invalid}'. "
+        "Valid options: 'Groovy', 'Python'.",
+    ):
+        shared.validate_programming_language(invalid, "session_enterprise_create")
 
 
 def test_format_partial_result_completed_no_errors_is_none():

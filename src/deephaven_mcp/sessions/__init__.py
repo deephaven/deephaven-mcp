@@ -25,6 +25,8 @@ session-manager classes that share the same domain prose
 """
 
 __all__ = [
+    "VALID_LAUNCH_METHODS",
+    "VALID_PROGRAMMING_LANGUAGES",
     "CommunitySessionConfig",
     "EnterpriseSessionCreation",
     "EnterpriseSessionCreationDefaults",
@@ -39,4 +41,9 @@ from ._enterprise import (
     EnterpriseSessionCreationDefaults,
     EnterpriseSystemConfig,
 )
-from ._types import LaunchMethod, ProgrammingLanguage
+from ._types import (
+    VALID_LAUNCH_METHODS,
+    VALID_PROGRAMMING_LANGUAGES,
+    LaunchMethod,
+    ProgrammingLanguage,
+)
