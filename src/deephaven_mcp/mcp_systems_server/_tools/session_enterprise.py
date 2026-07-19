@@ -10,12 +10,16 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp._exception_utils import exception_summary
-from deephaven_mcp._exceptions import InvalidSessionNameError, RegistryItemNotFoundError
+from deephaven_mcp._exceptions import (
+    InvalidSessionNameError,
+    RegistryItemNotFoundError,
+    SessionCreationError,
+)
 from deephaven_mcp.auth.credentials import PasswordCredentials
 from deephaven_mcp.client import (
     CorePlusQueryConfig,
@@ -47,6 +51,9 @@ from deephaven_mcp.sessions import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_VALID_PROGRAMMING_LANGUAGES: frozenset[str] = frozenset(get_args(ProgrammingLanguage))
+"""Runtime membership set for ``ProgrammingLanguage``, derived via ``typing.get_args``."""
 
 # Probe-supplied detail strings that carry no actionable information.
 # When the probe falls back to one of these and the registry recorded an
@@ -774,7 +781,24 @@ def _resolve_session_parameters(
 
     Returns:
         dict: Resolved configuration with all parameters using priority order.
+
+    Raises:
+        SessionCreationError: If ``programming_language`` is not
+            "Python" or "Groovy".
     """
+    # Runtime validation retained for untyped callers; typed callers
+    # are constrained by ProgrammingLanguage.
+    if (
+        programming_language is not None
+        and programming_language not in _VALID_PROGRAMMING_LANGUAGES
+    ):
+        valid_options = ", ".join(
+            f"'{v}'" for v in sorted(_VALID_PROGRAMMING_LANGUAGES)
+        )
+        error_msg = f"Invalid programming_language '{programming_language}'. Valid options: {valid_options}."
+        _LOGGER.error(f"[mcp_systems_server:session_enterprise_create] {error_msg}")
+        raise SessionCreationError(error_msg)
+
     return {
         "heap_size_gb": heap_size_gb or defaults.heap_size_gb,
         "auto_delete_timeout": (
