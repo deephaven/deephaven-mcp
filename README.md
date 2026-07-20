@@ -443,7 +443,7 @@ directory, and dispatches MCP tool calls over loopback HTTP with a
 random PSK. Beyond the raw `dh-mcp tool call` escape hatch, it offers
 friendly noun-verb commands — `session`, `system`, `table`, `script`,
 `catalog`, and `pq` — with typed flags, shaped output, and
-`-o human|json|yaml` (e.g. `dh-mcp session list`,
+`-o human|json|json-pretty|yaml` (e.g. `dh-mcp session list`,
 `dh-mcp session open <id>`). Useful for shell scripting, tool
 exploration, and local debugging without managing a server lifecycle
 yourself. See [`docs/CLI.md`](docs/CLI.md) for the full reference.

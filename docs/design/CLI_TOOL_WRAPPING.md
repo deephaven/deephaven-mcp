@@ -179,7 +179,7 @@ async def system_list(runtime: Runtime) -> None:
 
 ## Output shaping and diagnostics
 
-Presentation is owned by a single knob, `-o human|json|yaml`
+Presentation is owned by a single knob, `-o human|json|json-pretty|yaml`
 (`format_output`); a wrapper never branches on output mode. It chooses
 only *what value* to render:
 

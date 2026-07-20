@@ -29,7 +29,7 @@ Wire format (JSON5; ``//`` comments are accepted)::
 
     {
         "output": {
-            "format": "human"               // "human" | "json" | "yaml"
+            "format": "human"               // "human" | "json" | "json-pretty" | "yaml"
         },
         "daemon": {
             "auto_start": true,

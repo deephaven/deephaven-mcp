@@ -250,11 +250,12 @@ class HelpfulCommand(click.Command):
         Args:
             help_spec (HelpSpec | None): Structured help content. When set,
                 the command's ``help`` text is rendered from it (overriding
-                any ``help`` keyword) and ``output_spec`` defaults to its
+                any ``help`` keyword) and ``output_spec`` is always its
                 ``output`` field.
             output_spec (OutputSpec | None): Structured description of the
-                command's output, surfaced by ``dh-mcp agents``.
-                Defaults to ``help_spec.output`` when a spec is given.
+                command's output, surfaced by ``dh-mcp agents``. Only for
+                commands without a ``help_spec``; a command with a spec
+                declares its output as ``help_spec.output``.
             wraps_tool (str | None): Name of the single MCP tool the command
                 wraps, or ``None`` when it wraps none or many.
             wraps_tools (tuple[str, ...]): Names of the MCP tools the command
@@ -272,11 +273,21 @@ class HelpfulCommand(click.Command):
                 :class:`click.Command`.
             **kwargs (Any): Keyword arguments forwarded to
                 :class:`click.Command`.
+
+        Raises:
+            ValueError: When both ``help_spec`` and ``output_spec`` are
+                given. The spec is the single source for both surfaces,
+                so a separate ``output_spec`` could render one output in
+                ``--help`` and another in ``--agents``.
         """
         if help_spec is not None:
+            if output_spec is not None:
+                raise ValueError(
+                    "output_spec must not be passed alongside help_spec; "
+                    "declare the command's output as help_spec.output"
+                )
             kwargs["help"] = _render_help_spec(help_spec)
-            if output_spec is None:
-                output_spec = help_spec.output
+            output_spec = help_spec.output
         # ``*args`` / ``**kwargs`` is the standard click-subclass
         # pass-through to click.Command's broad constructor signature.
         super().__init__(*args, **kwargs)

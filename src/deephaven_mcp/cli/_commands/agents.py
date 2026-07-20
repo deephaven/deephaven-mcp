@@ -74,19 +74,48 @@ _OUTPUT_TREE = OutputSpec(
         OutputField("version", "string", "Installed deephaven-mcp package version."),
         OutputField("prog", "string", "Program name (dh-mcp)."),
         OutputField("summary", "string", "Root command one-line summary."),
-        OutputField("hint", "string", "How to drill down to full command nodes."),
+        OutputField(
+            "hint", "string", "How to drill down to full command nodes (default only)."
+        ),
         OutputField(
             "commands",
             "object",
-            "Nested {name: {summary, commands?}} map down to the leaves.",
+            "Nested {name: {summary, commands?}} map down to the leaves; "
+            "full command nodes instead with --full.",
+        ),
+        OutputField("description", "string", "Root command description (--full only)."),
+        OutputField("examples", "array", "Root command examples (--full only)."),
+        OutputField(
+            "global_options",
+            "array",
+            "Root-level option descriptions (--full only).",
+        ),
+        OutputField(
+            "universal_options",
+            "array",
+            "Options available on every command: --help, --agents (--full only).",
+        ),
+        OutputField(
+            "default_environment",
+            "array",
+            "Project-wide environment variables ({name, help}) (--full only).",
+        ),
+        OutputField(
+            "default_exit_codes",
+            "array",
+            "Project-wide exit codes ({code, help}) (--full only).",
+        ),
+        OutputField(
+            "error_codes",
+            "array",
+            "Stable error_code registry ({code, help}) (--full only).",
         ),
     ),
     note=(
-        "Sorted for stable diffs. With --full, instead the complete "
-        "manifest: summary/description/examples, global_options, "
-        "universal_options, full command nodes under 'commands', "
-        "default_environment, default_exit_codes, and the error_codes "
-        "registry. Absent keys mean false/empty/default throughout."
+        "Superset of both variants: fields marked (default only) appear "
+        "only in the summary tree, fields marked (--full only) only in "
+        "the complete manifest. Sorted for stable diffs; absent keys "
+        "mean false/empty/default throughout."
     ),
 )
 

@@ -650,9 +650,17 @@ carries once (`error_codes` meanings, `default_exit_codes`,
 `default_environment`) is hoisted, so a leaf node there equals the
 standalone node minus those hoisted entries.
 
-The whole-tree fields (`version`, `error_codes`, `universal_options`,
-...) appear only in `tree` / `tree --full` (and `dh-mcp --agents`); a
-single command's node never carries them.
+The two whole-tree surfaces carry different top-level fields, and a
+single command's node never carries any of them:
+
+- **Summary tree** (`agents tree`, `dh-mcp --agents`): `version`,
+  `prog`, `summary`, `hint`, and a nested `{name: {summary,
+  commands?}}` map under `commands`.
+- **Full manifest** (`agents tree --full`): `version`, `prog`,
+  `summary` (plus the root's `description` / `examples`),
+  `global_options`, `universal_options`, full command nodes under
+  `commands`, `default_environment`, `default_exit_codes`, and the
+  `error_codes` registry.
 
 > **Migration:** this surface was previously named `dh-mcp introspect`
 > / `--introspect`, and `tree` previously emitted the full manifest

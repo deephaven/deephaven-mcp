@@ -82,7 +82,7 @@ def test_accepts_full_block() -> None:
     assert cfg.request.timeouts.default_seconds == 15
 
 
-@pytest.mark.parametrize("value", ["human", "json", "yaml"])
+@pytest.mark.parametrize("value", ["human", "json", "json-pretty", "yaml"])
 def test_accepts_all_output_formats(value: str) -> None:
     cfg = CliConfig.model_validate({"output": {"format": value}})
     assert cfg.output.format == value

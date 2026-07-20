@@ -361,6 +361,23 @@ def test_helpful_command_stores_output_spec_and_wrapper_binding() -> None:
     assert cmd.client_only_params == frozenset({"print_only"})
 
 
+def test_helpful_command_derives_output_spec_from_help_spec() -> None:
+    """A command with a help_spec always exposes the spec's output."""
+    output = OutputSpec("object", (OutputField("f", "string", "field"),))
+    cmd = HelpfulCommand("c", help_spec=HelpSpec(summary="S.", output=output))
+    assert cmd.output_spec is output
+
+
+def test_helpful_command_rejects_output_spec_alongside_help_spec() -> None:
+    """help_spec is the single source; a separate output_spec is rejected."""
+    with pytest.raises(ValueError, match="help_spec.output"):
+        HelpfulCommand(
+            "c",
+            help_spec=HelpSpec(summary="S."),
+            output_spec=OutputSpec("text"),
+        )
+
+
 def test_helpful_group_leaves_default_to_helpful_command() -> None:
     """A ``HelpfulGroup``'s verbs are ``HelpfulCommand`` so they carry metadata."""
     assert HelpfulGroup.command_class is HelpfulCommand
