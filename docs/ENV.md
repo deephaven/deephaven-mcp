@@ -124,7 +124,7 @@ Precedence: **CLI flag** > **`DH_MCP_OUTPUT`** > **`cli.json`'s `output`** > **s
 
 | | |
 |---|---|
-| Values | `human`, `json`, `yaml` |
+| Values | `human`, `json`, `json-pretty`, `yaml` |
 | CLI flag | `-o`, `--output` |
 | `cli.json` field | `output` |
 

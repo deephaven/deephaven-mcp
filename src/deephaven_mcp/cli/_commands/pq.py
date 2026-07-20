@@ -28,9 +28,9 @@ from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
 
@@ -82,9 +82,8 @@ _OUTPUT_LIST = OutputSpec(
 
 @pq.command(
     "list",
-    output_spec=_OUTPUT_LIST,
     wraps_tool="pq_list",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List Persistent Queries on a system.",
         description=(
             "Enterprise (Core+) only. Lists the PQs configured on SYSTEM. Use "
@@ -118,9 +117,8 @@ async def pq_list(runtime: Runtime, system: str) -> None:
 
 @pq.command(
     "details",
-    output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_details",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Show details for one Persistent Query.",
         description="Enterprise (Core+) only. Reports configuration and status for ID.",
         arguments=(
@@ -152,9 +150,8 @@ async def pq_details(runtime: Runtime, id: str) -> None:
 
 @pq.command(
     "name-to-id",
-    output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_name_to_id",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Resolve a Persistent Query name to its fully qualified id.",
         description="Enterprise (Core+) only. Looks up PQ_NAME within SYSTEM.",
         arguments=(
@@ -364,10 +361,9 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
 
 @pq.command(
     "create",
-    output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_create",
     client_only_params=frozenset({"script_body_path"}),
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Create a Persistent Query.",
         description=(
             "Enterprise (Core+) only. Creates a PQ named PQ_NAME on --system with "
@@ -434,10 +430,9 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
 
 @pq.command(
     "modify",
-    output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_modify",
     client_only_params=frozenset({"script_body_path"}),
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Modify an existing Persistent Query.",
         description=(
             "Enterprise (Core+) only. Updates only the fields you pass on ID; "
@@ -523,9 +518,8 @@ def _ids(id: tuple[str, ...]) -> list[str]:
 
 @pq.command(
     "delete",
-    output_spec=_OUTPUT_OBJECT,
     wraps_tool="pq_delete",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Delete one or more Persistent Queries.",
         description=(
             "Enterprise (Core+) only. Deletes every ID given. --max-concurrent "
@@ -576,9 +570,8 @@ def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]
 
     @pq.command(
         name,
-        output_spec=_OUTPUT_OBJECT,
         wraps_tool=tool,
-        help=build_help(
+        help_spec=HelpSpec(
             summary=summary,
             description=(
                 f"Enterprise (Core+) only. {summary} --no-wait returns without "

@@ -28,11 +28,11 @@ import click
 
 from deephaven_mcp._logging import setup_logging
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._commands.agents import agents as agents_group
 from deephaven_mcp.cli._commands.catalog import catalog as catalog_group
 from deephaven_mcp.cli._commands.config import config as config_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
 from deephaven_mcp.cli._commands.docs import docs as docs_group
-from deephaven_mcp.cli._commands.introspect import introspect as introspect_group
 from deephaven_mcp.cli._commands.pq import pq as pq_group
 from deephaven_mcp.cli._commands.session import session as session_group
 from deephaven_mcp.cli._commands.system import system as system_group
@@ -45,7 +45,7 @@ from deephaven_mcp.cli._format import (
     OUTPUT_MODES,
     OutputMode,
 )
-from deephaven_mcp.cli._help import HelpfulGroup, build_help
+from deephaven_mcp.cli._help import HelpfulGroup, HelpSpec
 from deephaven_mcp.cli._runtime import load_runtime
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,14 +122,14 @@ def _is_help_invocation() -> bool:
     return _argv_has_option(frozenset({"--help", "-h"}))
 
 
-def _is_introspect_invocation() -> bool:
-    """Return True when ``--introspect`` is a real option in ``sys.argv``.
+def _is_agents_invocation() -> bool:
+    """Return True when ``--agents`` is a real option in ``sys.argv``.
 
-    The universal ``--introspect`` flag is the machine-readable twin of
+    The universal ``--agents`` flag is the machine-readable twin of
     ``--help`` and likewise renders without a valid configuration tree,
     so it short-circuits runtime loading wherever it appears.
     """
-    return _argv_has_option(frozenset({"--introspect"}))
+    return _argv_has_option(frozenset({"--agents"}))
 
 
 def _verbosity_to_level(verbose: int, quiet: bool) -> int:
@@ -170,7 +170,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
 @click.group(
     name="dh-mcp",
     cls=HelpfulGroup,
-    help=build_help(
+    help_spec=HelpSpec(
         summary=(
             "Local CLI for the Deephaven MCP systems server: manage a "
             "per-user daemon and call MCP tools."
@@ -191,16 +191,17 @@ def _quiet_dependency_loggers(verbose: int) -> None:
             "question; and 'config' to inspect and validate configuration. "
             "Pass --no-auto-start to require an already-running daemon "
             "instead of spawning one. AI agents should run 'dh-mcp "
-            "introspect tree' for a machine-readable manifest of every "
-            "command, option, and error code rather than scraping --help, "
-            "or append --introspect to any command for just its node."
+            "agents tree' for a machine-readable summary of every "
+            "command (--full for every option and error code) rather "
+            "than scraping --help, or append --agents to any command "
+            "for its full node."
         ),
         examples=(
             "$ dh-mcp tool list",
             "$ dh-mcp tool call sessions_list --arg type=community",
             "$ dh-mcp daemon status",
             "$ dh-mcp config validate",
-            "$ dh-mcp introspect tree | jq '.commands | keys'",
+            "$ dh-mcp agents tree | jq '.commands | keys'",
         ),
     ),
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -234,8 +235,8 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     type=click.Choice(OUTPUT_MODES),
     envvar=OUTPUT_ENV_VAR,
     default=None,
-    # Eager so it is resolved before the eager ``--introspect`` callback,
-    # which reads the root output mode (e.g. ``dh-mcp -o json --introspect``).
+    # Eager so it is resolved before the eager ``--agents`` callback,
+    # which reads the root output mode (e.g. ``dh-mcp -o json --agents``).
     is_eager=True,
     help=(
         "Output format. Takes precedence over the DH_MCP_OUTPUT "
@@ -304,17 +305,17 @@ async def cli(
     logging.getLogger().setLevel(_verbosity_to_level(verbose, quiet))
     _quiet_dependency_loggers(verbose)
 
-    # ``introspect`` walks the command tree and does not need a
+    # ``agents`` walks the command tree and does not need a
     # validated configuration tree; constructing the runtime would
     # force-load config/server JSON files that may not exist when
     # an agent is just learning the surface. The same reasoning
-    # applies to the ``--introspect`` flag (its machine twin) at any
+    # applies to the ``--agents`` flag (its machine twin) at any
     # depth, and to ``--help`` (``dh-mcp daemon --help``, ``dh-mcp tool
     # call --help``).
     if (
-        ctx.invoked_subcommand == "introspect"
+        ctx.invoked_subcommand == "agents"
         or _is_help_invocation()
-        or _is_introspect_invocation()
+        or _is_agents_invocation()
     ):
         ctx.obj = None
         return
@@ -341,7 +342,7 @@ cli.add_command(catalog_group)
 cli.add_command(pq_group)
 cli.add_command(docs_group)
 cli.add_command(config_group)
-cli.add_command(introspect_group)
+cli.add_command(agents_group)
 
 
 # ---------------------------------------------------------------------------

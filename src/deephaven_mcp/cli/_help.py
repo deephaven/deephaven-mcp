@@ -1,26 +1,31 @@
-"""Help-text templating and the introspection manifest for the dh-mcp CLI.
+"""Help-text templating and the agents manifest for the dh-mcp CLI.
 
-This module describes every command twice over: to humans as ``--help``
-text, and to machines as the introspection manifest.
+This module describes every command twice over from one source: a
+command's ``HelpSpec`` renders to humans as ``--help`` text and to
+machines as its agents-manifest node, so the two surfaces cannot
+drift.
 
-Help side: every leaf command's help follows the same layout — a
-one-line summary, an optional description paragraph, and a fixed
-sequence of trailing sections (Arguments, Output, Examples, See also,
-Environment, Exit codes, Error codes). ``build_help`` assembles them in
-that order, defaulting the Environment and Exit codes sections from
-shared constants. Help text is plain text, not reStructuredText: click
-renders it verbatim in the terminal and the manifest surfaces it
-verbatim. The pre-formatted trailing sections (aligned columns, one
-example per line) are prefixed with click's no-rewrap marker so their
-layout survives click's paragraph rewrapping.
+Help side: every leaf command declares a ``HelpSpec`` — a one-line
+summary, an optional description paragraph, and the structured content
+of the trailing sections (Arguments, Output, Examples, See also,
+Environment, Exit codes, Error codes). ``build_help`` renders the
+sections in that fixed order, defaulting the Environment and Exit
+codes sections from shared constants. Help text is plain text, not
+reStructuredText: click renders it verbatim in the terminal. The
+pre-formatted trailing sections (aligned columns, one example per
+line) are prefixed with click's no-rewrap marker so their layout
+survives click's paragraph rewrapping.
 
-Manifest side: ``build_manifest`` walks the live click tree into a
-JSON-safe dict, and ``_describe_command`` renders one node; the
-``introspect`` group and the universal ``--introspect`` flag both render
-these. A command's structured output is described once as an
-``OutputSpec``, which ``build_help`` renders into the Output section and
-``HelpfulCommand`` carries for the manifest. The builders live here, next
-to ``HelpfulCommand``, so the ``--introspect`` flag can reach them without
+Manifest side: ``build_summary_tree`` renders the compact orientation
+view (every command path with its one-line summary),
+``build_manifest`` walks the live click tree into the complete
+JSON-safe manifest, and ``describe_command`` renders one
+self-contained node from the command's ``HelpSpec``; the ``agents``
+group and the universal ``--agents`` flag both render these. Node keys
+are sparse — an absent key means false, empty, or the default. A
+command's structured output is described once as an ``OutputSpec``
+inside its ``HelpSpec``. The builders live here, next to
+``HelpfulCommand``, so the ``--agents`` flag can reach them without
 a circular import. Apply the ``_cli-help-standards`` skill when authoring
 or reviewing command help.
 """
@@ -30,14 +35,22 @@ from __future__ import annotations
 __all__ = [
     "COMMON_ENV_VARS",
     "HelpEntry",
+    "HelpSpec",
     "HelpfulCommand",
     "HelpfulGroup",
     "OutputField",
+    "OutputShape",
     "OutputSpec",
     "build_help",
     "build_manifest",
+    "build_summary_tree",
+    "describe_command",
+    "emit_payload",
+    "error_code_registry",
+    "resolve_command",
 ]
 
+import inspect
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -58,7 +71,7 @@ from deephaven_mcp.config import DATA_DIR_ENV_VAR
 # Click rewraps each help paragraph unless it begins with a backspace
 # (\b) on its own line; prefixing the pre-formatted sections with this
 # marker preserves their column alignment and one-example-per-line
-# layout. introspect strips the marker so the manifest stays clean.
+# layout. the manifest builders strip the marker so the manifest stays clean.
 _NO_WRAP = "\b\n"
 
 
@@ -81,7 +94,7 @@ COMMON_ENV_VARS: tuple[HelpEntry, ...] = (
         "User-data root holding the config and runtime "
         "subdirectories (overrides the platform default).",
     ),
-    HelpEntry(OUTPUT_ENV_VAR, "Output mode: human, json, or yaml."),
+    HelpEntry(OUTPUT_ENV_VAR, "Output mode: human, json, json-pretty, or yaml."),
 )
 """Standard env-var disclosures shared by every leaf command."""
 
@@ -106,7 +119,7 @@ class OutputSpec:
     """Structured description of a command's output.
 
     Rendered into the human-readable ``Output:`` section and the
-    introspect manifest.
+    agents manifest.
     """
 
     mode: OutputShape
@@ -117,48 +130,104 @@ class OutputSpec:
     """Optional one-line note shown above the field list."""
 
 
-def _introspect_callback(
-    ctx: click.Context, param: click.Parameter, value: bool
-) -> None:
-    """Emit ``ctx.command``'s introspection manifest, then exit.
+@dataclass(frozen=True)
+class HelpSpec:
+    """Structured help content for one command.
 
-    The eager callback behind the universal ``--introspect`` flag, the
-    machine-readable twin of ``--help``: emits the whole-tree manifest
-    when invoked on the root group and a single command node otherwise,
-    in the root ``-o/--output`` mode (or ``DH_MCP_OUTPUT``), defaulting
-    to :data:`~deephaven_mcp.cli._format.DEFAULT_OUTPUT_MODE` (``json``)
+    The single source for a command's help: :func:`build_help` renders
+    it as the ``--help`` text, and the agents manifest emits its
+    fields directly. Field semantics and defaults match the
+    corresponding :func:`build_help` parameters.
+    """
+
+    summary: str
+    """Single-line summary, rendered verbatim as the command's first line."""
+    description: str | None = None
+    """Paragraph covering what the command does and when to use it."""
+    arguments: Sequence[HelpEntry] | None = None
+    """Positional arguments shown under the ``Arguments:`` heading."""
+    output: OutputSpec | None = None
+    """Structured output description; also the command's ``output_spec``."""
+    examples: Sequence[str] | None = None
+    """Shell snippets shown under the ``Examples:`` heading."""
+    see_also: Sequence[str] | None = None
+    """Related commands shown under the ``See also:`` heading."""
+    environment: Sequence[HelpEntry] | None = None
+    """Environment variables; ``None`` means :data:`COMMON_ENV_VARS`."""
+    exit_codes: Sequence[ExitCode] | None = None
+    """Exit codes the command can return; ``None`` means every :class:`ExitCode`."""
+    error_codes: Sequence[ErrorCode] | None = None
+    """Error codes the command can emit; ``None`` renders no section."""
+
+
+def _render_help_spec(spec: HelpSpec) -> str:
+    """Render ``spec`` as the command's ``--help`` text via :func:`build_help`."""
+    return build_help(
+        summary=spec.summary,
+        description=spec.description,
+        arguments=spec.arguments,
+        output=spec.output,
+        examples=spec.examples,
+        see_also=spec.see_also,
+        environment=spec.environment,
+        exit_codes=spec.exit_codes,
+        error_codes=spec.error_codes,
+    )
+
+
+def _agents_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """Emit ``ctx.command``'s agents node, then exit.
+
+    The eager callback behind the universal ``--agents`` flag, the
+    machine-readable twin of ``--help``: emits the summary tree when
+    invoked on the root group and a single self-contained command node
+    otherwise, in the root ``-o/--output`` mode (or ``DH_MCP_OUTPUT``),
+    defaulting to
+    :data:`~deephaven_mcp.cli._format.DEFAULT_OUTPUT_MODE` (``json``)
     like every command. Pass ``-o human`` for terminal-friendly output.
+
+    Root-level ordering caveat: both ``--agents`` and the root ``-o``
+    are eager, and click processes eager options in command-line
+    order, so a root-level ``-o`` *after* ``--agents`` is honored only
+    because ``main()``'s ``_lift_root_options`` hoists root options to
+    the front first. A direct ``cli.main()`` / ``CliRunner`` call with
+    ``["--agents", "-o", "human"]`` (no lifter) falls back to the
+    default mode.
     """
     if not value or ctx.resilient_parsing:
         return
     payload = (
-        build_manifest(ctx.command)
+        build_summary_tree(ctx.command)
         if ctx.command is ctx.find_root().command
-        else _describe_command(ctx.command)
+        else describe_command(ctx.command)
     )
-    _emit(ctx, payload)
+    emit_payload(ctx, payload)
     ctx.exit()
 
 
-def _build_introspect_option() -> click.Option:
-    """Return a fresh eager ``--introspect`` option bound to its callback."""
+def _build_agents_option() -> click.Option:
+    """Return a fresh eager ``--agents`` option bound to its callback."""
     return click.Option(
-        ["--introspect"],
+        ["--agents"],
         is_flag=True,
         is_eager=True,
         expose_value=False,
-        callback=_introspect_callback,
+        callback=_agents_callback,
         help=(
             "Emit this command's manifest node and exit (machine twin of "
-            "--help; rendered in the -o/--output mode, json by default)."
+            "--help; rendered in the -o/--output mode — compact json by "
+            "default, -o json-pretty for indented)."
         ),
     )
 
 
-def _params_with_introspect(params: list[click.Parameter]) -> list[click.Parameter]:
-    """Append the lazy ``--introspect`` option to a command's parameter list."""
-    params.append(_build_introspect_option())
-    return params
+def _params_with_agents(params: list[click.Parameter]) -> list[click.Parameter]:
+    """Return ``params`` plus the lazy ``--agents`` option, as a new list."""
+    # A new list, never an in-place append: click's ``get_params`` returns
+    # ``self.params`` itself when a command disables its help option, and
+    # appending to that would permanently grow the command's parameter
+    # list on every call.
+    return [*params, _build_agents_option()]
 
 
 class HelpfulCommand(click.Command):
@@ -167,6 +236,7 @@ class HelpfulCommand(click.Command):
     def __init__(
         self,
         *args: Any,
+        help_spec: HelpSpec | None = None,
         output_spec: OutputSpec | None = None,
         wraps_tool: str | None = None,
         wraps_tools: tuple[str, ...] = (),
@@ -178,8 +248,13 @@ class HelpfulCommand(click.Command):
         """Store the wrapper metadata; defer the rest to :class:`click.Command`.
 
         Args:
+            help_spec (HelpSpec | None): Structured help content. When set,
+                the command's ``help`` text is rendered from it (overriding
+                any ``help`` keyword) and ``output_spec`` defaults to its
+                ``output`` field.
             output_spec (OutputSpec | None): Structured description of the
-                command's output, surfaced by ``dh-mcp introspect``.
+                command's output, surfaced by ``dh-mcp agents``.
+                Defaults to ``help_spec.output`` when a spec is given.
             wraps_tool (str | None): Name of the single MCP tool the command
                 wraps, or ``None`` when it wraps none or many.
             wraps_tools (tuple[str, ...]): Names of the MCP tools the command
@@ -198,9 +273,14 @@ class HelpfulCommand(click.Command):
             **kwargs (Any): Keyword arguments forwarded to
                 :class:`click.Command`.
         """
+        if help_spec is not None:
+            kwargs["help"] = _render_help_spec(help_spec)
+            if output_spec is None:
+                output_spec = help_spec.output
         # ``*args`` / ``**kwargs`` is the standard click-subclass
         # pass-through to click.Command's broad constructor signature.
         super().__init__(*args, **kwargs)
+        self.help_spec: HelpSpec | None = help_spec
         self.output_spec: OutputSpec | None = output_spec
         self.wraps_tool: str | None = wraps_tool
         self.wraps_tools: tuple[str, ...] = wraps_tools
@@ -209,14 +289,14 @@ class HelpfulCommand(click.Command):
         self.client_only_params: frozenset[str] = client_only_params
 
     def get_params(self, ctx: click.Context) -> list[click.Parameter]:
-        """Append the lazy ``--introspect`` option, like click's ``--help``.
+        """Append the lazy ``--agents`` option, like click's ``--help``.
 
         Injecting it here rather than in ``self.params`` keeps it out of
-        the option-lifter and the introspect manifest (both read
+        the option-lifter and the agents manifest (both read
         ``params``), exactly as click's own ``--help`` is invisible to
         them.
         """
-        return _params_with_introspect(super().get_params(ctx))
+        return _params_with_agents(super().get_params(ctx))
 
 
 class HelpfulGroup(click.Group):
@@ -224,15 +304,39 @@ class HelpfulGroup(click.Group):
 
     command_class = HelpfulCommand
 
+    def __init__(
+        self,
+        *args: Any,
+        help_spec: HelpSpec | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Render ``help`` from ``help_spec`` when given; defer to :class:`click.Group`.
+
+        Args:
+            help_spec (HelpSpec | None): Structured help content. When set,
+                the group's ``help`` text is rendered from it (overriding
+                any ``help`` keyword).
+            *args (Any): Positional arguments forwarded to
+                :class:`click.Group`.
+            **kwargs (Any): Keyword arguments forwarded to
+                :class:`click.Group`.
+        """
+        if help_spec is not None:
+            kwargs["help"] = _render_help_spec(help_spec)
+        # ``*args`` / ``**kwargs`` is the standard click-subclass
+        # pass-through to click.Group's broad constructor signature.
+        super().__init__(*args, **kwargs)
+        self.help_spec: HelpSpec | None = help_spec
+
     def get_params(self, ctx: click.Context) -> list[click.Parameter]:
-        """Append the lazy ``--introspect`` option; see :meth:`HelpfulCommand.get_params`.
+        """Append the lazy ``--agents`` option; see :meth:`HelpfulCommand.get_params`.
 
         Also the seam that makes the root ``dh-mcp`` group expose
-        ``--introspect``: ``cli`` in :mod:`deephaven_mcp.cli._main` is
+        ``--agents``: ``cli`` in :mod:`deephaven_mcp.cli._main` is
         registered with ``cls=HelpfulGroup`` so the universal flag is
         available at every depth.
         """
-        return _params_with_introspect(super().get_params(ctx))
+        return _params_with_agents(super().get_params(ctx))
 
 
 def _aligned(pairs: Sequence[tuple[object, str]]) -> str:
@@ -362,105 +466,185 @@ def build_help(
 
 
 # ---------------------------------------------------------------------------
-# Introspection manifest
+# Agents manifest
 #
 # These builders walk the live click tree into a JSON-safe manifest. They
-# live here, alongside ``HelpfulCommand``, so the ``--introspect`` flag
-# callback above can call them without importing the ``introspect`` command
+# live here, alongside ``HelpfulCommand``, so the ``--agents`` flag
+# callback above can call them without importing the ``agents`` command
 # module (which imports this one) — a circular import.
 # ---------------------------------------------------------------------------
 
 
-def _clean_help(text: str | None) -> str:
-    r"""Return help text with click's no-rewrap marker removed.
+def _split_help_text(text: str | None) -> tuple[str, str | None]:
+    r"""Split raw help text into a one-line summary and a description.
 
-    build_help prefixes pre-formatted sections with a backspace
-    marker (``\b\n``) so the terminal renderer preserves their
-    layout; the manifest is a machine surface, so the control
-    character is stripped before serialization.
+    Used for commands that carry no :class:`HelpSpec` (docstring-help
+    groups and plain :class:`click.Command` instances). The text is
+    dedented with :func:`inspect.cleandoc` (docstring help keeps its
+    source indentation until click renders it) and stripped of click's
+    no-rewrap markers (``\b\n``).
 
     Args:
-        text (str | None): Raw ``help`` / ``short_help`` text, or
-            ``None`` when the command sets neither.
+        text (str | None): Raw ``help`` text, or ``None`` when the
+            command sets none.
 
     Returns:
-        str: The text with markers removed and surrounding
-            whitespace stripped; ``""`` when ``text`` is ``None``.
+        tuple[str, str | None]: ``(summary, description)`` where
+            ``summary`` is the first paragraph collapsed to one line
+            (``""`` when ``text`` is ``None``) and ``description`` is
+            the remaining text, or ``None`` when there is none.
     """
-    return (text or "").replace("\b\n", "").strip()
+    cleaned = inspect.cleandoc((text or "").replace("\b\n", ""))
+    first, _, rest = cleaned.partition("\n\n")
+    summary = " ".join(first.split())
+    description = rest.strip() or None
+    return summary, description
 
 
-def _describe_output(spec: OutputSpec | None) -> dict[str, Any] | None:
+def _help_spec_of(cmd: click.Command) -> HelpSpec | None:
+    """Return the command's :class:`HelpSpec`, or ``None`` when it has none."""
+    if isinstance(cmd, HelpfulCommand | HelpfulGroup):
+        return cmd.help_spec
+    return None
+
+
+def _summary_and_description(cmd: click.Command) -> tuple[str, str | None]:
+    """Return ``(summary, description)`` for ``cmd``.
+
+    Reads the :class:`HelpSpec` when the command carries one, falling
+    back to splitting its raw help text with :func:`_split_help_text`.
+    """
+    spec = _help_spec_of(cmd)
+    if spec is not None:
+        return spec.summary, spec.description
+    return _split_help_text(cmd.help)
+
+
+def _summary_of(cmd: click.Command) -> str:
+    """Return the one-line summary for ``cmd``.
+
+    Reads the :class:`HelpSpec` summary when the command carries one,
+    falling back to the first paragraph of its raw help text.
+    """
+    return _summary_and_description(cmd)[0]
+
+
+def _describe_output(spec: OutputSpec) -> dict[str, Any]:
     """Return a JSON-safe description of a command's output shape.
 
     Args:
-        spec (OutputSpec | None): The command's output spec, or
-            ``None`` for groups and commands that declare none.
+        spec (OutputSpec): The command's output spec.
 
     Returns:
-        dict[str, Any] | None: ``{mode, fields, note}`` where each
-            field is ``{name, type, help}``; ``None`` when ``spec`` is
-            ``None``.
+        dict[str, Any]: ``{mode}`` plus ``fields`` (each
+            ``{name, type, help}``) when the spec declares fields and
+            ``note`` when it carries one — sparse keys, like the rest
+            of the node.
     """
-    if spec is None:
-        return None
-    return {
-        "mode": spec.mode,
-        "fields": [
+    info: dict[str, Any] = {"mode": spec.mode}
+    if spec.fields:
+        info["fields"] = [
             {"name": f.name, "type": f.type, "help": f.help} for f in spec.fields
-        ],
-        "note": spec.note,
-    }
+        ]
+    if spec.note is not None:
+        info["note"] = spec.note
+    return info
 
 
-def _describe_param(param: click.Parameter) -> dict[str, Any]:
-    """Return a JSON-safe description of a click parameter.
+def _argument_help_map(spec: HelpSpec | None) -> dict[str, str]:
+    """Map click parameter names to the help of the spec's ``Arguments`` entries.
 
-    Both :class:`click.Option` and :class:`click.Argument` produce the
-    same key shape. ``type`` is always present (e.g. ``"choice"``,
-    ``"text"``, ``"integer"``); ``choices`` is present when
-    ``type == "choice"``; ``nargs`` is present for every parameter.
-    Option-only keys (``opts``, ``secondary_opts``, ``is_flag``,
-    ``multiple``, ``envvar``, ``default``) are present only for
-    :class:`click.Option`.
+    An entry name is its metavar (``"PATH..."``, ``"PQ_NAME"``); the
+    corresponding click parameter name is that metavar lowercased with
+    any trailing ``...`` removed (``"path"``, ``"pq_name"``).
+    """
+    if spec is None or not spec.arguments:
+        return {}
+    return {e.name.rstrip(".").lower(): e.help for e in spec.arguments}
+
+
+def _describe_param(
+    param: click.Parameter, argument_help: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Return a JSON-safe, sparse description of a click parameter.
+
+    Keys are sparse: a key absent from the dict means false, empty, or
+    the default (``nargs`` 1). Always present: ``name``, ``kind``
+    (``"option"`` or ``"argument"``), and ``type`` (e.g. ``"choice"``,
+    ``"text"``, ``"integer"``). Present when applicable: ``help``,
+    ``required`` (only ``true``), ``nargs`` (only when not 1),
+    ``choices`` (when ``type == "choice"``), and the option-only keys
+    ``opts``, ``secondary_opts``, ``is_flag`` (only ``true``),
+    ``multiple`` (only ``true``), ``envvar``, and ``default``.
+
+    Args:
+        param (click.Parameter): The parameter to describe.
+        argument_help (dict[str, str] | None): Help text for positional
+            arguments keyed by parameter name, from
+            :func:`_argument_help_map`; click itself carries no help
+            for :class:`click.Argument`.
     """
     info: dict[str, Any] = {
         "name": param.name,
     }
-    # ``help`` is only set on :class:`click.Option`; :class:`click.Argument`
-    # does not expose the attribute, so direct access would AttributeError.
-    help_text = getattr(param, "help", None)
-    if help_text:
-        info["help"] = help_text
+    if isinstance(param, click.Option):
+        if param.help:
+            info["help"] = param.help
+    elif argument_help:
+        entry_help = argument_help.get(param.name or "")
+        if entry_help:
+            info["help"] = entry_help
     # Stable lowercase string rather than ``param.__class__.__name__`` so the
     # manifest contract does not leak click's internal class names.
     info["kind"] = "option" if isinstance(param, click.Option) else "argument"
     info["type"] = param.type.name
-    info["required"] = bool(param.required)
-    info["nargs"] = param.nargs
+    if param.required:
+        info["required"] = True
+    if param.nargs != 1:
+        info["nargs"] = param.nargs
     if isinstance(param.type, click.Choice):
         info["choices"] = list(param.type.choices)
     if isinstance(param, click.Option):
-        info["opts"] = list(param.opts)
-        info["secondary_opts"] = list(param.secondary_opts)
-        info["is_flag"] = bool(param.is_flag)
-        info["multiple"] = bool(param.multiple)
-        if param.envvar is not None:
-            envvar = param.envvar
-            info["envvar"] = (
-                list(envvar) if isinstance(envvar, list | tuple) else envvar
-            )
-        # Skip ``callable`` defaults (e.g. ``default=lambda: Path.home()``);
-        # invoking them at introspect time could touch the filesystem or
-        # environment, and the resulting value would not reflect the
-        # state at the time the operator actually runs the command.
-        if param.default is not None and not callable(param.default):
-            try:
-                json.dumps(param.default)
-                info["default"] = param.default
-            except TypeError:
-                info["default"] = repr(param.default)
+        _describe_option_extras(param, info)
     return info
+
+
+def _describe_option_extras(param: click.Option, info: dict[str, Any]) -> None:
+    """Add the option-only sparse keys to a parameter description in place.
+
+    Adds ``opts`` always, and ``secondary_opts``, ``is_flag`` (only
+    ``true``), ``multiple`` (only ``true``), ``envvar``, and ``default``
+    when applicable.
+
+    Args:
+        param (click.Option): The option being described.
+        info (dict[str, Any]): The description dict from
+            :func:`_describe_param`, mutated in place.
+    """
+    info["opts"] = list(param.opts)
+    if param.secondary_opts:
+        info["secondary_opts"] = list(param.secondary_opts)
+    if param.is_flag:
+        info["is_flag"] = True
+    if param.multiple:
+        info["multiple"] = True
+    if param.envvar is not None:
+        envvar = param.envvar
+        info["envvar"] = list(envvar) if isinstance(envvar, list | tuple) else envvar
+    # Skip ``callable`` defaults (e.g. ``default=lambda: Path.home()``);
+    # invoking them at manifest-build time could touch the filesystem or
+    # environment, and the resulting value would not reflect the
+    # state at the time the operator actually runs the command. A
+    # flag's ``False`` default is implied by the sparse-key contract.
+    skip_default = param.default is None or (param.is_flag and param.default is False)
+    if not skip_default and not callable(param.default):
+        try:
+            json.dumps(param.default)
+            info["default"] = param.default
+        except TypeError:
+            # Open-set fallback: a default json cannot encode is recorded
+            # as its ``repr`` so the manifest stays JSON-safe.
+            info["default"] = repr(param.default)
 
 
 def _describe_wraps(cmd: click.Command) -> dict[str, Any] | None:
@@ -470,8 +654,7 @@ def _describe_wraps(cmd: click.Command) -> dict[str, Any] | None:
     ``None`` for any command that is not a :class:`HelpfulCommand` or
     that wraps no MCP tool (groups and non-wrapping verbs such as
     ``daemon`` and ``config``), so the manifest only carries the binding
-    where it is meaningful. The schema-drift test and ``review-changes``
-    consume this so they need not import Python.
+    where it is meaningful.
 
     Args:
         cmd (click.Command): The command to inspect.
@@ -495,59 +678,146 @@ def _describe_wraps(cmd: click.Command) -> dict[str, Any] | None:
     }
 
 
-def _describe_subcommands(cmd: click.Command) -> dict[str, dict[str, Any]]:
-    """Return ``{name: description}`` for a group; ``{}`` for a leaf command.
+def _describe_subcommands(
+    cmd: click.Group, *, include_defaults: bool, recurse: bool
+) -> dict[str, Any]:
+    """Return the ``subcommands`` map for a group node.
 
     Entries are ordered by sorted key so the manifest is reproducible
     across invocations.
+
+    Args:
+        cmd (click.Group): The group whose subcommands are described.
+        include_defaults (bool): Forwarded to :func:`describe_command`
+            when recursing.
+        recurse (bool): When ``True``, each entry is a full nested node
+            from :func:`describe_command`; when ``False``, each entry
+            is the subcommand's one-line summary string (the bounded
+            view a standalone group node carries).
     """
-    if not isinstance(cmd, click.Group):
-        return {}
-    return {
-        name: _describe_command(cmd.commands[name]) for name in sorted(cmd.commands)
-    }
+    if recurse:
+        return {
+            name: describe_command(
+                cmd.commands[name],
+                include_defaults=include_defaults,
+                recurse=True,
+            )
+            for name in sorted(cmd.commands)
+        }
+    return {name: _summary_of(cmd.commands[name]) for name in sorted(cmd.commands)}
 
 
-def _describe_command(cmd: click.Command) -> dict[str, Any]:
-    """Recurse over a click command tree, returning a JSON-safe dict.
+def _describe_spec_extras(
+    node: dict[str, Any], spec: HelpSpec, *, include_defaults: bool
+) -> None:
+    """Add the spec-sourced sparse keys to a command node in place.
 
-    Each returned dict has the keys:
+    Adds ``examples``, ``see_also``, ``error_codes``, ``exit_codes``,
+    and ``environment`` when applicable, per the node contract in
+    :func:`describe_command`.
 
-    - ``name`` (str): The command's invocation name.
-    - ``help`` (str): Full help text as rendered by ``--help``.
-    - ``short_help`` (str): One-line summary derived by click from
-      the first line of ``help``.
-    - ``params`` (list[dict]): Per-parameter descriptions produced
-      by :func:`_describe_param` (options and positional arguments).
-    - ``subcommands`` (dict[str, dict]): Map of subcommand name to
-      a nested description with the same shape, produced by
-      :func:`_describe_subcommands`. **Empty when the command is a
-      plain :class:`click.Command`** (leaf verb).
-    - ``output`` (dict | None): Structured output shape produced by
-      :func:`_describe_output` from the command's ``output_spec``
-      (set on :class:`HelpfulCommand`). Always present; ``None`` for
-      groups and commands that declare no spec.
-    - ``wraps`` (dict | None): Wrapped-MCP-tool binding produced by
-      :func:`_describe_wraps`. Always present; ``None`` for commands
-      that wrap no MCP tool.
+    Args:
+        node (dict[str, Any]): The node dict from
+            :func:`describe_command`, mutated in place.
+        spec (HelpSpec): The command's help spec.
+        include_defaults (bool): When ``True`` (standalone nodes), the
+            resolved ``environment`` and ``exit_codes`` are always
+            inlined and code entries carry their meanings; when
+            ``False`` (whole-tree manifest), default entries are
+            omitted and code entries are bare values.
     """
-    return {
-        "name": cmd.name,
-        "help": _clean_help(cmd.help),
-        "short_help": _clean_help(cmd.short_help),
-        "params": [_describe_param(p) for p in cmd.params],
-        "subcommands": _describe_subcommands(cmd),
-        "output": _describe_output(getattr(cmd, "output_spec", None)),
-        "wraps": _describe_wraps(cmd),
-    }
+    if spec.examples:
+        node["examples"] = list(spec.examples)
+    if spec.see_also:
+        node["see_also"] = list(spec.see_also)
+    if spec.error_codes:
+        node["error_codes"] = [
+            ({"code": c.value, "help": c.help_text} if include_defaults else c.value)
+            for c in spec.error_codes
+        ]
+    exit_codes = spec.exit_codes if spec.exit_codes is not None else tuple(ExitCode)
+    if exit_codes and (include_defaults or spec.exit_codes is not None):
+        node["exit_codes"] = [
+            ({"code": c.value, "help": c.help_text} if include_defaults else c.value)
+            for c in exit_codes
+        ]
+    environment = spec.environment if spec.environment is not None else COMMON_ENV_VARS
+    if environment and (include_defaults or spec.environment is not None):
+        node["environment"] = [{"name": e.name, "help": e.help} for e in environment]
 
 
-def _error_code_registry() -> list[dict[str, Any]]:
+def describe_command(
+    cmd: click.Command, *, include_defaults: bool = True, recurse: bool = False
+) -> dict[str, Any]:
+    """Describe one command as a JSON-safe, sparse node dict.
+
+    Keys are sparse: a key absent from the node means the command has
+    none of that content. Always present: ``name`` and ``summary``.
+    Present when applicable:
+
+    - ``description`` (str): What the command does and when to use it.
+    - ``params`` (list[dict]): Options and positional arguments from
+      :func:`_describe_param`; positional arguments carry the help of
+      the spec's ``Arguments`` entries.
+    - ``output`` (dict): Structured output shape from
+      :func:`_describe_output`.
+    - ``examples`` (list[str]): Shell snippets.
+    - ``see_also`` (list[str]): Related commands.
+    - ``error_codes`` (list): The codes the command can emit —
+      ``{code, help}`` entries in a standalone node (decodable without
+      the root registry), bare code strings inside the whole-tree
+      manifest (the root ``error_codes`` registry carries the
+      meanings).
+    - ``exit_codes`` (list): The codes the command can return —
+      ``{code, help}`` entries in a standalone node, bare integers
+      inside the whole-tree manifest (see ``default_exit_codes``).
+    - ``environment`` (list[dict]): ``{name, help}`` entries.
+    - ``wraps`` (dict): Wrapped-MCP-tool binding from
+      :func:`_describe_wraps`.
+    - ``subcommands`` (dict): Groups only — subcommand summaries, or
+      full nested nodes when ``recurse`` is set (see
+      :func:`_describe_subcommands`).
+
+    Args:
+        cmd (click.Command): The command to describe.
+        include_defaults (bool): When ``True`` (standalone nodes), the
+            resolved ``environment`` and ``exit_codes`` are always
+            inlined and code entries carry their meanings, so the node
+            is self-contained. When ``False`` (nodes inside the
+            whole-tree manifest), code meanings and entries the spec
+            leaves unset (the project defaults) are hoisted to the
+            root's ``error_codes`` / ``default_exit_codes`` /
+            ``default_environment`` keys, which carry them once.
+        recurse (bool): Forwarded to :func:`_describe_subcommands` for
+            groups.
+    """
+    spec = _help_spec_of(cmd)
+    summary, description = _summary_and_description(cmd)
+    node: dict[str, Any] = {"name": cmd.name, "summary": summary}
+    if description:
+        node["description"] = description
+    argument_help = _argument_help_map(spec)
+    if cmd.params:
+        node["params"] = [_describe_param(p, argument_help) for p in cmd.params]
+    if isinstance(cmd, HelpfulCommand) and cmd.output_spec is not None:
+        node["output"] = _describe_output(cmd.output_spec)
+    if spec is not None:
+        _describe_spec_extras(node, spec, include_defaults=include_defaults)
+    wraps = _describe_wraps(cmd)
+    if wraps is not None:
+        node["wraps"] = wraps
+    if isinstance(cmd, click.Group):
+        node["subcommands"] = _describe_subcommands(
+            cmd, include_defaults=include_defaults, recurse=recurse
+        )
+    return node
+
+
+def error_code_registry() -> list[dict[str, Any]]:
     """Return the stable error-code registry as sorted ``{code, help}`` entries.
 
     Agents use this to map an ``error_code`` field in a structured
-    error response back to its meaning. Shared by :func:`build_manifest`
-    (the ``error_codes`` key) and the ``introspect errors`` verb.
+    error response back to its meaning.
     """
     return [
         {"code": ec.value, "help": ec.help_text}
@@ -571,31 +841,105 @@ def _help_option() -> click.Option:
     )
 
 
+def _package_version() -> str:
+    """Return the installed ``deephaven-mcp`` version, or ``"unknown"``."""
+    # Fall back to ``"unknown"`` (rather than a fake ``"0.0.0"``) when
+    # this module is imported outside an installed-package context.
+    try:
+        return metadata.version("deephaven-mcp")
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
+_SUMMARY_TREE_HINT = (
+    "Summary view. Run 'dh-mcp agents command <path...>' (or append "
+    "--agents to any command) for one command's full node, 'dh-mcp "
+    "agents tree --full' for the complete manifest, and 'dh-mcp "
+    "agents errors' for the error-code registry."
+)
+"""Drill-down pointer carried by the summary tree so it self-describes."""
+
+
+def _summary_commands(group: click.Group) -> dict[str, Any]:
+    """Return the nested ``{name: {summary, commands?}}`` summary map.
+
+    Each entry carries the command's one-line ``summary``; group
+    entries additionally carry ``commands``, recursing to the leaves.
+    Entries are ordered by sorted key.
+    """
+    out: dict[str, Any] = {}
+    for name in sorted(group.commands):
+        cmd = group.commands[name]
+        entry: dict[str, Any] = {"summary": _summary_of(cmd)}
+        if isinstance(cmd, click.Group):
+            entry["commands"] = _summary_commands(cmd)
+        out[name] = entry
+    return out
+
+
+def build_summary_tree(root: click.Command) -> dict[str, Any]:
+    """Construct the compact orientation view of the command tree.
+
+    The default output of ``dh-mcp agents tree`` and the root
+    ``--agents`` flag: every command path with its one-line summary,
+    small enough to sit in an agent's context. Shape:
+
+    - ``version`` (str): Installed ``deephaven-mcp`` package version.
+    - ``prog`` (str): Program invocation name (``"dh-mcp"``).
+    - ``summary`` (str): The root command's one-line summary.
+    - ``hint`` (str): How to drill down to full nodes and the complete
+      manifest.
+    - ``commands`` (dict): Nested ``{name: {summary, commands?}}`` map
+      from :func:`_summary_commands`; empty when ``root`` is a plain
+      :class:`click.Command`.
+
+    Args:
+        root (click.Command): The root command. In production this is
+            the ``dh-mcp`` :class:`click.Group`.
+
+    Returns:
+        dict[str, Any]: JSON / YAML serializable summary tree.
+    """
+    return {
+        "version": _package_version(),
+        "prog": root.name or "dh-mcp",
+        "summary": _summary_of(root),
+        "hint": _SUMMARY_TREE_HINT,
+        "commands": (_summary_commands(root) if isinstance(root, click.Group) else {}),
+    }
+
+
 def build_manifest(root: click.Command) -> dict[str, Any]:
-    """Construct the introspection manifest for the root command tree.
+    """Construct the complete agents manifest for the root command tree.
 
     The manifest is the canonical agent-discoverable description of
-    the entire CLI. All collections within it are sorted (commands
-    by name, error codes by value) so repeated invocations produce
-    byte-identical output suitable for snapshot tests and diffs.
+    the entire CLI, emitted by ``dh-mcp agents tree --full``. All
+    collections within it are sorted (commands by name, error codes
+    by value) so repeated invocations produce byte-identical output
+    suitable for snapshot tests and diffs.
 
     Manifest shape:
 
     - ``version`` (str): Installed ``deephaven-mcp`` package version,
       or ``"unknown"`` if package metadata is unavailable.
     - ``prog`` (str): Program invocation name (``"dh-mcp"``).
-    - ``help`` (str): Root command's full help text.
+    - ``summary`` (str): The root command's one-line summary.
+    - ``description`` (str): The root command's description, when set.
+    - ``examples`` (list[str]): The root command's examples, when set.
     - ``global_options`` (list[dict]): Root-level options
       (``-o``, ``--timeout``, etc.) as produced by
       :func:`_describe_param`.
     - ``universal_options`` (list[dict]): Options available on *every*
-      command (``--help``, ``--introspect``). Injected via
+      command (``--help``, ``--agents``). Injected via
       ``get_params`` rather than ``params``, so they never appear under
       a command's ``params``; this key is where an agent discovers them.
     - ``commands`` (dict[str, dict]): Top-level command tree, one
       entry per registered noun group and meta command; each entry
-      follows :func:`_describe_command`'s shape and recurses through
-      any subcommand groups. Always present; empty when ``root`` is a
+      follows :func:`describe_command`'s shape and recurses through
+      any subcommand groups. Nodes omit ``environment`` and
+      ``exit_codes`` their spec leaves unset (the project defaults) —
+      the ``default_environment`` / ``default_exit_codes`` keys below
+      carry them once. Always present; empty when ``root`` is a
       plain :class:`click.Command`.
     - ``default_environment`` (list[dict]): Project-wide
       environment variables (name + help) honored by every verb.
@@ -615,32 +959,42 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
     Returns:
         dict[str, Any]: JSON / YAML serializable manifest.
     """
-    # Fall back to ``"unknown"`` (rather than a fake ``"0.0.0"``) when
-    # this module is imported outside an installed-package context.
-    try:
-        version = metadata.version("deephaven-mcp")
-    except metadata.PackageNotFoundError:
-        version = "unknown"
-    return {
-        "version": version,
+    spec = _help_spec_of(root)
+    summary, description = _summary_and_description(root)
+    examples = list(spec.examples) if spec is not None and spec.examples else []
+    manifest: dict[str, Any] = {
+        "version": _package_version(),
         "prog": root.name or "dh-mcp",
-        "help": _clean_help(root.help),
-        "global_options": [_describe_param(p) for p in root.params],
-        "universal_options": [
-            _describe_param(o) for o in (_help_option(), _build_introspect_option())
-        ],
-        "commands": _describe_subcommands(root),
-        "default_environment": [
-            {"name": e.name, "help": e.help} for e in COMMON_ENV_VARS
-        ],
-        "default_exit_codes": [
-            {"code": ec.value, "help": ec.help_text} for ec in ExitCode
-        ],
-        "error_codes": _error_code_registry(),
+        "summary": summary,
     }
+    if description:
+        manifest["description"] = description
+    if examples:
+        manifest["examples"] = examples
+    manifest.update(
+        {
+            "global_options": [_describe_param(p) for p in root.params],
+            "universal_options": [
+                _describe_param(o) for o in (_help_option(), _build_agents_option())
+            ],
+            "commands": (
+                _describe_subcommands(root, include_defaults=False, recurse=True)
+                if isinstance(root, click.Group)
+                else {}
+            ),
+            "default_environment": [
+                {"name": e.name, "help": e.help} for e in COMMON_ENV_VARS
+            ],
+            "default_exit_codes": [
+                {"code": ec.value, "help": ec.help_text} for ec in ExitCode
+            ],
+            "error_codes": error_code_registry(),
+        }
+    )
+    return manifest
 
 
-def _resolve_command(root: click.Command, path: tuple[str, ...]) -> click.Command:
+def resolve_command(root: click.Command, path: tuple[str, ...]) -> click.Command:
     """Resolve a command path against the live click command tree.
 
     Walks ``path`` token by token, descending through each
@@ -673,14 +1027,23 @@ def _resolve_command(root: click.Command, path: tuple[str, ...]) -> click.Comman
     return current
 
 
-def _emit(ctx: click.Context, payload: Any) -> None:
+# ``Any``: ``payload`` is any JSON-safe agents-surface value (manifest,
+# summary tree, command node, registry); ``format_output`` dispatches
+# on type when rendering.
+def emit_payload(ctx: click.Context, payload: Any) -> None:
     """Render ``payload`` in the root ``-o/--output`` mode and print it.
 
     Output mode is resolved from the root ``-o/--output`` flag or
-    ``DH_MCP_OUTPUT``, falling back to :data:`DEFAULT_OUTPUT_MODE` (``json``).
-    The introspection surfaces run without the validated config, so they
-    cannot consult ``cli.json``'s ``output.format``; use ``-o`` (or set
-    ``DH_MCP_OUTPUT``) to opt into ``human``/``yaml`` output.
+    ``DH_MCP_OUTPUT``, falling back to :data:`DEFAULT_OUTPUT_MODE`
+    (``json``, compact). The agents surfaces run without the validated
+    config, so they cannot consult ``cli.json``'s ``output.format``;
+    use ``-o`` (or set ``DH_MCP_OUTPUT``) to opt into
+    ``json-pretty``/``human``/``yaml`` output.
+
+    Args:
+        ctx (click.Context): The invoking command's context; the root
+            context supplies the output mode.
+        payload (Any): The JSON-safe value to render.
     """
     output: OutputMode = ctx.find_root().params.get("output") or DEFAULT_OUTPUT_MODE
     click.echo(format_output(payload, output=output))

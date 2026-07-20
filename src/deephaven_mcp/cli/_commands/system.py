@@ -23,9 +23,9 @@ from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
 from deephaven_mcp.sessions._enterprise import EnterpriseSystemConfig
@@ -65,9 +65,8 @@ _OUTPUT_LIST = OutputSpec(
 
 @system.command(
     "list",
-    output_spec=_OUTPUT_LIST,
     wraps_tool="list_systems",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List the Deephaven systems the daemon is configured to serve.",
         description=(
             "Enumerates every configured system: the single Community umbrella "
@@ -140,9 +139,8 @@ _OUTPUT_STATUS = OutputSpec(
 
 @system.command(
     "status",
-    output_spec=_OUTPUT_STATUS,
     wraps_tool="enterprise_systems_status",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Report Enterprise (Core+) system health.",
         description=(
             "Reports liveness for configured Enterprise systems. This is "
@@ -279,8 +277,7 @@ _OUTPUT_URL = OutputSpec("text", note="The Enterprise web console URL, one line.
 
 @system.command(
     "url",
-    output_spec=_OUTPUT_URL,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Print an Enterprise system's web console URL.",
         description=(
             "Prints the Deephaven Enterprise (Core+) web console URL for a "
@@ -330,8 +327,7 @@ _OUTPUT_OPEN = OutputSpec(
 
 @system.command(
     "open",
-    output_spec=_OUTPUT_OPEN,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Open an Enterprise system's web console in the browser.",
         description=(
             "Derives the Deephaven Enterprise (Core+) web console URL for a "

@@ -35,9 +35,9 @@ from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
 
@@ -228,9 +228,8 @@ _OUTPUT_LIST = OutputSpec(
 
 @session.command(
     "list",
-    output_spec=_OUTPUT_LIST,
     wraps_tool="sessions_list",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List sessions with basic metadata.",
         description=(
             "Lightweight discovery across Community and Enterprise sessions; "
@@ -315,9 +314,8 @@ _OUTPUT_SHOW = OutputSpec(
 
 @session.command(
     "show",
-    output_spec=_OUTPUT_SHOW,
     wraps_tool="session_details",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Show detailed information about one session.",
         description=(
             "Reports status and configuration for a session. By default this is "
@@ -377,10 +375,9 @@ _OUTPUT_CREATE = OutputSpec(
 
 @session.command(
     "create",
-    output_spec=_OUTPUT_CREATE,
     wraps_tools=("session_community_create", "session_enterprise_create"),
     router_params=frozenset({"system"}),
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Create a session on a system (Community or Enterprise).",
         description=(
             "The --system value selects the backend and its type: 'community' "
@@ -627,9 +624,8 @@ _OUTPUT_DELETE = OutputSpec(
 
 @session.command(
     "delete",
-    output_spec=_OUTPUT_DELETE,
     wraps_tools=("session_community_delete", "session_enterprise_delete"),
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Delete a session by id.",
         description=(
             "Permanently deletes the session with ID; this cannot be "
@@ -675,9 +671,8 @@ _OUTPUT_EXEC = OutputSpec(
 
 @session.command(
     "exec",
-    output_spec=_OUTPUT_EXEC,
     wraps_tool="session_script_run",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Run a script in a session.",
         description=(
             "Executes a script in the session's worker. Provide the code inline "
@@ -755,9 +750,8 @@ _OUTPUT_PIP_LIST = OutputSpec(
 
 @session.command(
     "pip-list",
-    output_spec=_OUTPUT_PIP_LIST,
     wraps_tool="session_pip_list",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List a session's installed pip packages.",
         description=(
             "Returns the Python packages available in the session's environment "
@@ -819,9 +813,8 @@ _CREDENTIALS_DESCRIPTION = (
 
 @session.command(
     "credentials",
-    output_spec=_OUTPUT_CREDENTIALS,
     wraps_tool=_CREDENTIALS_TOOL,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Print a Community session's browser-login credentials.",
         description=_CREDENTIALS_DESCRIPTION,
         arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
@@ -853,9 +846,8 @@ _OUTPUT_URL = OutputSpec("text", note="The authenticated browser URL, one line."
 
 @session.command(
     "url",
-    output_spec=_OUTPUT_URL,
     wraps_tool=_CREDENTIALS_TOOL,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Print a Community session's authenticated browser URL.",
         description=(
             "Prints only connection_url_with_auth — the browser-ready URL "
@@ -899,10 +891,9 @@ _OUTPUT_OPEN = OutputSpec(
 
 @session.command(
     "open",
-    output_spec=_OUTPUT_OPEN,
     wraps_tool=_CREDENTIALS_TOOL,
     client_only_params=frozenset({"print_only"}),
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Open a Community session in the default web browser.",
         description=(
             "Fetches the authenticated URL and launches your default browser. "

@@ -6,13 +6,16 @@ environment variable that supplies it (``OUTPUT_ENV_VAR``) — and renders
 any subcommand return value in the selected mode via :func:`format_output`.
 
 :func:`format_output` dispatches on the requested ``output`` mode
-(``"human"`` / ``"json"`` / ``"yaml"``) and the runtime value type. Human
-output is terminal-friendly: a flat two-column listing for tool catalogs,
-``TextContent`` concatenation for tool results, an aligned table for a list
-of row dicts (and for a ``data`` block nested in a dict), ``key: value``
-lines for other dicts, and a best-effort string for scalars. ``json`` and
-``yaml`` modes emit deterministically sorted documents suitable for piping
-into ``jq`` / ``yq`` or for programmatic consumption by AI agents.
+(``"human"`` / ``"json"`` / ``"json-pretty"`` / ``"yaml"``) and the runtime
+value type. Human output is terminal-friendly: a flat two-column listing for
+tool catalogs, ``TextContent`` concatenation for tool results, an aligned
+table for a list of row dicts (and for a ``data`` block nested in a dict),
+``key: value`` lines for other dicts, and a best-effort string for scalars.
+The structured modes emit deterministically sorted documents suitable for
+piping into ``jq`` / ``yq`` or for programmatic consumption by AI agents:
+``json`` is a compact single-line document (the machine-optimal form),
+``json-pretty`` is the same document indented for human reading, and
+``yaml`` is block-style YAML.
 """
 
 from __future__ import annotations
@@ -33,8 +36,8 @@ import yaml
 from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import BaseModel
 
-OutputMode = Literal["human", "json", "yaml"]
-"""Static type of the ``-o/--output`` flag: one of ``human``/``json``/``yaml``."""
+OutputMode = Literal["human", "json", "json-pretty", "yaml"]
+"""Static type of the ``-o/--output`` flag: ``human``/``json``/``json-pretty``/``yaml``."""
 
 OUTPUT_MODES: tuple[OutputMode, ...] = get_args(OutputMode)
 """Runtime tuple of accepted ``-o/--output`` values, derived from :data:`OutputMode`."""
@@ -46,11 +49,12 @@ DEFAULT_OUTPUT_MODE: OutputMode = "json"
 """Fallback output mode when none is set via ``-o``, ``DH_MCP_OUTPUT``, or config.
 
 ``dh-mcp`` is machine-first (primarily driven by AI agents), so every
-surface defaults to ``json`` — operational commands (through
-``CliConfig.output.format``), the ``introspect`` group / ``--introspect``
-flag, and the error renderer. Humans opt into terminal-friendly output
-with ``-o human``, ``DH_MCP_OUTPUT=human``, or ``output.format`` in
-cli.json. A test pins this equal to ``CliConfig().output.format``."""
+surface defaults to ``json`` — compact single-line JSON — for
+operational commands (through ``CliConfig.output.format``), the
+``agents`` group / ``--agents`` flag, and the error renderer. Humans
+opt into terminal-friendly output with ``-o human``, indented JSON
+with ``-o json-pretty``, or set ``DH_MCP_OUTPUT`` / ``output.format``
+in cli.json. A test pins this equal to ``CliConfig().output.format``."""
 
 
 # ``Any``: renders heterogeneous CLI return values (pydantic models,
@@ -91,13 +95,14 @@ def format_output(
             :class:`mcp.types.CallToolResult`, :class:`mcp.types.Tool`
             lists, plain dicts, lists of row dicts, and primitive scalars.
         output (OutputMode): One of :data:`OUTPUT_MODES`. ``"human"``
-            for terminal-friendly output; ``"json"`` for a single
-            deterministically-formatted JSON document; ``"yaml"`` for
-            a deterministically-formatted YAML document.
+            for terminal-friendly output; ``"json"`` for a compact
+            single-line JSON document; ``"json-pretty"`` for the same
+            document indented two spaces; ``"yaml"`` for a
+            deterministically-formatted YAML document.
         empty_message (str): Human-mode text for an empty list. Defaults
-            to ``"(none)"``; ``json``/``yaml`` modes ignore it and emit
+            to ``"(none)"``; the structured modes ignore it and emit
             ``[]``.
-        sort_keys (bool): Whether ``json``/``yaml`` modes sort object keys
+        sort_keys (bool): Whether the structured modes sort object keys
             alphabetically. Defaults to ``True``. Pass ``False`` to emit
             keys in insertion order, for payloads whose key order is itself
             meaningful (e.g. most- to least-important first). ``human`` mode
@@ -110,6 +115,12 @@ def format_output(
         case "human":
             return _format_human(value, empty_message=empty_message)
         case "json":
+            return json.dumps(
+                _coerce_jsonable(value),
+                separators=(",", ":"),
+                sort_keys=sort_keys,
+            )
+        case "json-pretty":
             return json.dumps(_coerce_jsonable(value), indent=2, sort_keys=sort_keys)
         case "yaml":
             dumped: str = yaml.safe_dump(

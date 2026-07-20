@@ -227,7 +227,7 @@ Two mechanisms keep them honest.
   the real-param assertion. Use this — never `router_params` — for flags
   with no tool counterpart, so a stale `router_params` entry can't hide.
 
-The binding is emitted in the `introspect` manifest (`wraps`) so
+The binding is emitted in the `agents` manifest (`wraps`) so
 `review-changes` and other tooling can read it without importing Python.
 
 **Automated guard.** [`tests/cli/test_tool_wrapper_drift.py`](../../tests/cli/test_tool_wrapper_drift.py) builds every

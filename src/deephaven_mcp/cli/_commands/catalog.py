@@ -25,9 +25,9 @@ from deephaven_mcp.cli._errors import ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
 
@@ -72,9 +72,8 @@ _OUTPUT_TABLES = OutputSpec(
 
 @catalog.command(
     "tables",
-    output_spec=_OUTPUT_TABLES,
     wraps_tool="catalog_tables_list",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List tables in the Enterprise catalog.",
         description=(
             "Enterprise (Core+) only. Prints one {namespace, table_name} entry "
@@ -143,9 +142,8 @@ _OUTPUT_NAMESPACES = OutputSpec(
 
 @catalog.command(
     "namespaces",
-    output_spec=_OUTPUT_NAMESPACES,
     wraps_tool="catalog_namespaces_list",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List namespaces in the Enterprise catalog.",
         description=(
             "Enterprise (Core+) only. Prints the catalog's distinct namespace "
@@ -219,9 +217,8 @@ _OUTPUT_SCHEMA = OutputSpec(
 
 @catalog.command(
     "schema",
-    output_spec=_OUTPUT_SCHEMA,
     wraps_tool="catalog_table_schema",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Show column definitions for one catalog table.",
         description=(
             "Enterprise (Core+) only. Returns the schema (column names and "
@@ -282,9 +279,8 @@ _OUTPUT_TABULAR = OutputSpec(
 
 @catalog.command(
     "sample",
-    output_spec=_OUTPUT_TABULAR,
     wraps_tool="catalog_table_sample",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Sample rows from a catalog table.",
         description=(
             "Enterprise (Core+) only. Returns up to --max-rows rows from the "

@@ -22,9 +22,9 @@ from deephaven_mcp.cli._errors import ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
 
@@ -50,9 +50,8 @@ _OUTPUT_LIST = OutputSpec(
 
 @table.command(
     "list",
-    output_spec=_OUTPUT_LIST,
     wraps_tool="session_tables_list",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List the table names in a session.",
         description=(
             "Lightweight discovery of table names without schemas. Follow up "
@@ -105,9 +104,8 @@ _OUTPUT_SCHEMA = OutputSpec(
 
 @table.command(
     "schema",
-    output_spec=_OUTPUT_SCHEMA,
     wraps_tool="session_table_schema",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Show column definitions for one table in a session.",
         description=(
             "Returns the schema (column names and types) for a single table. "
@@ -153,9 +151,8 @@ _OUTPUT_DATA = OutputSpec(
 
 @table.command(
     "data",
-    output_spec=_OUTPUT_DATA,
     wraps_tool="session_table_data",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Fetch row data from a table in a session.",
         description=(
             "Returns up to --max-rows rows from the head (default) or, with "

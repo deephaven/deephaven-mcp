@@ -24,9 +24,9 @@ from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._mcp_client import (
     McpClient,
@@ -190,9 +190,8 @@ _OUTPUT_ASK = OutputSpec(
 
 @docs.command(
     "ask",
-    output_spec=_OUTPUT_ASK,
     wraps_tool="docs_chat",
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Ask the Deephaven documentation assistant a question.",
         description=(
             "Sends a one-shot question to the docs MCP server configured as "
@@ -321,8 +320,7 @@ _OUTPUT_STATUS = OutputSpec(
 
 @docs.command(
     "status",
-    output_spec=_OUTPUT_STATUS,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Check that the configured docs MCP server is reachable.",
         description=(
             "Connects to the docs MCP server configured as 'docs.url' in "

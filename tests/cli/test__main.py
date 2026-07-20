@@ -291,29 +291,29 @@ def test_is_help_invocation_table_driven(
     ("argv", "expected"),
     [
         # Bare flag.
-        (["--introspect"], True),
+        (["--agents"], True),
         # Flag appended to a command path.
-        (["daemon", "start", "--introspect"], True),
+        (["daemon", "start", "--agents"], True),
         # Flag after a value-taking option whose value is supplied.
-        (["--config-dir", "/tmp", "--introspect"], True),
-        # ``--introspect`` consumed as the value of a value-taking option.
-        (["--config-dir", "--introspect"], False),
+        (["--config-dir", "/tmp", "--agents"], True),
+        # ``--agents`` consumed as the value of a value-taking option.
+        (["--config-dir", "--agents"], False),
         # ``=``-form value-taking option does not consume the next token.
-        (["--config-dir=/tmp", "--introspect"], True),
-        # No introspect token anywhere.
+        (["--config-dir=/tmp", "--agents"], True),
+        # No agents token anywhere.
         (["daemon", "stop"], False),
         # Empty argv.
         ([], False),
     ],
 )
-def test_is_introspect_invocation_table_driven(
+def test_is_agents_invocation_table_driven(
     argv: list[str], expected: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``_is_introspect_invocation`` reads ``sys.argv[1:]``; monkey-patch it."""
-    from deephaven_mcp.cli._main import _is_introspect_invocation
+    """``_is_agents_invocation`` reads ``sys.argv[1:]``; monkey-patch it."""
+    from deephaven_mcp.cli._main import _is_agents_invocation
 
     monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
-    assert _is_introspect_invocation() is expected
+    assert _is_agents_invocation() is expected
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +337,7 @@ def test_value_taking_root_options_is_liftable_value_taking_half() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Top-level help / version / introspect smoke
+# Top-level help / version / agents smoke
 # ---------------------------------------------------------------------------
 
 
@@ -356,7 +356,7 @@ def test_help_lists_top_level_nouns() -> None:
         "pq",
         "docs",
         "config",
-        "introspect",
+        "agents",
     ):
         assert noun in result.output
 
@@ -378,7 +378,7 @@ def test_main_registers_exactly_the_expected_groups() -> None:
         "pq",
         "docs",
         "config",
-        "introspect",
+        "agents",
     }
 
 
@@ -389,8 +389,8 @@ def test_version_flag() -> None:
     assert result.output.startswith("dh-mcp ")
 
 
-def test_introspect_runs_without_loading_runtime() -> None:
-    """``introspect`` must work without a valid configuration tree.
+def test_agents_runs_without_loading_runtime() -> None:
+    """``agents`` must work without a valid configuration tree.
 
     The root callback short-circuits before calling ``load_runtime``;
     we confirm by stubbing ``load_runtime`` to raise and asserting
@@ -403,7 +403,7 @@ def test_introspect_runs_without_loading_runtime() -> None:
         AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID)),
     ):
         result = runner.invoke(
-            cli, ["-o", "json", "introspect", "tree"], standalone_mode=False
+            cli, ["-o", "json", "agents", "tree"], standalone_mode=False
         )
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -411,16 +411,16 @@ def test_introspect_runs_without_loading_runtime() -> None:
     assert "daemon" in payload["commands"]
 
 
-def test_introspect_flag_runs_without_loading_runtime(
+def test_agents_flag_runs_without_loading_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``--introspect`` flag short-circuits ``load_runtime`` too.
+    """The ``--agents`` flag short-circuits ``load_runtime`` too.
 
     The root callback inspects ``sys.argv``; ``CliRunner.invoke`` does
     not set it, so the test patches it explicitly (mirroring the
     ``--help`` path).
     """
-    argv = ["-o", "json", "daemon", "start", "--introspect"]
+    argv = ["-o", "json", "daemon", "start", "--agents"]
     monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     runner = CliRunner()
     with patch.object(
@@ -464,7 +464,7 @@ def test_help_is_human_regardless_of_output_mode(
 
     Help goes through click's help formatter, independent of the output-mode
     system, so the JSON default does not turn it into JSON. This locks the
-    intended split: ``--help`` is human, ``--introspect`` is the machine twin.
+    intended split: ``--help`` is human, ``--agents`` is the machine twin.
 
     The runtime-load bypass inspects ``sys.argv``; ``CliRunner.invoke`` does
     not set it, so the test patches it explicitly so a CI machine without
@@ -546,17 +546,17 @@ def test_main_returns_zero_on_success(capsys) -> None:
     assert payload["stopped"] is False
 
 
-def test_main_output_flag_after_introspect_subcommand(capsys) -> None:
-    """``dh-mcp introspect tree -o json`` works end-to-end through ``main()``.
+def test_main_output_flag_after_agents_subcommand(capsys) -> None:
+    """``dh-mcp agents tree -o json`` works end-to-end through ``main()``.
 
     Exercises the interaction this change relies on: the argv lifter hoists
     the trailing ``-o json`` to the front, the eager ``-o`` resolves before
-    the introspect verb renders, and the introspect bypass means no config
+    the agents verb renders, and the agents bypass means no config
     is loaded. (``CliRunner`` does not run the lifter, so this must go
     through ``main()``.)
     """
     with pytest.raises(SystemExit) as exc_info:
-        main(["introspect", "tree", "-o", "json"])
+        main(["agents", "tree", "-o", "json"])
     assert exc_info.value.code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["prog"] == "dh-mcp"

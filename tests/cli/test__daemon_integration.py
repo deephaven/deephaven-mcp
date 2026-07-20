@@ -15,7 +15,7 @@ These tests:
   list`` / ``status``, ``table list`` / ``schema`` / ``data``, ``script
   run`` / ``pip-list``), plus the error/exit-code paths (``config_invalid``,
   ``daemon_not_running``, ``tool_returned_error``) and the config /
-  introspect verbs that need no worker.
+  agents verbs that need no worker.
 
 They are marked ``@pytest.mark.integration`` and skipped by the
 default ``uv run pytest`` run. Invoke with::
@@ -671,10 +671,10 @@ def test_config_invalid_exits_2(tmp_path: Path) -> None:
     shutil.which("dh-mcp") is None,
     reason="dh-mcp entry point not on PATH",
 )
-def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
-    """``introspect tree`` emits the command manifest without touching config.
+def test_agents_emits_json_without_config(tmp_path: Path) -> None:
+    """``agents tree`` emits the command manifest without touching config.
 
-    The config directory is deliberately left unseeded: introspect
+    The config directory is deliberately left unseeded: the agents group
     bypasses the eager config load, so it must still succeed.
     """
     cfg_dir = tmp_path / "cfg"
@@ -683,7 +683,7 @@ def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
     os.chmod(runtime_dir, 0o700)
 
     result = _run_cli(
-        ["-o", "json", "introspect", "tree"],
+        ["-o", "json", "agents", "tree"],
         config_dir=cfg_dir,
         runtime_dir=runtime_dir,
     )

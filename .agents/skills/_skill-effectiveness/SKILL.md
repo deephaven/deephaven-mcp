@@ -20,13 +20,13 @@ The frontmatter `description` is the only text the agent sees at decision time. 
   - **What the skill is *not* for** when ambiguity with a sibling skill exists.
 - **Triggerability test**: read the skill's description alongside its ten nearest sibling descriptions in the catalog README. Given a representative task, can you predict — without reading any body — which skill should fire? If no, the description is broken.
 - **Acceptable / unacceptable pairs:**
-  - ✅ "Add a new command to the dh-mcp CLI — wraps the click + Pattern B + structured-error + introspect conventions; prevents the most common bugs." (Names the artifact, names the verb, names the failure mode it prevents.)
+  - ✅ "Add a new command to the dh-mcp CLI — wraps the click + Pattern B + structured-error + agents-manifest conventions; prevents the most common bugs." (Names the artifact, names the verb, names the failure mode it prevents.)
   - ❌ "CLI command guidance." (Names the topic; not the moment.)
   - ✅ "Run a single test file's tests with coverage — required for assessing per-file coverage of a single source file." (Names the verb, the artifact, and the disambiguator from `tests-run`.)
   - ❌ "Test running helper." (No verb, no disambiguator, no artifact.)
   - ✅ "Verify a markdown documentation file is factually accurate — checks commands, file paths, config keys, API names, code examples, and URLs against source code; fixes inaccuracies in place." (Names verb, artifact, scope, side effect.)
   - ❌ "Documentation review skill." (All three failures.)
-- **Empirical grounding**: the longest-standing effectiveness bug in this codebase was `ErrorCode.help_text` emitting one identical string per member because the description-level `__doc__` was read as a member-level attribute — a triggerability failure at the catalog layer (`dh-mcp introspect` reported "10 codes, 1 unique help string"). The skill-level analog is a description that names the topic but not the moment.
+- **Empirical grounding**: the longest-standing effectiveness bug in this codebase was `ErrorCode.help_text` emitting one identical string per member because the description-level `__doc__` was read as a member-level attribute — a triggerability failure at the catalog layer (`dh-mcp agents errors` reported "10 codes, 1 unique help string"). The skill-level analog is a description that names the topic but not the moment.
 
 ## 2. Actionability — when invoked, can the agent act?
 
@@ -99,7 +99,7 @@ These rules apply equally to:
 
 - `AGENTS.md` bullets (always-on, every-session content; effectiveness is *more* important here because every reader is forced to read it).
 - MCP tool docstrings (consumed by AI agents through `tools/list`).
-- Error-code `help_text` (consumed by agents through structured-error output and `dh-mcp introspect errors`).
+- Error-code `help_text` (consumed by agents through structured-error output and `dh-mcp agents errors`).
 - README catalog rows (the second-tier description; agents and humans both read it).
 
 When applying effectiveness rules outside skills, the same checks apply: name the moment, name the verb, prefer examples over abstractions, avoid hedges, ground in real exemplars.

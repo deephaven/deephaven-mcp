@@ -29,7 +29,7 @@ def test_default_output_mode_matches_config_schema_default() -> None:
     """The CLI fallback and the ``cli.json`` schema default must not drift.
 
     Operational commands fall back to ``CliConfig().output.format``;
-    config-independent surfaces (introspect, errors) fall back to
+    config-independent surfaces (agents, errors) fall back to
     ``DEFAULT_OUTPUT_MODE``. They are one conceptual default, pinned equal
     here without coupling the config layer to the CLI layer by import.
     """
@@ -39,9 +39,9 @@ def test_default_output_mode_matches_config_schema_default() -> None:
     assert DEFAULT_OUTPUT_MODE in OUTPUT_MODES
 
 
-def test_output_modes_are_the_three_supported_values() -> None:
+def test_output_modes_are_the_four_supported_values() -> None:
     """The runtime mode tuple matches the documented choices."""
-    assert OUTPUT_MODES == ("human", "json", "yaml")
+    assert OUTPUT_MODES == ("human", "json", "json-pretty", "yaml")
 
 
 def _tool(name: str, desc: str | None = None) -> Tool:
@@ -80,6 +80,27 @@ def test_json_format_dict() -> None:
     assert parsed == {"a": 2, "b": 1}
     # Sorted keys per the format contract.
     assert out.index('"a"') < out.index('"b"')
+
+
+def test_json_format_is_compact_single_line() -> None:
+    """``json`` mode emits one line with no indentation or separator spaces."""
+    out = format_output({"b": {"c": [1, 2]}, "a": 2}, output="json")
+    assert out == '{"a":2,"b":{"c":[1,2]}}'
+
+
+def test_json_pretty_format_is_indented_same_payload() -> None:
+    """``json-pretty`` emits the same document indented two spaces."""
+    payload = {"b": {"c": [1, 2]}, "a": 2}
+    pretty = format_output(payload, output="json-pretty")
+    assert "\n" in pretty
+    assert '  "a": 2' in pretty
+    assert json.loads(pretty) == json.loads(format_output(payload, output="json"))
+
+
+def test_json_pretty_honors_sort_keys_false() -> None:
+    """``json-pretty`` preserves insertion order under ``sort_keys=False``."""
+    out = format_output({"z": 1, "a": 2}, output="json-pretty", sort_keys=False)
+    assert out.index('"z"') < out.index('"a"')
 
 
 def test_sort_keys_false_preserves_insertion_order() -> None:

@@ -14,9 +14,9 @@ from deephaven_mcp.cli._errors import ErrorCode, ExitCode
 from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._help import (
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
 
@@ -68,8 +68,7 @@ _OUTPUT_VALIDATE = OutputSpec(
 
 @config.command(
     "show",
-    output_spec=_OUTPUT_SHOW,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Print the resolved configuration with secrets redacted.",
         description=(
             "Shows the post-merge view used at runtime. Secret-bearing "
@@ -101,8 +100,7 @@ async def config_show(runtime: Runtime) -> None:
 
 @config.command(
     "validate",
-    output_spec=_OUTPUT_VALIDATE,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Confirm the configuration is valid (exit 0 / 2).",
         description=(
             "Validation runs eagerly on every dh-mcp invocation, so a "
