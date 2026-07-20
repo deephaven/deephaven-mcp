@@ -672,10 +672,13 @@ def test_config_invalid_exits_2(tmp_path: Path) -> None:
     reason="dh-mcp entry point not on PATH",
 )
 def test_agents_emits_json_without_config(tmp_path: Path) -> None:
-    """``agents tree`` emits the command manifest without touching config.
+    """``agents tree --full`` emits the complete manifest without touching config.
 
     The config directory is deliberately left unseeded: the agents group
-    bypasses the eager config load, so it must still succeed.
+    bypasses the eager config load, so it must still succeed. ``--full``
+    is required for the whole-manifest keys asserted below
+    (``error_codes``, per-node ``wraps``); the default ``tree`` output
+    is the summary tree, which carries neither.
     """
     cfg_dir = tmp_path / "cfg"
     runtime_dir = tmp_path / "rt"
@@ -683,7 +686,7 @@ def test_agents_emits_json_without_config(tmp_path: Path) -> None:
     os.chmod(runtime_dir, 0o700)
 
     result = _run_cli(
-        ["-o", "json", "agents", "tree"],
+        ["-o", "json", "agents", "tree", "--full"],
         config_dir=cfg_dir,
         runtime_dir=runtime_dir,
     )
