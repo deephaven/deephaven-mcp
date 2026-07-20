@@ -25,7 +25,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 5. **Output.** `click.echo(format_output(payload, output=runtime.config.cli.output.format))`. The `format_output` function (`cli/_format.py`) handles `human` / `json` / `json-pretty` / `yaml` consistently. Do not branch on the output mode in the command body. Note: `output.format` is a nested field — `CliConfig` groups domain-specific knobs under `output.*` / `daemon.*` / `request.*`. Canonical implementation: `config/schema/_cli.py` (`CliConfig`, `OutputConfig`).
 
 6. **Tests.** Add cases to `tests/cli/_commands/test_<noun>.py` (one test file per source file under `_commands/`). Use `click.testing.CliRunner` with `load_runtime` patched to return a test `Runtime`. Cover:
-   - Happy path in each output mode (`human`, `json`, `json-pretty`, `yaml`).
+   - Happy path. For a tool-wrapping command, cover **one** structured mode and leave the `human`/`json`/`json-pretty`/`yaml` matrix to `format_output`'s own tests (`_cli-tool-wrapping` *Testing*). For a command with bespoke rendering logic, cover each mode that exercises a distinct code path.
    - Every error path — each one should produce a `CliError` with the expected `error_code` (parse the JSON output and assert).
    - Any new option / argument validation.
 

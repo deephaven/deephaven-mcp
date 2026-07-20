@@ -271,6 +271,10 @@ def test_output_from_argv_equals_form_with_unknown_value(
         (["--config-dir", "--help"], False),
         # ``=``-form value-taking option does not consume the next token.
         (["--config-dir=/tmp", "--help"], True),
+        # ``--help`` after the ``--`` sentinel is positional data.
+        (["tool", "show", "--", "--help"], False),
+        # ``--help`` before the sentinel is still a real option.
+        (["--help", "--", "x"], True),
         # No help token anywhere.
         (["daemon", "stop"], False),
         # Empty argv.
@@ -300,6 +304,10 @@ def test_is_help_invocation_table_driven(
         (["--config-dir", "--agents"], False),
         # ``=``-form value-taking option does not consume the next token.
         (["--config-dir=/tmp", "--agents"], True),
+        # ``--agents`` after the ``--`` sentinel is positional data.
+        (["tool", "show", "--", "--agents"], False),
+        # ``--agents`` before the sentinel is still a real option.
+        (["--agents", "--", "x"], True),
         # No agents token anywhere.
         (["daemon", "stop"], False),
         # Empty argv.

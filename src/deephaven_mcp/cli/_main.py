@@ -90,7 +90,14 @@ def _argv_has_option(targets: frozenset[str]) -> bool:
     Tokens consumed as the value of a value-taking root option
     (``dh-mcp --config-dir --help`` treats ``--help`` as a path) are
     skipped so the match only fires for a genuine option, not a value
-    that happens to share the spelling.
+    that happens to share the spelling. The scan stops at a literal
+    ``--`` (POSIX end-of-options sentinel): everything after it is
+    positional data, never an option.
+
+    Like :func:`_lift_root_options`, the scan is purely lexical — it
+    has no grammar for subcommand options, so a target spelling
+    consumed as the *value* of a subcommand option still matches;
+    guard such a value with the ``--`` sentinel.
 
     Args:
         targets (frozenset[str]): Option spellings to look for
@@ -104,6 +111,8 @@ def _argv_has_option(targets: frozenset[str]) -> bool:
     i = 0
     while i < len(argv):
         tok = argv[i]
+        if tok == "--":
+            return False
         if tok in targets:
             return True
         if "=" not in tok and tok in value_taking and i + 1 < len(argv):

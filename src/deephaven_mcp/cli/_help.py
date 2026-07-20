@@ -71,7 +71,7 @@ from deephaven_mcp.config import DATA_DIR_ENV_VAR
 # Click rewraps each help paragraph unless it begins with a backspace
 # (\b) on its own line; prefixing the pre-formatted sections with this
 # marker preserves their column alignment and one-example-per-line
-# layout. the manifest builders strip the marker so the manifest stays clean.
+# layout. The manifest builders strip the marker so the manifest stays clean.
 _NO_WRAP = "\b\n"
 
 
