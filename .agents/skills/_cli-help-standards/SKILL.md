@@ -6,7 +6,7 @@ user-invocable: false
 
 # CLI Help Standards
 
-The dh-mcp CLI is described by three surfaces from **two authored sources**: a command's `HelpSpec` renders both the `--help` text and its agents-manifest node, and `docs/CLI.md` is written by hand. Help text is plain text rendered verbatim by click in the terminal, so it carries no reStructuredText markup. Every leaf command's help follows a fixed section contract so a human or an AI agent can operate the command without reading the source or `docs/CLI.md`.
+The dh-mcp CLI is described by three surfaces from **two authored sources**: in-code help renders both the `--help` text and the agents-manifest node — a `HelpSpec` on the root and every leaf command, a function docstring on each noun group (split into manifest summary/description by `_split_help_text`; see §2 *Group commands*) — and `docs/CLI.md` is written by hand. Help text is plain text rendered verbatim by click in the terminal, so it carries no reStructuredText markup. Every leaf command's help follows a fixed section contract so a human or an AI agent can operate the command without reading the source or `docs/CLI.md`.
 
 ## 1. Three surfaces, two sources
 
