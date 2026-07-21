@@ -53,7 +53,7 @@ def test_default_root_windows_without_appdata() -> None:
 
 
 def test_resolve_uses_env_var_when_set(tmp_path: Path) -> None:
-    """``$DH_MCP_DATA_DIR`` overrides the platform default."""
+    """``$DH_AI_DATA_DIR`` overrides the platform default."""
     env_value = str(tmp_path / "from_env")
     with patch.dict(os.environ, {DATA_DIR_ENV_VAR: env_value}):
         assert resolve_data_root() == Path(env_value)
@@ -67,7 +67,7 @@ def test_resolve_falls_back_to_default_when_env_unset() -> None:
 
 
 def test_resolve_expands_tilde_in_env_var() -> None:
-    """A ``~``-prefixed ``$DH_MCP_DATA_DIR`` expands to the user's home."""
+    """A ``~``-prefixed ``$DH_AI_DATA_DIR`` expands to the user's home."""
     with patch.dict(os.environ, {DATA_DIR_ENV_VAR: "~/some/where"}):
         resolved = resolve_data_root()
     assert resolved == Path.home() / "some" / "where"
@@ -76,4 +76,4 @@ def test_resolve_expands_tilde_in_env_var() -> None:
 
 def test_env_var_constant_is_stable() -> None:
     """The env-var name is part of the public contract."""
-    assert DATA_DIR_ENV_VAR == "DH_MCP_DATA_DIR"
+    assert DATA_DIR_ENV_VAR == "DH_AI_DATA_DIR"

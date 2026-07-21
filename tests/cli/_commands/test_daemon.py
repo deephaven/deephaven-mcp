@@ -359,7 +359,7 @@ def test_start_corrupt_registry_returns_2(tmp_path: Path) -> None:
     ``get_or_start_daemon`` propagates ``RegistryCorruptError``
     unchanged (no more auto-quarantine); the command layer wraps it
     in ``CliError(DAEMON_REGISTRY_CORRUPT)`` and surfaces the
-    ``dh-mcp daemon repair`` recovery procedure to the operator.
+    ``dhcli daemon repair`` recovery procedure to the operator.
     """
     rt = make_runtime(tmp_path)
     with patch.object(

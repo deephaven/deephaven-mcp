@@ -1,4 +1,4 @@
-"""End-to-end integration tests for the ``dh-mcp`` CLI.
+"""End-to-end integration tests for the ``dhcli`` CLI.
 
 These tests:
 
@@ -7,7 +7,7 @@ These tests:
   ``tests/resource_manager/test_launcher_integration.py``).
 - Seed a temporary configuration tree pointing the multiplexed
   systems server at that worker.
-- Drive the ``dh-mcp`` CLI as a real subprocess, exercising the
+- Drive the ``dhcli`` CLI as a real subprocess, exercising the
   full daemon lifecycle: ``start`` → ``status`` → ``tool list`` →
   ``tool show`` → ``tool call`` → ``restart`` → ``logs`` → ``stop``,
   the runtime tool-wrapper verbs against the live worker (``session
@@ -25,7 +25,7 @@ default ``uv run pytest`` run. Invoke with::
 Prerequisites:
 
 - ``deephaven-server`` must be importable in the current environment.
-- ``dh-mcp`` must be on ``$PATH`` (provided by ``uv sync``).
+- ``dhcli`` must be on ``$PATH`` (provided by ``uv sync``).
 """
 
 from __future__ import annotations
@@ -185,7 +185,7 @@ def _run_cli(
     root_flags: list[str] | None = None,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
-    """Drive the ``dh-mcp`` CLI as a subprocess.
+    """Drive the ``dhcli`` CLI as a subprocess.
 
     The runtime + config dir overrides are forwarded verbatim so each
     test gets an isolated daemon. ``root_flags`` are extra top-level
@@ -193,7 +193,7 @@ def _run_cli(
     since click requires root flags to precede the verb.
     """
     cmd = [
-        "dh-mcp",
+        "dhcli",
         "--config-dir",
         str(config_dir),
         "--runtime-dir",
@@ -235,8 +235,8 @@ def _structured_error(stderr: str) -> dict:
     reason="deephaven-server not installed",
 )
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 async def test_full_daemon_lifecycle(
     tmp_path: Path, community_worker_port: int, community_worker: str
@@ -349,8 +349,8 @@ async def test_full_daemon_lifecycle(
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_status_when_no_daemon(tmp_path: Path) -> None:
     """``daemon status`` against an empty runtime dir reports ``state=stopped``."""
@@ -416,8 +416,8 @@ def _seed_anonymous_config(cfg_dir: Path) -> None:
     reason="deephaven-server not installed",
 )
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 async def test_tool_call_error_exits_3(
     tmp_path: Path, community_worker_port: int, community_worker: str
@@ -454,8 +454,8 @@ async def test_tool_call_error_exits_3(
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_no_auto_start_without_daemon_exits_2(tmp_path: Path) -> None:
     """``--no-auto-start`` against a dead daemon exits 2 with ``daemon_not_running``."""
@@ -479,8 +479,8 @@ def test_no_auto_start_without_daemon_exits_2(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_config_validate_and_show(tmp_path: Path) -> None:
     """``config validate`` and ``config show`` succeed on a valid tree."""
@@ -507,11 +507,11 @@ def test_config_validate_and_show(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_root_options_accepted_after_subcommand(tmp_path: Path) -> None:
-    """End-to-end through the real ``dh-mcp`` binary: every root option is
+    """End-to-end through the real ``dhcli`` binary: every root option is
     accepted at any position on the command line.
 
     ``_lift_root_options`` (``cli/_main.py``) is exhaustively unit-tested
@@ -519,7 +519,7 @@ def test_root_options_accepted_after_subcommand(tmp_path: Path) -> None:
     full ``main()`` entry point in-process. This test closes the loop at
     the OS-subprocess level, where Python is started fresh by the shell
     and ``sys.argv`` is populated by the OS — the path that matters in
-    production for any operator typing ``dh-mcp config show -o json``.
+    production for any operator typing ``dhcli config show -o json``.
     """
     cfg_dir = tmp_path / "cfg"
     runtime_dir = tmp_path / "rt"
@@ -531,7 +531,7 @@ def test_root_options_accepted_after_subcommand(tmp_path: Path) -> None:
     # ``_lift_root_options`` click would fail with ``No such option
     # '--config-dir'`` at the first one.
     cmd = [
-        "dh-mcp",
+        "dhcli",
         "config",
         "show",
         "--config-dir",
@@ -559,7 +559,7 @@ def test_root_options_accepted_after_subcommand(tmp_path: Path) -> None:
     # ``-o=yaml`` would become ``-o`` + value ``=yaml`` — broken
     # regardless of position), so only the long ``=`` form is asserted.
     cmd_equals = [
-        "dh-mcp",
+        "dhcli",
         "config",
         "show",
         f"--config-dir={cfg_dir}",
@@ -582,11 +582,11 @@ def test_root_options_accepted_after_subcommand(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_help_at_depth_still_routes_to_subcommand(tmp_path: Path) -> None:
-    """``--help`` is deliberately not lifted: ``dh-mcp daemon --help``
+    """``--help`` is deliberately not lifted: ``dhcli daemon --help``
     must render the daemon group's help, not the root group's, even
     though ``daemon`` precedes the flag on the command line.
 
@@ -606,7 +606,7 @@ def test_help_at_depth_still_routes_to_subcommand(tmp_path: Path) -> None:
     # supplied only because ``_run_cli`` is not in play and the root
     # callback expects the standard arg order.
     cmd = [
-        "dh-mcp",
+        "dhcli",
         "--config-dir",
         str(cfg_dir),
         "--runtime-dir",
@@ -624,15 +624,15 @@ def test_help_at_depth_still_routes_to_subcommand(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     # Daemon group help (lists daemon verbs); not root help (which
     # lists top-level nouns like 'tool', 'session', etc.).
-    assert "Manage the local dh-mcp daemon" in result.stdout
+    assert "Manage the local dhcli daemon" in result.stdout
     assert "repair" in result.stdout
 
 
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_config_invalid_exits_2(tmp_path: Path) -> None:
     """A malformed config tree fails fast with ``config_invalid`` (exit 2).
@@ -668,8 +668,8 @@ def test_config_invalid_exits_2(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_agents_emits_json_without_config(tmp_path: Path) -> None:
     """``agents tree --full`` emits the complete manifest without touching config.
@@ -713,8 +713,8 @@ def test_agents_emits_json_without_config(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_daemon_repair_quarantines_corrupt_registry(tmp_path: Path) -> None:
     """``daemon repair`` moves aside an unparseable ``daemon.json``."""
@@ -752,8 +752,8 @@ _DEMO_ID = "community:community:demo"
     reason="deephaven-server not installed",
 )
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 async def test_session_wrapper_verbs_e2e(
     tmp_path: Path, community_worker_port: int, community_worker: str
@@ -875,8 +875,8 @@ async def test_session_wrapper_verbs_e2e(
     reason="deephaven-server not installed",
 )
 @pytest.mark.skipif(
-    shutil.which("dh-mcp") is None,
-    reason="dh-mcp entry point not on PATH",
+    shutil.which("dhcli") is None,
+    reason="dhcli entry point not on PATH",
 )
 def test_session_create_delete_roundtrip_e2e(tmp_path: Path) -> None:
     """``session create`` then a *separate* ``session delete`` round-trips.

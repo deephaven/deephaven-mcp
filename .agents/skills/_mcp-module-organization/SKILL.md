@@ -6,7 +6,7 @@ user-invocable: false
 
 # MCP Tools Module Organization Guidelines
 
-> **Scope.** This skill applies only to MCP server tool modules under `src/deephaven_mcp/mcp_systems_server/_tools/`. For commands in the local `dh-mcp` CLI under `src/deephaven_mcp/cli/_commands/`, apply the `cli-command-add` skill instead — the CLI uses a different framework (`click`), a different async pattern (`@run_async` from `cli/_async.py`), and a different error contract (`CliError` from `cli/_errors.py`). Do not transplant patterns between the two.
+> **Scope.** This skill applies only to MCP server tool modules under `src/deephaven_mcp/mcp_systems_server/_tools/`. For commands in the local `dhcli` CLI under `src/deephaven_mcp/cli/_commands/`, apply the `cli-command-add` skill instead — the CLI uses a different framework (`click`), a different async pattern (`@run_async` from `cli/_async.py`), and a different error contract (`CliError` from `cli/_errors.py`). Do not transplant patterns between the two.
 
 ## File Organization Principles
 
@@ -31,7 +31,7 @@ user-invocable: false
 5. **Registering New Tool Modules**:
    - **CRITICAL**: Every tool module must define a `register_tools(server: FastMCP) -> None` function
    - This function calls `server.tool()(tool_fn)` for each tool in the module
-   - After creating a new module, add a `module.register_tools(server)` call to `_register_tools()` in `src/deephaven_mcp/mcp_systems_server/_fastmcp.py`. **Registration is not gated by configuration** — every tool module registers unconditionally, so the tool surface is stable and self-describing across all deployment shapes (and matches the static `dh-mcp` CLI command tree). A tool that needs a configuration section the deployment lacks **self-reports applicability when invoked**: it returns an empty result where one is meaningful (e.g. `enterprise_systems_status` → `{"systems": []}`) or a structured user-facing error otherwise. The section accessors enforce this — `get_enterprise_settings` raises `EnterpriseNotConfiguredError` and `get_community_settings`/`get_community_registry` raise `CommunityNotConfiguredError` (both `ConfigurationError` subclasses), which each tool's `except` handler converts to a `success=False` response. Do **not** gate registration on `multi_config.community`/`multi_config.enterprise`. See `_register_tools` in `mcp_systems_server/_fastmcp.py`.
+   - After creating a new module, add a `module.register_tools(server)` call to `_register_tools()` in `src/deephaven_mcp/mcp_systems_server/_fastmcp.py`. **Registration is not gated by configuration** — every tool module registers unconditionally, so the tool surface is stable and self-describing across all deployment shapes (and matches the static `dhcli` CLI command tree). A tool that needs a configuration section the deployment lacks **self-reports applicability when invoked**: it returns an empty result where one is meaningful (e.g. `enterprise_systems_status` → `{"systems": []}`) or a structured user-facing error otherwise. The section accessors enforce this — `get_enterprise_settings` raises `EnterpriseNotConfiguredError` and `get_community_settings`/`get_community_registry` raise `CommunityNotConfiguredError` (both `ConfigurationError` subclasses), which each tool's `except` handler converts to a `success=False` response. Do **not** gate registration on `multi_config.community`/`multi_config.enterprise`. See `_register_tools` in `mcp_systems_server/_fastmcp.py`.
 
 ## Required Pattern for MCP Tool Modules
 

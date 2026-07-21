@@ -99,7 +99,7 @@ a real use case for changing it.
 
 ## When you think you need an env var directly
 
-Almost never. `DH_MCP_DATA_DIR` is the only legitimate case
+Almost never. `DH_AI_DATA_DIR` is the only legitimate case
 today (read by
 `deephaven_mcp.config.resolve_config_dir`). Before
 adding another, ask: can the operator put this value in a JSON

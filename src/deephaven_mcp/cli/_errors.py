@@ -1,4 +1,4 @@
-"""Structured-error contract for the ``dh-mcp`` CLI.
+"""Structured-error contract for the ``dhcli`` CLI.
 
 Subcommand handlers signal user-facing failure by raising
 :class:`CliError` with a stable :class:`ErrorCode` enum value. The
@@ -33,7 +33,7 @@ from deephaven_mcp.cli._format import OutputMode, format_output
 
 
 class ExitCode(IntEnum):
-    """Stable process exit codes for the ``dh-mcp`` CLI.
+    """Stable process exit codes for the ``dhcli`` CLI.
 
     Each member carries its agent-facing help text intrinsically via the
     ``(value, help_text)`` tuple — adding a member without a help string
@@ -100,14 +100,14 @@ class ErrorCode(StrEnum):
             "from daemon_not_running so the operator gets an actionable "
             "diagnostic rather than the misleading 'no daemon running' the CLI "
             "would otherwise emit after silently treating a corrupt file as "
-            "absent. Recover with 'dh-mcp daemon repair'."
+            "absent. Recover with 'dhcli daemon repair'."
         ),
     )
     DAEMON_REGISTRY_LIVE = (
         "daemon_registry_live",
         (
-            "'dh-mcp daemon repair' refused to move daemon.json aside "
-            "because a live daemon is still registered. Run 'dh-mcp daemon "
+            "'dhcli daemon repair' refused to move daemon.json aside "
+            "because a live daemon is still registered. Run 'dhcli daemon "
             "stop' first to avoid orphaning the running process."
         ),
     )
@@ -116,7 +116,7 @@ class ErrorCode(StrEnum):
         (
             "The running daemon is a different build than this CLI (its "
             "version, virtualenv, or source fingerprint differs) and the "
-            "daemon.reuse policy resolved to 'refuse'. Run 'dh-mcp daemon "
+            "daemon.reuse policy resolved to 'refuse'. Run 'dhcli daemon "
             "restart' to replace it, or adjust daemon.reuse in cli.json."
         ),
     )
@@ -136,7 +136,7 @@ class ErrorCode(StrEnum):
     )
     TOOL_NOT_FOUND = (
         "tool_not_found",
-        "'dh-mcp tool show' or 'tool call' referenced an unknown tool name.",
+        "'dhcli tool show' or 'tool call' referenced an unknown tool name.",
     )
     TOOL_RETURNED_ERROR = (
         "tool_returned_error",
@@ -149,8 +149,7 @@ class ErrorCode(StrEnum):
     )
     COMMAND_NOT_FOUND = (
         "command_not_found",
-        "'dh-mcp agents command PATH' referenced a command path that "
-        "does not exist.",
+        "'dhcli agents command PATH' referenced a command path that does not exist.",
     )
     MISSING_ARGUMENT = (
         "missing_argument",
@@ -182,7 +181,7 @@ class ErrorCode(StrEnum):
     )
     SYSTEM_NOT_FOUND = (
         "system_not_found",
-        "The named Enterprise system is not configured (run 'dh-mcp system list').",
+        "The named Enterprise system is not configured (run 'dhcli system list').",
     )
     CONFIG_INVALID = (
         "config_invalid",

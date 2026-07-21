@@ -34,7 +34,7 @@ Each archive contains two executables:
 | Binary | What it is |
 |--------|------------|
 | `dh-mcp-systems-server` | The MCP server your AI tool connects to |
-| `dh-mcp` | The local CLI |
+| `dhcli` | The Deephaven CLI (for humans and AI agents) |
 
 The docs server (`dh-mcp-docs-server`) is **not** distributed this way — it runs as a hosted service.
 
@@ -71,7 +71,7 @@ The build writes, under `dist/pyapp/`:
 dist/pyapp/
 ├── <target>/
 │   ├── dh-mcp-systems-server[.exe]
-│   └── dh-mcp[.exe]
+│   └── dhcli[.exe]
 └── deephaven-mcp-pyapp-<version>-<target>.{tar.gz,zip}
 ```
 

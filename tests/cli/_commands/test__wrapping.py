@@ -58,15 +58,15 @@ async def test_acquire_forwards_config_and_recovery_hint(tmp_path: Path) -> None
         return make_entry()
 
     with patch.object(_wrapping, "acquire_daemon", fake_acquire_daemon):
-        entry = await acquire(rt, retry_command="dh-mcp system list")
+        entry = await acquire(rt, retry_command="dhcli system list")
 
     assert entry.port == 9999
     assert captured["auto_start"] is True
     assert captured["code"] is ErrorCode.DAEMON_NOT_RUNNING
     err = captured["on_corrupt"](RegistryCorruptError("bad json"))  # type: ignore[operator]
     assert err.code is ErrorCode.DAEMON_REGISTRY_CORRUPT
-    assert "dh-mcp daemon repair" in err.message
-    assert "dh-mcp system list" in err.message
+    assert "dhcli daemon repair" in err.message
+    assert "dhcli system list" in err.message
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ async def test_call_for_payload_composes_fetch_and_returns_payload(
         patch.object(_wrapping, "call_tool", AsyncMock(return_value=result)) as call,
     ):
         payload = await call_for_payload(
-            rt, "list_systems", retry_command="dh-mcp system list", arguments={"x": 1}
+            rt, "list_systems", retry_command="dhcli system list", arguments={"x": 1}
         )
     assert payload == {"systems": [1, 2]}
     assert call.await_args.args[2] == "list_systems"
@@ -322,7 +322,7 @@ async def test_call_for_payload_failure_exits_3(tmp_path: Path) -> None:
         patch.object(_wrapping, "call_tool", AsyncMock(return_value=result)),
     ):
         with pytest.raises(CliError) as exc:
-            await call_for_payload(rt, "t", retry_command="dh-mcp x", arguments={})
+            await call_for_payload(rt, "t", retry_command="dhcli x", arguments={})
     assert exc.value.code is ErrorCode.TOOL_RETURNED_ERROR
 
 
@@ -438,7 +438,7 @@ async def test_call_and_echo_table_drops_format_and_keeps_order_in_human_mode(
         await call_and_echo_table(
             rt,
             "catalog_table_sample",
-            retry_command="dh-mcp catalog sample",
+            retry_command="dhcli catalog sample",
             arguments={},
         )
     out = capsys.readouterr().out
@@ -456,7 +456,7 @@ async def test_call_and_echo_table_keeps_format_and_order_in_json_mode(
     acq, call = _patched_call(result)
     with acq, call:
         await call_and_echo_table(
-            rt, "session_table_data", retry_command="dh-mcp table data", arguments={}
+            rt, "session_table_data", retry_command="dhcli table data", arguments={}
         )
     raw = capsys.readouterr().out
     # require_success strips success/isError; format and all data survive.
@@ -492,7 +492,7 @@ async def test_call_and_echo_table_drops_columns_in_human_mode(
         await call_and_echo_table(
             rt,
             "catalog_namespaces_list",
-            retry_command="dh-mcp catalog namespaces",
+            retry_command="dhcli catalog namespaces",
             arguments={},
         )
     out = capsys.readouterr().out
@@ -515,7 +515,7 @@ async def test_call_and_echo_table_keeps_columns_in_json_mode(
         await call_and_echo_table(
             rt,
             "catalog_namespaces_list",
-            retry_command="dh-mcp catalog namespaces",
+            retry_command="dhcli catalog namespaces",
             arguments={},
         )
     emitted = json.loads(capsys.readouterr().out)
@@ -535,7 +535,7 @@ async def test_call_and_echo_fetches_then_prints_whole_payload(
         patch.object(_wrapping, "call_tool", AsyncMock(return_value=result)) as call,
     ):
         await call_and_echo(
-            rt, "list_systems", retry_command="dh-mcp system list", arguments={}
+            rt, "list_systems", retry_command="dhcli system list", arguments={}
         )
     assert "count: 1" in capsys.readouterr().out
     assert call.await_args.args[2] == "list_systems"
@@ -555,7 +555,7 @@ async def test_call_and_echo_forwards_sort_keys_and_human_exclude(
         await call_and_echo(
             rt,
             "t",
-            retry_command="dh-mcp x",
+            retry_command="dhcli x",
             arguments={},
             sort_keys=False,
             human_exclude=("drop",),
@@ -586,7 +586,7 @@ async def test_call_and_echo_field_emits_field_and_asserts_call(
         await call_and_echo_field(
             rt,
             "list_systems",
-            retry_command="dh-mcp system list",
+            retry_command="dhcli system list",
             arguments={"x": 1},
             field="systems",
             default=[],
@@ -607,7 +607,7 @@ async def test_call_and_echo_field_uses_default_when_field_absent(
     acq, call = _patched_call(result)
     with acq, call:
         await call_and_echo_field(
-            rt, "t", retry_command="dh-mcp x", arguments={}, field="missing", default=[]
+            rt, "t", retry_command="dhcli x", arguments={}, field="missing", default=[]
         )
     assert capsys.readouterr().out.strip() == "(none)"
 
@@ -633,7 +633,7 @@ async def test_call_and_echo_field_surfaces_partial_result_with_errors(
         await call_and_echo_field(
             rt,
             "sessions_list",
-            retry_command="dh-mcp session list",
+            retry_command="dhcli session list",
             arguments={},
             field="sessions",
             default=[],
@@ -665,7 +665,7 @@ async def test_call_and_echo_field_surfaces_partial_result_detail_only(
         await call_and_echo_field(
             rt,
             "sessions_list",
-            retry_command="dh-mcp session list",
+            retry_command="dhcli session list",
             arguments={},
             field="sessions",
             default=[],
@@ -697,7 +697,7 @@ async def test_call_and_echo_field_suppresses_completed_partial_result_when_opte
         await call_and_echo_field(
             rt,
             "enterprise_systems_status",
-            retry_command="dh-mcp system status",
+            retry_command="dhcli system status",
             arguments={},
             field="systems",
             default=[],
@@ -730,7 +730,7 @@ async def test_call_and_echo_field_loading_still_warns_when_opted_out(
         await call_and_echo_field(
             rt,
             "enterprise_systems_status",
-            retry_command="dh-mcp system status",
+            retry_command="dhcli system status",
             arguments={},
             field="systems",
             default=[],
@@ -763,7 +763,7 @@ async def test_call_and_echo_field_failed_surfaces_errors_when_reasons_in_rows(
         await call_and_echo_field(
             rt,
             "enterprise_systems_status",
-            retry_command="dh-mcp system status",
+            retry_command="dhcli system status",
             arguments={},
             field="systems",
             default=[],
@@ -788,7 +788,7 @@ async def test_call_and_echo_field_warns_on_truncated_result(
         await call_and_echo_field(
             rt,
             "catalog_namespaces_list",
-            retry_command="dh-mcp catalog namespaces",
+            retry_command="dhcli catalog namespaces",
             arguments={},
             field="namespaces",
             default=[],
@@ -811,7 +811,7 @@ async def test_call_and_echo_field_truncation_hint_appended(
         await call_and_echo_field(
             rt,
             "catalog_namespaces_list",
-            retry_command="dh-mcp catalog namespaces",
+            retry_command="dhcli catalog namespaces",
             arguments={},
             field="namespaces",
             default=[],
@@ -835,7 +835,7 @@ async def test_call_and_echo_field_complete_result_no_truncation_warning(
         await call_and_echo_field(
             rt,
             "catalog_namespaces_list",
-            retry_command="dh-mcp catalog namespaces",
+            retry_command="dhcli catalog namespaces",
             arguments={},
             field="namespaces",
             default=[],

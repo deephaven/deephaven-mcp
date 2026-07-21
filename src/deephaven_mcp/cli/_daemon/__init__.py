@@ -1,6 +1,6 @@
 """CLI daemon lifecycle subsystem — find an existing daemon or spawn one.
 
-The ``dh-mcp`` command layer obtains daemon connection details through this
+The ``dhcli`` command layer obtains daemon connection details through this
 package's public surface; every CLI subcommand reaches a live daemon via
 :func:`get_or_start_daemon` (directly, or through the shared acquire helper in
 :mod:`deephaven_mcp.cli._commands._acquire`), and the ``daemon`` verb group

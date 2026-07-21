@@ -85,7 +85,7 @@ def test_manager_config_dir_explicit_wins(tmp_path: Path) -> None:
 
 
 def test_manager_config_dir_uses_data_root_env_var(tmp_path: Path) -> None:
-    """With no explicit arg, the manager uses ``$DH_MCP_DATA_DIR/config``."""
+    """With no explicit arg, the manager uses ``$DH_AI_DATA_DIR/config``."""
     root = str(tmp_path / "data_root")
     with patch.dict(os.environ, {DATA_DIR_ENV_VAR: root}):
         assert ConfigTreeLoader().config_dir == Path(root) / "config"

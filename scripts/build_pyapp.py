@@ -488,7 +488,7 @@ def build_binary(
     """Compile one PyApp binary with the distribution embedded.
 
     Args:
-        binary_name (str): Output binary name (e.g. ``dh-mcp``).
+        binary_name (str): Output binary name (e.g. ``dhcli``).
         exec_spec (str): The ``module:function`` entry point.
         project_name (str): Distribution name (``PYAPP_PROJECT_NAME``).
         project_version (str): Project version (``PYAPP_PROJECT_VERSION``).

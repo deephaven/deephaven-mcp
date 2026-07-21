@@ -1,12 +1,12 @@
 ---
 name: _cli-tool-wrapping
-description: Conventions for dh-mcp commands that wrap an MCP tool — wrapper categories, type scoping, path-flag locality (CLI-read vs server-side), and the wraps_tool drift contract — invoke when adding/editing a cli/_commands verb that fronts a tool; not for authoring MCP server tools (_mcp-module-organization)
+description: Conventions for dhcli commands that wrap an MCP tool — wrapper categories, type scoping, path-flag locality (CLI-read vs server-side), and the wraps_tool drift contract — invoke when adding/editing a cli/_commands verb that fronts a tool; not for authoring MCP server tools (_mcp-module-organization)
 user-invocable: false
 ---
 
 # CLI tool-wrapping conventions
 
-Runtime `dh-mcp` commands (`session`, `system`, `table`, `catalog`, `pq`, `docs`) wrap MCP tools. This skill is the how; the *why* is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `_cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`_mcp-module-organization`).
+Runtime `dhcli` commands (`session`, `system`, `table`, `catalog`, `pq`, `docs`) wrap MCP tools. This skill is the how; the *why* is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `_cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`_mcp-module-organization`).
 
 ## The shared flow
 
@@ -18,12 +18,12 @@ Every daemon-backed wrapper routes through `cli/_commands/_wrapping.py`, never a
 ```python
 # Whole-payload verb (emit the tool's result as-is):
 await call_and_echo(
-    runtime, "<tool>", retry_command="dh-mcp <noun> <verb>", arguments=arguments
+    runtime, "<tool>", retry_command="dhcli <noun> <verb>", arguments=arguments
 )
 
 # Shaping verb (emit one field as a bare value):
 await call_and_echo_field(
-    runtime, "<tool>", retry_command="dh-mcp <noun> <verb>",
+    runtime, "<tool>", retry_command="dhcli <noun> <verb>",
     arguments=arguments, field="<key>", default=[],
 )
 ```

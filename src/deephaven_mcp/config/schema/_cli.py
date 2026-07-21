@@ -101,7 +101,7 @@ class OutputConfig(RedactableSchema):
     indented for human reading, ``"yaml"`` also emits a
     deterministically sorted structured document, and ``"human"`` emits
     terminal-friendly output for interactive use. Overridden per
-    invocation by ``-o/--output`` or ``DH_MCP_OUTPUT``."""
+    invocation by ``-o/--output`` or ``DHCLI_OUTPUT``."""
 
 
 class DaemonTimeouts(RedactableSchema):
@@ -117,7 +117,7 @@ class DaemonTimeouts(RedactableSchema):
     kill_after_seconds: Annotated[int, Field(gt=0)] = 10
     """Maximum number of seconds the CLI waits after sending
     ``SIGTERM`` to the daemon before escalating to ``SIGKILL``.
-    Applies to ``dh-mcp daemon stop`` and ``dh-mcp daemon restart``.
+    Applies to ``dhcli daemon stop`` and ``dhcli daemon restart``.
     Strictly a CLI-side patience knob — the daemon binary itself
     never reads it."""
 
@@ -208,7 +208,7 @@ class DaemonControlConfig(RedactableSchema):
     on demand if it is not already running. When ``False``, tool
     subcommands exit with a non-zero status before attempting any
     tool call unless the daemon has been started explicitly via
-    ``dh-mcp daemon start``."""
+    ``dhcli daemon start``."""
 
     reuse: DaemonReusePolicy = Field(default_factory=DaemonReusePolicy)
     """Per-field policy for reusing a daemon that is a different build
@@ -251,7 +251,7 @@ class DocsTimeouts(RedactableSchema):
 
 
 class DocsConfig(RedactableSchema):
-    """Docs MCP server settings for the ``dh-mcp docs`` commands."""
+    """Docs MCP server settings for the ``dhcli docs`` commands."""
 
     url: str = "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
     """Streamable-HTTP endpoint of the docs MCP server. Must be an

@@ -1,4 +1,4 @@
-"""Daemon-reuse policy engine for the ``dh-mcp`` CLI.
+"""Daemon-reuse policy engine for the ``dhcli`` CLI.
 
 Decides whether a live daemon can be reused when its recorded build identity
 differs from the CLI's own. The comparison is field by field — package

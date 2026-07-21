@@ -6,13 +6,13 @@ mirrors the on-disk layout one-for-one (``server.json`` ->
 ``server``, ``cli.json`` -> ``cli``, ``community/`` -> ``community``,
 ``enterprise/`` -> ``enterprise``). Used by the multiplexed MCP
 systems server to drive registry construction at startup, and by the
-``dh-mcp`` CLI for ``config show`` / ``config validate``.
+``dhcli`` CLI for ``config show`` / ``config validate``.
 
 Directory layout (under the directory returned by
 :func:`deephaven_mcp.config.resolve_config_dir`)::
 
     server.json                      # server-process tunables (transport, host, port, PSK, ...)
-    cli.json                         # dh-mcp CLI user defaults (optional)
+    cli.json                         # dhcli CLI user defaults (optional)
     community/
       settings.json                  # community-wide globals (optional)
       sessions/
@@ -71,14 +71,14 @@ class ConfigTree(StrictSchema):
 
     The type is consumed by both the multiplexed systems server (which
     drives registry construction from ``community`` + ``enterprise``)
-    and the ``dh-mcp`` CLI (which dumps the redacted tree for
+    and the ``dhcli`` CLI (which dumps the redacted tree for
     ``config show`` and reconstructs it for ``config validate``).
     """
 
     config_dir: Path
     """The configuration directory the manager loaded from, after
     resolution by :func:`deephaven_mcp.config.resolve_config_dir`
-    (explicit constructor arg, ``$DH_MCP_DATA_DIR/config``, or the
+    (explicit constructor arg, ``$DH_AI_DATA_DIR/config``, or the
     platform default user-data root's ``config`` subdirectory)."""
 
     server: ServerConfig | None = None
@@ -89,7 +89,7 @@ class ConfigTree(StrictSchema):
     """Parsed ``cli.json`` when present, otherwise an all-defaults
     :class:`CliConfig`. Always populated: :func:`load_cli` substitutes
     defaults for an absent file. Unused by the server itself; the
-    ``dh-mcp`` CLI reads this for output formatting and request
+    ``dhcli`` CLI reads this for output formatting and request
     timeouts (with top-level flag overrides applied)."""
 
     community: CommunityConfig | None = None

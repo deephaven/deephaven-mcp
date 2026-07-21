@@ -1,4 +1,4 @@
-"""Daemon acquisition for ``dh-mcp`` command modules.
+"""Daemon acquisition for ``dhcli`` command modules.
 
 Adapts the ``cli._daemon`` lifecycle layer for command use: acquire a
 running daemon (get-or-start) and translate daemon-lifecycle exceptions into
@@ -41,9 +41,9 @@ def registry_corrupt_message(exc: RegistryCorruptError, *, retry_command: str) -
     """
     return (
         f"{exc}. The daemon process (if any) is unaffected. To recover:\n"
-        "  1. Run `dh-mcp daemon status` to confirm whether a daemon is still running.\n"
-        "  2. If a daemon is running, run `dh-mcp daemon stop` first.\n"
-        "  3. Run `dh-mcp daemon repair` to move the corrupt file aside.\n"
+        "  1. Run `dhcli daemon status` to confirm whether a daemon is still running.\n"
+        "  2. If a daemon is running, run `dhcli daemon stop` first.\n"
+        "  3. Run `dhcli daemon repair` to move the corrupt file aside.\n"
         f"  4. Re-run `{retry_command}`."
     )
 

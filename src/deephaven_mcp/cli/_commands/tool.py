@@ -1,4 +1,4 @@
-"""``dh-mcp tool`` noun group: inspect and invoke MCP tools.
+"""``dhcli tool`` noun group: inspect and invoke MCP tools.
 
 Verbs: ``list``, ``show``, ``call``.
 """
@@ -69,10 +69,10 @@ _OUTPUT_LIST = OutputSpec("list", _TOOL_FIELDS, note="Array of registered tools.
         ),
         output=_OUTPUT_LIST,
         examples=(
-            "$ dh-mcp tool list",
-            "$ dh-mcp -o json tool list | jq '.[].name'",
+            "$ dhcli tool list",
+            "$ dhcli -o json tool list | jq '.[].name'",
         ),
-        see_also=("dh-mcp tool show NAME", "dh-mcp tool call NAME"),
+        see_also=("dhcli tool show NAME", "dhcli tool call NAME"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=wrapper_error_codes(tool_error=False, request_timeout=False),
     ),
@@ -88,7 +88,7 @@ _OUTPUT_LIST = OutputSpec("list", _TOOL_FIELDS, note="Array of registered tools.
 @run_async
 async def tool_list(runtime: Runtime, show_all: bool) -> None:
     """List MCP tools registered on the daemon."""
-    handle = await acquire(runtime, retry_command="dh-mcp tool list")
+    handle = await acquire(runtime, retry_command="dhcli tool list")
     try:
         async with McpClient.for_daemon(
             handle,
@@ -118,14 +118,14 @@ _OUTPUT_SHOW = OutputSpec("object", _TOOL_FIELDS)
             "summary; in json/yaml mode the whole tool object is emitted."
         ),
         arguments=(
-            HelpEntry("NAME", "Tool name. Run 'dh-mcp tool list' to discover names."),
+            HelpEntry("NAME", "Tool name. Run 'dhcli tool list' to discover names."),
         ),
         output=_OUTPUT_SHOW,
         examples=(
-            "$ dh-mcp tool show sessions_list",
-            "$ dh-mcp -o json tool show sessions_list | jq .inputSchema",
+            "$ dhcli tool show sessions_list",
+            "$ dhcli -o json tool show sessions_list | jq .inputSchema",
         ),
-        see_also=("dh-mcp tool list", "dh-mcp tool call NAME"),
+        see_also=("dhcli tool list", "dhcli tool call NAME"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.TOOL_NOT_FOUND,
@@ -138,7 +138,7 @@ _OUTPUT_SHOW = OutputSpec("object", _TOOL_FIELDS)
 @run_async
 async def tool_show(runtime: Runtime, name: str) -> None:
     """Show one MCP tool's metadata."""
-    handle = await acquire(runtime, retry_command="dh-mcp tool show")
+    handle = await acquire(runtime, retry_command="dhcli tool show")
     try:
         async with McpClient.for_daemon(
             handle,
@@ -206,16 +206,16 @@ _OUTPUT_CALL = OutputSpec(
             "Exit code 3 if the tool returns isError=True."
         ),
         arguments=(
-            HelpEntry("NAME", "Tool name. Run 'dh-mcp tool list' to discover names."),
+            HelpEntry("NAME", "Tool name. Run 'dhcli tool list' to discover names."),
         ),
         output=_OUTPUT_CALL,
         examples=(
-            "$ dh-mcp tool call sessions_list",
-            "$ dh-mcp tool call sessions_list --arg type=community",
-            "$ dh-mcp -o json tool call session_community_create "
+            "$ dhcli tool call sessions_list",
+            "$ dhcli tool call sessions_list --arg type=community",
+            "$ dhcli -o json tool call session_community_create "
             "--arg session_name=demo",
         ),
-        see_also=("dh-mcp tool list", "dh-mcp tool show NAME"),
+        see_also=("dhcli tool list", "dhcli tool show NAME"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.ARG_PARSE_ERROR, *wrapper_error_codes()),
     ),
@@ -233,7 +233,7 @@ _OUTPUT_CALL = OutputSpec(
 async def tool_call(runtime: Runtime, name: str, args: tuple[str, ...]) -> None:
     """Invoke a single MCP tool and print its result."""
     arguments = dict(parse_key_value(p, decode_json=True) for p in args)
-    handle = await acquire(runtime, retry_command="dh-mcp tool call")
+    handle = await acquire(runtime, retry_command="dhcli tool call")
     result = await call_tool(handle, runtime, name, arguments)
     echo_payload(runtime, result)
     if result.isError:

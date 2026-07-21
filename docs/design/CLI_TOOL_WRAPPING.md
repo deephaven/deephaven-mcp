@@ -1,6 +1,6 @@
-# Design: wrapping MCP tools as first-class `dh-mcp` CLI commands
+# Design: wrapping MCP tools as first-class `dhcli` CLI commands
 
-**Audience:** contributors and architects working on the `dh-mcp` CLI.
+**Audience:** contributors and architects working on the `dhcli` CLI.
 **Scope:** *why* the CLI wraps MCP tools the way it does — the noun
 structure, the type-scoping rule, the wrapper categories, output shaping
 and diagnostics, and the schema-drift contract. Per-command reference
@@ -20,7 +20,7 @@ here.
 
 ## Why a wrapper layer exists
 
-`dh-mcp tool call <name> --arg key=value` can already invoke any MCP
+`dhcli tool call <name> --arg key=value` can already invoke any MCP
 tool, but it gives users and AI agents no typed flags, no
 tab-completion, no per-argument validation, and no shaped output, and
 it forces JSON-encoding tricks (`--arg n=42`). The wrapper layer turns
@@ -172,7 +172,7 @@ re-surface a partial-result diagnostic on stderr; see *Output shaping*).
 @run_async
 async def system_list(runtime: Runtime) -> None:
     await call_and_echo_field(
-        runtime, "list_systems", retry_command="dh-mcp system list",
+        runtime, "list_systems", retry_command="dhcli system list",
         arguments={}, field="systems", default=[],
     )
 ```
@@ -257,5 +257,5 @@ runs the drift check on `_tools/**` or `cli/_commands/**` edits).
 | `docs` | (Direct-URL; docs server at `docs.url`, no daemon) `ask`→`docs_chat`; `status`→ connectivity probe (no tool binding) |
 
 Every group above is implemented, each complete (all of a noun's verbs
-are wrapped). Any tool is still reachable directly via `dh-mcp tool call`
+are wrapped). Any tool is still reachable directly via `dhcli tool call`
 as the raw escape hatch.

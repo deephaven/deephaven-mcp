@@ -3,7 +3,7 @@
   //
   // This fixture exercises every file-INDEPENDENT v1->v2 conversion shape so the
   // integration test round-trips them all through the real v2 loader
-  // (dh-mcp config validate). Secrets are covered in both the literal (regular)
+  // (dhcli config validate). Secrets are covered in both the literal (regular)
   // and ${env:} forms: PSK literal (local_dev) + env (psk_env); Basic->custom
   // literal (basic) + env (basic_env); password literal (analytics) + env (prod).
   // Also: anonymous auth; never_timeout and Groovy normalization; both the docker

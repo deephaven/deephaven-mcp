@@ -1,4 +1,4 @@
-"""Shared flow for ``dh-mcp`` commands that wrap MCP tools.
+"""Shared flow for ``dhcli`` commands that wrap MCP tools.
 
 Every runtime command that fronts an MCP tool follows the same flow:
 acquire the daemon, call the tool over MCP, unwrap the structured

@@ -34,7 +34,7 @@ curl -O https://raw.githubusercontent.com/deephaven/deephaven-mcp/main/scripts/c
 3. **Validate** the result:
 
    ```bash
-   dh-mcp config validate
+   dhcli config validate
    ```
 
 The converter copies your secrets, splits the old file into the v2
@@ -60,10 +60,10 @@ reads by default:
 
 - macOS or Linux: `~/.deephaven/ai/config/`
 - Windows: `%APPDATA%/Deephaven/ai/config/`
-- If you have set `DH_MCP_DATA_DIR`: `$DH_MCP_DATA_DIR/config`
+- If you have set `DH_AI_DATA_DIR`: `$DH_AI_DATA_DIR/config`
 
 If you used `--output DIR`, validate that directory with
-`dh-mcp --config-dir DIR config validate`.
+`dhcli --config-dir DIR config validate`.
 
 ## If you see a warning
 
@@ -72,7 +72,7 @@ username/password ("Basic") logins, Docker images, and disabled session
 creation all convert automatically. It prints a warning only when a
 choice is genuinely yours to make, for example a setting with no v2
 equivalent or an incomplete TLS client certificate. Each warning names
-the exact file and field. Fix those, then re-run `dh-mcp config validate`.
+the exact file and field. Fix those, then re-run `dhcli config validate`.
 
 If a required secret is missing entirely from the old file — an auth type
 other than anonymous with no token (or no `*_env_var` reference), a

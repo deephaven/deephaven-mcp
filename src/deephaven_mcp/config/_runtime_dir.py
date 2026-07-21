@@ -13,12 +13,12 @@ Resolution precedence (highest first):
 
 1. Explicit ``runtime_dir`` argument passed by the caller (CLI
    ``--runtime-dir`` flag, test fixtures, etc.).
-2. ``$DH_MCP_DATA_DIR / "runtime"`` — i.e. the env-overridden data
+2. ``$DH_AI_DATA_DIR / "runtime"`` — i.e. the env-overridden data
    root with a fixed ``"runtime"`` subdirectory.
 3. The platform default data root plus ``"runtime"``.
 
-There is intentionally **no** ``DH_MCP_RUNTIME_DIR`` env var: a
-single ``DH_MCP_DATA_DIR`` knob moves every MCP-managed directory at
+There is intentionally **no** ``DH_AI_RUNTIME_DIR`` env var: a
+single ``DH_AI_DATA_DIR`` knob moves every MCP-managed directory at
 once.
 
 The :func:`daemon_dir` helper returns the subdirectory under the

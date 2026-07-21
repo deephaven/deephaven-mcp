@@ -19,10 +19,10 @@ from deephaven_mcp.cli._format import (
 def test_output_env_var_is_the_public_contract_name() -> None:
     """Pin the env-var name agents and users rely on to select the output mode.
 
-    This is the external wire contract (``DH_MCP_OUTPUT``); changing it is a
+    This is the external wire contract (``DHCLI_OUTPUT``); changing it is a
     breaking change, so it is asserted directly rather than left to behavior.
     """
-    assert OUTPUT_ENV_VAR == "DH_MCP_OUTPUT"
+    assert OUTPUT_ENV_VAR == "DHCLI_OUTPUT"
 
 
 def test_default_output_mode_matches_config_schema_default() -> None:

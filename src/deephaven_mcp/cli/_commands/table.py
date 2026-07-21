@@ -1,4 +1,4 @@
-"""``dh-mcp table`` noun group: inspect tables in a Deephaven session.
+"""``dhcli table`` noun group: inspect tables in a Deephaven session.
 
 Verbs: ``list``, ``schema``, ``data``.
 """
@@ -59,8 +59,8 @@ _OUTPUT_LIST = OutputSpec(
         ),
         arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_LIST,
-        examples=("$ dh-mcp table list community:community:dev",),
-        see_also=("dh-mcp table schema ID TABLE", "dh-mcp table data ID TABLE"),
+        examples=("$ dhcli table list community:community:dev",),
+        see_also=("dhcli table schema ID TABLE", "dhcli table data ID TABLE"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -73,7 +73,7 @@ async def table_list(runtime: Runtime, id: str) -> None:
     await call_and_echo_field(
         runtime,
         "session_tables_list",
-        retry_command="dh-mcp table list",
+        retry_command="dhcli table list",
         arguments={"id": id},
         field="table_names",
         default=[],
@@ -116,8 +116,8 @@ _OUTPUT_SCHEMA = OutputSpec(
             HelpEntry("TABLE_NAME", "The table whose schema to show."),
         ),
         output=_OUTPUT_SCHEMA,
-        examples=("$ dh-mcp table schema community:community:dev trades",),
-        see_also=("dh-mcp table list ID",),
+        examples=("$ dhcli table schema community:community:dev trades",),
+        see_also=("dhcli table list ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -132,7 +132,7 @@ async def table_schema(runtime: Runtime, id: str, table_name: str) -> None:
     await call_and_echo(
         runtime,
         "session_table_schema",
-        retry_command="dh-mcp table schema",
+        retry_command="dhcli table schema",
         arguments=arguments,
     )
 
@@ -164,10 +164,10 @@ _OUTPUT_DATA = OutputSpec(
         ),
         output=_OUTPUT_DATA,
         examples=(
-            "$ dh-mcp table data community:community:dev trades",
-            "$ dh-mcp table data community:community:dev trades --max-rows 50 --tail",
+            "$ dhcli table data community:community:dev trades",
+            "$ dhcli table data community:community:dev trades --max-rows 50 --tail",
         ),
-        see_also=("dh-mcp table list ID", "dh-mcp table schema ID TABLE"),
+        see_also=("dhcli table list ID", "dhcli table schema ID TABLE"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -208,6 +208,6 @@ async def table_data(
     await call_and_echo_table(
         runtime,
         "session_table_data",
-        retry_command="dh-mcp table data",
+        retry_command="dhcli table data",
         arguments=arguments,
     )

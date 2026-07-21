@@ -21,7 +21,7 @@ no ``mcp_reload`` tool — configuration changes require a restart.
 Every operator-tunable knob lives on ``ServerConfig`` and is read from
 ``server.json``. CLI flags below override the JSON values when
 supplied. The only environment variable this server itself consults at
-startup is ``DH_MCP_DATA_DIR`` (which moves the user-data root and is
+startup is ``DH_AI_DATA_DIR`` (which moves the user-data root and is
 read transitively when ``--config-dir`` and ``--runtime-dir`` are
 unset).
 """
@@ -68,7 +68,7 @@ async def _load_multi_config_or_exit(
 
     Args:
         config_dir (Path | None): The directory passed via ``--config-dir``,
-            or ``None`` to use ``$DH_MCP_DATA_DIR/config`` (or the platform
+            or ``None`` to use ``$DH_AI_DATA_DIR/config`` (or the platform
             default user-data root's ``config`` subdirectory).
 
     Returns:
@@ -274,7 +274,7 @@ def _validate_cli_args(
     is_flag=True,
     default=False,
     help=(
-        "Launch as a per-user local daemon for the dh-mcp CLI. "
+        "Launch as a per-user local daemon for the dhcli CLI. "
         "Preset that forces HTTP transport on 127.0.0.1:0 (kernel-"
         "chosen ephemeral port), enables idle shutdown when "
         "server.json:daemon.idle_shutdown_seconds > 0, and writes "
@@ -303,7 +303,7 @@ def _command(
     ``None`` / ``False`` so ``server.json`` provides the effective value per
     field. ``--config-dir`` is resolved to an absolute path here; the runtime
     directory is resolved once via :func:`resolve_runtime_dir` (honoring
-    ``--runtime-dir``, then ``$DH_MCP_DATA_DIR``, then the platform default)
+    ``--runtime-dir``, then ``$DH_AI_DATA_DIR``, then the platform default)
     and threaded into every dispatch arm.
     """
     setup_logging()
@@ -325,7 +325,7 @@ def _command(
     )
 
     # Resolve the runtime directory once for every transport: ``--runtime-dir``
-    # override (if given) → ``$DH_MCP_DATA_DIR`` → platform default. ``None``
+    # override (if given) → ``$DH_AI_DATA_DIR`` → platform default. ``None``
     # selects the env/default path; an explicit path is ``expanduser()``-ed.
     runtime_dir_resolved = resolve_runtime_dir(runtime_dir)
 

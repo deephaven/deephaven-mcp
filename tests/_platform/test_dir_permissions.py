@@ -218,7 +218,7 @@ def test_audit_accepts_symlinked_root_with_safe_target(
 
     Common in real deployments: dotfile managers, XDG redirects, or
     container bind paths where the operator sets
-    ``DH_MCP_DATA_DIR=~/symlink-to-real-config``. The audit follows
+    ``DH_AI_DATA_DIR=~/symlink-to-real-config``. The audit follows
     the symlink at the root via ``os.walk(top=link, ...)``.
     """
     link = tmp_path / "config_link"

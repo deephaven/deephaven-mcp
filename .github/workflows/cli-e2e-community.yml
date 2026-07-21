@@ -1,4 +1,4 @@
-# Exercises the dh-mcp CLI end-to-end against a real Community worker.
+# Exercises the dhcli CLI end-to-end against a real Community worker.
 #
 # This drives the full operator workflow on a live worker subprocess: starting
 # the daemon, querying its status, and stopping it. It is the CLI counterpart
@@ -22,7 +22,7 @@ on:
 
 jobs:
   cli-e2e-community:
-    name: dh-mcp CLI end-to-end (community)
+    name: dhcli CLI end-to-end (community)
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -52,8 +52,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra test
 
-      - name: Verify dh-mcp entry point
-        run: uv run dh-mcp --help
+      - name: Verify dhcli entry point
+        run: uv run dhcli --help
 
       # The pytest integration test is the single source of truth for the
       # community end-to-end flow. The standalone scripts/run_cli_e2e.py

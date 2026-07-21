@@ -2,7 +2,7 @@
 
 These prove the converter end-to-end against the *real* v2 loader: the
 standalone script (run as a subprocess, so its stdlib-only / no-project-import
-property is exercised) produces a config tree that ``dh-mcp config validate``
+property is exercised) produces a config tree that ``dhcli config validate``
 accepts. A bad field mapping surfaces as ``config_invalid`` (exit 2) and fails
 the test.
 
@@ -11,7 +11,7 @@ Invoke with::
 
     uv run pytest -s -m integration -k convert_config
 
-Prerequisites: ``dh-mcp`` on ``$PATH`` (provided by ``uv sync``).
+Prerequisites: ``dhcli`` on ``$PATH`` (provided by ``uv sync``).
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "v1_config.json"
 
 pytestmark = pytest.mark.integration
 
-_NO_DH_MCP = pytest.mark.skipif(
-    shutil.which("dh-mcp") is None, reason="dh-mcp entry point not on PATH"
+_NO_DHCLI = pytest.mark.skipif(
+    shutil.which("dhcli") is None, reason="dhcli entry point not on PATH"
 )
 
 
@@ -50,10 +50,10 @@ def _convert(v1_path: Path, out: Path) -> None:
 
 
 def _validate(config_dir: Path, runtime_dir: Path, env: dict[str, str]) -> None:
-    """Run ``dh-mcp config validate`` and assert it accepts the tree."""
+    """Run ``dhcli config validate`` and assert it accepts the tree."""
     result = subprocess.run(  # noqa: S603 - argv fully constructed locally
         [
-            "dh-mcp",
+            "dhcli",
             "--config-dir",
             str(config_dir),
             "--runtime-dir",
@@ -70,7 +70,7 @@ def _validate(config_dir: Path, runtime_dir: Path, env: dict[str, str]) -> None:
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
 
 
-@_NO_DH_MCP
+@_NO_DHCLI
 def test_converted_fixture_validates(tmp_path: Path) -> None:
     """The checked-in v1 fixture converts to a tree the v2 loader accepts.
 
@@ -103,7 +103,7 @@ def test_converted_fixture_validates(tmp_path: Path) -> None:
     )
 
 
-@_NO_DH_MCP
+@_NO_DHCLI
 def test_converted_tls_and_private_key_validate(tmp_path: Path) -> None:
     """TLS certs and an enterprise private key (absolute ${file:} paths) validate.
 

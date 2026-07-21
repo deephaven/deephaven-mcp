@@ -1,4 +1,4 @@
-"""``dh-mcp docs`` noun group: query the Deephaven docs MCP server.
+"""``dhcli docs`` noun group: query the Deephaven docs MCP server.
 
 Verbs: ``ask``, ``status``.
 """
@@ -210,15 +210,14 @@ _OUTPUT_ASK = OutputSpec(
         ),
         output=_OUTPUT_ASK,
         examples=(
-            '$ dh-mcp docs ask "How do I join two tables?"',
-            '$ dh-mcp docs ask "Show me a ring table example" ' "--language python",
-            '$ dh-mcp -o json docs ask "What is a liveness scope?" '
-            "| jq -r .response",
-            '$ dh-mcp docs ask "How do I filter it?" --history '
+            '$ dhcli docs ask "How do I join two tables?"',
+            '$ dhcli docs ask "Show me a ring table example" --language python',
+            '$ dhcli -o json docs ask "What is a liveness scope?" | jq -r .response',
+            '$ dhcli docs ask "How do I filter it?" --history '
             '\'[{"role":"user","content":"How do I make a time table?"},'
             '{"role":"assistant","content":"Use time_table()..."}]\'',
         ),
-        see_also=("dh-mcp docs status",),
+        see_also=("dhcli docs status",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.ARG_PARSE_ERROR,
@@ -335,10 +334,10 @@ _OUTPUT_STATUS = OutputSpec(
         ),
         output=_OUTPUT_STATUS,
         examples=(
-            "$ dh-mcp docs status",
-            "$ dh-mcp -o json docs status | jq .latency_ms",
+            "$ dhcli docs status",
+            "$ dhcli -o json docs status | jq .latency_ms",
         ),
-        see_also=("dh-mcp docs ask PROMPT",),
+        see_also=("dhcli docs ask PROMPT",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.MCP_REQUEST_FAILED,

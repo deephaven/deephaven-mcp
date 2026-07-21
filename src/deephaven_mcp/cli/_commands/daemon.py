@@ -1,4 +1,4 @@
-"""``dh-mcp daemon`` noun group: lifecycle of the local daemon.
+"""``dhcli daemon`` noun group: lifecycle of the local daemon.
 
 Verbs: ``start``, ``stop``, ``status``, ``restart``, ``repair``, ``logs``.
 
@@ -43,9 +43,9 @@ def _registry_corrupt_message(exc: RegistryCorruptError, *, verb: str) -> str:
     Args:
         exc (RegistryCorruptError): The underlying corruption error.
         verb (str): The daemon verb the operator invoked, threaded into
-            the recovery hint (e.g. ``"status"`` -> ``dh-mcp daemon status``).
+            the recovery hint (e.g. ``"status"`` -> ``dhcli daemon status``).
     """
-    return registry_corrupt_message(exc, retry_command=f"dh-mcp daemon {verb}")
+    return registry_corrupt_message(exc, retry_command=f"dhcli daemon {verb}")
 
 
 async def _acquire_daemon(runtime: Runtime, *, verb: str) -> DaemonRegistryEntry:
@@ -117,12 +117,13 @@ async def _release_daemon(runtime: Runtime, *, verb: str) -> bool:
 
 @click.group(cls=HelpfulGroup)
 def daemon() -> None:
-    """Manage the local dh-mcp daemon.
+    """Manage the local dhcli daemon.
 
     The daemon is a per-user background process that hosts the MCP
-    systems server; the 'tool' commands connect to it. Use these
+    systems server; the runtime commands ('session', 'system',
+    'table', 'catalog', 'pq', and 'tool') connect to it. Use these
     verbs to start, stop, restart, and inspect the daemon, tail its
-    log, or repair a corrupt registry file. Tool commands
+    log, or repair a corrupt registry file. Runtime commands
     auto-start the daemon on demand, so an explicit 'daemon start'
     is rarely required.
     """
@@ -271,10 +272,10 @@ _OUTPUT_START = OutputSpec(
         ),
         output=_OUTPUT_START,
         examples=(
-            "$ dh-mcp daemon start",
-            "$ dh-mcp -o json daemon start | jq .daemon.port",
+            "$ dhcli daemon start",
+            "$ dhcli -o json daemon start | jq .daemon.port",
         ),
-        see_also=("dh-mcp daemon status", "dh-mcp daemon stop"),
+        see_also=("dhcli daemon status", "dhcli daemon stop"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.DAEMON_STARTUP_TIMEOUT,
@@ -315,8 +316,8 @@ _OUTPUT_STOP = OutputSpec(
             "running."
         ),
         output=_OUTPUT_STOP,
-        examples=("$ dh-mcp daemon stop",),
-        see_also=("dh-mcp daemon start", "dh-mcp daemon status"),
+        examples=("$ dhcli daemon stop",),
+        see_also=("dhcli daemon start", "dhcli daemon status"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.DAEMON_CLIENT_ERROR,
@@ -365,14 +366,14 @@ _OUTPUT_STATUS = OutputSpec(
             "is dead). Exits 0 in all three cases so callers branch on the "
             "'state' field without parsing exit codes. This command is "
             "read-only: a 'crashed' entry is reported but left in place — run "
-            "'dh-mcp daemon start' or 'dh-mcp daemon repair' to clean it up."
+            "'dhcli daemon start' or 'dhcli daemon repair' to clean it up."
         ),
         output=_OUTPUT_STATUS,
         examples=(
-            "$ dh-mcp daemon status",
-            "$ dh-mcp -o json daemon status | jq .state",
+            "$ dhcli daemon status",
+            "$ dhcli -o json daemon status | jq .state",
         ),
-        see_also=("dh-mcp daemon start", "dh-mcp daemon logs"),
+        see_also=("dhcli daemon start", "dhcli daemon logs"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.DAEMON_REGISTRY_CORRUPT,),
     ),
@@ -408,7 +409,7 @@ async def daemon_status(runtime: Runtime) -> None:
             state=DaemonState.CRASHED,
             message=(
                 f"Daemon not running: a previous instance (pid {entry.pid}) "
-                f"exited without cleanup. Run 'dh-mcp daemon start' to clean up "
+                f"exited without cleanup. Run 'dhcli daemon start' to clean up "
                 f"and relaunch."
             ),
         )
@@ -431,16 +432,16 @@ _OUTPUT_RESTART = OutputSpec(
     help_spec=HelpSpec(
         summary="Restart the daemon: stop (if running) then start.",
         description=(
-            "Equivalent to 'dh-mcp daemon stop' followed by 'dh-mcp daemon "
+            "Equivalent to 'dhcli daemon stop' followed by 'dhcli daemon "
             "start', but single-command, and reports the new daemon's state "
             "and connection details on success."
         ),
         output=_OUTPUT_RESTART,
         examples=(
-            "$ dh-mcp daemon restart",
-            "$ dh-mcp -o json daemon restart | jq .daemon.pid",
+            "$ dhcli daemon restart",
+            "$ dhcli -o json daemon restart | jq .daemon.pid",
         ),
-        see_also=("dh-mcp daemon start", "dh-mcp daemon stop"),
+        see_also=("dhcli daemon start", "dhcli daemon stop"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.DAEMON_STARTUP_TIMEOUT,
@@ -489,22 +490,22 @@ _OUTPUT_REPAIR = OutputSpec(
     help_spec=HelpSpec(
         summary="Recover from a corrupt daemon registry file.",
         description=(
-            "Use this when 'dh-mcp daemon status' (or start, stop, restart) "
+            "Use this when 'dhcli daemon status' (or start, stop, restart) "
             "reports the daemon_registry_corrupt error. It moves the "
             "unreadable daemon.json aside to a timestamped "
-            "daemon.json.corrupt-<ts> sibling so the next 'dh-mcp daemon "
+            "daemon.json.corrupt-<ts> sibling so the next 'dhcli daemon "
             "start' can write a clean one. The corrupt bytes are preserved "
             "on disk for postmortem.\n\n"
             "Refuses to run while a live daemon is still registered, so you "
-            "cannot accidentally orphan a running process. Run 'dh-mcp "
+            "cannot accidentally orphan a running process. Run 'dhcli "
             "daemon stop' first in that case."
         ),
         output=_OUTPUT_REPAIR,
         examples=(
-            "$ dh-mcp daemon repair",
-            "$ dh-mcp -o json daemon repair | jq .quarantined_to",
+            "$ dhcli daemon repair",
+            "$ dhcli -o json daemon repair | jq .quarantined_to",
         ),
-        see_also=("dh-mcp daemon status", "dh-mcp daemon stop"),
+        see_also=("dhcli daemon status", "dhcli daemon stop"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.DAEMON_REGISTRY_LIVE,),
     ),
@@ -540,7 +541,7 @@ async def daemon_repair(runtime: Runtime) -> None:
         if entry is not None and entry.is_live():
             raise CliError(
                 f"Refusing to repair registry while daemon pid={entry.pid} is "
-                f"live on {entry.host}:{entry.port}. Run `dh-mcp daemon stop` "
+                f"live on {entry.host}:{entry.port}. Run `dhcli daemon stop` "
                 f"first.",
                 code=ErrorCode.DAEMON_REGISTRY_LIVE,
             )
@@ -628,12 +629,12 @@ async def _tail_and_follow(
         ),
         output=_OUTPUT_LOGS,
         examples=(
-            "$ dh-mcp daemon logs",
-            "$ dh-mcp daemon logs -n 500",
-            "$ dh-mcp daemon logs -f",
-            "$ dh-mcp daemon logs --path",
+            "$ dhcli daemon logs",
+            "$ dhcli daemon logs -n 500",
+            "$ dhcli daemon logs -f",
+            "$ dhcli daemon logs --path",
         ),
-        see_also=("dh-mcp daemon status",),
+        see_also=("dhcli daemon status",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.DAEMON_NOT_RUNNING,),
     ),

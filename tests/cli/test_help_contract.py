@@ -1,4 +1,4 @@
-"""Contract tests for dh-mcp help content across the live command tree.
+"""Contract tests for dhcli help content across the live command tree.
 
 Enforces the _cli-help-standards contract on every registered leaf
 command, parametrized over the live click tree so a newly-added
@@ -33,12 +33,12 @@ def _all_commands(
     """Return ``(path, command)`` for ``group`` and every command beneath it.
 
     Unlike :func:`_leaf_commands`, this includes the groups (the root
-    ``dh-mcp`` group and each noun group), so checks that apply to every
+    ``dhcli`` group and each noun group), so checks that apply to every
     command's surfaced strings -- plain-text and option-help presence --
     also cover group-level options such as the global ``-o``/``--timeout``/
     ``-v``/``-q`` flags on the root.
     """
-    path = " ".join(prefix) or "dh-mcp"
+    path = " ".join(prefix) or "dhcli"
     commands: list[tuple[str, click.Command]] = [(path, group)]
     for name, cmd in group.commands.items():
         sub = (*prefix, name)
@@ -58,7 +58,9 @@ _ALL_IDS = [path for path, _ in _ALL]
 # cannot raise a CliError), so they document no Error codes section.
 # Every operational command must. ``agents command`` is excluded
 # because it can raise COMMAND_NOT_FOUND for an unresolvable path.
-_NO_ERROR_CODES = {"agents tree", "agents errors"}
+# ``self completion`` only prints a click-generated script; its sole
+# failure mode (bad SHELL) is a click argument-parse error.
+_NO_ERROR_CODES = {"agents tree", "agents errors", "self completion"}
 
 
 @pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)

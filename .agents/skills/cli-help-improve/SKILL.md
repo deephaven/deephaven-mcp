@@ -1,6 +1,6 @@
 ---
 name: cli-help-improve
-description: Comprehensively improve the help surface of one or more dh-mcp CLI commands — fill missing sections, single-source the output schema, fix inaccuracies, and reconcile the description surfaces (the HelpSpec behind --help and the agents manifest, and docs/CLI.md) — invoke when a command's help is thin, stale, or newly added
+description: Comprehensively improve the help surface of one or more dhcli CLI commands — fill missing sections, single-source the output schema, fix inaccuracies, and reconcile the description surfaces (the HelpSpec behind --help and the agents manifest, and docs/CLI.md) — invoke when a command's help is thin, stale, or newly added
 ---
 
 **When to use this vs. `cli-help-accuracy`**: use `cli-help-improve` for a full review (accuracy + missing sections + output single-sourcing + reconciling all three surfaces). Use `cli-help-accuracy` for surgical correctness-only fixes when the help structure is already complete.
@@ -24,8 +24,8 @@ For each command in scope:
 ## Verify
 
 ```bash
-dh-mcp <noun> <verb> --help
-dh-mcp <noun> <verb> --agents    # or: dh-mcp agents command <noun> <verb> — both default to compact json
+dhcli <noun> <verb> --help
+dhcli <noun> <verb> --agents    # or: dhcli agents command <noun> <verb> — both default to compact json
 uv run pytest tests/cli/test_help_contract.py tests/cli/test__help.py tests/cli/_commands/test_agents.py
 ```
 

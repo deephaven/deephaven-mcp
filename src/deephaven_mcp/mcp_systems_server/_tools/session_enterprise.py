@@ -147,7 +147,7 @@ async def enterprise_systems_status(
     Returns a compact per-system health record (name, type, liveness_status,
     is_alive, optional liveness_detail) for each configured Enterprise system —
     the runtime ``.status``, not the static ``.spec``. Use ``list_systems`` to
-    enumerate configured systems and the configuration tools (``dh-mcp config
+    enumerate configured systems and the configuration tools (``dhcli config
     show`` on the CLI) to inspect their declared settings; this tool
     deliberately does not duplicate that data.
 
@@ -185,7 +185,7 @@ async def enterprise_systems_status(
     - Check 'systems' array in response for individual system status
     - Use each system's 'liveness_detail' field for troubleshooting connection issues
     - This tool does not return configuration; pair with 'list_systems' (and the
-      CLI's 'dh-mcp config show') if you need the declared settings of a system
+      CLI's 'dhcli config show') if you need the declared settings of a system
     - If 'partial_result' is present, this report may be incomplete: check its 'phase'
       ('loading'/'partial' → discovery still running, retry later; 'failed' → report)
       and 'errors' for which enterprise systems could not be reached

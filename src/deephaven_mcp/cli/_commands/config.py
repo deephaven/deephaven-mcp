@@ -1,4 +1,4 @@
-"""``dh-mcp config`` noun group: inspect and validate the resolved configuration tree."""
+"""``dhcli config`` noun group: inspect and validate the resolved configuration tree."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ _OUTPUT_SHOW = OutputSpec(
         OutputField(
             "config_dir", "string", "Directory the configuration was loaded from."
         ),
-        OutputField("cli", "object", "dh-mcp CLI defaults (output, daemon, request)."),
+        OutputField("cli", "object", "dhcli CLI defaults (output, daemon, request)."),
         OutputField("server", "object", "Parsed server.json; omitted when absent."),
         OutputField("community", "object", "Community config; omitted when absent."),
         OutputField("enterprise", "object", "Enterprise config; omitted when absent."),
@@ -77,10 +77,10 @@ _OUTPUT_VALIDATE = OutputSpec(
         ),
         output=_OUTPUT_SHOW,
         examples=(
-            "$ dh-mcp config show",
-            "$ dh-mcp -o json config show | jq .community",
+            "$ dhcli config show",
+            "$ dhcli -o json config show | jq .community",
         ),
-        see_also=("dh-mcp config validate",),
+        see_also=("dhcli config validate",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.CONFIG_INVALID,),
     ),
@@ -112,8 +112,8 @@ async def config_show(runtime: Runtime) -> None:
             "config check in CI pipelines."
         ),
         output=_OUTPUT_VALIDATE,
-        examples=("$ dh-mcp config validate",),
-        see_also=("dh-mcp config show",),
+        examples=("$ dhcli config validate",),
+        see_also=("dhcli config show",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.CONFIG_INVALID,),
     ),

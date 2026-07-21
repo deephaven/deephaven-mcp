@@ -1,4 +1,4 @@
-"""Resolved runtime context shared by every ``dh-mcp`` subcommand.
+"""Resolved runtime context shared by every ``dhcli`` subcommand.
 
 Configuration is loaded **once per invocation, just before the leaf
 command's body runs**. Any malformed file under the configuration
@@ -36,7 +36,7 @@ Read sites:
 
 Recovery from a broken configuration tree happens by editing the
 file the error message points at; ``--help``, the ``--agents``
-flag, and ``dh-mcp agents`` continue to work without config
+flag, and ``dhcli agents`` continue to work without config
 because they exit before any command body — and therefore before
 the load — runs.
 """
@@ -141,7 +141,7 @@ class RuntimeSpec:
 
 @dataclass(frozen=True, slots=True)
 class Runtime:
-    """Resolved runtime context for a single ``dh-mcp`` invocation."""
+    """Resolved runtime context for a single ``dhcli`` invocation."""
 
     config_dir: Path
     """The resolved configuration directory."""
@@ -196,11 +196,11 @@ async def load_runtime(
     Args:
         config_dir_override (Path | None): Optional explicit config
             directory. ``None`` falls back to
-            ``$DH_MCP_DATA_DIR/config`` (or the platform default
+            ``$DH_AI_DATA_DIR/config`` (or the platform default
             user-data root's ``config`` subdirectory).
         runtime_dir_override (Path | None): Optional explicit
             runtime directory. ``None`` falls back to
-            ``$DH_MCP_DATA_DIR/runtime`` (or the platform default
+            ``$DH_AI_DATA_DIR/runtime`` (or the platform default
             user-data root's ``runtime`` subdirectory).
         cli_overrides (dict[str, object] | None): Optional nested
             partial mapping of raw field values deep-merged into

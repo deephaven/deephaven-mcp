@@ -254,7 +254,7 @@ async def test_load_runtime_rejects_missing_config_dir(tmp_path: Path) -> None:
     """A non-existent config dir fails the load with ``CONFIG_INVALID``.
 
     Total validation: the configuration directory is part of the
-    audited surface, so ``dh-mcp`` cannot operate without it.
+    audited surface, so ``dhcli`` cannot operate without it.
     """
     cfg_dir = tmp_path / "does-not-exist"
     rt = tmp_path / "rt"

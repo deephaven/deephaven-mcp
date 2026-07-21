@@ -47,7 +47,7 @@ dependencies = [
     "psutil>=5.9.0",               # Process and system monitoring
     # Table formatting for AI agents
     "pyyaml>=6.0",                 # YAML formatting support
-    # CLI framework for the dh-mcp local client (noun-verb command tree, async via Pattern B)
+    # CLI framework for the dhcli command-line tool (noun-verb command tree, async via Pattern B)
     "click>=8.4.0",
 ]
 
@@ -92,14 +92,14 @@ Repository = "https://github.com/deephaven/deephaven-mcp"
 Issues = "https://github.com/deephaven/deephaven-mcp/issues"
 
 [project.scripts]
-dh-mcp = "deephaven_mcp.cli._main:main"
+dhcli = "deephaven_mcp.cli._main:main"
 dh-mcp-systems-server = "deephaven_mcp.mcp_systems_server.server:main"
 dh-mcp-docs-server = "deephaven_mcp.mcp_docs_server.main:main"
 
 [tool.pyapp]
 python-version = "3.12"
 pyapp-version = "0.29.0"
-binaries = ["dh-mcp-systems-server", "dh-mcp"]
+binaries = ["dh-mcp-systems-server", "dhcli"]
 
 [tool.uv]
 package = true

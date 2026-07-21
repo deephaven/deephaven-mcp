@@ -1,7 +1,7 @@
 """Tests for ``deephaven_mcp.config._loaders``.
 
 Covers the shared JSON-to-Pydantic loader helpers used by both the
-``dh-mcp`` CLI (``cli.json``) and every per-section loader under
+``dhcli`` CLI (``cli.json``) and every per-section loader under
 ``deephaven_mcp.config.schema``.
 """
 

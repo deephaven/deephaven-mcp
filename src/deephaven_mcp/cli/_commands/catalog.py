@@ -1,4 +1,4 @@
-"""``dh-mcp catalog`` noun group: query an Enterprise (Core+) data catalog.
+"""``dhcli catalog`` noun group: query an Enterprise (Core+) data catalog.
 
 Verbs: ``tables``, ``namespaces``, ``schema``, ``sample``.
 
@@ -83,10 +83,10 @@ _OUTPUT_TABLES = OutputSpec(
         ),
         arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
         output=_OUTPUT_TABLES,
-        examples=("$ dh-mcp catalog tables enterprise:prod:rpt",),
+        examples=("$ dhcli catalog tables enterprise:prod:rpt",),
         see_also=(
-            "dh-mcp catalog namespaces ID",
-            "dh-mcp catalog schema ID NAMESPACE TABLE",
+            "dhcli catalog namespaces ID",
+            "dhcli catalog schema ID NAMESPACE TABLE",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
@@ -118,7 +118,7 @@ async def catalog_tables(
     await call_and_echo_field(
         runtime,
         "catalog_tables_list",
-        retry_command="dh-mcp catalog tables",
+        retry_command="dhcli catalog tables",
         arguments=arguments,
         field="tables",
         default=[],
@@ -152,8 +152,8 @@ _OUTPUT_NAMESPACES = OutputSpec(
         ),
         arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
         output=_OUTPUT_NAMESPACES,
-        examples=("$ dh-mcp catalog namespaces enterprise:prod:rpt",),
-        see_also=("dh-mcp catalog tables ID",),
+        examples=("$ dhcli catalog namespaces enterprise:prod:rpt",),
+        see_also=("dhcli catalog tables ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -184,7 +184,7 @@ async def catalog_namespaces(
     await call_and_echo_field(
         runtime,
         "catalog_namespaces_list",
-        retry_command="dh-mcp catalog namespaces",
+        retry_command="dhcli catalog namespaces",
         arguments=arguments,
         field="namespaces",
         default=[],
@@ -231,8 +231,8 @@ _OUTPUT_SCHEMA = OutputSpec(
             HelpEntry("TABLE_NAME", "The catalog table whose schema to show."),
         ),
         output=_OUTPUT_SCHEMA,
-        examples=("$ dh-mcp catalog schema enterprise:prod:rpt Market Trades",),
-        see_also=("dh-mcp catalog tables ID",),
+        examples=("$ dhcli catalog schema enterprise:prod:rpt Market Trades",),
+        see_also=("dhcli catalog tables ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -257,7 +257,7 @@ async def catalog_schema(
     await call_and_echo(
         runtime,
         "catalog_table_schema",
-        retry_command="dh-mcp catalog schema",
+        retry_command="dhcli catalog schema",
         arguments=arguments,
     )
 
@@ -293,12 +293,12 @@ _OUTPUT_TABULAR = OutputSpec(
         ),
         output=_OUTPUT_TABULAR,
         examples=(
-            "$ dh-mcp catalog sample enterprise:prod:rpt Market Trades",
-            "$ dh-mcp catalog sample enterprise:prod:rpt Market Trades --max-rows 20 --tail",
+            "$ dhcli catalog sample enterprise:prod:rpt Market Trades",
+            "$ dhcli catalog sample enterprise:prod:rpt Market Trades --max-rows 20 --tail",
         ),
         see_also=(
-            "dh-mcp catalog tables ID",
-            "dh-mcp catalog schema ID NAMESPACE TABLE",
+            "dhcli catalog tables ID",
+            "dhcli catalog schema ID NAMESPACE TABLE",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
@@ -344,6 +344,6 @@ async def catalog_sample(
     await call_and_echo_table(
         runtime,
         "catalog_table_sample",
-        retry_command="dh-mcp catalog sample",
+        retry_command="dhcli catalog sample",
         arguments=arguments,
     )

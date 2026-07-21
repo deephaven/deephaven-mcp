@@ -1,4 +1,4 @@
-"""Click subcommand modules for the ``dh-mcp`` CLI.
+"""Click subcommand modules for the ``dhcli`` CLI.
 
 Each module under this package exposes one click command that the
 root in :mod:`deephaven_mcp.cli._main` mounts as a top-level noun: a

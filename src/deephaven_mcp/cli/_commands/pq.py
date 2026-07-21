@@ -1,4 +1,4 @@
-"""``dh-mcp pq`` noun group: manage Enterprise (Core+) Persistent Queries.
+"""``dhcli pq`` noun group: manage Enterprise (Core+) Persistent Queries.
 
 Verbs: ``list``, ``details``, ``name-to-id``, ``create``, ``modify``,
 ``delete``, ``start``, ``stop``, ``restart``.
@@ -92,10 +92,10 @@ _OUTPUT_LIST = OutputSpec(
         arguments=(HelpEntry("SYSTEM", "Enterprise system name. Run 'system list'."),),
         output=_OUTPUT_LIST,
         examples=(
-            "$ dh-mcp pq list prod",
-            "$ dh-mcp pq list prod | jq '.[].id'",
+            "$ dhcli pq list prod",
+            "$ dhcli pq list prod | jq '.[].id'",
         ),
-        see_also=("dh-mcp pq details ID", "dh-mcp pq name-to-id SYSTEM NAME"),
+        see_also=("dhcli pq details ID", "dhcli pq name-to-id SYSTEM NAME"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -108,7 +108,7 @@ async def pq_list(runtime: Runtime, system: str) -> None:
     await call_and_echo_field(
         runtime,
         "pq_list",
-        retry_command="dh-mcp pq list",
+        retry_command="dhcli pq list",
         arguments={"system": system},
         field="pqs",
         default=[],
@@ -129,8 +129,8 @@ async def pq_list(runtime: Runtime, system: str) -> None:
             ),
         ),
         output=_OUTPUT_OBJECT,
-        examples=("$ dh-mcp pq details enterprise:prod:1234567890",),
-        see_also=("dh-mcp pq list SYSTEM",),
+        examples=("$ dhcli pq details enterprise:prod:1234567890",),
+        see_also=("dhcli pq list SYSTEM",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -143,7 +143,7 @@ async def pq_details(runtime: Runtime, id: str) -> None:
     await call_and_echo(
         runtime,
         "pq_details",
-        retry_command="dh-mcp pq details",
+        retry_command="dhcli pq details",
         arguments={"id": id},
     )
 
@@ -159,8 +159,8 @@ async def pq_details(runtime: Runtime, id: str) -> None:
             HelpEntry("PQ_NAME", "Human-readable PQ name."),
         ),
         output=_OUTPUT_OBJECT,
-        examples=("$ dh-mcp pq name-to-id prod nightly-report",),
-        see_also=("dh-mcp pq list SYSTEM",),
+        examples=("$ dhcli pq name-to-id prod nightly-report",),
+        see_also=("dhcli pq list SYSTEM",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -174,7 +174,7 @@ async def pq_name_to_id(runtime: Runtime, system: str, pq_name: str) -> None:
     await call_and_echo(
         runtime,
         "pq_name_to_id",
-        retry_command="dh-mcp pq name-to-id",
+        retry_command="dhcli pq name-to-id",
         arguments={"system": system, "pq_name": pq_name},
     )
 
@@ -377,12 +377,12 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
         arguments=(HelpEntry("PQ_NAME", "Name for the new PQ."),),
         output=_OUTPUT_OBJECT,
         examples=(
-            "$ dh-mcp pq create nightly --system prod --heap-size-gb 4 "
+            "$ dhcli pq create nightly --system prod --heap-size-gb 4 "
             "--script-body-path ./nightly.py",
-            "$ dh-mcp pq create nightly --system prod --heap-size-gb 4 "
+            "$ dhcli pq create nightly --system prod --heap-size-gb 4 "
             "--git-script-path IrisQueries/py/nightly.py",
         ),
-        see_also=("dh-mcp pq modify ID", "dh-mcp pq start ID"),
+        see_also=("dhcli pq modify ID", "dhcli pq start ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
@@ -397,7 +397,7 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
     "--system",
     "system",
     required=True,
-    help="Enterprise system name to create the PQ on (see 'dh-mcp system list').",
+    help="Enterprise system name to create the PQ on (see 'dhcli system list').",
 )
 @click.option(
     "--heap-size-gb",
@@ -423,7 +423,7 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
     await call_and_echo(
         runtime,
         "pq_create",
-        retry_command="dh-mcp pq create",
+        retry_command="dhcli pq create",
         arguments=_create_modify_args(ctx.params),
     )
 
@@ -450,10 +450,10 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
         ),
         output=_OUTPUT_OBJECT,
         examples=(
-            "$ dh-mcp pq modify enterprise:prod:1234567890 --heap-size-gb 8 --restart",
-            "$ dh-mcp pq modify enterprise:prod:1234567890 --disabled",
+            "$ dhcli pq modify enterprise:prod:1234567890 --heap-size-gb 8 --restart",
+            "$ dhcli pq modify enterprise:prod:1234567890 --disabled",
         ),
-        see_also=("dh-mcp pq details ID", "dh-mcp pq restart ID"),
+        see_also=("dhcli pq details ID", "dhcli pq restart ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
@@ -499,7 +499,7 @@ async def pq_modify(ctx: click.Context, **_options: Any) -> None:
     await call_and_echo(
         runtime,
         "pq_modify",
-        retry_command="dh-mcp pq modify",
+        retry_command="dhcli pq modify",
         arguments=_create_modify_args(ctx.params),
     )
 
@@ -535,9 +535,9 @@ def _ids(id: tuple[str, ...]) -> list[str]:
         ),
         output=_OUTPUT_OBJECT,
         examples=(
-            "$ dh-mcp pq delete enterprise:prod:1234567890 enterprise:prod:1234567891",
+            "$ dhcli pq delete enterprise:prod:1234567890 enterprise:prod:1234567891",
         ),
-        see_also=("dh-mcp pq list SYSTEM",),
+        see_also=("dhcli pq list SYSTEM",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
     ),
@@ -560,7 +560,7 @@ async def pq_delete(
     if max_concurrent is not None:
         arguments["max_concurrent"] = max_concurrent
     await call_and_echo(
-        runtime, "pq_delete", retry_command="dh-mcp pq delete", arguments=arguments
+        runtime, "pq_delete", retry_command="dhcli pq delete", arguments=arguments
     )
 
 
@@ -587,8 +587,8 @@ def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]
                 ),
             ),
             output=_OUTPUT_OBJECT,
-            examples=(f"$ dh-mcp pq {name} enterprise:prod:1234567890",),
-            see_also=("dh-mcp pq details ID",),
+            examples=(f"$ dhcli pq {name} enterprise:prod:1234567890",),
+            see_also=("dhcli pq details ID",),
             exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
             error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
         ),
@@ -613,7 +613,7 @@ def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]
         if max_concurrent is not None:
             arguments["max_concurrent"] = max_concurrent
         await call_and_echo(
-            runtime, tool, retry_command=f"dh-mcp pq {name}", arguments=arguments
+            runtime, tool, retry_command=f"dhcli pq {name}", arguments=arguments
         )
 
     return _cmd

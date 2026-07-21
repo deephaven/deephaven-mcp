@@ -1,9 +1,13 @@
-# `dh-mcp` CLI
+# `dhcli` — the Deephaven CLI
 
-The `dh-mcp` command-line tool is a thin local client for the
-multiplexed [Deephaven](https://deephaven.io) MCP systems server. It
-manages a per-user background daemon, lists registered MCP tools, and
-dispatches tool calls — without requiring you to run the server yourself.
+`dhcli` is the [Deephaven](https://deephaven.io) command-line tool,
+designed for humans and especially AI agents. It inspects and operates
+Deephaven systems from the shell — sessions, tables, catalogs,
+persistent queries, documentation Q&A — with machine-first structured
+output on every command. Today its runtime commands are backed by a
+per-user background daemon hosting the multiplexed Deephaven MCP
+systems server, which `dhcli` manages for you — that is the current
+mechanism, not the tool's scope.
 
 ## Table of Contents
 
@@ -17,16 +21,17 @@ dispatches tool calls — without requiring you to run the server yourself.
   - [`server.json` — `daemon` block](#serverjson--daemon-block)
 - [Runtime directory](#runtime-directory)
 - [Command tree](#command-tree)
-  - [`dh-mcp daemon`](#dh-mcp-daemon)
-  - [`dh-mcp tool`](#dh-mcp-tool)
-  - [`dh-mcp session`](#dh-mcp-session)
-  - [`dh-mcp system`](#dh-mcp-system)
-  - [`dh-mcp table`](#dh-mcp-table)
-  - [`dh-mcp catalog`](#dh-mcp-catalog)
-  - [`dh-mcp pq`](#dh-mcp-pq)
-  - [`dh-mcp docs`](#dh-mcp-docs)
-  - [`dh-mcp config`](#dh-mcp-config)
-  - [`dh-mcp agents`](#dh-mcp-agents)
+  - [`dhcli daemon`](#dhcli-daemon)
+  - [`dhcli tool`](#dhcli-tool)
+  - [`dhcli session`](#dhcli-session)
+  - [`dhcli system`](#dhcli-system)
+  - [`dhcli table`](#dhcli-table)
+  - [`dhcli catalog`](#dhcli-catalog)
+  - [`dhcli pq`](#dhcli-pq)
+  - [`dhcli docs`](#dhcli-docs)
+  - [`dhcli config`](#dhcli-config)
+  - [`dhcli agents`](#dhcli-agents)
+  - [`dhcli self`](#dhcli-self)
 - [Top-level flags](#top-level-flags)
 - [Output modes](#output-modes)
 - [Exit codes](#exit-codes)
@@ -36,7 +41,7 @@ dispatches tool calls — without requiring you to run the server yourself.
 
 ## Installation
 
-`dh-mcp` ships with the `deephaven-mcp` package; installing the
+`dhcli` ships with the `deephaven-mcp` package; installing the
 package wires the entry point automatically:
 
 ```bash
@@ -45,59 +50,61 @@ pip install deephaven-mcp
 uv sync --all-extras
 ```
 
-After installation `dh-mcp` is on `$PATH`. Verify with:
+After installation `dhcli` is on `$PATH`. Verify with:
 
 ```bash
-dh-mcp --help
+dhcli --help
 ```
 
 ## Shell completion
 
-`dh-mcp` supports tab completion for commands, subcommands, and options via
-`click`'s built-in mechanism — no extra package or command. Enable it for the
-current shell by evaluating the generated script, or add the line to your shell
-startup file to make it permanent:
+`dhcli` supports tab completion for commands, subcommands, and options
+in bash, zsh, and fish. Enable it for the current shell by evaluating
+the script printed by `dhcli self completion <shell>`, or add the line to
+your shell startup file to make it permanent:
 
 ```bash
 # bash (requires bash >= 4.4); add to ~/.bashrc
-eval "$(_DH_MCP_COMPLETE=bash_source dh-mcp)"
+eval "$(dhcli self completion bash)"
 
 # zsh; add to ~/.zshrc
-eval "$(_DH_MCP_COMPLETE=zsh_source dh-mcp)"
+eval "$(dhcli self completion zsh)"
 
-# fish; add to ~/.config/fish/completions/dh-mcp.fish
-_DH_MCP_COMPLETE=fish_source dh-mcp | source
+# fish; add to ~/.config/fish/completions/dhcli.fish
+dhcli self completion fish | source
 ```
+
+See [`dhcli self`](#dhcli-self) for details.
 
 ## Quick start
 
 ```bash
 # Show subcommands.
-dh-mcp --help
+dhcli --help
 
 # Start the daemon (idempotent; spawns one if absent).
-dh-mcp daemon start
+dhcli daemon start
 
 # List the tools the daemon registers.
-dh-mcp tool list
+dhcli tool list
 
 # Inspect one tool's input schema.
-dh-mcp tool show sessions_list
+dhcli tool show sessions_list
 
 # Invoke a tool. Arguments are key=value, JSON values are auto-decoded.
-dh-mcp tool call sessions_list
+dhcli tool call sessions_list
 
 # Tail the daemon log file.
-dh-mcp daemon logs -n 200
+dhcli daemon logs -n 200
 
 # Stop the daemon.
-dh-mcp daemon stop
+dhcli daemon stop
 
 # Discover the command tree as structured JSON (for AI agents).
-dh-mcp agents tree | jq .
+dhcli agents tree | jq .
 
 # Machine-readable description of one command (twin of --help).
-dh-mcp daemon start --agents
+dhcli daemon start --agents
 ```
 
 ## Architecture
@@ -125,7 +132,7 @@ The CLI shares the multi-server configuration directory with
 `dh-mcp-systems-server`. Override the directory via:
 
 - `--config-dir <path>`
-- `$DH_MCP_DATA_DIR/config/` (the env var moves the user-data
+- `$DH_AI_DATA_DIR/config/` (the env var moves the user-data
   root; the per-subdir override is the CLI flag)
 - (otherwise) the platform default: `~/.deephaven/ai/config/` on
   POSIX, `%APPDATA%/Deephaven/ai/config/` on Windows.
@@ -135,8 +142,8 @@ Two files in that directory are CLI-relevant:
 - `cli.json` — CLI defaults (output mode, request timeout, ...).
 - `server.json` — daemon tunables (under the `daemon` block).
 
-Use `dh-mcp config show` to inspect the resolved tree (with secrets
-redacted) and `dh-mcp config validate` to confirm it is valid.
+Use `dhcli config show` to inspect the resolved tree (with secrets
+redacted) and `dhcli config validate` to confirm it is valid.
 
 ### Configuration loading
 
@@ -150,7 +157,7 @@ The single load runs when a command is dispatched (after its
 arguments parse, before its body):
 
 1. Resolves `config_dir` and `runtime_dir` (CLI flags →
-   `$DH_MCP_DATA_DIR/{config,runtime}` → platform default).
+   `$DH_AI_DATA_DIR/{config,runtime}` → platform default).
 2. Creates `runtime_dir` at mode `0o700`.
 3. Audits `config_dir` permissions and parses `server.json`,
    `cli.json`, `community/`, and `enterprise/` into a single
@@ -161,16 +168,16 @@ arguments parse, before its body):
 Help and agent self-discovery therefore work against a broken (or
 absent) configuration tree, with no special-casing:
 
-- `dh-mcp --help`, `dh-mcp <noun> --help`, `dh-mcp <noun> <verb> --help` — help exits while arguments are being parsed, before the load would run, so you can navigate the CLI surface against a broken tree.
-- `--agents` at any depth (`dh-mcp --agents`, `dh-mcp <noun> <verb> --agents`) — the machine-readable twin of `--help`, exits at the same parse-time point.
-- `dh-mcp agents <verb>` — the agents verbs are declared config-free and never trigger the load; they emit machine-readable metadata for agents that need to learn the surface before any config exists.
+- `dhcli --help`, `dhcli <noun> --help`, `dhcli <noun> <verb> --help` — help exits while arguments are being parsed, before the load would run, so you can navigate the CLI surface against a broken tree.
+- `--agents` at any depth (`dhcli --agents`, `dhcli <noun> <verb> --agents`) — the machine-readable twin of `--help`, exits at the same parse-time point.
+- `dhcli agents <verb>` — the agents verbs are declared config-free and never trigger the load; they emit machine-readable metadata for agents that need to learn the surface before any config exists.
 
 #### Recovering from a broken configuration
 
 Pre-body validation means a typo in any config file blocks every
-subcommand body. Workarounds when you can't run `dh-mcp` itself:
+subcommand body. Workarounds when you can't run `dhcli` itself:
 
-- **Diagnose the error**: `dh-mcp config validate` surfaces the
+- **Diagnose the error**: `dhcli config validate` surfaces the
   structured `config_invalid` payload identifying the offending
   file. (Validation runs in the pre-body load, so the error appears
   even though the verb itself never executes.)
@@ -197,7 +204,7 @@ slot in without a breaking schema change.
 
 | Field                                       | Type    | Default | Notes                                                                          |
 |---------------------------------------------|---------|---------|--------------------------------------------------------------------------------|
-| `daemon.auto_start`                         | bool    | `true`  | When `false`, `dh-mcp` exits if no daemon is running.                          |
+| `daemon.auto_start`                         | bool    | `true`  | When `false`, `dhcli` exits if no daemon is running.                          |
 | `daemon.reuse.version`                      | string  | `refuse`| Action when the running daemon's package version differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`. |
 | `daemon.reuse.venv`                         | string  | `refuse`| Action when the daemon's virtualenv (`sys.prefix`) differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`. |
 | `daemon.reuse.fingerprint`                  | string  | `warn`  | Action when only the source fingerprint differs (an in-place code edit at the same version + venv). One of `ignore`, `warn`, `restart`, `refuse`. |
@@ -278,7 +285,7 @@ defaults live in
 Daemon state lives under the runtime directory, controlled by:
 
 - `--runtime-dir <path>` (top-level CLI flag)
-- `$DH_MCP_DATA_DIR/runtime/` (the env var moves the user-data
+- `$DH_AI_DATA_DIR/runtime/` (the env var moves the user-data
   root; the per-subdir override is the CLI flag)
 - (otherwise) the platform default: `~/.deephaven/ai/runtime/` on
   POSIX, `%APPDATA%/Deephaven/ai/runtime/` on Windows.
@@ -301,9 +308,10 @@ under the Windows-support follow-up.
 ## Command tree
 
 The CLI is organized noun-verb. Each noun is a `click` group; each
-verb honors the top-level `-o/--output` flag.
+verb honors the top-level `-o/--output` flag (except `self
+completion`, which prints raw shell source).
 
-### `dh-mcp daemon`
+### `dhcli daemon`
 
 | Verb       | Purpose                                                                                       |
 |------------|-----------------------------------------------------------------------------------------------|
@@ -314,7 +322,7 @@ verb honors the top-level `-o/--output` flag.
 | `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
 | `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
 
-### `dh-mcp tool`
+### `dhcli tool`
 
 | Verb               | Purpose                                                                                                 |
 |--------------------|---------------------------------------------------------------------------------------------------------|
@@ -322,7 +330,7 @@ verb honors the top-level `-o/--output` flag.
 | `show <name>`      | Prints one tool's name, description, and JSON input schema.                                             |
 | `call <name>`      | Invokes a tool. Pass arguments as `--arg key=value` (repeatable); JSON-decoded when possible.           |
 
-`dh-mcp tool call` returns:
+`dhcli tool call` returns:
 
 - `0` — success.
 - `2` — client-side failure (connection, timeout, malformed argument, ...).
@@ -331,12 +339,12 @@ verb honors the top-level `-o/--output` flag.
 Examples:
 
 ```bash
-dh-mcp tool list
-dh-mcp tool show sessions_list
-dh-mcp tool call sessions_list --arg type=community
+dhcli tool list
+dhcli tool show sessions_list
+dhcli tool call sessions_list --arg type=community
 ```
 
-### `dh-mcp session`
+### `dhcli session`
 
 Sessions are addressed by a fully qualified id `type:system:name`
 (`type` is `community` or `enterprise`). Verbs that take an id route to
@@ -369,7 +377,7 @@ For an Enterprise system, `create` is *create-and-connect*: it provisions
 a Persistent Query and connects immediately, and `delete` also deletes
 the underlying PQ (equivalent to `pq delete` with the same id). To define
 a durable PQ without connecting — scheduled, RunAndDone, or disabled —
-use `pq create` instead; see [`dh-mcp pq`](#dh-mcp-pq).
+use `pq create` instead; see [`dhcli pq`](#dhcli-pq).
 
 `exec` takes exactly one script source: `--script TEXT` (inline),
 `--script-path PATH` (a local file), or `--script-path -` (standard
@@ -391,17 +399,17 @@ tool reports an error.
 Examples:
 
 ```bash
-dh-mcp session list --type community
-dh-mcp session create dev --launch-method python --env LOG_LEVEL=DEBUG
-dh-mcp session create rpt --system prod --engine DeephavenEnterprise
-dh-mcp session exec community:community:dev --script 'print(1)'
-cat job.py | dh-mcp session exec community:community:dev --script-path -
-dh-mcp session pip-list community:community:dev
-dh-mcp session delete community:community:dev
-dh-mcp session open community:community:dev --print
+dhcli session list --type community
+dhcli session create dev --launch-method python --env LOG_LEVEL=DEBUG
+dhcli session create rpt --system prod --engine DeephavenEnterprise
+dhcli session exec community:community:dev --script 'print(1)'
+cat job.py | dhcli session exec community:community:dev --script-path -
+dhcli session pip-list community:community:dev
+dhcli session delete community:community:dev
+dhcli session open community:community:dev --print
 ```
 
-### `dh-mcp system`
+### `dhcli system`
 
 A *system* is the source dimension of every fully qualified session id
 (`type:system:name`): the single Community umbrella (named `community`)
@@ -410,7 +418,7 @@ plus every configured Enterprise (Core+) system.
 | Verb         | Purpose                                                                                       |
 |--------------|-----------------------------------------------------------------------------------------------|
 | `list`       | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`. |
-| `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dh-mcp config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
+| `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dhcli config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
 | `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
 | `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
 
@@ -427,14 +435,14 @@ in the message) when no browser can be launched.
 Examples:
 
 ```bash
-dh-mcp system list
-dh-mcp system list | jq '.[].name'
-dh-mcp system status --system prod --connect
-dh-mcp system url prod
-dh-mcp system open prod --print
+dhcli system list
+dhcli system list | jq '.[].name'
+dhcli system status --system prod --connect
+dhcli system url prod
+dhcli system open prod --print
 ```
 
-### `dh-mcp table`
+### `dhcli table`
 
 Inspects tables in a session. All verbs take a fully qualified
 `ID`.
@@ -446,12 +454,12 @@ Inspects tables in a session. All verbs take a fully qualified
 | `data <id> <table>`           | Row data: `--max-rows N`, `--head/--tail` (default head). Wraps `session_table_data`. |
 
 ```bash
-dh-mcp table list community:community:dev
-dh-mcp table schema community:community:dev trades
-dh-mcp table data community:community:dev trades --max-rows 50 --tail
+dhcli table list community:community:dev
+dhcli table schema community:community:dev trades
+dhcli table data community:community:dev trades --max-rows 50 --tail
 ```
 
-### `dh-mcp catalog`
+### `dhcli catalog`
 
 **Enterprise (Core+) only.** Queries an enterprise session's catalog
 (database); `ID` must name an enterprise session.
@@ -464,12 +472,12 @@ dh-mcp table data community:community:dev trades --max-rows 50 --tail
 | `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 
 ```bash
-dh-mcp catalog tables enterprise:prod:42
-dh-mcp catalog schema enterprise:prod:42 Market Trades
-dh-mcp catalog sample enterprise:prod:42 Market Trades --max-rows 20
+dhcli catalog tables enterprise:prod:42
+dhcli catalog schema enterprise:prod:42 Market Trades
+dhcli catalog sample enterprise:prod:42 Market Trades --max-rows 20
 ```
 
-### `dh-mcp pq`
+### `dhcli pq`
 
 **Enterprise (Core+) only.** Manages Persistent Queries, addressed by
 their fully qualified id `enterprise:<system>:<serial>` — the same id the
@@ -505,7 +513,7 @@ shared flags are: `--script-body`/`--script-body-path`/`--git-script-path`,
 (repeatable), `--class-path` (repeatable), `--python-venv`, `--env KEY=VALUE`
 (repeatable), `--init-timeout-nanos`, `--auto-delete-timeout`,
 `--admin-group`/`--viewer-group` (repeatable), `--restart-users`, and `--owner`.
-Run `dh-mcp pq create --help` (or `modify`) for the full per-flag detail.
+Run `dhcli pq create --help` (or `modify`) for the full per-flag detail.
 The three script sources and `--auto-delete-timeout`/`--schedule` are each
 mutually exclusive; combining them exits `2` with `mutually_exclusive_options`.
 
@@ -524,12 +532,12 @@ exit `0` means the batch ran, not that every id succeeded — check the
 `summary` and per-item `results` in the payload for failures.
 
 ```bash
-dh-mcp pq create nightly --system prod --heap-size-gb 4 --script-body-path ./n.py
-dh-mcp pq create weekly --system prod --heap-size-gb 4 --git-script-path IrisQueries/py/weekly.py
-dh-mcp pq restart enterprise:prod:1234567890 --no-wait
+dhcli pq create nightly --system prod --heap-size-gb 4 --script-body-path ./n.py
+dhcli pq create weekly --system prod --heap-size-gb 4 --git-script-path IrisQueries/py/weekly.py
+dhcli pq restart enterprise:prod:1234567890 --no-wait
 ```
 
-### `dh-mcp docs`
+### `dhcli docs`
 
 Queries the Deephaven documentation MCP server. These verbs connect
 **directly** to the docs server configured as `docs.url` in `cli.json`
@@ -561,32 +569,32 @@ tool list — so a server that accepts the connection but stalls still
 fails within the configured time.
 
 ```bash
-dh-mcp docs ask "How do I join two tables?"
-dh-mcp docs ask "Show me a ring table example" --language python
-dh-mcp docs ask "What is a liveness scope?" | jq -r .response
-dh-mcp docs status
+dhcli docs ask "How do I join two tables?"
+dhcli docs ask "Show me a ring table example" --language python
+dhcli docs ask "What is a liveness scope?" | jq -r .response
+dhcli docs status
 ```
 
-### `dh-mcp config`
+### `dhcli config`
 
 | Verb        | Purpose                                                                                       |
 |-------------|-----------------------------------------------------------------------------------------------|
 | `show`      | Prints the resolved configuration with secrets redacted.                                      |
 | `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. Validation runs before every command body, so this is CI-friendly. |
 
-### `dh-mcp agents`
+### `dhcli agents`
 
 Machine-readable CLI metadata for AI-agent self-discovery — the
 `--help` for agents; prefer it over scraping help text. There are two
 complementary ways to reach it: the `--agents` flag for one command in
 place, and the `agents` group for whole-system views. Both honor the
-root `-o/--output` flag and `DH_MCP_OUTPUT` (`human`, `json`,
+root `-o/--output` flag and `DHCLI_OUTPUT` (`human`, `json`,
 `json-pretty`, or `yaml`) and, like every command, **default to
 `json`** — compact single-line JSON; pass `-o json-pretty` for
 indented JSON or `-o human` for terminal-friendly output. Both run
 without a valid configuration tree, so they work even when `config
 validate` fails; that same bypass means they cannot read `cli.json`'s
-`output.format` (use `-o`/`DH_MCP_OUTPUT` instead).
+`output.format` (use `-o`/`DHCLI_OUTPUT` instead).
 
 The surfaces are sized as a **progressive-disclosure ladder**: orient
 with the summary tree (a few KB), drill into one group (~1 KB), then
@@ -599,9 +607,9 @@ Append `--agents` to any command, at any depth, to emit just that
 command's node — the machine-readable counterpart of `--help`:
 
 ```bash
-dh-mcp daemon start --agents    # the start verb's full node
-dh-mcp daemon --agents          # the daemon group node (verb summaries)
-dh-mcp --agents                 # the summary tree (== agents tree)
+dhcli daemon start --agents    # the start verb's full node
+dhcli daemon --agents          # the daemon group node (verb summaries)
+dhcli --agents                 # the summary tree (== agents tree)
 ```
 
 Like click's own `--help`, the universal `--help` and `--agents` flags
@@ -612,15 +620,15 @@ discloses them once under `universal_options`.
 
 | Verb                 | Output                                                                                  |
 |----------------------|-----------------------------------------------------------------------------------------|
-| `tree`               | The **summary tree** by default: `version`, `prog`, the root `summary`, a drill-down `hint`, and a nested `commands` map of `{name: {summary, commands?}}` down to the leaves. Identical to `dh-mcp --agents`. With `--full`, the complete manifest instead: root `summary`/`description`/`examples`, `global_options`, `universal_options` (the every-command flags `--help` and `--agents`), full command nodes under `commands`, `default_environment`, `default_exit_codes`, and the project-wide `error_codes` registry. |
+| `tree`               | The **summary tree** by default: `version`, `prog`, the root `summary`, a drill-down `hint`, and a nested `commands` map of `{name: {summary, commands?}}` down to the leaves. Identical to `dhcli --agents`. With `--full`, the complete manifest instead: root `summary`/`description`/`examples`, `global_options`, `universal_options` (the every-command flags `--help` and `--agents`), full command nodes under `commands`, `default_environment`, `default_exit_codes`, and the project-wide `error_codes` registry. |
 | `command PATH...`    | One command's **self-contained node**, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--agents` to that command. A group's node lists its subcommands as one-line summaries; `--full` expands them into full nested nodes. A path that does not resolve exits `2` with `command_not_found`. |
 | `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree --full`. |
 
 ```bash
-dh-mcp agents tree | jq '.commands | keys'
-dh-mcp agents command daemon start    # == dh-mcp daemon start --agents
-dh-mcp agents command session         # group: verb summaries, one level
-dh-mcp agents errors | jq '.[].code'
+dhcli agents tree | jq '.commands | keys'
+dhcli agents command daemon start    # == dhcli daemon start --agents
+dhcli agents command session         # group: verb summaries, one level
+dhcli agents errors | jq '.[].code'
 ```
 
 #### Node schema
@@ -655,7 +663,7 @@ standalone node minus those hoisted entries.
 The two whole-tree surfaces carry different top-level fields, and a
 single command's node never carries any of them:
 
-- **Summary tree** (`agents tree`, `dh-mcp --agents`): `version`,
+- **Summary tree** (`agents tree`, `dhcli --agents`): `version`,
   `prog`, `summary`, `hint`, and a nested `{name: {summary,
   commands?}}` map under `commands`.
 - **Full manifest** (`agents tree --full`): `version`, `prog`,
@@ -668,7 +676,7 @@ single command's node never carries any of them:
 > / `--introspect`, and `tree` previously emitted the full manifest
 > (with a rendered `help` string per node) by default. The rename has
 > no alias; use `agents` / `--agents`. For the old "everything"
-> behavior, use `dh-mcp agents tree --full` — the rendered `help` and
+> behavior, use `dhcli agents tree --full` — the rendered `help` and
 > `short_help` node fields are replaced by the structured `summary`,
 > `description`, and section keys above. Separately, `-o json` now
 > emits compact single-line JSON on every command; use
@@ -676,16 +684,44 @@ single command's node never carries any of them:
 > `--compact/--no-compact` flag on the `agents` verbs was removed in
 > favor of the mode).
 
+### `dhcli self`
+
+Verbs that operate on the `dhcli` installation itself rather than on
+Deephaven resources (the `rustup self` / `uv self` pattern), and the
+intended home for future tool-self-management verbs.
+
+| Verb         | Purpose                                                        |
+|--------------|----------------------------------------------------------------|
+| `completion` | Print the shell tab-completion script for `bash`, `zsh`, or `fish`. |
+
+`self completion SHELL` prints the tab-completion script for one
+supported shell — `bash` (>= 4.4), `zsh`, or `fish` — as raw shell
+source (not subject to `-o/--output`; the script *is* the output).
+Evaluate it to enable completion in the current shell, or add the
+line to your shell startup file (see
+[Shell completion](#shell-completion)):
+
+```bash
+eval "$(dhcli self completion bash)"    # ~/.bashrc
+eval "$(dhcli self completion zsh)"     # ~/.zshrc
+dhcli self completion fish | source     # ~/.config/fish/completions/dhcli.fish
+```
+
+The scripts are generated and maintained by `click`; the supported set
+is exactly click's native set. The command reads no configuration and
+works without a valid configuration tree. An unsupported shell fails
+argument parsing and exits `2`.
+
 ## Top-level flags
 
 | Flag                | Envvar               | Purpose                                                                              |
 |---------------------|----------------------|--------------------------------------------------------------------------------------|
-| `--config-dir PATH` |                      | Override the configuration directory. No per-subdir env var; use `DH_MCP_DATA_DIR` to move both `config/` and `runtime/` together. |
+| `--config-dir PATH` |                      | Override the configuration directory. No per-subdir env var; use `DH_AI_DATA_DIR` to move both `config/` and `runtime/` together. |
 | `--runtime-dir PATH`|                      | Override the runtime directory (where `daemon.json` lives). No per-subdir env var.   |
-|                     | `DH_MCP_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
-| `-o`, `--output`    | `DH_MCP_OUTPUT`      | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.json`'s `output.format`. |
+|                     | `DH_AI_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
+| `-o`, `--output`    | `DHCLI_OUTPUT`      | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.json`'s `output.format`. |
 | `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds` (and `docs.timeouts.request_seconds` for the `docs` commands). |
-| `--agents`          |                      | Print the command's machine-readable description, tuned for AI agents, and exit (the machine twin of `--help`); available on every command. Honors the `-o`/`DH_MCP_OUTPUT` mode, compact `json` by default. On the root, emits the summary tree; `dh-mcp agents tree` prints the whole surface. |
+| `--agents`          |                      | Print the command's machine-readable description, tuned for AI agents, and exit (the machine twin of `--help`); available on every command. Honors the `-o`/`DHCLI_OUTPUT` mode, compact `json` by default. On the root, emits the summary tree; `dhcli agents tree` prints the whole surface. |
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
@@ -693,11 +729,11 @@ single command's node never carries any of them:
 
 These flags accept any position on the command line — before the
 noun group, between the noun and the verb, or after the verb.
-For example `dh-mcp -o json config show`, `dh-mcp config -o json
-show`, and `dh-mcp config show -o json` are all equivalent. The
+For example `dhcli -o json config show`, `dhcli config -o json
+show`, and `dhcli config show -o json` are all equivalent. The
 CLI rewrites argv to lift recognized top-level options to the
 front before `click` parses it. `--help` and `--version` are
-*not* lifted: Click resolves them per-command, so `dh-mcp daemon
+*not* lifted: Click resolves them per-command, so `dhcli daemon
 --help` correctly renders the `daemon` group's help (not the
 root's). Use the POSIX `--` sentinel to force a literal token
 later in the command line (everything after `--` is preserved
@@ -706,13 +742,13 @@ verbatim).
 ## Output modes
 
 Every verb honors `-o/--output`, selecting how its result is rendered. The mode
-is resolved per invocation: `-o/--output` flag → `DH_MCP_OUTPUT` → `cli.json`'s
+is resolved per invocation: `-o/--output` flag → `DHCLI_OUTPUT` → `cli.json`'s
 `output.format` (default `json`). The CLI is **machine-first** (primarily driven
 by AI agents), so the default is `json`; for human-readable output, pass
-`-o human`, set `DH_MCP_OUTPUT=human`, or set `output.format: "human"` in
-`cli.json`. `dh-mcp agents`, the `--agents` flag, and error output run
+`-o human`, set `DHCLI_OUTPUT=human`, or set `output.format: "human"` in
+`cli.json`. `dhcli agents`, the `--agents` flag, and error output run
 without the validated config, so they skip the `cli.json` step — use
-`-o`/`DH_MCP_OUTPUT` for those (so `DH_MCP_OUTPUT=human` is the most complete way
+`-o`/`DHCLI_OUTPUT` for those (so `DHCLI_OUTPUT=human` is the most complete way
 to get human output everywhere).
 
 - `json` (default) — a **compact single-line** document
@@ -773,35 +809,35 @@ with these keys:
 ```
 
 The `error_code` values are stable across releases. Get the full
-registry programmatically via `dh-mcp agents errors` (or the
-`error_codes` key of `dh-mcp agents tree --full`). Current set:
+registry programmatically via `dhcli agents errors` (or the
+`error_codes` key of `dhcli agents tree --full`). Current set:
 
 | `error_code`                  | Meaning                                                            |
 |-------------------------------|--------------------------------------------------------------------|
 | `daemon_startup_timeout`      | Daemon was spawned but did not publish a registry entry in time.   |
 | `daemon_not_running`          | No running daemon was found: either none is registered and `--no-auto-start` was specified, or a command that needs the daemon's files (e.g. `daemon logs`) found none yet. |
 | `daemon_client_error`         | A client-side daemon-management failure (signal denied, etc.).     |
-| `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dh-mcp daemon repair`. |
-| `daemon_registry_live`        | `dh-mcp daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dh-mcp daemon stop` first. |
-| `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `daemon.reuse` resolved to `refuse`. Run `dh-mcp daemon restart`, or adjust `daemon.reuse` in `cli.json`. |
+| `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dhcli daemon repair`. |
+| `daemon_registry_live`        | `dhcli daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dhcli daemon stop` first. |
+| `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `daemon.reuse` resolved to `refuse`. Run `dhcli daemon restart`, or adjust `daemon.reuse` in `cli.json`. |
 | `mcp_request_failed`          | The MCP transport reported an error (connect, parse, server failure). |
 | `mcp_request_timeout`         | The MCP request timed out. The server may still finish processing the request — if the operation changes state, verify the result before retrying. Allow more time with `--timeout`, or raise the timeout in `cli.json`: `request.timeouts.default_seconds` (`docs.timeouts.request_seconds` for the `docs` commands). |
-| `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
+| `tool_not_found`              | `dhcli tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
-| `command_not_found`           | `dh-mcp agents command PATH` referenced a command path that does not exist. |
+| `command_not_found`           | `dhcli agents command PATH` referenced a command path that does not exist. |
 | `missing_argument`            | A required positional argument or option was not provided.         |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `file_read_failed`            | A local file passed on the command line could not be read.          |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
-| `browser_launch_failed`       | `dh-mcp session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
-| `system_not_found`            | `dh-mcp system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
+| `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
+| `system_not_found`            | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
 | `config_invalid`              | The configuration tree failed validation.                          |
 | `internal_error`              | An unexpected internal failure not attributable to a specific subsystem. |
 
 ## Troubleshooting
 
-**Daemon refuses to start / `dh-mcp daemon start` times out.**
+**Daemon refuses to start / `dhcli daemon start` times out.**
 
 Inspect `<runtime_dir>/daemon/daemon.log`. The daemon writes its
 stdout and stderr there; configuration errors and import failures
@@ -810,7 +846,7 @@ will be written on the next successful spawn.
 
 **Stale registry after a crash.**
 
-If the daemon crashes without cleaning up, `dh-mcp` detects the
+If the daemon crashes without cleaning up, `dhcli` detects the
 mismatch between the registered PID and the running process names,
 purges the registry, and (when auto-start is enabled) spawns a
 fresh daemon. You can also delete `<runtime_dir>/daemon/daemon.json`
@@ -826,10 +862,10 @@ co-existing with a still-live daemon would otherwise produce a
 confusing port-bind timeout. Recovery:
 
 ```bash
-dh-mcp daemon status    # confirm whether a daemon is still running
-dh-mcp daemon stop      # if it is, stop it first
-dh-mcp daemon repair    # move the corrupt file aside (renames to daemon.json.corrupt-<UTC>)
-dh-mcp daemon start     # fresh spawn
+dhcli daemon status    # confirm whether a daemon is still running
+dhcli daemon stop      # if it is, stop it first
+dhcli daemon repair    # move the corrupt file aside (renames to daemon.json.corrupt-<UTC>)
+dhcli daemon start     # fresh spawn
 ```
 
 `daemon repair` refuses to run while a live daemon is still
@@ -850,7 +886,7 @@ sudo chown -R $USER ~/.deephaven/ai/runtime
 
 **`No daemon is running and auto-start is disabled.`**
 
-You set `daemon.auto_start: false` in `cli.json`. Run `dh-mcp
+You set `daemon.auto_start: false` in `cli.json`. Run `dhcli
 daemon start` explicitly, or flip the config back to `true`.
 
 **Build mismatch (`daemon_reuse_refused`).**
@@ -862,14 +898,14 @@ virtualenv's daemon is still running, the CLI refuses (by default) rather
 than silently driving a stale daemon. Replace it:
 
 ```bash
-dh-mcp daemon restart   # stop the stale daemon and spawn a fresh one
+dhcli daemon restart   # stop the stale daemon and spawn a fresh one
 ```
 
 To relax the policy per field, set `daemon.reuse` in `cli.json`
 (see the `daemon.*` configuration table above). For parallel
 development across multiple checkouts, give each its own daemon by pointing
-`DH_MCP_DATA_DIR` at a per-worktree directory (e.g.
-`export DH_MCP_DATA_DIR="$PWD/.dh-mcp-data"`), so switching checkouts never
+`DH_AI_DATA_DIR` at a per-worktree directory (e.g.
+`export DH_AI_DATA_DIR="$PWD/.dhcli-data"`), so switching checkouts never
 tears down another's daemon.
 
 ## Security model

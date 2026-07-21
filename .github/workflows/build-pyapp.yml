@@ -8,7 +8,7 @@
 #
 # Produced artifacts (per target):
 #   dist/pyapp/<target>/dh-mcp-systems-server[.exe]
-#   dist/pyapp/<target>/dh-mcp[.exe]
+#   dist/pyapp/<target>/dhcli[.exe]
 #   dist/pyapp/deephaven-mcp-pyapp-<version>-<target>.{tar.gz,zip}
 #
 # Binary filenames are identical across architectures; the target alias is
@@ -112,8 +112,8 @@ jobs:
           # First run unpacks the embedded distribution; --help and agents both boot
           # the embedded interpreter and import the entry point without any configuration.
           "${dir}/dh-mcp-systems-server${suffix}" --help
-          "${dir}/dh-mcp${suffix}" --help
-          "${dir}/dh-mcp${suffix}" agents tree > /dev/null
+          "${dir}/dhcli${suffix}" --help
+          "${dir}/dhcli${suffix}" agents tree > /dev/null
 
       - name: Upload distribution archive
         # The archive bundles both binaries. Short retention keeps Actions

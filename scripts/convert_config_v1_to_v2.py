@@ -13,7 +13,7 @@ Design notes:
   standard library — no ``json5``, no ``pydantic``, no ``deephaven_mcp``. It can
   be copied out of the repository and run on its own with any ``python3`` on
   macOS, Linux, or Windows. Correctness is proven by a CI integration test that
-  converts a fixture and validates the result with ``dh-mcp config validate``.
+  converts a fixture and validates the result with ``dhcli config validate``.
   Because it cannot import ``json5``, it parses only the JSON5 subset v1 configs
   use in practice: ``//`` / ``/* */`` comments and trailing commas. v1 itself
   read configs with the full ``json5`` library, so a file using other JSON5
@@ -781,12 +781,12 @@ def resolve_output_dir(explicit: str | None) -> Path:
 
     Returns:
         Path: The config directory. ``--output`` wins; otherwise
-            ``$DH_MCP_DATA_DIR/config`` when that env var is set; otherwise the
+            ``$DH_AI_DATA_DIR/config`` when that env var is set; otherwise the
             platform default ``.../ai/config``.
     """
     if explicit:
         return Path(explicit).expanduser()
-    env_value = os.environ.get("DH_MCP_DATA_DIR")
+    env_value = os.environ.get("DH_AI_DATA_DIR")
     if env_value:
         return Path(env_value).expanduser() / "config"
     return _default_data_root() / "config"
@@ -920,7 +920,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--output",
         default=None,
         help=(
-            "Target config directory. Defaults to $DH_MCP_DATA_DIR/config when "
+            "Target config directory. Defaults to $DH_AI_DATA_DIR/config when "
             "set, otherwise ~/.deephaven/ai/config "
             "(%%APPDATA%%/Deephaven/ai/config on Windows)."
         ),
@@ -996,7 +996,7 @@ def main(argv: list[str] | None = None) -> int:
 
     write_tree(root, result.files)
     _print_summary(root, result, written=True)
-    print(f"\nValidate the result with:\n  dh-mcp --config-dir {root} config validate")
+    print(f"\nValidate the result with:\n  dhcli --config-dir {root} config validate")
     _print_review_items(result)
     return 0
 

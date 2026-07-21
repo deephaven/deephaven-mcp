@@ -10,14 +10,14 @@ Resolution precedence (highest first):
 
 1. Explicit ``config_dir`` argument passed by the caller (CLI
    ``--config-dir`` flag, test fixtures, etc.).
-2. ``$DH_MCP_DATA_DIR / "config"`` — i.e. the env-overridden data
+2. ``$DH_AI_DATA_DIR / "config"`` — i.e. the env-overridden data
    root with a fixed ``"config"`` subdirectory.
 3. The platform default data root (see
    :func:`deephaven_mcp.config._data_root._default_data_root`) plus
    ``"config"``.
 
-There is intentionally **no** ``DH_MCP_CONFIG_DIR`` env var: a single
-``DH_MCP_DATA_DIR`` knob moves every MCP-managed directory at once,
+There is intentionally **no** ``DH_AI_CONFIG_DIR`` env var: a single
+``DH_AI_DATA_DIR`` knob moves every MCP-managed directory at once,
 which is the operator use case that motivated this design.
 """
 
