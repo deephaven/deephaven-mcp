@@ -103,7 +103,10 @@ test_bash() {
         source <(dhcli self completion bash) || exit 1
         COMP_WORDS=(dhcli daem)
         COMP_CWORD=1
-        _dhcli_completion
+        # bash passes the command name as $1 when it invokes the
+        # function via `complete -F`; the generated function runs
+        # `env ... $1`, so the manual call must supply it too.
+        _dhcli_completion dhcli
         printf "%s\n" "${COMPREPLY[@]}"
     ')" && grep -qx "daemon" <<<"$out" && ok=0
     report bash "source + COMPREPLY suggests 'daemon'" "$ok"
