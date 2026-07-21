@@ -99,9 +99,11 @@ a real use case for changing it.
 
 ## When you think you need an env var directly
 
-Almost never. `DH_AI_DATA_DIR` is the only legitimate case
-today (read by
-`deephaven_mcp.config.resolve_data_root`). Before
+Almost never. `DH_AI_DATA_DIR` (read by
+`deephaven_mcp.config.resolve_data_root`) and the
+`PYTHONLOGLEVEL` logging control (read by `setup_logging()`) are
+the only legitimate cases today — `docs/ENV.md` is the canonical
+inventory. Before
 adding another, ask: can the operator put this value in a JSON
 file and use `${env:NAME}` to pull the env-var contents into it?
 Usually yes — and that path keeps the schema, validation,

@@ -20,10 +20,12 @@ no ``mcp_reload`` tool — configuration changes require a restart.
 
 Every operator-tunable knob lives on ``ServerConfig`` and is read from
 ``server.json``. CLI flags below override the JSON values when
-supplied. The only environment variable this server itself consults at
-startup is ``DH_AI_DATA_DIR`` (which moves the user-data root and is
-read transitively when ``--config-dir`` and ``--runtime-dir`` are
-unset).
+supplied. The only configuration-location environment variable this
+server consults at startup is ``DH_AI_DATA_DIR`` (which moves the
+user-data root and is read transitively when ``--config-dir`` and
+``--runtime-dir`` are unset); the log level comes from
+``PYTHONLOGLEVEL`` via :func:`deephaven_mcp._logging.setup_logging`.
+``docs/ENV.md`` is the canonical environment-variable reference.
 """
 
 from __future__ import annotations

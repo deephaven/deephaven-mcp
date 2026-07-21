@@ -12,10 +12,12 @@ a config model, or wiring an environment variable into the code.
 
 Authoritative end-user reference: `docs/CONFIGURATION.md`. This
 skill is the *internal-to-the-codebase* counterpart and explains
-**how** to extend the configuration safely. The only env var the
-server itself reads is `DH_AI_DATA_DIR` (consumed by
-`deephaven_mcp.config.resolve_data_root`); every
-other tunable lives in the JSON tree.
+**how** to extend the configuration safely. The only
+configuration-location env var the server itself reads is
+`DH_AI_DATA_DIR` (consumed by
+`deephaven_mcp.config.resolve_data_root`); the log level comes
+from `PYTHONLOGLEVEL` (see `docs/ENV.md`). Every other tunable
+lives in the JSON tree.
 
 ## Architecture in one sentence
 
