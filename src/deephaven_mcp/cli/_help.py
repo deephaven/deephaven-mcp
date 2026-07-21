@@ -66,12 +66,13 @@ from deephaven_mcp.cli._format import (
     OutputMode,
     format_output,
 )
+from deephaven_mcp.cli._runtime import RuntimeSpec
 from deephaven_mcp.config import DATA_DIR_ENV_VAR
 
 # Click rewraps each help paragraph unless it begins with a backspace
 # (\b) on its own line; prefixing the pre-formatted sections with this
 # marker preserves their column alignment and one-example-per-line
-# layout. the manifest builders strip the marker so the manifest stays clean.
+# layout. The manifest builders strip the marker so the manifest stays clean.
 _NO_WRAP = "\b\n"
 
 
@@ -214,9 +215,11 @@ def _build_agents_option() -> click.Option:
         expose_value=False,
         callback=_agents_callback,
         help=(
-            "Emit this command's manifest node and exit (machine twin of "
-            "--help; rendered in the -o/--output mode — compact json by "
-            "default, -o json-pretty for indented)."
+            "Print this command's machine-readable description, tuned for "
+            "AI agents, and exit; the machine twin of --help. Honors "
+            "-o/--output: compact json by default, -o json-pretty for "
+            "indented. For the whole command tree, use 'dh-mcp agents "
+            "tree'."
         ),
     )
 
@@ -243,6 +246,7 @@ class HelpfulCommand(click.Command):
         intentionally_unsupported: frozenset[str] = frozenset(),
         router_params: frozenset[str] = frozenset(),
         client_only_params: frozenset[str] = frozenset(),
+        needs_runtime: bool = True,
         **kwargs: Any,
     ) -> None:
         """Store the wrapper metadata; defer the rest to :class:`click.Command`.
@@ -269,6 +273,12 @@ class HelpfulCommand(click.Command):
             client_only_params (frozenset[str]): Flag names that are not a
                 parameter of any wrapped tool (e.g. ``"print_only"`` on
                 ``session open``, which only controls local browser launch).
+            needs_runtime (bool): Whether :meth:`invoke` materializes the
+                :class:`~deephaven_mcp.cli._runtime.Runtime` (loading and
+                validating the configuration tree) before the command body
+                runs. Default True — almost every verb reads config.
+                Declare False only for commands that must work without a
+                valid configuration tree (the ``agents`` verbs).
             *args (Any): Positional arguments forwarded to
                 :class:`click.Command`.
             **kwargs (Any): Keyword arguments forwarded to
@@ -298,6 +308,31 @@ class HelpfulCommand(click.Command):
         self.intentionally_unsupported: frozenset[str] = intentionally_unsupported
         self.router_params: frozenset[str] = router_params
         self.client_only_params: frozenset[str] = client_only_params
+        self.needs_runtime: bool = needs_runtime
+
+    def invoke(self, ctx: click.Context) -> Any:
+        """Materialize the :class:`Runtime` just before the command body runs.
+
+        The root callback stores a cheap
+        :class:`~deephaven_mcp.cli._runtime.RuntimeSpec` (the load
+        recipe) on ``ctx.obj``; this hook swaps it for the real
+        :class:`~deephaven_mcp.cli._runtime.Runtime` so the body's
+        ``@click.pass_obj`` receives a fully-validated runtime. Running
+        the load *here* — after click has parsed this command's
+        arguments — means the eager ``--help`` / ``--agents`` callbacks
+        have already exited on those invocations, so they never touch
+        configuration. Commands declared ``needs_runtime=False`` skip
+        the swap entirely; tests that pass a prebuilt ``Runtime`` as
+        ``obj`` are also left untouched (the swap only fires on a
+        :class:`RuntimeSpec`).
+
+        Raises:
+            CliError: With ``CONFIG_INVALID`` when the configuration
+                tree fails to load — before the command body runs.
+        """
+        if self.needs_runtime and isinstance(ctx.obj, RuntimeSpec):
+            ctx.obj = ctx.obj.resolve()
+        return super().invoke(ctx)
 
     def get_params(self, ctx: click.Context) -> list[click.Parameter]:
         """Append the lazy ``--agents`` option, like click's ``--help``.

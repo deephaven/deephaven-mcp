@@ -11,7 +11,12 @@ from pydantic import ValidationError
 
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.cli._errors import CliError, ErrorCode
-from deephaven_mcp.cli._runtime import Runtime, apply_cli_overrides, load_runtime
+from deephaven_mcp.cli._runtime import (
+    Runtime,
+    RuntimeSpec,
+    apply_cli_overrides,
+    load_runtime,
+)
 from deephaven_mcp.config.schema import CliConfig
 from deephaven_mcp.config.tree import ConfigTree
 
@@ -38,13 +43,54 @@ def _seed_minimal_config_dir(d: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# RuntimeSpec.resolve
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_spec_resolve_builds_runtime(tmp_path: Path) -> None:
+    """``resolve`` runs ``load_runtime`` with the spec's fields (sync caller)."""
+    cfg_dir = tmp_path / "cfg"
+    runtime_dir = tmp_path / "runtime"
+    _seed_minimal_config_dir(cfg_dir)
+    spec = RuntimeSpec(
+        config_dir_override=cfg_dir,
+        runtime_dir_override=runtime_dir,
+        cli_overrides={"output": {"format": "yaml"}},
+    )
+    runtime = spec.resolve()
+    assert isinstance(runtime, Runtime)
+    assert runtime.config_dir == cfg_dir
+    assert runtime.runtime_dir == runtime_dir
+    assert runtime.config.cli.output.format == "yaml"
+
+
+def test_runtime_spec_resolve_propagates_config_error(tmp_path: Path) -> None:
+    """A malformed config surfaces from ``resolve`` as ``CONFIG_INVALID``."""
+    spec = RuntimeSpec(
+        config_dir_override=tmp_path / "missing",
+        runtime_dir_override=tmp_path / "runtime",
+    )
+    with pytest.raises(CliError) as exc_info:
+        spec.resolve()
+    assert exc_info.value.code is ErrorCode.CONFIG_INVALID
+
+
+def test_runtime_spec_defaults_are_none() -> None:
+    """An all-defaults spec matches ``load_runtime``'s keyword defaults."""
+    spec = RuntimeSpec()
+    assert spec.config_dir_override is None
+    assert spec.runtime_dir_override is None
+    assert spec.cli_overrides is None
+
+
+# ---------------------------------------------------------------------------
 # load_runtime: happy paths
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_load_runtime_returns_populated_runtime(tmp_path: Path) -> None:
-    """``load_runtime`` resolves paths and validates the entire tree eagerly."""
+    """``load_runtime`` resolves paths and validates the entire tree in one pass."""
     cfg_dir = tmp_path / "cfg"
     runtime_dir = tmp_path / "runtime"
     _seed_minimal_config_dir(cfg_dir)
@@ -207,7 +253,7 @@ async def test_load_runtime_creates_runtime_dir_when_missing(
 async def test_load_runtime_rejects_missing_config_dir(tmp_path: Path) -> None:
     """A non-existent config dir fails the load with ``CONFIG_INVALID``.
 
-    Eager validation: the configuration directory is part of the
+    Total validation: the configuration directory is part of the
     audited surface, so ``dh-mcp`` cannot operate without it.
     """
     cfg_dir = tmp_path / "does-not-exist"
@@ -221,7 +267,7 @@ async def test_load_runtime_rejects_missing_config_dir(tmp_path: Path) -> None:
 async def test_load_runtime_rejects_malformed_cli_json(tmp_path: Path) -> None:
     """A broken ``cli.json`` is a hard ``CONFIG_INVALID`` error.
 
-    Eager validation: ``cli.json`` is part of the configuration tree
+    Total validation: ``cli.json`` is part of the configuration tree
     and is not given the best-effort treatment the previous design
     used. Recovery is to fix the file (the error message names it).
     """

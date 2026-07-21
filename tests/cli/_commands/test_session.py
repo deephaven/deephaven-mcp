@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent
 
 from deephaven_mcp.cli import _browser as browser_mod
-from deephaven_mcp.cli import _main
+from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._commands import session as session_mod
 from deephaven_mcp.cli._main import cli
@@ -32,7 +32,7 @@ def _invoke(
     input: str | None = None,
 ):
     runner = CliRunner()
-    with patch.object(_main, "load_runtime", fake_load_runtime(runtime)):
+    with patch.object(runtime_mod, "load_runtime", fake_load_runtime(runtime)):
         return runner.invoke(cli, args, standalone_mode=standalone_mode, input=input)
 
 

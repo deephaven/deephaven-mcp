@@ -18,14 +18,14 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 3. **Body: do the work.** Use the `Runtime` on `ctx.obj` for config / runtime-dir / output mode / timeouts. For commands that talk to the daemon, use `acquire_daemon(runtime, ...)` from `cli/_commands/_acquire.py` (it remaps the daemon-lifecycle exceptions to `CliError`) and `McpClient.for_daemon(...)` from `cli/_mcp_client.py`.
 
-   The runtime is fully validated by the time your body runs: read `runtime.config.cli` for output mode and timeouts, `runtime.config.server` / `.community` / `.enterprise` for the systems sections, and `runtime.daemon_dir` for the registry handle. There is no upgrade gate — eager validation in `_main`'s root callback means a malformed config has already produced a `config_invalid` exit before dispatch reaches your verb. See `docs/CLI.md` *Configuration loading* and `AGENTS.md` *CLI* for the rationale.
+   The runtime is fully validated by the time your body runs: read `runtime.config.cli` for output mode and timeouts, `runtime.config.server` / `.community` / `.enterprise` for the systems sections, and `runtime.daemon_dir` for the registry handle. There is no upgrade gate — `HelpfulCommand.invoke` materializes the `Runtime` (loading and validating the whole config tree) right before your body runs, so a malformed config has already produced a `config_invalid` exit before dispatch reaches your verb. Commands that must work without a valid config tree (the `agents` verbs) declare `needs_runtime=False` on the command. See `docs/CLI.md` *Configuration loading* and `AGENTS.md` *CLI* for the rationale.
 
 4. **Errors.** Raise `CliError(message, code=ErrorCode.X)` from `cli/_errors.py` (`CliError.__init__` takes only `message` and the keyword-only `code` — the exit code is carried by the `ErrorCode` member via `code.exit_code`, not passed in). If no existing `ErrorCode` fits, add a new enum value with a single-line docstring describing what triggers it.
 
 5. **Output.** `click.echo(format_output(payload, output=runtime.config.cli.output.format))`. The `format_output` function (`cli/_format.py`) handles `human` / `json` / `json-pretty` / `yaml` consistently. Do not branch on the output mode in the command body. Note: `output.format` is a nested field — `CliConfig` groups domain-specific knobs under `output.*` / `daemon.*` / `request.*`. Canonical implementation: `config/schema/_cli.py` (`CliConfig`, `OutputConfig`).
 
-6. **Tests.** Add cases to `tests/cli/_commands/test_<noun>.py` (one test file per source file under `_commands/`). Use `click.testing.CliRunner` with `load_runtime` patched to return a test `Runtime`. Cover:
-   - Happy path in each output mode (`human`, `json`, `json-pretty`, `yaml`).
+6. **Tests.** Add cases to `tests/cli/_commands/test_<noun>.py` (one test file per source file under `_commands/`). Use `click.testing.CliRunner` with `load_runtime` patched to return a test `Runtime` — patch it in `deephaven_mcp.cli._runtime` (where `RuntimeSpec.resolve` looks it up), using `fake_load_runtime` from `tests/cli/_helpers.py`. Cover:
+   - Happy path. For a tool-wrapping command, cover **one** structured mode and leave the `human`/`json`/`json-pretty`/`yaml` matrix to `format_output`'s own tests (`_cli-tool-wrapping` *Testing*). For a command with bespoke rendering logic, cover each mode that exercises a distinct code path.
    - Every error path — each one should produce a `CliError` with the expected `error_code` (parse the JSON output and assert).
    - Any new option / argument validation.
 

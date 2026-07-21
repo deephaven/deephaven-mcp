@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent
 
-from deephaven_mcp.cli import _main
+from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._main import cli
 
@@ -27,7 +27,7 @@ def _run(args: list[str], payload: dict, tmp_path: Path):
     with (
         patch.object(wrapping_mod, "acquire", AsyncMock(return_value=make_entry())),
         patch.object(wrapping_mod, "call_tool", AsyncMock(return_value=result)) as call,
-        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)),
     ):
         return CliRunner().invoke(cli, args), call
 

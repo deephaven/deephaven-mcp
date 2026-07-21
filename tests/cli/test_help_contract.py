@@ -86,10 +86,11 @@ def test_leaf_help_documents_positional_arguments(
 def test_help_is_plain_text(path: str, cmd: click.Command) -> None:
     """Help text carries no backtick markup (literal or RST role).
 
-    Surfaced help is rendered verbatim by click and re-emitted verbatim
-    in the agents manifest; neither interprets markup. Rejecting any
-    backtick catches both double-backtick literals and single-backtick
-    RST roles (``:func:`x```). Single quotes are the emphasis convention.
+    Surfaced help is rendered verbatim by click in the terminal, and
+    the agents manifest emits the same HelpSpec strings structurally;
+    neither interprets markup. Rejecting any backtick catches both
+    double-backtick literals and single-backtick RST roles
+    (``:func:`x```). Single quotes are the emphasis convention.
     """
     assert "`" not in (cmd.help or ""), f"{path}: backtick markup in help"
 

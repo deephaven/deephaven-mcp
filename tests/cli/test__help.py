@@ -339,6 +339,68 @@ def test_helpful_command_defaults_are_empty() -> None:
     assert cmd.intentionally_unsupported == frozenset()
     assert cmd.router_params == frozenset()
     assert cmd.client_only_params == frozenset()
+    assert cmd.needs_runtime is True
+
+
+def test_helpful_command_needs_runtime_opt_out_is_stored() -> None:
+    """``needs_runtime=False`` (the agents verbs' declaration) is stored."""
+    assert HelpfulCommand("c", needs_runtime=False).needs_runtime is False
+
+
+def test_invoke_materializes_runtime_from_spec() -> None:
+    """``invoke`` swaps a ``RuntimeSpec`` obj for the resolved ``Runtime``."""
+    from deephaven_mcp.cli._runtime import RuntimeSpec
+
+    sentinel = object()
+    seen: list[object] = []
+
+    @click.command(cls=HelpfulCommand)
+    @click.pass_obj
+    def c(obj: object) -> None:
+        seen.append(obj)
+
+    spec = RuntimeSpec()
+    with patch.object(RuntimeSpec, "resolve", return_value=sentinel):
+        result = CliRunner().invoke(c, [], obj=spec, standalone_mode=False)
+    assert result.exit_code == 0
+    assert seen == [sentinel]
+
+
+def test_invoke_skips_load_when_needs_runtime_false() -> None:
+    """A ``needs_runtime=False`` command receives the spec untouched."""
+    from deephaven_mcp.cli._runtime import RuntimeSpec
+
+    seen: list[object] = []
+
+    @click.command(cls=HelpfulCommand, needs_runtime=False)
+    @click.pass_obj
+    def c(obj: object) -> None:
+        seen.append(obj)
+
+    spec = RuntimeSpec()
+    with patch.object(
+        RuntimeSpec,
+        "resolve",
+        side_effect=AssertionError("resolve must not be called"),
+    ):
+        result = CliRunner().invoke(c, [], obj=spec, standalone_mode=False)
+    assert result.exit_code == 0
+    assert seen == [spec]
+
+
+def test_invoke_leaves_prebuilt_runtime_untouched() -> None:
+    """A non-spec obj (e.g. a prebuilt ``Runtime`` in tests) passes through."""
+    prebuilt = object()
+    seen: list[object] = []
+
+    @click.command(cls=HelpfulCommand)
+    @click.pass_obj
+    def c(obj: object) -> None:
+        seen.append(obj)
+
+    result = CliRunner().invoke(c, [], obj=prebuilt, standalone_mode=False)
+    assert result.exit_code == 0
+    assert seen == [prebuilt]
 
 
 def test_helpful_command_stores_output_spec_and_wrapper_binding() -> None:

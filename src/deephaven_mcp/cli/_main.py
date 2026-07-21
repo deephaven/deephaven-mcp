@@ -1,9 +1,19 @@
 """Entry point for the ``dh-mcp`` CLI.
 
-This module assembles the click command tree, resolves the
-:class:`Runtime` once, and dispatches to the noun groups defined in
-:mod:`deephaven_mcp.cli._commands`. It is the only module wired to
-``[project.scripts]`` in ``pyproject.toml``.
+This module assembles the click command tree and dispatches to the
+noun groups defined in :mod:`deephaven_mcp.cli._commands`. It is the
+only module wired to ``[project.scripts]`` in ``pyproject.toml``.
+
+The root callback does no configuration I/O: it stashes a cheap
+:class:`~deephaven_mcp.cli._runtime.RuntimeSpec` (directory overrides
++ CLI flag overrides) on ``ctx.obj``, and
+:meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke` materializes
+the full :class:`~deephaven_mcp.cli._runtime.Runtime` from it right
+before a leaf command's body runs. ``--help`` / ``--agents`` /
+``dh-mcp agents`` therefore work without a valid configuration tree
+with no special-casing: the first two exit during argument parsing
+(before any body), and the ``agents`` verbs are declared
+``needs_runtime=False``.
 
 Exit codes:
 
@@ -27,7 +37,6 @@ from pathlib import Path
 import click
 
 from deephaven_mcp._logging import setup_logging
-from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands.agents import agents as agents_group
 from deephaven_mcp.cli._commands.catalog import catalog as catalog_group
 from deephaven_mcp.cli._commands.config import config as config_group
@@ -46,7 +55,7 @@ from deephaven_mcp.cli._format import (
     OutputMode,
 )
 from deephaven_mcp.cli._help import HelpfulGroup, HelpSpec
-from deephaven_mcp.cli._runtime import load_runtime
+from deephaven_mcp.cli._runtime import RuntimeSpec
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,55 +90,6 @@ def _build_cli_overrides(
     if no_auto_start:
         overrides["daemon"] = {"auto_start": False}
     return overrides
-
-
-def _argv_has_option(targets: frozenset[str]) -> bool:
-    """Return True when any spelling in ``targets`` is a real option in argv.
-
-    Scans ``sys.argv[1:]`` for a bare occurrence of any target spelling.
-    Tokens consumed as the value of a value-taking root option
-    (``dh-mcp --config-dir --help`` treats ``--help`` as a path) are
-    skipped so the match only fires for a genuine option, not a value
-    that happens to share the spelling.
-
-    Args:
-        targets (frozenset[str]): Option spellings to look for
-            (e.g. ``{"--help", "-h"}``).
-
-    Returns:
-        bool: True when a target spelling appears as a standalone token.
-    """
-    value_taking = _value_taking_root_options()
-    argv = sys.argv[1:]
-    i = 0
-    while i < len(argv):
-        tok = argv[i]
-        if tok in targets:
-            return True
-        if "=" not in tok and tok in value_taking and i + 1 < len(argv):
-            i += 2
-            continue
-        i += 1
-    return False
-
-
-def _is_help_invocation() -> bool:
-    """Return True when ``--help`` or ``-h`` is a real option in ``sys.argv``.
-
-    Used to short-circuit runtime loading: rendering ``--help`` for a
-    subcommand should not require a valid configuration tree.
-    """
-    return _argv_has_option(frozenset({"--help", "-h"}))
-
-
-def _is_agents_invocation() -> bool:
-    """Return True when ``--agents`` is a real option in ``sys.argv``.
-
-    The universal ``--agents`` flag is the machine-readable twin of
-    ``--help`` and likewise renders without a valid configuration tree,
-    so it short-circuits runtime loading wherever it appears.
-    """
-    return _argv_has_option(frozenset({"--agents"}))
 
 
 def _verbosity_to_level(verbose: int, quiet: bool) -> int:
@@ -284,8 +244,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     message="%(prog)s %(version)s",
 )
 @click.pass_context
-@run_async
-async def cli(
+def cli(
     ctx: click.Context,
     config_dir: Path | None,
     runtime_dir: Path | None,
@@ -305,27 +264,17 @@ async def cli(
     logging.getLogger().setLevel(_verbosity_to_level(verbose, quiet))
     _quiet_dependency_loggers(verbose)
 
-    # ``agents`` walks the command tree and does not need a
-    # validated configuration tree; constructing the runtime would
-    # force-load config/server JSON files that may not exist when
-    # an agent is just learning the surface. The same reasoning
-    # applies to the ``--agents`` flag (its machine twin) at any
-    # depth, and to ``--help`` (``dh-mcp daemon --help``, ``dh-mcp tool
-    # call --help``).
-    if (
-        ctx.invoked_subcommand == "agents"
-        or _is_help_invocation()
-        or _is_agents_invocation()
-    ):
-        ctx.obj = None
-        return
-
+    # No configuration I/O here — just the load recipe. The
+    # ``Runtime`` is materialized by ``HelpfulCommand.invoke`` right
+    # before a leaf command's body runs, so ``--help`` / ``--agents``
+    # (which exit during argument parsing) and the ``agents`` verbs
+    # (``needs_runtime=False``) never trigger a config load.
     overrides = _build_cli_overrides(
         output=output,
         timeout=timeout,
         no_auto_start=no_auto_start,
     )
-    ctx.obj = await load_runtime(
+    ctx.obj = RuntimeSpec(
         config_dir_override=config_dir,
         runtime_dir_override=runtime_dir,
         cli_overrides=overrides or None,
@@ -640,9 +589,8 @@ def _value_taking_root_options() -> frozenset[str]:
 
     The value-taking half of :func:`_liftable_root_options`, single-sourced
     through that bucketer so the classification of ``cli.params`` lives in one
-    place. Callers that only need to know which root options consume a
-    following token — ``_argv_command_path`` and ``_is_help_invocation`` —
-    read this.
+    place. ``_argv_command_path``, which needs to know which root options
+    consume a following token, reads this.
     """
     return _liftable_root_options()[0]
 

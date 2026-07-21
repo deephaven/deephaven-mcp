@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent, Tool
 
-from deephaven_mcp.cli import _main
+from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import _acquire as acquire_mod
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._commands import tool as tool_mod
@@ -28,7 +28,7 @@ from .._helpers import fake_load_runtime, make_entry, make_runtime
 
 def _invoke(args: list[str], runtime: Runtime):
     runner = CliRunner()
-    with patch.object(_main, "load_runtime", fake_load_runtime(runtime)):
+    with patch.object(runtime_mod, "load_runtime", fake_load_runtime(runtime)):
         return runner.invoke(cli, args)
 
 

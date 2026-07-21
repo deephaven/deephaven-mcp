@@ -140,13 +140,14 @@ redacted) and `dh-mcp config validate` to confirm it is valid.
 
 ### Configuration loading
 
-Configuration is loaded **once, eagerly, on every invocation**.
-Any malformed file under the configuration directory fails fast
-with `config_invalid` (exit code `2`) before any subcommand body
-runs. There is no recovery mode — fix the file the error message
-names, then retry.
+Configuration is loaded **once per invocation, just before the
+command body runs**. Any malformed file under the configuration
+directory fails fast with `config_invalid` (exit code `2`) before
+any subcommand body runs. There is no recovery mode — fix the file
+the error message names, then retry.
 
-The single load runs in `dh-mcp`'s root callback:
+The single load runs when a command is dispatched (after its
+arguments parse, before its body):
 
 1. Resolves `config_dir` and `runtime_dir` (CLI flags →
    `$DH_MCP_DATA_DIR/{config,runtime}` → platform default).
@@ -157,21 +158,22 @@ The single load runs in `dh-mcp`'s root callback:
 4. Applies top-level CLI flag overrides (`-o`, `--timeout`,
    `--no-auto-start`) onto `runtime.config.cli`.
 
-The only invocations that bypass the load are help and agent self-discovery:
+Help and agent self-discovery therefore work against a broken (or
+absent) configuration tree, with no special-casing:
 
-- `dh-mcp --help`, `dh-mcp <noun> --help`, `dh-mcp <noun> <verb> --help` — the help text is rendered without touching configuration so you can navigate the CLI surface against a broken tree.
-- `dh-mcp agents <verb>` — emits machine-readable metadata as JSON for agents that need to learn the surface before any config exists.
-- `--agents` at any depth (`dh-mcp --agents`, `dh-mcp <noun> <verb> --agents`) — the machine-readable twin of `--help`, likewise rendered without touching configuration.
+- `dh-mcp --help`, `dh-mcp <noun> --help`, `dh-mcp <noun> <verb> --help` — help exits while arguments are being parsed, before the load would run, so you can navigate the CLI surface against a broken tree.
+- `--agents` at any depth (`dh-mcp --agents`, `dh-mcp <noun> <verb> --agents`) — the machine-readable twin of `--help`, exits at the same parse-time point.
+- `dh-mcp agents <verb>` — the agents verbs are declared config-free and never trigger the load; they emit machine-readable metadata for agents that need to learn the surface before any config exists.
 
 #### Recovering from a broken configuration
 
-Eager validation means a typo in any config file blocks every
+Pre-body validation means a typo in any config file blocks every
 subcommand body. Workarounds when you can't run `dh-mcp` itself:
 
 - **Diagnose the error**: `dh-mcp config validate` surfaces the
   structured `config_invalid` payload identifying the offending
-  file. (Validation runs in the eager load before the verb body,
-  so the error appears even though the verb itself never executes.)
+  file. (Validation runs in the pre-body load, so the error appears
+  even though the verb itself never executes.)
 - **Stuck daemon**: read `daemon.json` directly under
   `<runtime_dir>/daemon/`, then `kill <pid>`. Optionally `rm`
   the registry file once the process is gone.
@@ -570,7 +572,7 @@ dh-mcp docs status
 | Verb        | Purpose                                                                                       |
 |-------------|-----------------------------------------------------------------------------------------------|
 | `show`      | Prints the resolved configuration with secrets redacted.                                      |
-| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. Validation is eager, so this is CI-friendly. |
+| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. Validation runs before every command body, so this is CI-friendly. |
 
 ### `dh-mcp agents`
 
@@ -683,7 +685,7 @@ single command's node never carries any of them:
 |                     | `DH_MCP_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
 | `-o`, `--output`    | `DH_MCP_OUTPUT`      | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.json`'s `output.format`. |
 | `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds` (and `docs.timeouts.request_seconds` for the `docs` commands). |
-| `--agents`          |                      | Emit the command's manifest node and exit (machine-readable twin of `--help`); available on every command. Rendered in the `-o`/`DH_MCP_OUTPUT` mode, `json` by default. On the root, emits the summary tree. |
+| `--agents`          |                      | Print the command's machine-readable description, tuned for AI agents, and exit (the machine twin of `--help`); available on every command. Honors the `-o`/`DH_MCP_OUTPUT` mode, compact `json` by default. On the root, emits the summary tree; `dh-mcp agents tree` prints the whole surface. |
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |

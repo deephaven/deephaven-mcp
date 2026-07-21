@@ -122,6 +122,9 @@ _OUTPUT_TREE = OutputSpec(
 
 @agents.command(
     "tree",
+    # Must work without a valid configuration tree — agents learn the
+    # surface before any config exists.
+    needs_runtime=False,
     help_spec=HelpSpec(
         summary="Print the command tree (summary by default, --full for all).",
         description=(
@@ -202,6 +205,7 @@ _OUTPUT_COMMAND = OutputSpec(
 
 @agents.command(
     "command",
+    needs_runtime=False,
     help_spec=HelpSpec(
         summary="Print one command's full node from the manifest.",
         description=(
@@ -264,6 +268,7 @@ _OUTPUT_ERRORS = OutputSpec(
 
 @agents.command(
     "errors",
+    needs_runtime=False,
     help_spec=HelpSpec(
         summary="Print the stable error-code registry.",
         description=(

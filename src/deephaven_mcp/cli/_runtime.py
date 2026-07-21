@@ -1,17 +1,28 @@
 """Resolved runtime context shared by every ``dh-mcp`` subcommand.
 
-Configuration is loaded **once, eagerly, on every invocation**. Any
-malformed file under the configuration directory fails fast with
-:class:`CliError(CONFIG_INVALID)` — there is no two-phase split, no
+Configuration is loaded **once per invocation, just before the leaf
+command's body runs**. Any malformed file under the configuration
+directory fails fast with :class:`CliError(CONFIG_INVALID)` before
+any subcommand body executes — there is no two-phase split, no
 "command runs against partially-broken config" mode. The user fixes
 the offending file (the error message names it) and retries.
 
+The load is deferred, not eager-at-the-root, so click's own eager
+``--help`` and ``--agents`` callbacks (which fire while the leaf's
+arguments are being parsed, *before* the leaf body is invoked) never
+touch configuration at all. The root callback in
+:mod:`deephaven_mcp.cli._main` stores a cheap :class:`RuntimeSpec`
+(the load recipe: directory overrides + CLI flag overrides) on
+``ctx.obj``;
+:meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke` swaps it for a
+fully-loaded :class:`Runtime` via :meth:`RuntimeSpec.resolve` right
+before the body runs. Commands declared ``needs_runtime=False`` (the
+``agents`` verbs) skip the swap and never load configuration.
+
 The single :class:`Runtime` aggregates the resolved paths, the
 validated :class:`ConfigTree`, and the daemon-directory handle.
-:func:`load_runtime` is the only entry point: every subcommand
-either takes a :class:`Runtime` injected by ``click.pass_obj`` or
-the ``--help`` / ``--agents`` / ``agents`` paths
-short-circuit before the load runs.
+:func:`load_runtime` is the only loader entry point: every subcommand
+body takes a :class:`Runtime` injected by ``click.pass_obj``.
 
 Read sites:
 
@@ -26,12 +37,13 @@ Read sites:
 Recovery from a broken configuration tree happens by editing the
 file the error message points at; ``--help``, the ``--agents``
 flag, and ``dh-mcp agents`` continue to work without config
-because :mod:`deephaven_mcp.cli._main` skips the load on those paths.
+because they exit before any command body — and therefore before
+the load — runs.
 """
 
 from __future__ import annotations
 
-__all__ = ["Runtime", "apply_cli_overrides", "load_runtime"]
+__all__ = ["Runtime", "RuntimeSpec", "apply_cli_overrides", "load_runtime"]
 
 import logging
 from dataclasses import dataclass
@@ -39,6 +51,7 @@ from pathlib import Path
 
 from deephaven_mcp._dictutil import deep_merge
 from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.config import (
     harden_private_dir,
@@ -78,6 +91,55 @@ def apply_cli_overrides(cli: CliConfig, cli_overrides: dict[str, object]) -> Cli
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeSpec:
+    """Deferred recipe for building a :class:`Runtime`.
+
+    The root callback constructs one per invocation — cheaply, with no
+    I/O and no validation — and stores it on ``ctx.obj``.
+    :meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke` calls
+    :meth:`resolve` to swap it for the real :class:`Runtime` right
+    before a leaf command's body runs. Fields mirror
+    :func:`load_runtime`'s keyword parameters.
+    """
+
+    config_dir_override: Path | None = None
+    """Explicit ``--config-dir`` value, or ``None`` for the default."""
+
+    runtime_dir_override: Path | None = None
+    """Explicit ``--runtime-dir`` value, or ``None`` for the default."""
+
+    cli_overrides: dict[str, object] | None = None
+    """Nested partial ``cli.json`` overrides from top-level CLI flags
+    (``-o``, ``--timeout``, ``--no-auto-start``), or ``None``."""
+
+    def resolve(self) -> Runtime:
+        """Load, validate, and return the :class:`Runtime` this spec describes.
+
+        Runs :func:`load_runtime` to completion on a fresh event loop
+        via :func:`~deephaven_mcp.cli._async.run_async` (the CLI's
+        async-to-sync seam); safe here because the caller (click's
+        command dispatch) is synchronous and no loop is running. The
+        returned :class:`Runtime` holds only paths, validated models,
+        and the daemon-directory handle — no loop-bound state — so the
+        command body's own event loop (``@run_async``) can use it
+        freely.
+
+        Returns:
+            Runtime: The frozen, fully-validated runtime context.
+
+        Raises:
+            CliError: With :attr:`ErrorCode.CONFIG_INVALID` when the
+                permission audit fails or any configuration file is
+                malformed.
+        """
+        return run_async(load_runtime)(
+            config_dir_override=self.config_dir_override,
+            runtime_dir_override=self.runtime_dir_override,
+            cli_overrides=self.cli_overrides,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Runtime:
     """Resolved runtime context for a single ``dh-mcp`` invocation."""
 
@@ -110,13 +172,13 @@ async def load_runtime(
 ) -> Runtime:
     """Resolve paths, validate the entire config tree, return a :class:`Runtime`.
 
-    Eager and total: every section under the configuration directory
-    is parsed and validated up front. Any malformed file raises
+    Total: every section under the configuration directory is parsed
+    and validated in one pass. Any malformed file raises
     :class:`CliError(CONFIG_INVALID)`. There is no recovery mode —
-    callers that want the CLI usable without a valid configuration
-    must short-circuit *before* calling this function (the ``--help``,
-    ``--agents``, and ``agents`` paths in
-    :mod:`deephaven_mcp.cli._main` are the canonical examples).
+    paths that must stay usable without a valid configuration
+    (``--help``, ``--agents``, and the ``agents`` verbs) never reach
+    this function because they exit before the leaf-body dispatch
+    that triggers the load (see :class:`RuntimeSpec`).
 
     The runtime directory is created if absent and tightened to mode
     ``0o700``; this happens before the configuration audit so a

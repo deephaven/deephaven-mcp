@@ -11,7 +11,7 @@ from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent
 
 from deephaven_mcp.cli import _browser as browser_mod
-from deephaven_mcp.cli import _main
+from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
@@ -45,7 +45,7 @@ _STATUS_PAYLOAD = {
 
 def _invoke(args: list[str], runtime: Runtime, *, standalone_mode: bool = True):
     runner = CliRunner()
-    with patch.object(_main, "load_runtime", fake_load_runtime(runtime)):
+    with patch.object(runtime_mod, "load_runtime", fake_load_runtime(runtime)):
         return runner.invoke(cli, args, standalone_mode=standalone_mode)
 
 

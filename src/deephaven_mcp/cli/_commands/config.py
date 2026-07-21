@@ -103,11 +103,13 @@ async def config_show(runtime: Runtime) -> None:
     help_spec=HelpSpec(
         summary="Confirm the configuration is valid (exit 0 / 2).",
         description=(
-            "Validation runs eagerly on every dh-mcp invocation, so a "
-            "malformed file exits 2 with config_invalid before this command "
-            "prints. This verb performs no extra work: when the eager load "
-            "succeeds it emits a CI-friendly 'valid: true' payload. Use it "
-            "as the explicit config check in CI pipelines."
+            "Validation runs before every command body (paths that print "
+            "without running a body, such as --help, --agents, and the "
+            "agents verbs, skip it), so a malformed file "
+            "exits 2 with config_invalid before this command prints. This "
+            "verb performs no extra work: when the load succeeds it emits "
+            "a CI-friendly 'valid: true' payload. Use it as the explicit "
+            "config check in CI pipelines."
         ),
         output=_OUTPUT_VALIDATE,
         examples=("$ dh-mcp config validate",),
@@ -121,13 +123,13 @@ async def config_show(runtime: Runtime) -> None:
 async def config_validate(runtime: Runtime) -> None:
     """Confirm the configuration directory is valid.
 
-    Validation already ran during runtime construction in
-    :mod:`deephaven_mcp.cli._main`; if it had failed the CLI would
-    have exited with :attr:`ErrorCode.CONFIG_INVALID` before
-    dispatching to this handler. The verb's job is therefore to
-    surface the success state in the active output mode (the
-    structured ``valid: true`` payload is the value to operators
-    and CI alike).
+    Validation already ran during runtime materialization in
+    :meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke`; if it had
+    failed the CLI would have exited with
+    :attr:`ErrorCode.CONFIG_INVALID` before dispatching to this
+    handler. The verb's job is therefore to surface the success state
+    in the active output mode (the structured ``valid: true`` payload
+    is the value to operators and CI alike).
     """
     payload = {
         "valid": True,
