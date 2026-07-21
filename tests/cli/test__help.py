@@ -174,17 +174,19 @@ def test_build_help_marks_preformatted_sections_no_wrap() -> None:
 
 
 def test_build_help_emits_plain_text_not_rst() -> None:
-    """Help text is plain text; the shared disclosures carry no RST markup.
+    """Help text is plain text; the shared disclosures carry no backticks.
 
     Help is rendered verbatim in the terminal and surfaced verbatim
-    in the agents manifest, so reStructuredText backticks would
-    leak as literal noise.
+    in the agents manifest, so backtick markup would leak as literal
+    noise. Rejecting any backtick catches both double-backtick
+    literals and single-backtick RST roles; single quotes are the
+    emphasis convention.
     """
     for entry in COMMON_ENV_VARS:
-        assert "``" not in entry.name
-        assert "``" not in entry.help
+        assert "`" not in entry.name
+        assert "`" not in entry.help
     for ec in ExitCode:
-        assert "``" not in ec.help_text
+        assert "`" not in ec.help_text
 
 
 def test_build_help_renders_arguments() -> None:
@@ -524,12 +526,14 @@ def test_agents_surfaces_contain_no_markup_or_markers(payload_builder) -> None:
 
     Locks the agent-facing contract: no summary, description, option
     help, error_code help, output-field help, or note carries click's
-    \\b no-rewrap marker or reStructuredText backticks, so an agent can
-    render the payload verbatim.
+    \\b no-rewrap marker or backtick markup, so an agent can render
+    the payload verbatim. Rejecting any backtick catches both
+    double-backtick literals and single-backtick RST roles, matching
+    the command-help contract in test_help_contract.py.
     """
     for text in _all_strings(payload_builder()):
         assert "\b" not in text
-        assert "``" not in text
+        assert "`" not in text
 
 
 # ---------------------------------------------------------------------------

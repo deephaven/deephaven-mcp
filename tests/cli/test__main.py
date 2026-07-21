@@ -307,6 +307,27 @@ def test_option_value_collision_loads_runtime() -> None:
     assert "summary" not in (result.output or "")
 
 
+def test_double_dash_sentinel_treats_agents_as_data() -> None:
+    """``--agents`` after the ``--`` sentinel is positional data, not a flag.
+
+    ``tool show -- --agents`` hands the literal string ``--agents`` to
+    the NAME argument: the runtime loads and the body runs (failing on
+    the unknown tool), rather than the agents node rendering. Click's
+    parser honors the sentinel natively; the historical argv pre-scan
+    needed (and once lacked) explicit handling for it.
+    """
+    rt = _runtime()
+    load = MagicMock(wraps=fake_load_runtime(rt))
+    with patch.object(runtime_mod, "load_runtime", load):
+        result = CliRunner().invoke(
+            cli,
+            ["tool", "show", "--", "--agents"],
+            standalone_mode=False,
+        )
+    assert load.call_count == 1
+    assert "summary" not in (result.output or "")
+
+
 def test_bare_group_shows_help_without_loading_runtime() -> None:
     """A bare noun (``dh-mcp daemon``) renders group help without config.
 
