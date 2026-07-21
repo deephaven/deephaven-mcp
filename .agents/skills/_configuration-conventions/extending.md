@@ -101,7 +101,7 @@ a real use case for changing it.
 
 Almost never. `DH_AI_DATA_DIR` is the only legitimate case
 today (read by
-`deephaven_mcp.config.resolve_config_dir`). Before
+`deephaven_mcp.config.resolve_data_root`). Before
 adding another, ask: can the operator put this value in a JSON
 file and use `${env:NAME}` to pull the env-var contents into it?
 Usually yes — and that path keeps the schema, validation,

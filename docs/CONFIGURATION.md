@@ -197,7 +197,7 @@ optional with schema-level defaults.
 | `process_name`          | str         | `"dh-mcp-systems-server"` | Expected process-name token the CLI's liveness check matches against the recorded PID (or command line on Linux/macOS); a mismatch marks the registry entry stale and discards it.          |
 
 The `dhcli` CLI commands that manage this daemon's lifecycle
-(`daemon start` / `stop` / `status` / `restart` / `reset` / `logs`)
+(`daemon start` / `stop` / `status` / `restart` / `repair` / `logs`)
 are documented in [`docs/CLI.md`](CLI.md) — that link is for the CLI
 command reference, not for these field definitions.
 

@@ -46,7 +46,7 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 ## Anti-patterns
 
-- **Reading `os.environ` directly.** Add `envvar=` to the click option. The only env var the CLI reads outside of click is `DH_AI_DATA_DIR`, and `_runtime.py` already handles it.
+- **Reading `os.environ` directly.** Add `envvar=` to the click option. The only env var the CLI reads outside of click is `DH_AI_DATA_DIR`, and `resolve_data_root` (in `config/_data_root.py`) is its sole reader.
 - **Hand-rolled output formatting.** Always go through `format_output(...)`; otherwise `-o yaml` and the structured-error renderer drift.
 - **Mixing in MCP-server-tool conventions.** This is a CLI command, not an MCP tool. No `register_tools()`, no `Terminology Note`, no `Format Accuracy for AI Agents`. Apply `_mcp-module-organization` only to MCP server tools.
 - **Redeclaring a root option on a subcommand.** The root callback's options (`-o/--output`, `--timeout`, `-v/--verbose`, `-q/--quiet`, `--no-auto-start`, `--config-dir`, `--runtime-dir`) are auto-lifted to the front of argv by `_lift_root_options` (in `cli/_main.py`), so `dhcli daemon status -o json` is rewritten to `dhcli -o json daemon status` before click parses it. The flag already applies to every subcommand — duplicating it on a subcommand creates a parser collision and breaks the auto-lift. If you add a new root option, `_lift_root_options` picks it up automatically from `cli.params`; if it must *not* be lifted (eager / context-sensitive like `--help` or `--version`), add the explicit exclusion in `_liftable_options` and a regression test in `tests/cli/test__main.py`.

@@ -14,7 +14,7 @@ Authoritative end-user reference: `docs/CONFIGURATION.md`. This
 skill is the *internal-to-the-codebase* counterpart and explains
 **how** to extend the configuration safely. The only env var the
 server itself reads is `DH_AI_DATA_DIR` (consumed by
-`deephaven_mcp.config.resolve_config_dir`); every
+`deephaven_mcp.config.resolve_data_root`); every
 other tunable lives in the JSON tree.
 
 ## Architecture in one sentence
