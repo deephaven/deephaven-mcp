@@ -24,9 +24,9 @@ from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._help import (
     HelpEntry,
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._mcp_client import McpClient, McpClientError
 from deephaven_mcp.cli._runtime import Runtime
@@ -59,8 +59,7 @@ _OUTPUT_LIST = OutputSpec("list", _TOOL_FIELDS, note="Array of registered tools.
 
 @tool.command(
     "list",
-    output_spec=_OUTPUT_LIST,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="List the MCP tools the daemon exposes.",
         description=(
             "Enumerates the tools registered on the daemon. Internal tools "
@@ -111,8 +110,7 @@ _OUTPUT_SHOW = OutputSpec("object", _TOOL_FIELDS)
 
 @tool.command(
     "show",
-    output_spec=_OUTPUT_SHOW,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Print one tool's name, description, and input schema.",
         description=(
             "Prints a single tool's metadata, including its full JSON input "
@@ -199,8 +197,7 @@ _OUTPUT_CALL = OutputSpec(
 
 @tool.command(
     "call",
-    output_spec=_OUTPUT_CALL,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Invoke a single MCP tool and print its result.",
         description=(
             "Each --arg is a key=value pair; the value is JSON-decoded when "

@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 from mcp.types import CallToolResult, TextContent, Tool
 
-from deephaven_mcp.cli import _main
+from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import docs as docs_mod
 from deephaven_mcp.cli._commands.docs import _parse_history
 from deephaven_mcp.cli._errors import CliError, ErrorCode
@@ -28,7 +28,7 @@ _DOCS_URL = DocsConfig().url
 
 def _invoke(args: list[str], runtime: Runtime, *, standalone_mode: bool = True):
     runner = CliRunner()
-    with patch.object(_main, "load_runtime", fake_load_runtime(runtime)):
+    with patch.object(runtime_mod, "load_runtime", fake_load_runtime(runtime)):
         return runner.invoke(cli, args, standalone_mode=standalone_mode)
 
 

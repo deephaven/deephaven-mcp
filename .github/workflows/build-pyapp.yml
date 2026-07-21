@@ -109,11 +109,11 @@ jobs:
           if [[ "${{ matrix.target }}" == windows-* ]]; then
             suffix=".exe"
           fi
-          # First run unpacks the embedded distribution; --help and introspect both boot
+          # First run unpacks the embedded distribution; --help and agents both boot
           # the embedded interpreter and import the entry point without any configuration.
           "${dir}/dh-mcp-systems-server${suffix}" --help
           "${dir}/dh-mcp${suffix}" --help
-          "${dir}/dh-mcp${suffix}" introspect > /dev/null
+          "${dir}/dh-mcp${suffix}" agents tree > /dev/null
 
       - name: Upload distribution archive
         # The archive bundles both binaries. Short retention keeps Actions

@@ -171,7 +171,7 @@ def test_error_code_values_are_unique() -> None:
 
 @pytest.mark.parametrize("code", list(ErrorCode))
 def test_every_error_code_has_non_empty_help_text(code: ErrorCode) -> None:
-    """The introspect manifest exposes ``ec.help_text`` to agents."""
+    """The agents manifest exposes ``ec.help_text`` to agents."""
     assert code.help_text, f"{code.value} is missing help text"
 
 
@@ -180,7 +180,7 @@ def test_error_code_help_text_values_are_unique() -> None:
 
     Regression test for the previous design that read ``ec.__doc__``
     per member: ``Enum`` returns the *class* docstring for every
-    member, so the introspect manifest silently emitted identical
+    member, so the agents manifest silently emitted identical
     help text for every code.
     """
     seen = {ec.help_text for ec in ErrorCode}
@@ -250,7 +250,7 @@ def test_exit_code_values_are_unique() -> None:
 
 @pytest.mark.parametrize("code", list(ExitCode))
 def test_every_exit_code_has_non_empty_help_text(code: ExitCode) -> None:
-    """The introspect manifest exposes ``ec.help_text`` for exit codes too."""
+    """The agents manifest exposes ``ec.help_text`` for exit codes too."""
     assert code.help_text, f"{code.value} is missing help text"
 
 

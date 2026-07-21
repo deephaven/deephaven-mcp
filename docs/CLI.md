@@ -26,7 +26,7 @@ dispatches tool calls — without requiring you to run the server yourself.
   - [`dh-mcp pq`](#dh-mcp-pq)
   - [`dh-mcp docs`](#dh-mcp-docs)
   - [`dh-mcp config`](#dh-mcp-config)
-  - [`dh-mcp introspect`](#dh-mcp-introspect)
+  - [`dh-mcp agents`](#dh-mcp-agents)
 - [Top-level flags](#top-level-flags)
 - [Output modes](#output-modes)
 - [Exit codes](#exit-codes)
@@ -93,11 +93,11 @@ dh-mcp daemon logs -n 200
 # Stop the daemon.
 dh-mcp daemon stop
 
-# Discover the full command tree as structured JSON (for AI agents).
-dh-mcp introspect tree | jq .
+# Discover the command tree as structured JSON (for AI agents).
+dh-mcp agents tree | jq .
 
 # Machine-readable description of one command (twin of --help).
-dh-mcp daemon start --introspect
+dh-mcp daemon start --agents
 ```
 
 ## Architecture
@@ -140,13 +140,14 @@ redacted) and `dh-mcp config validate` to confirm it is valid.
 
 ### Configuration loading
 
-Configuration is loaded **once, eagerly, on every invocation**.
-Any malformed file under the configuration directory fails fast
-with `config_invalid` (exit code `2`) before any subcommand body
-runs. There is no recovery mode — fix the file the error message
-names, then retry.
+Configuration is loaded **once per invocation, just before the
+command body runs**. Any malformed file under the configuration
+directory fails fast with `config_invalid` (exit code `2`) before
+any subcommand body runs. There is no recovery mode — fix the file
+the error message names, then retry.
 
-The single load runs in `dh-mcp`'s root callback:
+The single load runs when a command is dispatched (after its
+arguments parse, before its body):
 
 1. Resolves `config_dir` and `runtime_dir` (CLI flags →
    `$DH_MCP_DATA_DIR/{config,runtime}` → platform default).
@@ -157,21 +158,22 @@ The single load runs in `dh-mcp`'s root callback:
 4. Applies top-level CLI flag overrides (`-o`, `--timeout`,
    `--no-auto-start`) onto `runtime.config.cli`.
 
-The only invocations that bypass the load are help and self-introspection:
+Help and agent self-discovery therefore work against a broken (or
+absent) configuration tree, with no special-casing:
 
-- `dh-mcp --help`, `dh-mcp <noun> --help`, `dh-mcp <noun> <verb> --help` — the help text is rendered without touching configuration so you can navigate the CLI surface against a broken tree.
-- `dh-mcp introspect <verb>` — emits machine-readable metadata as JSON for agents that need to learn the surface before any config exists.
-- `--introspect` at any depth (`dh-mcp --introspect`, `dh-mcp <noun> <verb> --introspect`) — the machine-readable twin of `--help`, likewise rendered without touching configuration.
+- `dh-mcp --help`, `dh-mcp <noun> --help`, `dh-mcp <noun> <verb> --help` — help exits while arguments are being parsed, before the load would run, so you can navigate the CLI surface against a broken tree.
+- `--agents` at any depth (`dh-mcp --agents`, `dh-mcp <noun> <verb> --agents`) — the machine-readable twin of `--help`, exits at the same parse-time point.
+- `dh-mcp agents <verb>` — the agents verbs are declared config-free and never trigger the load; they emit machine-readable metadata for agents that need to learn the surface before any config exists.
 
 #### Recovering from a broken configuration
 
-Eager validation means a typo in any config file blocks every
+Pre-body validation means a typo in any config file blocks every
 subcommand body. Workarounds when you can't run `dh-mcp` itself:
 
 - **Diagnose the error**: `dh-mcp config validate` surfaces the
   structured `config_invalid` payload identifying the offending
-  file. (Validation runs in the eager load before the verb body,
-  so the error appears even though the verb itself never executes.)
+  file. (Validation runs in the pre-body load, so the error appears
+  even though the verb itself never executes.)
 - **Stuck daemon**: read `daemon.json` directly under
   `<runtime_dir>/daemon/`, then `kill <pid>`. Optionally `rm`
   the registry file once the process is gone.
@@ -189,7 +191,7 @@ slot in without a breaking schema change.
 
 | Field                | Type    | Default | Notes                                                                       |
 |----------------------|---------|---------|-----------------------------------------------------------------------------|
-| `output.format`      | string  | `json` | One of `human`, `json`, `yaml`. Machine-first default; set `human` for interactive use. Override per invocation with `-o/--output`. |
+| `output.format`      | string  | `json` | One of `human`, `json`, `json-pretty`, `yaml`. Machine-first default (`json` is compact single-line); set `human` for interactive use or `json-pretty` for indented JSON. Override per invocation with `-o/--output`. |
 
 #### `daemon.*` — CLI-side daemon lifecycle
 
@@ -570,66 +572,109 @@ dh-mcp docs status
 | Verb        | Purpose                                                                                       |
 |-------------|-----------------------------------------------------------------------------------------------|
 | `show`      | Prints the resolved configuration with secrets redacted.                                      |
-| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. Validation is eager, so this is CI-friendly. |
+| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. Validation runs before every command body, so this is CI-friendly. |
 
-### `dh-mcp introspect`
+### `dh-mcp agents`
 
-Machine-readable CLI metadata for AI-agent self-discovery — prefer it
-over scraping `--help`. There are two complementary ways to reach it:
-the `--introspect` flag for one command in place, and the `introspect`
-group for whole-system views. Both honor the root `-o/--output` flag
-and `DH_MCP_OUTPUT` (`human`, `json`, or `yaml`) and, like every
-command, **default to `json`** — pass `-o human` for terminal-friendly
-output. Both run without a valid configuration tree, so they work even
-when `config validate` fails; that same bypass means they cannot read
-`cli.json`'s `output.format` (use `-o`/`DH_MCP_OUTPUT` instead).
+Machine-readable CLI metadata for AI-agent self-discovery — the
+`--help` for agents; prefer it over scraping help text. There are two
+complementary ways to reach it: the `--agents` flag for one command in
+place, and the `agents` group for whole-system views. Both honor the
+root `-o/--output` flag and `DH_MCP_OUTPUT` (`human`, `json`,
+`json-pretty`, or `yaml`) and, like every command, **default to
+`json`** — compact single-line JSON; pass `-o json-pretty` for
+indented JSON or `-o human` for terminal-friendly output. Both run
+without a valid configuration tree, so they work even when `config
+validate` fails; that same bypass means they cannot read `cli.json`'s
+`output.format` (use `-o`/`DH_MCP_OUTPUT` instead).
 
-#### The `--introspect` flag (twin of `--help`)
+The surfaces are sized as a **progressive-disclosure ladder**: orient
+with the summary tree (a few KB), drill into one group (~1 KB), then
+read a leaf's full node (~2 KB) — instead of ingesting one giant
+manifest.
 
-Append `--introspect` to any command, at any depth, to emit just that
+#### The `--agents` flag (twin of `--help`)
+
+Append `--agents` to any command, at any depth, to emit just that
 command's node — the machine-readable counterpart of `--help`:
 
 ```bash
-dh-mcp daemon start --introspect    # the start verb node
-dh-mcp daemon --introspect          # the daemon group node (its verbs included)
-dh-mcp --introspect                 # the whole-tree manifest
+dh-mcp daemon start --agents    # the start verb's full node
+dh-mcp daemon --agents          # the daemon group node (verb summaries)
+dh-mcp --agents                 # the summary tree (== agents tree)
 ```
 
-A command's node carries its `name`, help text, options and arguments
-(`params`), any `subcommands`, its `output` shape, and which MCP tool it
-`wraps`. Like click's own `--help`, the universal `--help` and
-`--introspect` flags are *not* listed under any command's `params`; the
-whole-tree manifest discloses them once under `universal_options`.
-`dh-mcp --introspect` (on the root) instead emits the whole-tree manifest
-described below.
+Like click's own `--help`, the universal `--help` and `--agents` flags
+are *not* listed under any command's `params`; the complete manifest
+discloses them once under `universal_options`.
 
-#### The `introspect` group
+#### The `agents` group
 
 | Verb                 | Output                                                                                  |
 |----------------------|-----------------------------------------------------------------------------------------|
-| `tree`               | The whole-tree manifest: package `version`, the full `commands` tree, `global_options`, `universal_options` (the every-command flags `--help` and `--introspect`), the project-wide `error_codes`, and the other top-level fields. Identical to `dh-mcp --introspect`. |
-| `command PATH...`    | One command's node, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--introspect` to that command. A path that does not resolve exits `2` with `command_not_found`. |
-| `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree`. |
+| `tree`               | The **summary tree** by default: `version`, `prog`, the root `summary`, a drill-down `hint`, and a nested `commands` map of `{name: {summary, commands?}}` down to the leaves. Identical to `dh-mcp --agents`. With `--full`, the complete manifest instead: root `summary`/`description`/`examples`, `global_options`, `universal_options` (the every-command flags `--help` and `--agents`), full command nodes under `commands`, `default_environment`, `default_exit_codes`, and the project-wide `error_codes` registry. |
+| `command PATH...`    | One command's **self-contained node**, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--agents` to that command. A group's node lists its subcommands as one-line summaries; `--full` expands them into full nested nodes. A path that does not resolve exits `2` with `command_not_found`. |
+| `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree --full`. |
 
 ```bash
-dh-mcp introspect tree | jq '.commands | keys'
-dh-mcp introspect command daemon start    # == dh-mcp daemon start --introspect
-dh-mcp introspect errors | jq '.[].code'
+dh-mcp agents tree | jq '.commands | keys'
+dh-mcp agents command daemon start    # == dh-mcp daemon start --agents
+dh-mcp agents command session         # group: verb summaries, one level
+dh-mcp agents errors | jq '.[].code'
 ```
 
-The `command` node is byte-identical to the object found at
-`.commands.<path…>` in `tree` — e.g. `dh-mcp introspect command daemon
-start` equals `dh-mcp introspect tree | jq
-'.commands.daemon.subcommands.start'`.
+#### Node schema
 
-The whole-tree fields (`version`, `error_codes`, `universal_options`,
-...) appear only in `tree` (and `dh-mcp --introspect`); a single
-command's node never carries them.
+A command's node carries, as **sparse keys** (an absent key means
+false, empty, or the default):
 
-> **Migration:** `dh-mcp introspect` alone is now a command group and
-> lists its verbs (it no longer emits the manifest). Use `dh-mcp
-> introspect tree` (or `dh-mcp --introspect`) for the old whole-tree
-> JSON.
+| Key           | Content                                                                                     |
+|---------------|----------------------------------------------------------------------------------------------|
+| `name`        | Invocation name (always present).                                                            |
+| `summary`     | One-line summary (always present).                                                           |
+| `description` | What the command does and when to use it.                                                    |
+| `params`      | Options **and** positional arguments: `name`, `kind` (`option`/`argument`), `type`, `help`, plus (sparse) `required`, `nargs` (when not 1), `choices`, `opts`, `secondary_opts`, `is_flag`, `multiple`, `envvar`, `default`. |
+| `output`      | The structured output shape: `mode` (`object`/`list`/`text`), `fields` (`{name, type, help}`), `note`. |
+| `examples`    | Shell snippets.                                                                              |
+| `see_also`    | Related commands.                                                                            |
+| `error_codes` | The stable codes the command can emit — `{code, help}` in a standalone node; bare strings inside `tree --full` (meanings in the root registry). |
+| `exit_codes`  | The process codes the command can return — `{code, help}` in a standalone node; bare integers inside `tree --full` (see `default_exit_codes`). |
+| `environment` | Environment variables honored (`{name, help}`); inside `tree --full`, omitted when the command leaves it unset (it then inherits `default_environment`). |
+| `wraps`       | The wrapped MCP tool binding (`tools`, `intentionally_unsupported`, `router_params`, `client_only_params`). |
+| `subcommands` | Groups only: `{name: summary}` one level down, or full nested nodes with `--full` / inside `tree --full`. |
+
+A **standalone node** (`agents command PATH`, `<cmd> --agents`) is
+self-contained — it carries everything the command's `--help` renders,
+including code meanings and environment variables, so an agent needs no
+second fetch. `agents command PATH` and `<path> --agents` are
+byte-identical. Inside `tree --full`, per-node content that the root
+carries once (`error_codes` meanings, `default_exit_codes`,
+`default_environment`) is hoisted, so a leaf node there equals the
+standalone node minus those hoisted entries.
+
+The two whole-tree surfaces carry different top-level fields, and a
+single command's node never carries any of them:
+
+- **Summary tree** (`agents tree`, `dh-mcp --agents`): `version`,
+  `prog`, `summary`, `hint`, and a nested `{name: {summary,
+  commands?}}` map under `commands`.
+- **Full manifest** (`agents tree --full`): `version`, `prog`,
+  `summary` (plus the root's `description` / `examples`),
+  `global_options`, `universal_options`, full command nodes under
+  `commands`, `default_environment`, `default_exit_codes`, and the
+  `error_codes` registry.
+
+> **Migration:** this surface was previously named `dh-mcp introspect`
+> / `--introspect`, and `tree` previously emitted the full manifest
+> (with a rendered `help` string per node) by default. The rename has
+> no alias; use `agents` / `--agents`. For the old "everything"
+> behavior, use `dh-mcp agents tree --full` — the rendered `help` and
+> `short_help` node fields are replaced by the structured `summary`,
+> `description`, and section keys above. Separately, `-o json` now
+> emits compact single-line JSON on every command; use
+> `-o json-pretty` for the previous indented form (a short-lived
+> `--compact/--no-compact` flag on the `agents` verbs was removed in
+> favor of the mode).
 
 ## Top-level flags
 
@@ -638,9 +683,9 @@ command's node never carries them.
 | `--config-dir PATH` |                      | Override the configuration directory. No per-subdir env var; use `DH_MCP_DATA_DIR` to move both `config/` and `runtime/` together. |
 | `--runtime-dir PATH`|                      | Override the runtime directory (where `daemon.json` lives). No per-subdir env var.   |
 |                     | `DH_MCP_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
-| `-o`, `--output`    | `DH_MCP_OUTPUT`      | One of `human`, `json`, `yaml`. Overrides `cli.json`'s `output.format`.              |
+| `-o`, `--output`    | `DH_MCP_OUTPUT`      | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.json`'s `output.format`. |
 | `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds` (and `docs.timeouts.request_seconds` for the `docs` commands). |
-| `--introspect`      |                      | Emit the command's manifest node and exit (machine-readable twin of `--help`); available on every command. Rendered in the `-o`/`DH_MCP_OUTPUT` mode, `json` by default. On the root, emits the whole-tree manifest. |
+| `--agents`          |                      | Print the command's machine-readable description, tuned for AI agents, and exit (the machine twin of `--help`); available on every command. Honors the `-o`/`DH_MCP_OUTPUT` mode, compact `json` by default. On the root, emits the summary tree; `dh-mcp agents tree` prints the whole surface. |
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
@@ -665,13 +710,19 @@ is resolved per invocation: `-o/--output` flag → `DH_MCP_OUTPUT` → `cli.json
 `output.format` (default `json`). The CLI is **machine-first** (primarily driven
 by AI agents), so the default is `json`; for human-readable output, pass
 `-o human`, set `DH_MCP_OUTPUT=human`, or set `output.format: "human"` in
-`cli.json`. `dh-mcp introspect`, the `--introspect` flag, and error output run
+`cli.json`. `dh-mcp agents`, the `--agents` flag, and error output run
 without the validated config, so they skip the `cli.json` step — use
 `-o`/`DH_MCP_OUTPUT` for those (so `DH_MCP_OUTPUT=human` is the most complete way
 to get human output everywhere).
 
-- `json` (default) — a single document via `json.dumps(..., indent=2, sort_keys=True)`:
-  indented and key-sorted, so output is stable and diff-/`jq`-friendly.
+- `json` (default) — a **compact single-line** document
+  (`json.dumps(..., separators=(",", ":"), sort_keys=True)`): key-sorted and
+  deterministic, the machine-optimal form — it parses identically to the
+  indented form but costs the fewest tokens in an agent's context. Pipe
+  through `jq .` to eyeball it, or use `json-pretty`.
+- `json-pretty` — the same document via `json.dumps(..., indent=2,
+  sort_keys=True)`: indented and key-sorted, for human reading and
+  line-oriented diffs.
 - `human` — terminal-friendly. Row/tabular data and `tool list` render
   as aligned, header-topped tables (sized to the terminal width, falling back to
   80 columns when output is not a TTY); objects render as an indented tree
@@ -708,8 +759,9 @@ stderr so `-o json` / `-o yaml` stdout stays clean for piping.
 
 ## Structured errors (for AI agents)
 
-When run with `-o json` or `-o yaml`, any user-facing failure is
-emitted on **stderr** as a structured payload with these keys:
+When run with `-o json`, `-o json-pretty`, or `-o yaml`, any
+user-facing failure is emitted on **stderr** as a structured payload
+with these keys:
 
 ```json
 {
@@ -721,8 +773,8 @@ emitted on **stderr** as a structured payload with these keys:
 ```
 
 The `error_code` values are stable across releases. Get the full
-registry programmatically via `dh-mcp introspect errors` (or the
-`error_codes` key of `dh-mcp introspect tree`). Current set:
+registry programmatically via `dh-mcp agents errors` (or the
+`error_codes` key of `dh-mcp agents tree --full`). Current set:
 
 | `error_code`                  | Meaning                                                            |
 |-------------------------------|--------------------------------------------------------------------|
@@ -737,7 +789,7 @@ registry programmatically via `dh-mcp introspect errors` (or the
 | `tool_not_found`              | `dh-mcp tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
-| `command_not_found`           | `dh-mcp introspect command PATH` referenced a command path that does not exist. |
+| `command_not_found`           | `dh-mcp agents command PATH` referenced a command path that does not exist. |
 | `missing_argument`            | A required positional argument or option was not provided.         |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `file_read_failed`            | A local file passed on the command line could not be read.          |

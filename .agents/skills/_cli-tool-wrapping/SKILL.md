@@ -91,7 +91,7 @@ If a tool signature later changes, this test fails until the wrapper and its bin
 Per command, extend `tests/cli/_commands/test_<noun>.py`:
 
 - **Assert the call.** A success case asserting the wrapper invoked the right tool name and argument dict — the test that matters most — plus the `success=False` → exit-3 path.
-- **One structured mode, not three.** The `human`/`json`/`yaml` matrix is `format_output`'s own test; cover at least one structured mode here and leave the matrix to it.
+- **One structured mode, not four.** The `human`/`json`/`json-pretty`/`yaml` matrix is `format_output`'s own test; cover at least one structured mode here and leave the matrix to it.
 - **Patch the I/O seam.** Mock `_wrapping.acquire` and `_wrapping.call_tool` (the primitives the helpers call), not the composed `call_and_echo`/`call_for_payload`. The real fetch/render/`success=False`→exit-3 flow then runs, so a single `call_tool` mock covers the tool name + argument dict, the rendered output, and the exit-3 path for every verb shape. The helpers are additionally unit-tested in `tests/cli/_commands/test__wrapping.py`.
 - **Client-side composites** mock the side effect (e.g. `webbrowser.open`).
 - **Coverage + integration.** Target 100% per-file coverage. Add an integration round-trip in `tests/cli/test__daemon_integration.py` for community-reachable verbs; Enterprise-only verbs have no CI fixture (unit + drift only).

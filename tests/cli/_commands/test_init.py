@@ -14,7 +14,18 @@ import click
 
 import deephaven_mcp.cli._commands as commands_pkg
 
-_COMMAND_MODULES = ("config", "daemon", "introspect", "tool")
+_COMMAND_MODULES = (
+    "agents",
+    "catalog",
+    "config",
+    "daemon",
+    "docs",
+    "pq",
+    "session",
+    "system",
+    "table",
+    "tool",
+)
 
 
 def test_package_declares_no_public_surface() -> None:

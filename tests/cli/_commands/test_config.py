@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
-from deephaven_mcp.cli import _main
+from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
 from deephaven_mcp.config.schema import CliConfig, ServerConfig
@@ -19,7 +19,7 @@ from .._helpers import fake_load_runtime, make_runtime
 
 def _invoke(args: list[str], runtime: Runtime):
     runner = CliRunner()
-    with patch.object(_main, "load_runtime", fake_load_runtime(runtime)):
+    with patch.object(runtime_mod, "load_runtime", fake_load_runtime(runtime)):
         return runner.invoke(cli, args)
 
 
@@ -111,14 +111,14 @@ def test_config_validate_failure_propagates_load_error(tmp_path: Path) -> None:
     """A ``CliError`` raised from ``load_runtime`` produces exit code 2.
 
     ``config validate``'s only job is to confirm the load succeeded.
-    Any failure is detected upstream in ``_main``'s root callback,
-    which raises before dispatching here.
+    Any failure is detected in ``HelpfulCommand.invoke``'s runtime
+    materialization, which raises before the verb body runs.
     """
     from deephaven_mcp.cli._errors import CliError, ErrorCode
 
     runner = CliRunner()
     with patch.object(
-        _main,
+        runtime_mod,
         "load_runtime",
         AsyncMock(side_effect=CliError("oops", code=ErrorCode.CONFIG_INVALID)),
     ):
@@ -126,8 +126,8 @@ def test_config_validate_failure_propagates_load_error(tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
-def test_config_validate_help_describes_eager_validation() -> None:
-    """The help reflects eager validation, not a per-verb re-load.
+def test_config_validate_help_describes_pre_body_validation() -> None:
+    """The help reflects the pre-body validation, not a per-verb re-load.
 
     Regression test: the help previously claimed the verb "re-loads the
     configuration tree from disk," contradicting the handler (which only
@@ -136,5 +136,5 @@ def test_config_validate_help_describes_eager_validation() -> None:
     from deephaven_mcp.cli._commands.config import config as config_group
 
     help_text = config_group.commands["validate"].help or ""
-    assert "eagerly on every" in help_text
+    assert "before every command body" in help_text
     assert "re-load" not in help_text.lower()

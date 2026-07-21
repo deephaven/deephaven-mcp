@@ -17,8 +17,8 @@ Conventions:
 | Skill | Purpose |
 | --- | --- |
 | `_agents-md-curation` | Standards for editing the project root `AGENTS.md`: what belongs there vs in a skill, format conventions, composition with skills, sync rules. |
-| `_cli-help-standards` | The content contract for `dh-mcp` CLI help: required help sections, `build_help` usage, plain-text/no-RST rule, the no-rewrap marker, single-source `OutputSpec` output schema, and the three-surface consistency rule (`docs/CLI.md`, `--help`, introspect). |
-| `_cli-tool-wrapping` | Conventions for `dh-mcp` runtime commands that wrap MCP tools: the four wrapper categories, the shared `_wrapping` helpers, type scoping via `--system`/id/group-doc (never subgroups), path-flag locality (CLI-read vs server-side), and the `wraps_tool` schema-drift contract. |
+| `_cli-help-standards` | The content contract for `dh-mcp` CLI help: required sections, `HelpSpec` authoring, plain-text rendering rules, single-source output schema, and `docs/CLI.md` consistency. |
+| `_cli-tool-wrapping` | Conventions for `dh-mcp` runtime commands that wrap MCP tools: the five wrapper categories, the shared `_wrapping` helpers, type scoping via `--system`/id/group-doc (never subgroups), path-flag locality (CLI-read vs server-side), and the `wraps_tool` schema-drift contract. |
 | `_configuration-conventions` | Canonical reference for the project's config model: JSON5 + Pydantic v2 + `${env:VAR}` / `${file:PATH}` templating; no ad-hoc env reads or `DEFAULT_FOO` constants. |
 | `_documentation-roles` | Defines the role (audience and scope) of every top-level markdown document; loaded by the docs workflows (`docs-improve`, `docs-accuracy`) and `cli-command-add` to keep edits in-scope and prevent content drift. |
 | `_logging-standards` | Logger instantiation, `[module:function] Action: details` message format, log levels, sensitive-data rules, redaction-aware Pydantic model logging. |
@@ -35,7 +35,7 @@ Conventions:
 | Skill | Purpose |
 | --- | --- |
 | `mcp-tool-add` | Add a new MCP tool to the systems server end-to-end (placement, registration, docstring, logging, tests, docs). Wraps `_mcp-module-organization` + `pydocs-improve` + `_logging-standards`. |
-| `cli-command-add` | Add a new command to the `dh-mcp` CLI end-to-end (click + `@run_async` + `CliError`, tests, `docs/CLI.md`, introspect). Wraps `_python-coding-practices` rule 15 + `_documentation-roles` + `_cli-help-standards`. |
+| `cli-command-add` | Add a new command to the `dh-mcp` CLI end-to-end (click + `@run_async` + `CliError`, tests, `docs/CLI.md`, agents manifest). Wraps `_python-coding-practices` rule 15 + `_documentation-roles` + `_cli-help-standards`. |
 | `config-field-add` | Add a new field, setting, or tunable to the JSON config tree (`server.json`, `cli.json`, `community/`, `enterprise/`). Wraps `_configuration-conventions`. |
 | `skill-add` | Add a new agent skill end-to-end (composition gate, name + `_`-prefix decision, description, body, parent cross-links, catalog README row). Wraps `_skill-authoring-standards` + `_skill-effectiveness` + `_agents-md-curation`. |
 
@@ -49,7 +49,7 @@ Conventions:
 | `pydocs-improve` | Full Python docstring overhaul: accuracy + restructure + missing-section enforcement. The canonical MCP tool "Terminology Note" and "Format Accuracy for AI Agents" wording lives in [`pydocs-improve/mcp-tool-sections.md`](pydocs-improve/mcp-tool-sections.md). |
 | `docs-accuracy` | Surgical Markdown documentation accuracy fixes against the source code. |
 | `docs-improve` | Full Markdown documentation overhaul: accuracy + organization + missing content + link fixes. |
-| `cli-help-accuracy` | Surgical correctness fixes to CLI help — documented flags, arguments, error codes, exit codes, and output fields verified against the handler across `--help`, the introspect manifest, and `docs/CLI.md`. Wraps `_cli-help-standards`. |
+| `cli-help-accuracy` | Surgical correctness fixes to CLI help — documented flags, arguments, error codes, exit codes, and output fields verified against the handler across `--help`, the agents manifest, and `docs/CLI.md`. Wraps `_cli-help-standards`. |
 | `cli-help-improve` | Full overhaul of a command's help surface: fill missing sections, single-source the `OutputSpec`, reconcile all three description surfaces. Wraps `_cli-help-standards`. |
 | `skill-review` | Review an existing agent skill or `AGENTS.md` against the standards (composition audit, effectiveness audit, structural audit, cross-reference audit, README sync). Wraps `_skill-authoring-standards` + `_skill-effectiveness` + `_agents-md-curation`. |
 

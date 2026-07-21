@@ -29,9 +29,9 @@ from deephaven_mcp.cli._daemon import DaemonClientError, stop_daemon
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpfulGroup,
+    HelpSpec,
     OutputField,
     OutputSpec,
-    build_help,
 )
 from deephaven_mcp.cli._runtime import Runtime
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry, RegistryCorruptError
@@ -259,8 +259,7 @@ _OUTPUT_START = OutputSpec(
 
 @daemon.command(
     "start",
-    output_spec=_OUTPUT_START,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Start the daemon (idempotent).",
         description=(
             "Spawns the per-user daemon if none is running, then prints its "
@@ -308,8 +307,7 @@ _OUTPUT_STOP = OutputSpec(
 
 @daemon.command(
     "stop",
-    output_spec=_OUTPUT_STOP,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Stop the daemon (idempotent).",
         description=(
             "Sends SIGTERM (escalating to SIGKILL) to the registered daemon "
@@ -358,8 +356,7 @@ _OUTPUT_STATUS = OutputSpec(
 
 @daemon.command(
     "status",
-    output_spec=_OUTPUT_STATUS,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Report daemon status.",
         description=(
             "Reads the daemon registry and reports the daemon's state: "
@@ -431,8 +428,7 @@ _OUTPUT_RESTART = OutputSpec(
 
 @daemon.command(
     "restart",
-    output_spec=_OUTPUT_RESTART,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Restart the daemon: stop (if running) then start.",
         description=(
             "Equivalent to 'dh-mcp daemon stop' followed by 'dh-mcp daemon "
@@ -490,8 +486,7 @@ _OUTPUT_REPAIR = OutputSpec(
 
 @daemon.command(
     "repair",
-    output_spec=_OUTPUT_REPAIR,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Recover from a corrupt daemon registry file.",
         description=(
             "Use this when 'dh-mcp daemon status' (or start, stop, restart) "
@@ -622,8 +617,7 @@ async def _tail_and_follow(
 
 @daemon.command(
     "logs",
-    output_spec=_OUTPUT_LOGS,
-    help=build_help(
+    help_spec=HelpSpec(
         summary="Tail the daemon log file.",
         description=(
             "Without -f, prints the last --lines lines and exits. With -f, "

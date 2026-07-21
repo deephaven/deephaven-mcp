@@ -23,15 +23,13 @@ __all__ = [
     "render_warning",
 ]
 
-import json
 import sys
 from enum import IntEnum, StrEnum
 from typing import TextIO, assert_never
 
 import click
-import yaml
 
-from deephaven_mcp.cli._format import OutputMode
+from deephaven_mcp.cli._format import OutputMode, format_output
 
 
 class ExitCode(IntEnum):
@@ -72,7 +70,7 @@ class ErrorCode(StrEnum):
     code intrinsically via the ``(value, help_text[, exit_code])``
     tuple — adding a new member without a help string is a
     ``TypeError`` at class-construction time, which keeps the
-    ``introspect`` manifest's ``error_codes`` section from drifting
+    ``agents`` manifest's ``error_codes`` section from drifting
     silently. ``exit_code`` defaults to ``2``; only failures that must
     exit ``3`` declare it. Read ``ec.help_text`` for the explanation,
     ``ec.exit_code`` for the process code, and ``ec.value`` for the
@@ -151,7 +149,7 @@ class ErrorCode(StrEnum):
     )
     COMMAND_NOT_FOUND = (
         "command_not_found",
-        "'dh-mcp introspect command PATH' referenced a command path that "
+        "'dh-mcp agents command PATH' referenced a command path that "
         "does not exist.",
     )
     MISSING_ARGUMENT = (
@@ -255,7 +253,7 @@ def render_error(
     Args:
         err (CliError): The exception to render.
         output (OutputMode): Active output mode (``human``, ``json``,
-            ``yaml``).
+            ``json-pretty``, ``yaml``).
         command (str): Dotted command path (e.g. ``daemon start``)
             for the structured ``command`` field.
         stream (TextIO | None): Stream to write to. ``None`` falls
@@ -271,11 +269,9 @@ def render_error(
     match output:
         case "human":
             target.write(f"{command}: {err.message}\n")
-        case "json":
-            target.write(json.dumps(payload, indent=2, sort_keys=True))
+        case "json" | "json-pretty" | "yaml":
+            target.write(format_output(payload, output=output))
             target.write("\n")
-        case "yaml":
-            target.write(yaml.safe_dump(payload, sort_keys=True))
         case _ as unexpected:
             # Statically unreachable thanks to the ``OutputMode``
             # ``Literal``; the runtime ``assert_never`` is the safety
@@ -299,10 +295,10 @@ def render_warning(
     Args:
         message (str): Human-readable warning summary.
         output (OutputMode): Active output mode (``human``, ``json``,
-            ``yaml``).
+            ``json-pretty``, ``yaml``).
         details (dict[str, str] | None): Optional per-item detail (e.g.
             ``{system: error}``); listed beneath the message in ``human``
-            mode and nested under ``details`` in ``json`` / ``yaml`` mode.
+            mode and nested under ``details`` in the structured modes.
         stream (TextIO | None): Stream to write to. ``None`` falls back to
             :data:`sys.stderr`. Useful for tests.
     """
@@ -315,10 +311,8 @@ def render_warning(
             target.write(f"warning: {message}\n")
             for name, detail in (details or {}).items():
                 target.write(f"  {name}: {detail}\n")
-        case "json":
-            target.write(json.dumps(payload, indent=2, sort_keys=True))
+        case "json" | "json-pretty" | "yaml":
+            target.write(format_output(payload, output=output))
             target.write("\n")
-        case "yaml":
-            target.write(yaml.safe_dump(payload, sort_keys=True))
         case _ as unexpected:
             assert_never(unexpected)

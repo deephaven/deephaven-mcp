@@ -56,9 +56,9 @@ _ALL_IDS = [path for path, _ in _ALL]
 
 # Pure discovery commands have no command-specific failure mode (they
 # cannot raise a CliError), so they document no Error codes section.
-# Every operational command must. ``introspect command`` is excluded
+# Every operational command must. ``agents command`` is excluded
 # because it can raise COMMAND_NOT_FOUND for an unresolvable path.
-_NO_ERROR_CODES = {"introspect tree", "introspect errors"}
+_NO_ERROR_CODES = {"agents tree", "agents errors"}
 
 
 @pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)
@@ -86,10 +86,11 @@ def test_leaf_help_documents_positional_arguments(
 def test_help_is_plain_text(path: str, cmd: click.Command) -> None:
     """Help text carries no backtick markup (literal or RST role).
 
-    Surfaced help is rendered verbatim by click and re-emitted verbatim
-    in the introspect manifest; neither interprets markup. Rejecting any
-    backtick catches both double-backtick literals and single-backtick
-    RST roles (``:func:`x```). Single quotes are the emphasis convention.
+    Surfaced help is rendered verbatim by click in the terminal, and
+    the agents manifest emits the same HelpSpec strings structurally;
+    neither interprets markup. Rejecting any backtick catches both
+    double-backtick literals and single-backtick RST roles
+    (``:func:`x```). Single quotes are the emphasis convention.
     """
     assert "`" not in (cmd.help or ""), f"{path}: backtick markup in help"
 

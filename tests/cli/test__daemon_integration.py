@@ -15,7 +15,7 @@ These tests:
   list`` / ``status``, ``table list`` / ``schema`` / ``data``, ``script
   run`` / ``pip-list``), plus the error/exit-code paths (``config_invalid``,
   ``daemon_not_running``, ``tool_returned_error``) and the config /
-  introspect verbs that need no worker.
+  agents verbs that need no worker.
 
 They are marked ``@pytest.mark.integration`` and skipped by the
 default ``uv run pytest`` run. Invoke with::
@@ -386,7 +386,7 @@ def test_status_when_no_daemon(tmp_path: Path) -> None:
 def _seed_anonymous_config(cfg_dir: Path) -> None:
     """Write a minimal, valid community config that needs no live worker.
 
-    Anonymous credentials let the eager config load succeed without a
+    Anonymous credentials let the pre-body config load succeed without a
     reachable Deephaven server, so the verbs that never connect
     (``config``, ``daemon`` lifecycle, ``--no-auto-start`` failures)
     can be exercised without the slow worker fixture.
@@ -637,9 +637,9 @@ def test_help_at_depth_still_routes_to_subcommand(tmp_path: Path) -> None:
 def test_config_invalid_exits_2(tmp_path: Path) -> None:
     """A malformed config tree fails fast with ``config_invalid`` (exit 2).
 
-    The eager load in ``_main``'s root callback parses the whole config tree
-    before any subcommand body runs, so a syntactically broken session file
-    exits 2 with ``config_invalid`` even for a worker-free verb like
+    The pre-body load (``HelpfulCommand.invoke``) parses the whole config
+    tree before any subcommand body runs, so a syntactically broken session
+    file exits 2 with ``config_invalid`` even for a worker-free verb like
     ``config validate``.
     """
     cfg_dir = tmp_path / "cfg"
@@ -671,11 +671,14 @@ def test_config_invalid_exits_2(tmp_path: Path) -> None:
     shutil.which("dh-mcp") is None,
     reason="dh-mcp entry point not on PATH",
 )
-def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
-    """``introspect tree`` emits the command manifest without touching config.
+def test_agents_emits_json_without_config(tmp_path: Path) -> None:
+    """``agents tree --full`` emits the complete manifest without touching config.
 
-    The config directory is deliberately left unseeded: introspect
-    bypasses the eager config load, so it must still succeed.
+    The config directory is deliberately left unseeded: the agents verbs
+    are ``needs_runtime=False`` and never load config, so this must still
+    succeed. ``--full`` is required for the whole-manifest keys asserted
+    below (``error_codes``, per-node ``wraps``); the default ``tree``
+    output is the summary tree, which carries neither.
     """
     cfg_dir = tmp_path / "cfg"
     runtime_dir = tmp_path / "rt"
@@ -683,7 +686,7 @@ def test_introspect_emits_json_without_config(tmp_path: Path) -> None:
     os.chmod(runtime_dir, 0o700)
 
     result = _run_cli(
-        ["-o", "json", "introspect", "tree"],
+        ["-o", "json", "agents", "tree", "--full"],
         config_dir=cfg_dir,
         runtime_dir=runtime_dir,
     )

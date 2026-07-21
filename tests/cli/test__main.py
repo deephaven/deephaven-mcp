@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from deephaven_mcp.cli import _main
+from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._main import (
     _NOISY_DEPENDENCY_LOGGERS,
@@ -255,65 +256,119 @@ def test_output_from_argv_equals_form_with_unknown_value(
 
 
 # ---------------------------------------------------------------------------
-# _is_help_invocation
+# Leaf-boundary runtime materialization
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("argv", "expected"),
-    [
-        # Bare help spellings.
-        (["--help"], True),
-        (["-h"], True),
-        # Help after a value-taking option whose value is supplied.
-        (["--config-dir", "/tmp", "--help"], True),
-        # ``--help`` consumed as the value of a value-taking option.
-        (["--config-dir", "--help"], False),
-        # ``=``-form value-taking option does not consume the next token.
-        (["--config-dir=/tmp", "--help"], True),
-        # No help token anywhere.
-        (["daemon", "stop"], False),
-        # Empty argv.
-        ([], False),
-    ],
-)
-def test_is_help_invocation_table_driven(
-    argv: list[str], expected: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``_is_help_invocation`` reads ``sys.argv[1:]``; monkey-patch it."""
-    from deephaven_mcp.cli._main import _is_help_invocation
+def test_runtime_materializes_at_leaf_boundary() -> None:
+    """A leaf command's body receives a ``Runtime`` built from the root's spec.
 
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
-    assert _is_help_invocation() is expected
+    The root callback stores a ``RuntimeSpec`` on ``ctx.obj``;
+    ``HelpfulCommand.invoke`` swaps it for the loaded ``Runtime``
+    right before the body runs. Confirmed end-to-end: ``load_runtime``
+    is called exactly once and the body's output reaches stdout.
+    """
+    rt = _runtime()
+    load = MagicMock(wraps=fake_load_runtime(rt))
+    with (
+        patch.object(runtime_mod, "load_runtime", load),
+        patch(
+            "deephaven_mcp.cli._commands.daemon.stop_daemon",
+            AsyncMock(return_value=False),
+        ),
+    ):
+        result = CliRunner().invoke(
+            cli, ["-o", "json", "daemon", "stop"], standalone_mode=False
+        )
+    assert result.exit_code == 0
+    assert load.call_count == 1
+    assert json.loads(result.output)["stopped"] is False
 
 
-@pytest.mark.parametrize(
-    ("argv", "expected"),
-    [
-        # Bare flag.
-        (["--introspect"], True),
-        # Flag appended to a command path.
-        (["daemon", "start", "--introspect"], True),
-        # Flag after a value-taking option whose value is supplied.
-        (["--config-dir", "/tmp", "--introspect"], True),
-        # ``--introspect`` consumed as the value of a value-taking option.
-        (["--config-dir", "--introspect"], False),
-        # ``=``-form value-taking option does not consume the next token.
-        (["--config-dir=/tmp", "--introspect"], True),
-        # No introspect token anywhere.
-        (["daemon", "stop"], False),
-        # Empty argv.
-        ([], False),
-    ],
-)
-def test_is_introspect_invocation_table_driven(
-    argv: list[str], expected: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``_is_introspect_invocation`` reads ``sys.argv[1:]``; monkey-patch it."""
-    from deephaven_mcp.cli._main import _is_introspect_invocation
+def test_option_value_collision_loads_runtime() -> None:
+    """``--agents`` as an option *value* is data, not a bypass.
 
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
-    assert _is_introspect_invocation() is expected
+    ``session exec ID --script --agents`` hands the literal string
+    ``--agents`` to ``--script``; the command must load the runtime
+    and run its body (the historical pre-scan bypassed the load here,
+    crashing the body with ``runtime=None``). The body then fails on
+    the mock daemon — the assertions are that the load happened and
+    no agents node was rendered.
+    """
+    rt = _runtime()
+    load = MagicMock(wraps=fake_load_runtime(rt))
+    with patch.object(runtime_mod, "load_runtime", load):
+        result = CliRunner().invoke(
+            cli,
+            ["session", "exec", "c:c:x", "--script", "--agents"],
+            standalone_mode=False,
+        )
+    assert load.call_count == 1
+    assert "summary" not in (result.output or "")
+
+
+def test_double_dash_sentinel_treats_agents_as_data() -> None:
+    """``--agents`` after the ``--`` sentinel is positional data, not a flag.
+
+    ``tool show -- --agents`` hands the literal string ``--agents`` to
+    the NAME argument: the runtime loads and the body runs (failing on
+    the unknown tool), rather than the agents node rendering. Click's
+    parser honors the sentinel natively; the historical argv pre-scan
+    needed (and once lacked) explicit handling for it.
+    """
+    rt = _runtime()
+    load = MagicMock(wraps=fake_load_runtime(rt))
+    with patch.object(runtime_mod, "load_runtime", load):
+        result = CliRunner().invoke(
+            cli,
+            ["tool", "show", "--", "--agents"],
+            standalone_mode=False,
+        )
+    assert load.call_count == 1
+    assert "summary" not in (result.output or "")
+
+
+def test_bare_group_shows_help_without_loading_runtime() -> None:
+    """A bare noun (``dh-mcp daemon``) renders group help without config.
+
+    Click's ``no_args_is_help`` fires during the group's argument
+    parsing, before any leaf dispatch, so the load never runs and the
+    help text renders even against a broken configuration tree. (Under
+    the old eager-at-root model this path loaded config first, so a
+    broken tree suppressed the help.) The exit code (2) is click's own
+    no-args usage-error contract, not part of this pin.
+    """
+    load = MagicMock(side_effect=AssertionError("load_runtime must not be called"))
+    with patch.object(runtime_mod, "load_runtime", load):
+        result = CliRunner().invoke(cli, ["daemon"])
+    assert "Usage" in result.output
+    assert load.call_count == 0
+
+
+def test_unknown_command_reports_usage_error_without_loading_runtime() -> None:
+    """``dh-mcp bogus`` reports 'No such command' without a config load.
+
+    Subcommand resolution fails during parsing, before any leaf
+    dispatch. (Under the old eager-at-root model the load ran first,
+    so a broken tree masked the usage error with ``config_invalid``.)
+    """
+    load = MagicMock(side_effect=AssertionError("load_runtime must not be called"))
+    with patch.object(runtime_mod, "load_runtime", load):
+        result = CliRunner().invoke(cli, ["bogus"])
+    assert result.exit_code == 2
+    assert "No such command" in result.output
+    assert load.call_count == 0
+
+
+def test_needs_runtime_false_skips_the_load() -> None:
+    """A ``needs_runtime=False`` command never touches ``load_runtime``."""
+    load = MagicMock(side_effect=AssertionError("load_runtime must not be called"))
+    with patch.object(runtime_mod, "load_runtime", load):
+        result = CliRunner().invoke(
+            cli, ["-o", "json", "agents", "errors"], standalone_mode=False
+        )
+    assert result.exit_code == 0
+    assert load.call_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +392,7 @@ def test_value_taking_root_options_is_liftable_value_taking_half() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Top-level help / version / introspect smoke
+# Top-level help / version / agents smoke
 # ---------------------------------------------------------------------------
 
 
@@ -356,7 +411,7 @@ def test_help_lists_top_level_nouns() -> None:
         "pq",
         "docs",
         "config",
-        "introspect",
+        "agents",
     ):
         assert noun in result.output
 
@@ -378,7 +433,7 @@ def test_main_registers_exactly_the_expected_groups() -> None:
         "pq",
         "docs",
         "config",
-        "introspect",
+        "agents",
     }
 
 
@@ -389,21 +444,21 @@ def test_version_flag() -> None:
     assert result.output.startswith("dh-mcp ")
 
 
-def test_introspect_runs_without_loading_runtime() -> None:
-    """``introspect`` must work without a valid configuration tree.
+def test_agents_runs_without_loading_runtime() -> None:
+    """``agents`` must work without a valid configuration tree.
 
-    The root callback short-circuits before calling ``load_runtime``;
-    we confirm by stubbing ``load_runtime`` to raise and asserting
-    the verb still completes with a 0 exit code.
+    The ``agents`` verbs are ``needs_runtime=False``, so
+    ``load_runtime`` is never reached; confirmed by stubbing it to
+    raise and asserting the verb still completes with a 0 exit code.
     """
     runner = CliRunner()
     with patch.object(
-        _main,
+        runtime_mod,
         "load_runtime",
         AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID)),
     ):
         result = runner.invoke(
-            cli, ["-o", "json", "introspect", "tree"], standalone_mode=False
+            cli, ["-o", "json", "agents", "tree"], standalone_mode=False
         )
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -411,41 +466,36 @@ def test_introspect_runs_without_loading_runtime() -> None:
     assert "daemon" in payload["commands"]
 
 
-def test_introspect_flag_runs_without_loading_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The ``--introspect`` flag short-circuits ``load_runtime`` too.
+def test_agents_flag_runs_without_loading_runtime() -> None:
+    """The ``--agents`` flag never triggers ``load_runtime``.
 
-    The root callback inspects ``sys.argv``; ``CliRunner.invoke`` does
-    not set it, so the test patches it explicitly (mirroring the
-    ``--help`` path).
+    The eager flag exits while the leaf's arguments are being parsed,
+    before ``HelpfulCommand.invoke`` (where the load lives) runs.
     """
-    argv = ["-o", "json", "daemon", "start", "--introspect"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
     runner = CliRunner()
     with patch.object(
-        _main,
+        runtime_mod,
         "load_runtime",
         AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID)),
     ):
-        result = runner.invoke(cli, argv, standalone_mode=False)
+        result = runner.invoke(
+            cli,
+            ["-o", "json", "daemon", "start", "--agents"],
+            standalone_mode=False,
+        )
     assert result.exit_code == 0
     assert json.loads(result.output)["name"] == "start"
 
 
-def test_help_runs_without_loading_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_help_runs_without_loading_runtime() -> None:
     """``--help`` at any depth must work without a valid configuration tree.
 
-    The root callback short-circuits on help by inspecting
-    ``sys.argv``; ``CliRunner.invoke`` does not patch ``sys.argv``,
-    so the test must do it explicitly.
+    Click's eager help option exits during argument parsing, before
+    ``HelpfulCommand.invoke`` (where the load lives) runs.
     """
-    monkeypatch.setattr("sys.argv", ["dh-mcp", "daemon", "--help"])
     runner = CliRunner()
     with patch.object(
-        _main,
+        runtime_mod,
         "load_runtime",
         AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID)),
     ):
@@ -457,20 +507,13 @@ def test_help_runs_without_loading_runtime(
 @pytest.mark.parametrize(
     "args", [["daemon", "start", "--help"], ["-o", "json", "daemon", "start", "--help"]]
 )
-def test_help_is_human_regardless_of_output_mode(
-    args: list[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_help_is_human_regardless_of_output_mode(args: list[str]) -> None:
     """``--help`` always renders human help text, even under ``-o json``.
 
     Help goes through click's help formatter, independent of the output-mode
     system, so the JSON default does not turn it into JSON. This locks the
-    intended split: ``--help`` is human, ``--introspect`` is the machine twin.
-
-    The runtime-load bypass inspects ``sys.argv``; ``CliRunner.invoke`` does
-    not set it, so the test patches it explicitly so a CI machine without
-    a default config dir doesn't trip ``CONFIG_INVALID`` on the way in.
+    intended split: ``--help`` is human, ``--agents`` is the machine twin.
     """
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *args])
     runner = CliRunner()
     result = runner.invoke(cli, args, standalone_mode=False)
     assert result.exit_code == 0
@@ -488,7 +531,7 @@ def test_main_renders_config_error_human(capsys) -> None:
     """``-o human`` renders the error as plain text (json is now the default)."""
     fail = AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID))
     with (
-        patch.object(_main, "load_runtime", fail),
+        patch.object(runtime_mod, "load_runtime", fail),
         pytest.raises(SystemExit) as exc_info,
     ):
         main(["-o", "human", "daemon", "start"])
@@ -501,7 +544,7 @@ def test_main_renders_config_error_json(capsys) -> None:
     """Same error path under ``-o json`` emits a structured stderr payload."""
     fail = AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID))
     with (
-        patch.object(_main, "load_runtime", fail),
+        patch.object(runtime_mod, "load_runtime", fail),
         pytest.raises(SystemExit) as exc_info,
     ):
         main(["-o", "json", "daemon", "start"])
@@ -519,7 +562,7 @@ def test_main_renders_config_error_honors_env(
     monkeypatch.setenv("DH_MCP_OUTPUT", "json")
     fail = AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID))
     with (
-        patch.object(_main, "load_runtime", fail),
+        patch.object(runtime_mod, "load_runtime", fail),
         pytest.raises(SystemExit) as exc_info,
     ):
         main(["daemon", "start"])
@@ -532,7 +575,7 @@ def test_main_returns_zero_on_success(capsys) -> None:
     """Success path: ``main`` exits ``0`` and the callback's output reaches stdout."""
     rt = _runtime()
     with (
-        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)),
         patch(
             "deephaven_mcp.cli._commands.daemon.stop_daemon",
             AsyncMock(return_value=False),
@@ -546,17 +589,17 @@ def test_main_returns_zero_on_success(capsys) -> None:
     assert payload["stopped"] is False
 
 
-def test_main_output_flag_after_introspect_subcommand(capsys) -> None:
-    """``dh-mcp introspect tree -o json`` works end-to-end through ``main()``.
+def test_main_output_flag_after_agents_subcommand(capsys) -> None:
+    """``dh-mcp agents tree -o json`` works end-to-end through ``main()``.
 
     Exercises the interaction this change relies on: the argv lifter hoists
     the trailing ``-o json`` to the front, the eager ``-o`` resolves before
-    the introspect verb renders, and the introspect bypass means no config
+    the agents verb renders, and the agents bypass means no config
     is loaded. (``CliRunner`` does not run the lifter, so this must go
     through ``main()``.)
     """
     with pytest.raises(SystemExit) as exc_info:
-        main(["introspect", "tree", "-o", "json"])
+        main(["agents", "tree", "-o", "json"])
     assert exc_info.value.code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["prog"] == "dh-mcp"
@@ -581,7 +624,7 @@ def test_output_env_var_drives_a_normal_command(
     monkeypatch.setenv("DH_MCP_OUTPUT", "json")
     rt = _runtime()
     with (
-        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)),
         patch(
             "deephaven_mcp.cli._commands.daemon.stop_daemon",
             AsyncMock(return_value=False),
@@ -601,7 +644,7 @@ def test_explicit_output_flag_overrides_env_var(
     monkeypatch.setenv("DH_MCP_OUTPUT", "yaml")
     rt = _runtime()
     with (
-        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)),
         patch(
             "deephaven_mcp.cli._commands.daemon.stop_daemon",
             AsyncMock(return_value=False),
@@ -663,7 +706,7 @@ def test_v_and_q_are_mutually_exclusive() -> None:
     """``-v`` and ``-q`` together raise a ``CliError``."""
     rt = _runtime()
     runner = CliRunner()
-    with patch.object(_main, "load_runtime", fake_load_runtime(rt)):
+    with patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)):
         result = runner.invoke(cli, ["-v", "-q", "daemon", "status"])
     assert result.exit_code == 2
 
@@ -863,7 +906,7 @@ def test_main_accepts_output_after_subcommand(capsys) -> None:
     """
     rt = _runtime()
     with (
-        patch.object(_main, "load_runtime", fake_load_runtime(rt)),
+        patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)),
         patch(
             "deephaven_mcp.cli._commands.daemon.stop_daemon",
             AsyncMock(return_value=False),
