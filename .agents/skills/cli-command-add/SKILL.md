@@ -1,15 +1,15 @@
 ---
 name: cli-command-add
-description: Add a new command to the dh-mcp CLI — wraps the click + Pattern B + structured-error + agents-manifest conventions; prevents the most common bugs (calling asyncio.run inline, printing errors to stderr, forgetting to update docs/CLI.md)
+description: Add a new command to the dhcli CLI — wraps the click + Pattern B + structured-error + agents-manifest conventions; prevents the most common bugs (calling asyncio.run inline, printing errors to stderr, forgetting to update docs/CLI.md)
 ---
 
 Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` + `CliError` discipline), the `_documentation-roles` skill (it defines `docs/CLI.md`'s role as the exhaustive CLI reference), the `_cli-help-standards` skill (the help-content contract every command's `HelpSpec` — rendering both `--help` and the agents manifest — must satisfy), and the `_output-serialization-conventions` skill for the command's output payload (every `OutputField`'s value vocabulary, casing, and known carve-outs). **If the command wraps an MCP tool** (any verb under `session`/`system`/`table`/`catalog`/`pq`/`docs`), also apply the `_cli-tool-wrapping` skill — it owns the shared `_wrapping` helpers, the five wrapper categories, the type-scoping rule, the path-flag locality rule, and the `wraps_tool` drift contract (step 2's wrapper note has the binding details).
 
 ## Steps
 
-1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools — the raw escape hatch), `session` / `system` / `table` / `catalog` / `pq` (runtime MCP-tool wrappers — apply `_cli-tool-wrapping`), `docs` (documentation Q&A — connects directly to the docs MCP server, no daemon), `config` (inspect / validate the configuration tree). `agents` is not an add target — it emits machine-readable metadata about the live click tree, not user actions, and new commands appear there automatically. Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
+1. **Pick the noun group.** Look in `src/deephaven_mcp/cli/_commands/` for an existing noun that fits: `daemon` (lifecycle of the local daemon), `tool` (inspect / invoke MCP tools — the raw escape hatch), `session` / `system` / `table` / `catalog` / `pq` (runtime MCP-tool wrappers — apply `_cli-tool-wrapping`), `docs` (documentation Q&A — connects directly to the docs MCP server, no daemon), `config` (inspect / validate the configuration tree), `self` (tool self-management, e.g. shell completion — verbs here declare `needs_runtime=False` when they must work without a config tree). `agents` is not an add target — it emits machine-readable metadata about the live click tree, not user actions, and new commands appear there automatically. Only create a new noun if the command represents a genuinely new domain — adding a verb under an existing noun is the default.
 
-2. **Add the click command.** Copy the decorator stack from the model verb `tool_call` in `cli/_commands/tool.py`: `@<group>.command(name, help_spec=HelpSpec(...))` → click options/arguments → `@click.pass_obj` (or `@click.pass_context`) → `@run_async` → `async def`. Compose the help as a `HelpSpec` from `cli/_help.py` per the `_cli-help-standards` §2 section contract, and define the output shape once as an `OutputSpec` constant passed as the spec's `output=` field (§4) — `output_spec` derives from it automatically.
+2. **Add the click command.** Copy the decorator stack from the model verb `tool_call` in `cli/_commands/tool.py`: `@<group>.command(name, help_spec=HelpSpec(...))` → click options/arguments → `@click.pass_obj` (or `@click.pass_context`) → `@run_async` → `async def`. Exception: a verb that performs no I/O (pure metadata / self-management — canonical implementations: the `agents` verbs in `agents.py`, `self completion` in `self_cmd.py`) stays a plain synchronous `def` with no `@run_async`; never wrap a synchronous body in `async def`. Compose the help as a `HelpSpec` from `cli/_help.py` per the `_cli-help-standards` §2 section contract, and define the output shape once as an `OutputSpec` constant passed as the spec's `output=` field (§4) — `output_spec` derives from it automatically.
 
    **If the command wraps an MCP tool**, apply `_cli-tool-wrapping` and:
    - Build the body from the `_wrapping` helpers (`acquire` → `call_tool` → `tool_payload` → `require_success`) instead of hand-rolling the daemon/MCP dance.
@@ -33,20 +33,20 @@ Apply the `_python-coding-practices` skill (rule 15 covers click + `@run_async` 
 
 7. **Update `docs/CLI.md`.** Add the new verb under the noun's section: synopsis, description, every flag, exit codes, error codes, output fields, at least one runnable example. The three surfaces must agree (`_cli-help-standards` §1 consistency rule). If a new `ErrorCode` was introduced, add it to the `error_code` registry table in the same document. Docs have no automated check — this is the most commonly forgotten step.
 
-8. **Sanity-check the agents manifest.** `dh-mcp agents tree` walks the live click tree, so a newly-registered command appears there automatically (and `agents tree --full` carries its full node). `tests/cli/test__help.py` confirms the noun is wired and its content-preservation test asserts every `HelpSpec` fact surfaces in the node. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
+8. **Sanity-check the agents manifest.** `dhcli agents tree` walks the live click tree, so a newly-registered command appears there automatically (and `agents tree --full` carries its full node). `tests/cli/test__help.py` confirms the noun is wired and its content-preservation test asserts every `HelpSpec` fact surfaces in the node. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
 
 9. **Run checks.**
 
    ```bash
    uv run pytest tests/cli/ -q
    ./bin/precommit.sh
-   uv run dh-mcp <noun> <verb> --help    # eyeball the rendered help
-   uv run dh-mcp <noun> <verb> --agents    # machine-readable node (twin of --help)
+   uv run dhcli <noun> <verb> --help    # eyeball the rendered help
+   uv run dhcli <noun> <verb> --agents    # machine-readable node (twin of --help)
    ```
 
 ## Anti-patterns
 
-- **Reading `os.environ` directly.** Add `envvar=` to the click option. The only env var the CLI reads outside of click is `DH_MCP_DATA_DIR`, and `_runtime.py` already handles it.
+- **Reading `os.environ` directly.** Add `envvar=` to the click option. Outside of click the CLI reads only `DH_AI_DATA_DIR` (sole reader: `resolve_data_root` in `config/_data_root.py`), `PYTHONLOGLEVEL` (via `setup_logging()`), and `DHCLI_OUTPUT` (re-read by `_env_output_mode` in `cli/_main.py` for the fallback error renderer, where the click context is gone); `docs/ENV.md` is the canonical inventory.
 - **Hand-rolled output formatting.** Always go through `format_output(...)`; otherwise `-o yaml` and the structured-error renderer drift.
 - **Mixing in MCP-server-tool conventions.** This is a CLI command, not an MCP tool. No `register_tools()`, no `Terminology Note`, no `Format Accuracy for AI Agents`. Apply `_mcp-module-organization` only to MCP server tools.
-- **Redeclaring a root option on a subcommand.** The root callback's options (`-o/--output`, `--timeout`, `-v/--verbose`, `-q/--quiet`, `--no-auto-start`, `--config-dir`, `--runtime-dir`) are auto-lifted to the front of argv by `_lift_root_options` (in `cli/_main.py`), so `dh-mcp daemon status -o json` is rewritten to `dh-mcp -o json daemon status` before click parses it. The flag already applies to every subcommand — duplicating it on a subcommand creates a parser collision and breaks the auto-lift. If you add a new root option, `_lift_root_options` picks it up automatically from `cli.params`; if it must *not* be lifted (eager / context-sensitive like `--help` or `--version`), add the explicit exclusion in `_liftable_options` and a regression test in `tests/cli/test__main.py`.
+- **Redeclaring a root option on a subcommand.** The root callback's options (`-o/--output`, `--timeout`, `-v/--verbose`, `-q/--quiet`, `--no-auto-start`, `--config-dir`, `--runtime-dir`) are auto-lifted to the front of argv by `_lift_root_options` (in `cli/_main.py`), so `dhcli daemon status -o json` is rewritten to `dhcli -o json daemon status` before click parses it. The flag already applies to every subcommand — duplicating it on a subcommand creates a parser collision and breaks the auto-lift. If you add a new root option, `_lift_root_options` picks it up automatically from `cli.params`; if it must *not* be lifted (eager / context-sensitive like `--help` or `--version`), add the explicit exclusion in `_liftable_options` and a regression test in `tests/cli/test__main.py`.

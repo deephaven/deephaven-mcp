@@ -26,7 +26,7 @@ def test_resolve_explicit_argument_wins(tmp_path: Path) -> None:
 
 
 def test_resolve_uses_data_root_env_var_when_explicit_none(tmp_path: Path) -> None:
-    """``$DH_MCP_DATA_DIR/runtime`` is used when no explicit Path is given."""
+    """``$DH_AI_DATA_DIR/runtime`` is used when no explicit Path is given."""
     root = str(tmp_path / "data_root")
     with patch.dict(os.environ, {DATA_DIR_ENV_VAR: root}):
         assert resolve_runtime_dir(None) == Path(root) / "runtime"

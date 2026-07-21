@@ -2,7 +2,7 @@
 
 Delegates to :func:`deephaven_mcp.mcp_systems_server.server.main`, the
 same callable wired to the ``dh-mcp-systems-server`` console script. The
-``dh-mcp`` CLI spawns the background daemon via this module form so the
+``dhcli`` CLI spawns the background daemon via this module form so the
 daemon runs under the caller's interpreter (see
 :func:`deephaven_mcp.cli._daemon._build_spawn_command`).
 """

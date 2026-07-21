@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""End-to-end developer harness for the ``dh-mcp`` CLI.
+"""End-to-end developer harness for the ``dhcli`` CLI.
 
 Spins up a Deephaven Community worker via
 :class:`PythonLaunchedSession` (or, with ``--enterprise``, expects an
 operator-managed enterprise system), seeds a temporary configuration
-tree pointing at it, and drives every supported ``dh-mcp`` subcommand
+tree pointing at it, and drives every supported ``dhcli`` subcommand
 in sequence: ``daemon start`` → ``daemon status`` → ``tool list`` →
 ``tool call`` → idempotent ``daemon start`` → ``daemon stop`` →
 idempotent ``daemon stop``.
@@ -70,7 +70,7 @@ _CLI_TIMEOUT_SECONDS = 60
 def _parse_args() -> argparse.Namespace:
     """Parse the CLI arguments for the harness."""
     parser = argparse.ArgumentParser(
-        description="End-to-end test harness for the dh-mcp CLI.",
+        description="End-to-end test harness for the dhcli CLI.",
     )
     parser.add_argument(
         "--enterprise",
@@ -101,13 +101,13 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _run_cli(args: list[str], *, timeout: int = _CLI_TIMEOUT_SECONDS) -> str:
-    """Execute ``dh-mcp ...`` synchronously and return its stdout.
+    """Execute ``dhcli ...`` synchronously and return its stdout.
 
     The subprocess inherits the parent environment. Raises
     ``RuntimeError`` on non-zero exit or timeout; the message includes
     both stdout and stderr to make CI logs actionable.
     """
-    cmd = ["dh-mcp", *args]
+    cmd = ["dhcli", *args]
     _LOGGER.info(f"$ {shlex.join(cmd)}")
     try:
         completed = subprocess.run(  # noqa: S603 - argv is fully constructed
@@ -119,13 +119,13 @@ def _run_cli(args: list[str], *, timeout: int = _CLI_TIMEOUT_SECONDS) -> str:
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
-            f"`dh-mcp {' '.join(args)}` timed out after {timeout}s.\n"
+            f"`dhcli {' '.join(args)}` timed out after {timeout}s.\n"
             f"--- stdout ---\n{exc.stdout}\n"
             f"--- stderr ---\n{exc.stderr}"
         ) from exc
     if completed.returncode != 0:
         raise RuntimeError(
-            f"`dh-mcp {' '.join(args)}` failed with exit code "
+            f"`dhcli {' '.join(args)}` failed with exit code "
             f"{completed.returncode}.\n"
             f"--- stdout ---\n{completed.stdout}\n"
             f"--- stderr ---\n{completed.stderr}"
@@ -136,7 +136,7 @@ def _run_cli(args: list[str], *, timeout: int = _CLI_TIMEOUT_SECONDS) -> str:
 def _run_json(
     common: list[str], verb: list[str], *, timeout: int = _CLI_TIMEOUT_SECONDS
 ) -> Any:
-    """Run a ``dh-mcp`` subcommand and parse its JSON stdout."""
+    """Run a ``dhcli`` subcommand and parse its JSON stdout."""
     return json.loads(_run_cli([*common, *verb], timeout=timeout))
 
 
@@ -243,10 +243,10 @@ def _runtime_dir(*, keep: bool) -> Iterator[Path]:
     """Yield a mode-0o700 temp runtime dir, preserving it when ``keep``.
 
     On exit, when ``keep`` is set, the directory is copied to a
-    timestamped ``dh-mcp-e2e-runtime-<ts>`` path under the system temp
+    timestamped ``dhcli-e2e-runtime-<ts>`` path under the system temp
     dir and the location is logged; otherwise it is removed.
     """
-    with tempfile.TemporaryDirectory(prefix="dh-mcp-e2e-rt-") as runtime_str:
+    with tempfile.TemporaryDirectory(prefix="dhcli-e2e-rt-") as runtime_str:
         runtime_dir = Path(runtime_str)
         os.chmod(runtime_dir, 0o700)
         try:
@@ -255,7 +255,7 @@ def _runtime_dir(*, keep: bool) -> Iterator[Path]:
             if keep:
                 persisted = (
                     Path(tempfile.gettempdir())
-                    / f"dh-mcp-e2e-runtime-{int(time.time())}"
+                    / f"dhcli-e2e-runtime-{int(time.time())}"
                 )
                 shutil.copytree(runtime_dir, persisted)
                 _LOGGER.info(f"Preserved runtime dir at {persisted}")
@@ -296,7 +296,7 @@ async def _run_community(args: argparse.Namespace) -> int:
             )
             return 2
 
-        with tempfile.TemporaryDirectory(prefix="dh-mcp-e2e-cfg-") as cfg_str:
+        with tempfile.TemporaryDirectory(prefix="dhcli-e2e-cfg-") as cfg_str:
             cfg_dir = Path(cfg_str)
             os.chmod(cfg_dir, 0o700)
             _seed_community_config(cfg_dir, worker_port=port, auth_token=auth_token)
@@ -338,8 +338,8 @@ def _run_enterprise(args: argparse.Namespace) -> int:
 def main() -> int:
     """Entry point for the harness; returns the desired exit code."""
     args = _parse_args()
-    if shutil.which("dh-mcp") is None:
-        _LOGGER.error("`dh-mcp` is not on PATH. Install with `uv sync --all-extras`.")
+    if shutil.which("dhcli") is None:
+        _LOGGER.error("`dhcli` is not on PATH. Install with `uv sync --all-extras`.")
         return 2
     try:
         if args.enterprise:

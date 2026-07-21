@@ -64,7 +64,7 @@ def test_agents_tree_honors_human_with_flag() -> None:
         pass
     else:  # pragma: no cover - regression guard only
         raise AssertionError("human output unexpectedly parsed as JSON")
-    assert "dh-mcp" in result.output
+    assert "dhcli" in result.output
 
 
 def test_agents_tree_honors_yaml_output_mode() -> None:
@@ -73,16 +73,16 @@ def test_agents_tree_honors_yaml_output_mode() -> None:
     result = runner.invoke(cli, ["-o", "yaml", "agents", "tree"])
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
-    assert payload["prog"] == "dh-mcp"
+    assert payload["prog"] == "dhcli"
 
 
 def test_agents_tree_honors_envvar_output_mode() -> None:
-    """``DH_MCP_OUTPUT=yaml`` selects YAML without ``-o``."""
+    """``DHCLI_OUTPUT=yaml`` selects YAML without ``-o``."""
     runner = CliRunner()
-    result = runner.invoke(cli, ["agents", "tree"], env={"DH_MCP_OUTPUT": "yaml"})
+    result = runner.invoke(cli, ["agents", "tree"], env={"DHCLI_OUTPUT": "yaml"})
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
-    assert payload["prog"] == "dh-mcp"
+    assert payload["prog"] == "dhcli"
 
 
 # ---------------------------------------------------------------------------
@@ -218,11 +218,11 @@ def test_agents_errors_json_pretty_emits_indented_json() -> None:
 
 
 def test_bare_agents_shows_group_help() -> None:
-    """``dh-mcp agents`` with no verb lists the verbs (like any bare noun)."""
+    """``dhcli agents`` with no verb lists the verbs (like any bare noun)."""
     runner = CliRunner()
     result = runner.invoke(cli, ["agents"])
     # A group with no subcommand: usage error (exit 2) plus the verb listing,
-    # identical to bare ``dh-mcp daemon``.
+    # identical to bare ``dhcli daemon``.
     assert result.exit_code == 2
     for verb in ("tree", "command", "errors"):
         assert verb in result.output
@@ -239,7 +239,7 @@ def test_agents_flag_equals_command_verb(
     """The flag and the ``command`` verb produce byte-identical nodes."""
     runner = CliRunner()
     flag_argv = ["tool", "call", "--agents"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *flag_argv])
+    monkeypatch.setattr("sys.argv", ["dhcli", *flag_argv])
     via_flag = runner.invoke(cli, flag_argv, standalone_mode=False)
     via_verb = runner.invoke(
         cli, ["agents", "command", "tool", "call"], standalone_mode=False

@@ -158,7 +158,7 @@ def test_argv_command_path_skips_options_and_their_values() -> None:
 
 
 def test_argv_command_path_empty_returns_root_name() -> None:
-    assert _argv_command_path([]) == "dh-mcp"
+    assert _argv_command_path([]) == "dhcli"
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ def test_output_from_argv_unknown_value_falls_back_to_default(
     """A recognized ``-o`` with an invalid value falls through to env/default."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    monkeypatch.delenv("DHCLI_OUTPUT", raising=False)
     assert _output_from_argv(["-o", "xml"]) == "json"
 
 
@@ -188,35 +188,35 @@ def test_output_from_argv_no_o_falls_back_to_default(
 ) -> None:
     from deephaven_mcp.cli._main import _output_from_argv
 
-    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    monkeypatch.delenv("DHCLI_OUTPUT", raising=False)
     assert _output_from_argv(["daemon", "status"]) == "json"
 
 
 def test_output_from_argv_honors_env_when_no_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With no ``-o`` in argv, the error path honors ``DH_MCP_OUTPUT``."""
+    """With no ``-o`` in argv, the error path honors ``DHCLI_OUTPUT``."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    monkeypatch.setenv("DHCLI_OUTPUT", "json")
     assert _output_from_argv(["daemon", "status"]) == "json"
 
 
 def test_output_from_argv_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit ``-o`` in argv beats ``DH_MCP_OUTPUT`` on the error path."""
+    """An explicit ``-o`` in argv beats ``DHCLI_OUTPUT`` on the error path."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    monkeypatch.setenv("DHCLI_OUTPUT", "json")
     assert _output_from_argv(["-o", "yaml", "daemon", "status"]) == "yaml"
 
 
 def test_output_from_argv_ignores_invalid_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An invalid ``DH_MCP_OUTPUT`` is ignored, falling back to the default."""
+    """An invalid ``DHCLI_OUTPUT`` is ignored, falling back to the default."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    monkeypatch.setenv("DH_MCP_OUTPUT", "xml")
+    monkeypatch.setenv("DHCLI_OUTPUT", "xml")
     assert _output_from_argv(["daemon", "status"]) == "json"
 
 
@@ -225,7 +225,7 @@ def test_output_from_argv_o_at_end_with_no_value(
 ) -> None:
     from deephaven_mcp.cli._main import _output_from_argv
 
-    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    monkeypatch.delenv("DHCLI_OUTPUT", raising=False)
     assert _output_from_argv(["-o"]) == "json"
 
 
@@ -250,7 +250,7 @@ def test_output_from_argv_equals_form_with_unknown_value(
     """The ``=`` form with an unrecognized value falls back to the default."""
     from deephaven_mcp.cli._main import _output_from_argv
 
-    monkeypatch.delenv("DH_MCP_OUTPUT", raising=False)
+    monkeypatch.delenv("DHCLI_OUTPUT", raising=False)
     assert _output_from_argv(["--output=xml"]) == "json"
     assert _output_from_argv(["-o=toml"]) == "json"
 
@@ -329,7 +329,7 @@ def test_double_dash_sentinel_treats_agents_as_data() -> None:
 
 
 def test_bare_group_shows_help_without_loading_runtime() -> None:
-    """A bare noun (``dh-mcp daemon``) renders group help without config.
+    """A bare noun (``dhcli daemon``) renders group help without config.
 
     Click's ``no_args_is_help`` fires during the group's argument
     parsing, before any leaf dispatch, so the load never runs and the
@@ -346,7 +346,7 @@ def test_bare_group_shows_help_without_loading_runtime() -> None:
 
 
 def test_unknown_command_reports_usage_error_without_loading_runtime() -> None:
-    """``dh-mcp bogus`` reports 'No such command' without a config load.
+    """``dhcli bogus`` reports 'No such command' without a config load.
 
     Subcommand resolution fails during parsing, before any leaf
     dispatch. (Under the old eager-at-root model the load ran first,
@@ -434,6 +434,7 @@ def test_main_registers_exactly_the_expected_groups() -> None:
         "docs",
         "config",
         "agents",
+        "self",
     }
 
 
@@ -441,7 +442,7 @@ def test_version_flag() -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["--version"], standalone_mode=False)
     assert result.exit_code == 0
-    assert result.output.startswith("dh-mcp ")
+    assert result.output.startswith("dhcli ")
 
 
 def test_agents_runs_without_loading_runtime() -> None:
@@ -558,8 +559,8 @@ def test_main_renders_config_error_json(capsys) -> None:
 def test_main_renders_config_error_honors_env(
     capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With no ``-o`` but ``DH_MCP_OUTPUT=json``, the error renders structured."""
-    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    """With no ``-o`` but ``DHCLI_OUTPUT=json``, the error renders structured."""
+    monkeypatch.setenv("DHCLI_OUTPUT", "json")
     fail = AsyncMock(side_effect=CliError("nope", code=ErrorCode.CONFIG_INVALID))
     with (
         patch.object(runtime_mod, "load_runtime", fail),
@@ -590,7 +591,7 @@ def test_main_returns_zero_on_success(capsys) -> None:
 
 
 def test_main_output_flag_after_agents_subcommand(capsys) -> None:
-    """``dh-mcp agents tree -o json`` works end-to-end through ``main()``.
+    """``dhcli agents tree -o json`` works end-to-end through ``main()``.
 
     Exercises the interaction this change relies on: the argv lifter hoists
     the trailing ``-o json`` to the front, the eager ``-o`` resolves before
@@ -602,18 +603,18 @@ def test_main_output_flag_after_agents_subcommand(capsys) -> None:
         main(["agents", "tree", "-o", "json"])
     assert exc_info.value.code == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["prog"] == "dh-mcp"
+    assert payload["prog"] == "dhcli"
 
 
 # ---------------------------------------------------------------------------
-# DH_MCP_OUTPUT environment variable
+# DHCLI_OUTPUT environment variable
 # ---------------------------------------------------------------------------
 
 
 def test_output_env_var_drives_a_normal_command(
     capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DH_MCP_OUTPUT (no -o flag) selects a normal command's output mode.
+    """DHCLI_OUTPUT (no -o flag) selects a normal command's output mode.
 
     Exercises the full wiring the constant single-sources: the root
     option's ``envvar=OUTPUT_ENV_VAR`` resolves the env value, the
@@ -621,7 +622,7 @@ def test_output_env_var_drives_a_normal_command(
     in that mode. JSON parsing fails (and the test with it) if the env
     var is not honored — human mode prints ``stopped: false``.
     """
-    monkeypatch.setenv("DH_MCP_OUTPUT", "json")
+    monkeypatch.setenv("DHCLI_OUTPUT", "json")
     rt = _runtime()
     with (
         patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)),
@@ -640,8 +641,8 @@ def test_output_env_var_drives_a_normal_command(
 def test_explicit_output_flag_overrides_env_var(
     capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An explicit ``-o`` wins over DH_MCP_OUTPUT (the documented precedence)."""
-    monkeypatch.setenv("DH_MCP_OUTPUT", "yaml")
+    """An explicit ``-o`` wins over DHCLI_OUTPUT (the documented precedence)."""
+    monkeypatch.setenv("DHCLI_OUTPUT", "yaml")
     rt = _runtime()
     with (
         patch.object(runtime_mod, "load_runtime", fake_load_runtime(rt)),
@@ -754,9 +755,9 @@ def test_liftable_options_skips_arguments_help_and_version() -> None:
 def test_liftable_root_options_excludes_help_and_version() -> None:
     """``--help`` / ``-h`` / ``--version`` are never returned in either set.
 
-    Lifting them would actively break ``dh-mcp daemon --help`` (would
-    rewrite to ``dh-mcp --help daemon`` and render root help) and
-    ``dh-mcp daemon --version`` semantics. Pinned here so a future
+    Lifting them would actively break ``dhcli daemon --help`` (would
+    rewrite to ``dhcli --help daemon`` and render root help) and
+    ``dhcli daemon --version`` semantics. Pinned here so a future
     refactor cannot silently start lifting them.
     """
     from deephaven_mcp.cli._main import _liftable_root_options
@@ -892,7 +893,7 @@ def test_lift_root_options_none_defaults_to_sys_argv(
     """
     from deephaven_mcp.cli._main import _lift_root_options
 
-    monkeypatch.setattr("sys.argv", ["/path/to/dh-mcp", "config", "show", "-o", "json"])
+    monkeypatch.setattr("sys.argv", ["/path/to/dhcli", "config", "show", "-o", "json"])
     assert _lift_root_options() == ["-o", "json", "config", "show"]
     assert _lift_root_options(None) == ["-o", "json", "config", "show"]
 
@@ -922,7 +923,7 @@ def test_main_accepts_output_after_subcommand(capsys) -> None:
 def test_main_help_at_depth_still_routes_to_subcommand(
     capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``dh-mcp daemon --help`` must keep rendering daemon's help, not root.
+    """``dhcli daemon --help`` must keep rendering daemon's help, not root.
 
     ``--help`` is intentionally excluded from the lift set; this test
     locks that exclusion against future regressions. The runtime-load
@@ -931,7 +932,7 @@ def test_main_help_at_depth_still_routes_to_subcommand(
     would trip ``CONFIG_INVALID`` before help renders — patch it.
     """
     argv = ["daemon", "--help"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    monkeypatch.setattr("sys.argv", ["dhcli", *argv])
     with pytest.raises(SystemExit) as exc_info:
         main(argv)
     assert exc_info.value.code == 0
@@ -939,4 +940,4 @@ def test_main_help_at_depth_still_routes_to_subcommand(
     # The daemon group's help lists verbs, including 'repair'; the
     # root help does not.
     assert "repair" in out
-    assert "Manage the local dh-mcp daemon" in out
+    assert "Manage the local dhcli daemon" in out

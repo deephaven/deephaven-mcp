@@ -39,12 +39,12 @@ def test_build_help_minimal_summary_only() -> None:
 def test_build_help_includes_examples() -> None:
     text = build_help(
         summary="Do a thing.",
-        examples=("$ dh-mcp do thing",),
+        examples=("$ dhcli do thing",),
         environment=(),
         exit_codes=(),
     )
     assert "Examples:" in text
-    assert "$ dh-mcp do thing" in text
+    assert "$ dhcli do thing" in text
 
 
 def test_build_help_default_sections() -> None:
@@ -65,10 +65,10 @@ def test_build_help_custom_environment() -> None:
     )
     assert "FOO" in text
     assert "do foo" in text
-    # The default-environment lines (which include DH_MCP_DATA_DIR)
+    # The default-environment lines (which include DH_AI_DATA_DIR)
     # must not leak into a help block that supplied a custom
     # ``environment`` argument.
-    assert "DH_MCP_DATA_DIR" not in text
+    assert "DH_AI_DATA_DIR" not in text
 
 
 def test_build_help_custom_exit_codes() -> None:
@@ -203,12 +203,12 @@ def test_build_help_renders_arguments() -> None:
 def test_build_help_renders_see_also() -> None:
     text = build_help(
         summary="S",
-        see_also=("dh-mcp tool list",),
+        see_also=("dhcli tool list",),
         environment=(),
         exit_codes=(),
     )
     assert "\b\nSee also:" in text
-    assert "  dh-mcp tool list" in text
+    assert "  dhcli tool list" in text
 
 
 def test_build_help_renders_error_codes() -> None:
@@ -308,7 +308,7 @@ def test_build_help_full_section_order() -> None:
         arguments=(HelpEntry("NAME", "arg"),),
         output=OutputSpec("object", (OutputField("f", "string", "field"),)),
         examples=("$ ex",),
-        see_also=("dh-mcp x",),
+        see_also=("dhcli x",),
         environment=(HelpEntry("ENV", "env"),),
         exit_codes=(ExitCode.TOOL_ERROR,),
         error_codes=(ErrorCode.TOOL_NOT_FOUND,),
@@ -559,7 +559,7 @@ def test_manifest_output_absent_for_group() -> None:
 
 def test_build_manifest_root_has_expected_top_level_keys() -> None:
     manifest = build_manifest(cli)
-    assert manifest["prog"] == "dh-mcp"
+    assert manifest["prog"] == "dhcli"
     assert "version" in manifest
     # Structured summary/description replace the old rendered ``help``.
     assert "help" not in manifest
@@ -632,7 +632,7 @@ def test_build_manifest_describes_options_with_envvars() -> None:
     manifest = build_manifest(cli)
     global_opts = {opt["name"]: opt for opt in manifest["global_options"]}
     assert "output" in global_opts
-    assert global_opts["output"]["envvar"] == "DH_MCP_OUTPUT"
+    assert global_opts["output"]["envvar"] == "DHCLI_OUTPUT"
     assert global_opts["output"]["type"] == "choice"
     assert "choices" in global_opts["output"]
 
@@ -719,7 +719,7 @@ def test_build_manifest_falls_back_to_unknown_version() -> None:
 
 def test_summary_tree_shape() -> None:
     tree = build_summary_tree(cli)
-    assert tree["prog"] == "dh-mcp"
+    assert tree["prog"] == "dhcli"
     assert "version" in tree
     assert tree["summary"]
     assert "agents command" in tree["hint"]
@@ -874,9 +874,13 @@ def test_standalone_node_preserves_every_help_spec_fact(
         {"code": c.value, "help": c.help_text} for c in expected_exits
     ]
     expected_env = spec.environment if spec.environment is not None else COMMON_ENV_VARS
-    assert node["environment"] == [
-        {"name": e.name, "help": e.help} for e in expected_env
-    ]
+    if expected_env:
+        assert node["environment"] == [
+            {"name": e.name, "help": e.help} for e in expected_env
+        ]
+    else:
+        # Sparse keys: an explicitly empty disclosure omits the key.
+        assert "environment" not in node
     for option in cmd.params:
         if isinstance(option, click.Option) and option.help:
             match = next(p for p in node["params"] if p["name"] == option.name)
@@ -1007,7 +1011,7 @@ def test_resolve_command_descend_into_leaf_raises_command_not_found() -> None:
 
 
 def test_agents_flag_on_root_emits_summary_tree() -> None:
-    """``dh-mcp --agents`` equals the summary tree (== ``agents tree``)."""
+    """``dhcli --agents`` equals the summary tree (== ``agents tree``)."""
     runner = CliRunner()
     result = runner.invoke(cli, ["--agents"], standalone_mode=False)
     assert result.exit_code == 0
@@ -1024,7 +1028,7 @@ def test_agents_flag_on_leaf_matches_command_node(
     ``--help`` path) — otherwise CI without a default config dir fails.
     """
     argv = ["daemon", "start", "--agents"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    monkeypatch.setattr("sys.argv", ["dhcli", *argv])
     runner = CliRunner()
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
@@ -1037,7 +1041,7 @@ def test_agents_flag_on_group_matches_group_node(
 ) -> None:
     """``daemon --agents`` equals the bounded ``daemon`` group node."""
     argv = ["daemon", "--agents"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    monkeypatch.setattr("sys.argv", ["dhcli", *argv])
     runner = CliRunner()
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
@@ -1049,7 +1053,7 @@ def test_agents_flag_honors_output_mode(
 ) -> None:
     """The flag honors the root ``-o`` flag (rendered as YAML here)."""
     argv = ["-o", "yaml", "daemon", "start", "--agents"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    monkeypatch.setattr("sys.argv", ["dhcli", *argv])
     runner = CliRunner()
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
@@ -1066,7 +1070,7 @@ def test_agents_flag_not_hoisted_to_root(
     option-lifter never sees it and cannot hoist it to the root.
     """
     argv = ["config", "show", "--agents"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    monkeypatch.setattr("sys.argv", ["dhcli", *argv])
     runner = CliRunner()
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
@@ -1083,7 +1087,7 @@ def test_agents_flag_bypasses_config_load(tmp_path, monkeypatch) -> None:
     it, so the test patches it explicitly (mirroring the ``--help`` path).
     """
     argv = ["--config-dir", str(tmp_path / "nonexistent"), "daemon", "--agents"]
-    monkeypatch.setattr("sys.argv", ["dh-mcp", *argv])
+    monkeypatch.setattr("sys.argv", ["dhcli", *argv])
     runner = CliRunner()
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0

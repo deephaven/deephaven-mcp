@@ -6,7 +6,7 @@ class, the source file path, and the audited configuration root; it
 returns a validated model instance or raises
 :class:`~deephaven_mcp._exceptions.ConfigurationError` on any failure.
 
-Callers: the `dh-mcp` CLI's ``cli.json`` loader
+Callers: the `dhcli` CLI's ``cli.json`` loader
 (:mod:`deephaven_mcp.config.schema._cli`) and every per-section loader
 under :mod:`deephaven_mcp.config.schema` (``server.json``,
 ``community/settings.json``, ``community/sessions/<name>.json``,

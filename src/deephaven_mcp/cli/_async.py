@@ -1,6 +1,6 @@
 """Async-to-sync adapter for ``click`` command callbacks (Pattern B).
 
-The ``dh-mcp`` CLI is built on ``click``, whose command callbacks are
+The ``dhcli`` CLI is built on ``click``, whose command callbacks are
 synchronous. The :func:`run_async` decorator wraps an ``async def``
 callback in a synchronous shim that runs the coroutine via
 :func:`asyncio.run`, preserving ``__doc__`` / ``__name__`` /
@@ -62,7 +62,7 @@ def run_async[**P, R](f: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
     The returned wrapper drives the wrapped coroutine with
     :func:`asyncio.run`, which creates a fresh event loop per call.
     This is appropriate for the CLI's one-shot invocation model
-    (each ``dh-mcp`` subcommand runs to completion in a single
+    (each ``dhcli`` subcommand runs to completion in a single
     process) but means the decorator cannot be used inside an
     already-running event loop.
 

@@ -34,11 +34,11 @@ def _corrupt_to_error(exc: RegistryCorruptError) -> CliError:
 
 def test_registry_corrupt_message_contents() -> None:
     msg = registry_corrupt_message(
-        RegistryCorruptError("malformed"), retry_command="dh-mcp daemon start"
+        RegistryCorruptError("malformed"), retry_command="dhcli daemon start"
     )
     assert "malformed" in msg
-    assert "dh-mcp daemon repair" in msg
-    assert "Re-run `dh-mcp daemon start`." in msg
+    assert "dhcli daemon repair" in msg
+    assert "Re-run `dhcli daemon start`." in msg
 
 
 # ---------------------------------------------------------------------------

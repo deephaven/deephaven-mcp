@@ -1,4 +1,4 @@
-"""Schema-drift guard for ``dh-mcp`` MCP-tool wrappers.
+"""Schema-drift guard for ``dhcli`` MCP-tool wrappers.
 
 Each runtime CLI command that fronts an MCP tool declares the binding
 via ``wraps_tool`` / ``wraps_tools`` on
@@ -73,7 +73,7 @@ _NON_TOOL_PARAMS = frozenset({"help"})
 # server) rather than acquiring the local daemon. Their help lists the
 # transport error codes but not the daemon acquire codes, which their
 # flow cannot raise.
-_DIRECT_URL_WRAPPERS = frozenset({"dh-mcp docs ask"})
+_DIRECT_URL_WRAPPERS = frozenset({"dhcli docs ask"})
 
 
 @cache

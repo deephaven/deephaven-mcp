@@ -544,12 +544,12 @@ def test_resolve_output_dir_explicit(tmp_path):
 
 
 def test_resolve_output_dir_data_dir_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("DH_MCP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DH_AI_DATA_DIR", str(tmp_path))
     assert conv.resolve_output_dir(None) == tmp_path / "config"
 
 
 def test_resolve_output_dir_default(monkeypatch):
-    monkeypatch.delenv("DH_MCP_DATA_DIR", raising=False)
+    monkeypatch.delenv("DH_AI_DATA_DIR", raising=False)
     assert conv.resolve_output_dir(None) == conv._default_data_root() / "config"
 
 
@@ -808,7 +808,7 @@ def test_default_data_root_matches_package(monkeypatch):
     # cannot silently diverge.
     from deephaven_mcp.config import resolve_data_root
 
-    monkeypatch.delenv("DH_MCP_DATA_DIR", raising=False)
+    monkeypatch.delenv("DH_AI_DATA_DIR", raising=False)
     assert conv._default_data_root() == resolve_data_root()
 
 

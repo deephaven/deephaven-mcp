@@ -2896,7 +2896,7 @@ async def test_enterprise_systems_status_aggregation_failed_outranks_loading():
 async def test_enterprise_systems_status_aggregate_no_enterprise_returns_empty():
     """Aggregating with no enterprise section returns an empty system list.
 
-    This is the Community-only path exercised by ``dh-mcp system status``:
+    This is the Community-only path exercised by ``dhcli system status``:
     ``system=None`` with no enterprise config returns early, before any
     enterprise registry is consulted.
     """

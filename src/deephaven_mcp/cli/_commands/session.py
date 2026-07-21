@@ -1,4 +1,4 @@
-"""``dh-mcp session`` noun group: manage, inspect, and operate Deephaven sessions.
+"""``dhcli session`` noun group: manage, inspect, and operate Deephaven sessions.
 
 Verbs: ``list``, ``show``, ``create``, ``delete``, ``exec``, ``pip-list``,
 ``credentials``, ``url``, ``open``.
@@ -238,11 +238,11 @@ _OUTPUT_LIST = OutputSpec(
         ),
         output=_OUTPUT_LIST,
         examples=(
-            "$ dh-mcp session list",
-            "$ dh-mcp session list --type community",
-            "$ dh-mcp -o json session list | jq '.[].id'",
+            "$ dhcli session list",
+            "$ dhcli session list --type community",
+            "$ dhcli -o json session list | jq '.[].id'",
         ),
-        see_also=("dh-mcp session show ID", "dh-mcp system list"),
+        see_also=("dhcli session show ID", "dhcli system list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=wrapper_error_codes(tool_error=False),
     ),
@@ -260,7 +260,7 @@ _OUTPUT_LIST = OutputSpec(
     default=None,
     help=(
         "Filter by system name: 'community' or a configured Enterprise system "
-        "name (see 'dh-mcp system list')."
+        "name (see 'dhcli system list')."
     ),
 )
 @click.option(
@@ -288,7 +288,7 @@ async def session_list(
     await call_and_echo_field(
         runtime,
         "sessions_list",
-        retry_command="dh-mcp session list",
+        retry_command="dhcli session list",
         arguments=arguments,
         field="sessions",
         default=[],
@@ -326,10 +326,10 @@ _OUTPUT_SHOW = OutputSpec(
         arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_SHOW,
         examples=(
-            "$ dh-mcp session show community:community:my-session",
-            "$ dh-mcp session show community:community:my-session --connect",
+            "$ dhcli session show community:community:my-session",
+            "$ dhcli session show community:community:my-session --connect",
         ),
-        see_also=("dh-mcp session list",),
+        see_also=("dhcli session list",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -352,7 +352,7 @@ async def session_show(runtime: Runtime, id: str, attempt_to_connect: bool) -> N
     await call_and_echo_field(
         runtime,
         "session_details",
-        retry_command="dh-mcp session show",
+        retry_command="dhcli session show",
         arguments=arguments,
         field="session",
         default={},
@@ -400,11 +400,11 @@ _OUTPUT_CREATE = OutputSpec(
         ),
         output=_OUTPUT_CREATE,
         examples=(
-            "$ dh-mcp session create dev --launch-method python",
-            "$ dh-mcp session create rpt --system prod --engine DeephavenEnterprise",
-            "$ dh-mcp session create dev --env LOG_LEVEL=DEBUG --jvm-arg -Xmx2g",
+            "$ dhcli session create dev --launch-method python",
+            "$ dhcli session create rpt --system prod --engine DeephavenEnterprise",
+            "$ dhcli session create dev --env LOG_LEVEL=DEBUG --jvm-arg -Xmx2g",
         ),
-        see_also=("dh-mcp session delete ID", "dh-mcp system list"),
+        see_also=("dhcli session delete ID", "dhcli system list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.OPTION_NOT_APPLICABLE,
@@ -421,7 +421,7 @@ _OUTPUT_CREATE = OutputSpec(
     show_default=True,
     help=(
         "Target system: 'community' for a local Community worker, or a configured "
-        "Enterprise system name (run 'dh-mcp system list'). The system's type "
+        "Enterprise system name (run 'dhcli system list'). The system's type "
         "selects which options apply."
     ),
 )
@@ -607,7 +607,7 @@ async def session_create(  # noqa: PLR0913 — a wrapper mirrors its tool's full
     arguments = {k: v for k, v in opts.items() if k in keep and v is not None}
 
     await call_and_echo(
-        runtime, tool, retry_command="dh-mcp session create", arguments=arguments
+        runtime, tool, retry_command="dhcli session create", arguments=arguments
     )
 
 
@@ -637,8 +637,8 @@ _OUTPUT_DELETE = OutputSpec(
         ),
         arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_DELETE,
-        examples=("$ dh-mcp session delete community:community:my-session",),
-        see_also=("dh-mcp session create", "dh-mcp session list"),
+        examples=("$ dhcli session delete community:community:my-session",),
+        see_also=("dhcli session create", "dhcli session list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -653,7 +653,7 @@ async def session_delete(runtime: Runtime, id: str) -> None:
     await call_and_echo(
         runtime,
         tool,
-        retry_command="dh-mcp session delete",
+        retry_command="dhcli session delete",
         arguments={"id": id},
     )
 
@@ -685,11 +685,11 @@ _OUTPUT_EXEC = OutputSpec(
         arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_EXEC,
         examples=(
-            "$ dh-mcp session exec community:community:dev --script 'print(1+1)'",
-            "$ dh-mcp session exec community:community:dev --script-path /tmp/job.py",
-            "$ cat job.py | dh-mcp session exec community:community:dev --script-path -",
+            "$ dhcli session exec community:community:dev --script 'print(1+1)'",
+            "$ dhcli session exec community:community:dev --script-path /tmp/job.py",
+            "$ cat job.py | dhcli session exec community:community:dev --script-path -",
         ),
-        see_also=("dh-mcp session pip-list ID",),
+        see_also=("dhcli session pip-list ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.MISSING_ARGUMENT,
@@ -729,7 +729,7 @@ async def session_exec(
     await call_and_echo(
         runtime,
         "session_script_run",
-        retry_command="dh-mcp session exec",
+        retry_command="dhcli session exec",
         arguments=arguments,
     )
 
@@ -761,10 +761,10 @@ _OUTPUT_PIP_LIST = OutputSpec(
         arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
         output=_OUTPUT_PIP_LIST,
         examples=(
-            "$ dh-mcp session pip-list community:community:dev",
-            "$ dh-mcp -o json session pip-list community:community:dev | jq '.[].package'",
+            "$ dhcli session pip-list community:community:dev",
+            "$ dhcli -o json session pip-list community:community:dev | jq '.[].package'",
         ),
-        see_also=("dh-mcp session exec ID",),
+        see_also=("dhcli session exec ID",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -777,7 +777,7 @@ async def session_pip_list(runtime: Runtime, id: str) -> None:
     await call_and_echo_field(
         runtime,
         "session_pip_list",
-        retry_command="dh-mcp session pip-list",
+        retry_command="dhcli session pip-list",
         arguments={"id": id},
         field="packages",
         default=[],
@@ -819,8 +819,8 @@ _CREDENTIALS_DESCRIPTION = (
         description=_CREDENTIALS_DESCRIPTION,
         arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
         output=_OUTPUT_CREDENTIALS,
-        examples=("$ dh-mcp session credentials community:community:my-session",),
-        see_also=("dh-mcp session url ID", "dh-mcp session open ID"),
+        examples=("$ dhcli session credentials community:community:my-session",),
+        see_also=("dhcli session url ID", "dhcli session open ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -831,7 +831,7 @@ _CREDENTIALS_DESCRIPTION = (
 async def session_credentials(runtime: Runtime, id: str) -> None:
     """Fetch one Community session's browser-login credentials."""
     payload = await _fetch_credentials(
-        runtime, id, retry_command="dh-mcp session credentials"
+        runtime, id, retry_command="dhcli session credentials"
     )
     credentials = {field: payload.get(field) for field in _CREDENTIAL_FIELDS}
     echo_payload(runtime, credentials)
@@ -859,10 +859,10 @@ _OUTPUT_URL = OutputSpec("text", note="The authenticated browser URL, one line."
         arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
         output=_OUTPUT_URL,
         examples=(
-            "$ dh-mcp session url community:community:my-session",
-            '$ open "$(dh-mcp session url community:community:my-session)"',
+            "$ dhcli session url community:community:my-session",
+            '$ open "$(dhcli session url community:community:my-session)"',
         ),
-        see_also=("dh-mcp session credentials ID", "dh-mcp session open ID"),
+        see_also=("dhcli session credentials ID", "dhcli session open ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -872,7 +872,7 @@ _OUTPUT_URL = OutputSpec("text", note="The authenticated browser URL, one line."
 @run_async
 async def session_url(runtime: Runtime, id: str) -> None:
     """Print a Community session's authenticated browser URL."""
-    payload = await _fetch_credentials(runtime, id, retry_command="dh-mcp session url")
+    payload = await _fetch_credentials(runtime, id, retry_command="dhcli session url")
     click.echo(_authenticated_url(payload))
 
 
@@ -906,10 +906,10 @@ _OUTPUT_OPEN = OutputSpec(
         arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
         output=_OUTPUT_OPEN,
         examples=(
-            "$ dh-mcp session open community:community:my-session",
-            "$ dh-mcp session open community:community:my-session --print",
+            "$ dhcli session open community:community:my-session",
+            "$ dhcli session open community:community:my-session --print",
         ),
-        see_also=("dh-mcp session url ID", "dh-mcp session credentials ID"),
+        see_also=("dhcli session url ID", "dhcli session credentials ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.BROWSER_LAUNCH_FAILED, *wrapper_error_codes()),
     ),
@@ -926,7 +926,7 @@ _OUTPUT_OPEN = OutputSpec(
 @run_async
 async def session_open(runtime: Runtime, id: str, print_only: bool) -> None:
     """Open a Community session in the default web browser."""
-    payload = await _fetch_credentials(runtime, id, retry_command="dh-mcp session open")
+    payload = await _fetch_credentials(runtime, id, retry_command="dhcli session open")
     url = _authenticated_url(payload)
     launched = False if print_only else launch_browser(url)
     echo_payload(runtime, {"opened": url, "launched": launched})

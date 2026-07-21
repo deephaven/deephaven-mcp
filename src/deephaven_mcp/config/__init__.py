@@ -10,7 +10,7 @@ User-data-root resolution
 Every directory the MCP server family reads from or writes to lives
 under a single user-data root (``~/.deephaven/ai`` on POSIX;
 ``%APPDATA%/Deephaven/ai`` on Windows). One environment variable —
-:data:`DATA_DIR_ENV_VAR` (``DH_MCP_DATA_DIR``) — overrides that root,
+:data:`DATA_DIR_ENV_VAR` (``DH_AI_DATA_DIR``) — overrides that root,
 and per-subdir resolvers compose paths under whatever root that
 function returns:
 
@@ -28,7 +28,7 @@ function returns:
   files; deterministic and platform-independent given a resolved
   runtime directory.
 
-Per-subdir env vars (``DH_MCP_CONFIG_DIR``, ``DH_MCP_RUNTIME_DIR``)
+Per-subdir env vars (``DH_AI_CONFIG_DIR``, ``DH_AI_RUNTIME_DIR``)
 are intentionally absent: a single root knob serves the operator use
 cases (containers, chroots, custom install layouts), and per-subdir
 overrides are still available via explicit :class:`~pathlib.Path`

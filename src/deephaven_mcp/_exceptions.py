@@ -566,7 +566,7 @@ class DaemonRegistryError(McpError):
     """Base exception for failures in the on-disk daemon registry.
 
     The daemon registry (``<runtime_dir>/daemon/daemon.json``) is the
-    wire contract between the ``dh-mcp`` CLI and the daemon process.
+    wire contract between the ``dhcli`` CLI and the daemon process.
     This base groups every named failure mode of that contract so
     callers can catch the family with a single ``except`` while
     distinguishing specific cases (e.g. corruption) by subclass.
@@ -615,11 +615,11 @@ class RegistryCorruptError(DaemonRegistryError):
 
     - ``daemon status`` / ``daemon stop`` / ``daemon restart`` /
       ``daemon start`` surface the error to the operator with a
-      hint pointing at ``dh-mcp daemon repair``.
+      hint pointing at ``dhcli daemon repair``.
     - :func:`deephaven_mcp.cli._daemon.get_or_start_daemon` and
       :func:`deephaven_mcp.cli._daemon._lifecycle._poll_for_registry` both
       propagate: auto-recovery is the explicit operator verb
-      ``dh-mcp daemon repair``, not an implicit rename, because a
+      ``dhcli daemon repair``, not an implicit rename, because a
       silent rename that runs alongside a still-live daemon
       would orphan the loopback port from the CLI's perspective.
     """
@@ -657,7 +657,7 @@ class DaemonReuseRefusedError(McpError):
 
     The differing identity fields are recorded on :attr:`differing` for callers
     and tests; the message names them with old/new values and points at
-    ``dh-mcp daemon restart``.
+    ``dhcli daemon restart``.
     """
 
     def __init__(self, message: str, *, differing: tuple[str, ...] = ()) -> None:

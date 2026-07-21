@@ -37,7 +37,7 @@ Usage examples
     $ python mcp_systems_test_client.py \\
         --transport stdio \\
         --stdio-cmd "uv run dh-mcp-systems-server --transport stdio" \\
-        --env DH_MCP_DATA_DIR=/path/to/data-root
+        --env DH_AI_DATA_DIR=/path/to/data-root
 
     # Fail on the first tool error (useful in CI):
     $ python mcp_systems_test_client.py ... --strict

@@ -1,6 +1,6 @@
 ---
 name: cli-help-accuracy
-description: Verify dh-mcp CLI help is factually accurate against the code — documented flags, arguments, error codes, exit codes, and output fields all match the handler — and fix inaccuracies in place across --help, the agents manifest, and docs/CLI.md
+description: Verify dhcli CLI help is factually accurate against the code — documented flags, arguments, error codes, exit codes, and output fields all match the handler — and fix inaccuracies in place across --help, the agents manifest, and docs/CLI.md
 ---
 
 **When to use this vs. `cli-help-improve`**: use `cli-help-accuracy` for surgical correctness-only fixes when the help structure is already complete. Use `cli-help-improve` for a full review that may add missing sections, single-source the output schema, or reconcile all three surfaces.

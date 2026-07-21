@@ -56,7 +56,7 @@ class DaemonProcessConfig(RedactableSchema):
     """Daemon-mode tunables for ``dh-mcp-systems-server --daemon``.
 
     All fields are optional and have safe defaults. Consulted only
-    when the server is launched in daemon mode by the ``dh-mcp`` CLI;
+    when the server is launched in daemon mode by the ``dhcli`` CLI;
     ignored under stdio and the foreground HTTP transport.
 
     Wire format::

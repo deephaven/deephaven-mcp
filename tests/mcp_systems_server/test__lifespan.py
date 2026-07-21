@@ -589,7 +589,7 @@ async def test_concurrent_sessions_share_one_process_scoped_registry():
     dynamic session added through one session is visible to another.
 
     This is the property that makes a dynamically-created session persist
-    across ``dh-mcp`` invocations: every per-session lifespan yields the same
+    across ``dhcli`` invocations: every per-session lifespan yields the same
     registry built once by ``process_lifespan``.
     """
 

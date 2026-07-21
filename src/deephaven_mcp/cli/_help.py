@@ -1,4 +1,4 @@
-"""Help-text templating and the agents manifest for the dh-mcp CLI.
+"""Help-text templating and the agents manifest for the dhcli CLI.
 
 This module describes every command twice over from one source: a
 command's ``HelpSpec`` renders to humans as ``--help`` text and to
@@ -182,7 +182,7 @@ def _agents_callback(ctx: click.Context, _param: click.Parameter, value: bool) -
     The eager callback behind the universal ``--agents`` flag, the
     machine-readable twin of ``--help``: emits the summary tree when
     invoked on the root group and a single self-contained command node
-    otherwise, in the root ``-o/--output`` mode (or ``DH_MCP_OUTPUT``),
+    otherwise, in the root ``-o/--output`` mode (or ``DHCLI_OUTPUT``),
     defaulting to
     :data:`~deephaven_mcp.cli._format.DEFAULT_OUTPUT_MODE` (``json``)
     like every command. Pass ``-o human`` for terminal-friendly output.
@@ -218,7 +218,7 @@ def _build_agents_option() -> click.Option:
             "Print this command's machine-readable description, tuned for "
             "AI agents, and exit; the machine twin of --help. Honors "
             "-o/--output: compact json by default, -o json-pretty for "
-            "indented. For the whole command tree, use 'dh-mcp agents "
+            "indented. For the whole command tree, use 'dhcli agents "
             "tree'."
         ),
     )
@@ -257,7 +257,7 @@ class HelpfulCommand(click.Command):
                 any ``help`` keyword) and ``output_spec`` is always its
                 ``output`` field.
             output_spec (OutputSpec | None): Structured description of the
-                command's output, surfaced by ``dh-mcp agents``. Only for
+                command's output, surfaced by ``dhcli agents``. Only for
                 commands without a ``help_spec``; a command with a spec
                 declares its output as ``help_spec.output``.
             wraps_tool (str | None): Name of the single MCP tool the command
@@ -377,7 +377,7 @@ class HelpfulGroup(click.Group):
     def get_params(self, ctx: click.Context) -> list[click.Parameter]:
         """Append the lazy ``--agents`` option; see :meth:`HelpfulCommand.get_params`.
 
-        Also the seam that makes the root ``dh-mcp`` group expose
+        Also the seam that makes the root ``dhcli`` group expose
         ``--agents``: ``cli`` in :mod:`deephaven_mcp.cli._main` is
         registered with ``cls=HelpfulGroup`` so the universal flag is
         available at every depth.
@@ -898,9 +898,9 @@ def _package_version() -> str:
 
 
 _SUMMARY_TREE_HINT = (
-    "Summary view. Run 'dh-mcp agents command <path...>' (or append "
-    "--agents to any command) for one command's full node, 'dh-mcp "
-    "agents tree --full' for the complete manifest, and 'dh-mcp "
+    "Summary view. Run 'dhcli agents command <path...>' (or append "
+    "--agents to any command) for one command's full node, 'dhcli "
+    "agents tree --full' for the complete manifest, and 'dhcli "
     "agents errors' for the error-code registry."
 )
 """Drill-down pointer carried by the summary tree so it self-describes."""
@@ -926,12 +926,12 @@ def _summary_commands(group: click.Group) -> dict[str, Any]:
 def build_summary_tree(root: click.Command) -> dict[str, Any]:
     """Construct the compact orientation view of the command tree.
 
-    The default output of ``dh-mcp agents tree`` and the root
+    The default output of ``dhcli agents tree`` and the root
     ``--agents`` flag: every command path with its one-line summary,
     small enough to sit in an agent's context. Shape:
 
     - ``version`` (str): Installed ``deephaven-mcp`` package version.
-    - ``prog`` (str): Program invocation name (``"dh-mcp"``).
+    - ``prog`` (str): Program invocation name (``"dhcli"``).
     - ``summary`` (str): The root command's one-line summary.
     - ``hint`` (str): How to drill down to full nodes and the complete
       manifest.
@@ -941,14 +941,14 @@ def build_summary_tree(root: click.Command) -> dict[str, Any]:
 
     Args:
         root (click.Command): The root command. In production this is
-            the ``dh-mcp`` :class:`click.Group`.
+            the ``dhcli`` :class:`click.Group`.
 
     Returns:
         dict[str, Any]: JSON / YAML serializable summary tree.
     """
     return {
         "version": _package_version(),
-        "prog": root.name or "dh-mcp",
+        "prog": root.name or "dhcli",
         "summary": _summary_of(root),
         "hint": _SUMMARY_TREE_HINT,
         "commands": (_summary_commands(root) if isinstance(root, click.Group) else {}),
@@ -959,7 +959,7 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
     """Construct the complete agents manifest for the root command tree.
 
     The manifest is the canonical agent-discoverable description of
-    the entire CLI, emitted by ``dh-mcp agents tree --full``. All
+    the entire CLI, emitted by ``dhcli agents tree --full``. All
     collections within it are sorted (commands by name, error codes
     by value) so repeated invocations produce byte-identical output
     suitable for snapshot tests and diffs.
@@ -968,7 +968,7 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
 
     - ``version`` (str): Installed ``deephaven-mcp`` package version,
       or ``"unknown"`` if package metadata is unavailable.
-    - ``prog`` (str): Program invocation name (``"dh-mcp"``).
+    - ``prog`` (str): Program invocation name (``"dhcli"``).
     - ``summary`` (str): The root command's one-line summary.
     - ``description`` (str): The root command's description, when set.
     - ``examples`` (list[str]): The root command's examples, when set.
@@ -998,7 +998,7 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
 
     Args:
         root (click.Command): The root command. In production this
-            is the ``dh-mcp`` :class:`click.Group`; a plain
+            is the ``dhcli`` :class:`click.Group`; a plain
             :class:`click.Command` is also accepted, in which case
             ``commands`` is empty.
 
@@ -1010,7 +1010,7 @@ def build_manifest(root: click.Command) -> dict[str, Any]:
     examples = list(spec.examples) if spec is not None and spec.examples else []
     manifest: dict[str, Any] = {
         "version": _package_version(),
-        "prog": root.name or "dh-mcp",
+        "prog": root.name or "dhcli",
         "summary": summary,
     }
     if description:
@@ -1048,7 +1048,7 @@ def resolve_command(root: click.Command, path: tuple[str, ...]) -> click.Command
 
     Args:
         root (click.Command): The command to start the walk from
-            (the ``dh-mcp`` root group in production).
+            (the ``dhcli`` root group in production).
         path (tuple[str, ...]): Command-name tokens to descend,
             e.g. ``("daemon", "start")``.
 
@@ -1063,7 +1063,7 @@ def resolve_command(root: click.Command, path: tuple[str, ...]) -> click.Command
     current = root
     for index, token in enumerate(path):
         if not isinstance(current, click.Group) or token not in current.commands:
-            resolved = " ".join(path[:index]) or (root.name or "dh-mcp")
+            resolved = " ".join(path[:index]) or (root.name or "dhcli")
             raise CliError(
                 f"Unknown command path: {' '.join(path)!r} "
                 f"(no command {token!r} under {resolved!r}).",
@@ -1080,10 +1080,10 @@ def emit_payload(ctx: click.Context, payload: Any) -> None:
     """Render ``payload`` in the root ``-o/--output`` mode and print it.
 
     Output mode is resolved from the root ``-o/--output`` flag or
-    ``DH_MCP_OUTPUT``, falling back to :data:`DEFAULT_OUTPUT_MODE`
+    ``DHCLI_OUTPUT``, falling back to :data:`DEFAULT_OUTPUT_MODE`
     (``json``, compact). The agents surfaces run without the validated
     config, so they cannot consult ``cli.json``'s ``output.format``;
-    use ``-o`` (or set ``DH_MCP_OUTPUT``) to opt into
+    use ``-o`` (or set ``DHCLI_OUTPUT``) to opt into
     ``json-pretty``/``human``/``yaml`` output.
 
     Args:

@@ -1,4 +1,4 @@
-"""Output-mode vocabulary and rendering for ``dh-mcp`` subcommand results.
+"""Output-mode vocabulary and rendering for ``dhcli`` subcommand results.
 
 This module owns the output-mode vocabulary every command shares — the
 ``OutputMode`` type, its valid values (``OUTPUT_MODES``), and the
@@ -42,18 +42,18 @@ OutputMode = Literal["human", "json", "json-pretty", "yaml"]
 OUTPUT_MODES: tuple[OutputMode, ...] = get_args(OutputMode)
 """Runtime tuple of accepted ``-o/--output`` values, derived from :data:`OutputMode`."""
 
-OUTPUT_ENV_VAR = "DH_MCP_OUTPUT"
+OUTPUT_ENV_VAR = "DHCLI_OUTPUT"
 """Environment variable backing the ``-o/--output`` flag."""
 
 DEFAULT_OUTPUT_MODE: OutputMode = "json"
-"""Fallback output mode when none is set via ``-o``, ``DH_MCP_OUTPUT``, or config.
+"""Fallback output mode when none is set via ``-o``, ``DHCLI_OUTPUT``, or config.
 
-``dh-mcp`` is machine-first (primarily driven by AI agents), so every
+``dhcli`` is machine-first (primarily driven by AI agents), so every
 surface defaults to ``json`` — compact single-line JSON — for
 operational commands (through ``CliConfig.output.format``), the
 ``agents`` group / ``--agents`` flag, and the error renderer. Humans
 opt into terminal-friendly output with ``-o human``, indented JSON
-with ``-o json-pretty``, or set ``DH_MCP_OUTPUT`` / ``output.format``
+with ``-o json-pretty``, or set ``DHCLI_OUTPUT`` / ``output.format``
 in cli.json. A test pins this equal to ``CliConfig().output.format``."""
 
 

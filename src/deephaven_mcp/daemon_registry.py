@@ -1,7 +1,7 @@
-"""Shared wire contract between the ``dh-mcp`` CLI and a local daemon.
+"""Shared wire contract between the ``dhcli`` CLI and a local daemon.
 
 The ``dh-mcp-systems-server`` binary can be launched in *daemon
-mode* (``--daemon``) to back the ``dh-mcp`` CLI's per-user local
+mode* (``--daemon``) to back the ``dhcli`` CLI's per-user local
 daemon. The daemon and the CLI live in different top-level
 packages (``mcp_systems_server`` and ``cli``) but cooperate via a
 small set of artifacts on disk:
@@ -19,7 +19,7 @@ small set of artifacts on disk:
   directory-entry level) so liveness probes and ``daemon
   status`` happy paths do not contend.
 - ``daemon.log`` — the captured stdout/stderr of the daemon
-  process. Surfaced by ``dh-mcp daemon logs``.
+  process. Surfaced by ``dhcli daemon logs``.
 
 This module owns the contract *both* sides agree on:
 
@@ -282,13 +282,13 @@ class DaemonRegistryEntry(RedactableSchema):
 
     config_dir: Path
     """Absolute path to the configuration directory the daemon was
-    started against. Surfaced by ``dh-mcp daemon status`` so the
+    started against. Surfaced by ``dhcli daemon status`` so the
     operator can confirm which tree is in use. Round-trips to a
     string in ``model_dump(mode="json")``."""
 
     server_name: Annotated[str, Field(min_length=1)]
     """Human-readable server identifier sourced from
-    ``ServerConfig.server_name``. Surfaced by ``dh-mcp daemon
+    ``ServerConfig.server_name``. Surfaced by ``dhcli daemon
     status`` so the operator can confirm which configured server
     is running. Empty values are rejected because they would
     leave ``daemon status`` output ambiguous."""

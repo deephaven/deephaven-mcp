@@ -575,7 +575,7 @@ def _publish_daemon_registry(
                 f"already registered (pid={existing.pid}, "
                 f"port={existing.port}). The CLI's spawn lock should "
                 f"prevent this; was the daemon started outside "
-                f"`dh-mcp daemon start`?"
+                f"`dhcli daemon start`?"
             )
         reg.write(entry)
         # Clear the daemon.starting marker the spawning CLI left, so a peer

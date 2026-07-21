@@ -1,4 +1,4 @@
-"""``dh-mcp agents``: noun-verb group for machine-readable CLI metadata.
+"""``dhcli agents``: noun-verb group for machine-readable CLI metadata.
 
 The agents surface is the CLI's ``--help`` for AI agents: structured
 metadata for every command, option, argument, and error code so agents
@@ -55,16 +55,16 @@ def agents() -> None:
     registry); the 'command' verb prints one command's full node;
     'errors' prints the error_code registry. To describe a single
     command in place, append the universal --agents flag to it instead
-    (the machine-readable twin of --help), e.g. 'dh-mcp daemon start
+    (the machine-readable twin of --help), e.g. 'dhcli daemon start
     --agents'.
 
-    Every verb honors the root -o/--output flag and DH_MCP_OUTPUT
+    Every verb honors the root -o/--output flag and DHCLI_OUTPUT
     (human, json, json-pretty, or yaml) and defaults to json like the
     rest of the CLI — compact single-line json; pass '-o json-pretty'
     for indented json or '-o human' for terminal-friendly output. The
     group runs without a valid configuration tree, so it works even
     when 'config validate' fails — which is also why it cannot read
-    cli.json's output.format (use -o/DH_MCP_OUTPUT instead).
+    cli.json's output.format (use -o/DHCLI_OUTPUT instead).
     """
 
 
@@ -72,7 +72,7 @@ _OUTPUT_TREE = OutputSpec(
     "object",
     (
         OutputField("version", "string", "Installed deephaven-mcp package version."),
-        OutputField("prog", "string", "Program name (dh-mcp)."),
+        OutputField("prog", "string", "Program name (dhcli)."),
         OutputField("summary", "string", "Root command one-line summary."),
         OutputField(
             "hint", "string", "How to drill down to full command nodes (default only)."
@@ -131,7 +131,7 @@ _OUTPUT_TREE = OutputSpec(
             "The agent orientation surface. By default prints the compact "
             "summary tree: every command path with its one-line summary, "
             "plus a hint for drilling down — small enough to keep in "
-            "context (equivalent to 'dh-mcp --agents'). With --full, "
+            "context (equivalent to 'dhcli --agents'). With --full, "
             "prints the complete manifest instead: every command's full "
             "node (options, arguments, output schema, examples, error "
             "codes) plus the project-wide metadata (global_options, "
@@ -142,12 +142,12 @@ _OUTPUT_TREE = OutputSpec(
         ),
         output=_OUTPUT_TREE,
         examples=(
-            "$ dh-mcp agents tree",
-            "$ dh-mcp agents tree | jq '.commands | keys'",
-            "$ dh-mcp agents tree --full | jq '.error_codes'",
+            "$ dhcli agents tree",
+            "$ dhcli agents tree | jq '.commands | keys'",
+            "$ dhcli agents tree --full | jq '.error_codes'",
         ),
         exit_codes=(ExitCode.SUCCESS,),
-        see_also=("dh-mcp --agents", "dh-mcp agents command"),
+        see_also=("dhcli --agents", "dhcli agents command"),
     ),
 )
 @click.option(
@@ -225,14 +225,14 @@ _OUTPUT_COMMAND = OutputSpec(
         ),
         output=_OUTPUT_COMMAND,
         examples=(
-            "$ dh-mcp agents command daemon",
-            "$ dh-mcp agents command daemon start",
-            "$ dh-mcp agents command tool call | jq '.params'",
-            "$ dh-mcp agents command session --full",
+            "$ dhcli agents command daemon",
+            "$ dhcli agents command daemon start",
+            "$ dhcli agents command tool call | jq '.params'",
+            "$ dhcli agents command session --full",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.COMMAND_NOT_FOUND,),
-        see_also=("dh-mcp agents tree",),
+        see_also=("dhcli agents tree",),
     ),
 )
 @click.argument("path", nargs=-1, required=True)
@@ -278,9 +278,9 @@ _OUTPUT_ERRORS = OutputSpec(
             "the 'error_codes' key of 'agents tree --full'."
         ),
         output=_OUTPUT_ERRORS,
-        examples=("$ dh-mcp agents errors | jq '.[].code'",),
+        examples=("$ dhcli agents errors | jq '.[].code'",),
         exit_codes=(ExitCode.SUCCESS,),
-        see_also=("dh-mcp agents tree --full",),
+        see_also=("dhcli agents tree --full",),
     ),
 )
 @click.pass_context

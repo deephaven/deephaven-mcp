@@ -8,7 +8,7 @@ the daemon log, and any future mutable state. This module owns:
   (``~/.deephaven/ai`` on POSIX; ``%APPDATA%/Deephaven/ai`` on
   Windows).
 - The single environment variable that overrides it
-  (:data:`DATA_DIR_ENV_VAR` = ``DH_MCP_DATA_DIR``).
+  (:data:`DATA_DIR_ENV_VAR` = ``DH_AI_DATA_DIR``).
 - :func:`resolve_data_root` — the only function that reads the env
   var. Per-subdirectory helpers (``resolve_config_dir``,
   ``resolve_runtime_dir``) call this internally; they do *not* read
@@ -16,7 +16,7 @@ the daemon log, and any future mutable state. This module owns:
 
 Design intent:
 
-- **One operator knob.** Setting ``DH_MCP_DATA_DIR=/opt/dh-mcp/data``
+- **One operator knob.** Setting ``DH_AI_DATA_DIR=/opt/deephaven/ai``
   moves *every* MCP-managed directory at once. There is no
   per-subdir env var.
 - **Per-subdir explicit overrides remain.** CLI flags (``--config-dir``,
@@ -41,10 +41,10 @@ import os
 import sys
 from pathlib import Path
 
-DATA_DIR_ENV_VAR = "DH_MCP_DATA_DIR"
+DATA_DIR_ENV_VAR = "DH_AI_DATA_DIR"
 """Environment variable that overrides the platform-default data root.
 
-When set, :func:`resolve_data_root` returns ``Path($DH_MCP_DATA_DIR)``
+When set, :func:`resolve_data_root` returns ``Path($DH_AI_DATA_DIR)``
 (after :meth:`Path.expanduser`); all per-subdir resolvers
 (:func:`~deephaven_mcp.config.resolve_config_dir`,
 :func:`~deephaven_mcp.config.resolve_runtime_dir`) compose their
@@ -72,7 +72,7 @@ def resolve_data_root() -> Path:
     """Resolve the user-data root using documented precedence.
 
     Returns:
-        Path: ``$DH_MCP_DATA_DIR`` (with a leading ``~`` expanded via
+        Path: ``$DH_AI_DATA_DIR`` (with a leading ``~`` expanded via
             :meth:`Path.expanduser`) when the env var is set and
             non-empty; otherwise :func:`_default_data_root`.
     """

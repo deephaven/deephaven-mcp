@@ -171,8 +171,8 @@ To stop the server: `pkill -f dh-mcp-systems-server`
 ```
 
 > The default config directory is `~/.deephaven/ai/config/` (created in
-> Step 1), so no `DH_MCP_DATA_DIR` is needed. To use a different location,
-> add an `env` block setting `DH_MCP_DATA_DIR` to a data root that contains
+> Step 1), so no `DH_AI_DATA_DIR` is needed. To use a different location,
+> add an `env` block setting `DH_AI_DATA_DIR` to a data root that contains
 > a `config/` subdirectory.
 
 For an HTTP setup, replace the `deephaven-systems` stanza with one
@@ -198,11 +198,11 @@ that bridges through `mcp-proxy` and forwards the PSK header:
 #### 3. Verify Your Configuration (optional, AI-free)
 
 Before wiring up an AI client, confirm your config is valid and the server works using the
-`dh-mcp` CLI. It auto-starts its own background daemon — no server to launch, no PSK, no
+`dhcli` CLI. It auto-starts its own background daemon — no server to launch, no PSK, no
 `mcp-proxy`:
 
 ```bash
-dh-mcp session list
+dhcli session list
 ```
 
 This lists your **configured** sessions (it reads config; the Deephaven server need not be
@@ -345,8 +345,8 @@ To stop the server: `pkill -f dh-mcp-systems-server`
 ```
 
 > The default config directory is `~/.deephaven/ai/config/` (created in
-> Step 1), so no `DH_MCP_DATA_DIR` is needed. To use a different location,
-> add an `env` block setting `DH_MCP_DATA_DIR` to a data root that contains
+> Step 1), so no `DH_AI_DATA_DIR` is needed. To use a different location,
+> add an `env` block setting `DH_AI_DATA_DIR` to a data root that contains
 > a `config/` subdirectory.
 
 Or, for an HTTP-bridged setup, use:
@@ -370,11 +370,11 @@ Or, for an HTTP-bridged setup, use:
 
 #### 3. Verify Your Configuration (optional, AI-free)
 
-Before wiring up an AI client, confirm your config is valid using the `dh-mcp` CLI — it
+Before wiring up an AI client, confirm your config is valid using the `dhcli` CLI — it
 auto-starts its own daemon, so nothing else needs to be running:
 
 ```bash
-dh-mcp system list
+dhcli system list
 ```
 
 This lists your **configured** Enterprise systems straight from the config tree (no live
@@ -434,19 +434,22 @@ rewrites your old file into the new tree — follow the
 
 ## Deephaven MCP Components
 
-### Local CLI (`dh-mcp`)
+### Deephaven CLI (`dhcli`)
 
-A thin local client for the systems server. The `dh-mcp` console
-script auto-spawns a per-user background daemon on first use,
+The Deephaven command-line tool, designed for humans and especially
+AI agents: it inspects and operates Deephaven systems from the shell
+with friendly noun-verb commands — `session`, `system`, `table`,
+`catalog`, `pq`, and `docs` — with typed flags, shaped output, and
+`-o human|json|json-pretty|yaml` (e.g. `dhcli session list`,
+`dhcli session open <id>`), plus the raw `dhcli tool call` escape
+hatch. Today its runtime commands are backed by the systems server:
+`dhcli` auto-spawns a per-user background daemon on first use,
 discovers it via a `daemon.json` registry under the runtime
 directory, and dispatches MCP tool calls over loopback HTTP with a
-random PSK. Beyond the raw `dh-mcp tool call` escape hatch, it offers
-friendly noun-verb commands — `session`, `system`, `table`, `script`,
-`catalog`, and `pq` — with typed flags, shaped output, and
-`-o human|json|json-pretty|yaml` (e.g. `dh-mcp session list`,
-`dh-mcp session open <id>`). Useful for shell scripting, tool
-exploration, and local debugging without managing a server lifecycle
-yourself. See [`docs/CLI.md`](docs/CLI.md) for the full reference.
+random PSK — no server lifecycle to manage yourself. Useful for
+shell scripting, tool exploration, local debugging, and agent
+workflows (`dhcli agents tree` emits the whole command surface as
+JSON). See [`docs/CLI.md`](docs/CLI.md) for the full reference.
 
 ### Systems Server (`dh-mcp-systems-server`)
 
@@ -543,7 +546,7 @@ in the PQ id (form `<system>:<serial>`).
 - `session_script_run(id, ...)` - Execute Python/Groovy scripts
 - `session_pip_list(id)` - Query installed packages
 
-> For each tool's full parameters, return shape, and examples, run `dh-mcp tool show <name>` (or `dh-mcp tool list` to enumerate them) — see [`docs/CLI.md`](docs/CLI.md). The authoritative detail is each tool's source docstring, which is also what the command surfaces live.
+> For each tool's full parameters, return shape, and examples, run `dhcli tool show <name>` (or `dhcli tool list` to enumerate them) — see [`docs/CLI.md`](docs/CLI.md). The authoritative detail is each tool's source docstring, which is also what the command surfaces live.
 
 ---
 
@@ -672,7 +675,7 @@ If you do not have Python (or `uv`), download a prebuilt **standalone binary** �
 
 `dh-mcp-systems-server` reads a directory tree of small JSON / JSON5
 files. Resolution order: `--config-dir` flag, then
-`$DH_MCP_DATA_DIR/config/`, then the platform default user-data
+`$DH_AI_DATA_DIR/config/`, then the platform default user-data
 root's `config/` subdirectory (`~/.deephaven/ai/config/` on POSIX or
 `%APPDATA%/Deephaven/ai/config/` on Windows). The Quick Start
 sections above show minimal Community and Enterprise examples; this
@@ -773,7 +776,7 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
 ```
 
 > The systems server reads the default config directory
-> `~/.deephaven/ai/config/`; add an `env` block setting `DH_MCP_DATA_DIR`
+> `~/.deephaven/ai/config/`; add an `env` block setting `DH_AI_DATA_DIR`
 > only to point at a non-default data root (which must contain a `config/`
 > subdirectory).
 
@@ -909,7 +912,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 |-------|----------------------|----------|
 | `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
 | `Connection failed` | MCP server logs | Check internet connection and server URLs |
-| `Config directory not found` / permissions audit failure | MCP server startup | Verify the directory passed via `--config-dir` (or derived from `DH_MCP_DATA_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX). |
+| `Config directory not found` / permissions audit failure | MCP server startup | Verify the directory passed via `--config-dir` (or derived from `DH_AI_DATA_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX). |
 | `Permission denied` | Command execution | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path |
 | `Python version error` | uv tool install | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...` |
 | `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
@@ -935,7 +938,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Verify files exist at the specified paths
 
 - **Environment Variable Issues:**
-  - `DH_MCP_DATA_DIR` must point to a valid user-data root *directory* (under which `config/` and `runtime/` live), or be unset to use the platform default
+  - `DH_AI_DATA_DIR` must point to a valid user-data root *directory* (under which `config/` and `runtime/` live), or be unset to use the platform default
   - Environment variables in `env` block must use correct names
   - Sensitive values should use environment variables, not hardcoded strings
 
@@ -944,7 +947,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 - **LLM Tool Can't Connect / Server Not Found:**
   - Verify the MCP server is running and listening on the expected port (HTTP transport only)
   - Verify the URL in your MCP client config matches the server's host and port
-  - Ensure `DH_MCP_DATA_DIR` or `--config-dir` points to a valid configuration source (or unset both to use the platform default)
+  - Ensure `DH_AI_DATA_DIR` or `--config-dir` points to a valid configuration source (or unset both to use the platform default)
   - For HTTP transport, ensure your client sends the `X-Deephaven-PSK` header with the value declared in `server.json`
   - Ensure any [Deephaven Community Core](https://deephaven.io/community/) sessions you intend to use are running and network-accessible
   - Check for typos in server URLs or config paths

@@ -1,4 +1,4 @@
-"""``dh-mcp system`` noun group: inspect the configured Deephaven systems.
+"""``dhcli system`` noun group: inspect the configured Deephaven systems.
 
 Verbs: ``list``, ``status``, ``url``, ``open``.
 """
@@ -76,10 +76,10 @@ _OUTPUT_LIST = OutputSpec(
         ),
         output=_OUTPUT_LIST,
         examples=(
-            "$ dh-mcp system list",
-            "$ dh-mcp -o json system list | jq '.[].name'",
+            "$ dhcli system list",
+            "$ dhcli -o json system list | jq '.[].name'",
         ),
-        see_also=("dh-mcp system status", "dh-mcp session list"),
+        see_also=("dhcli system status", "dhcli session list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=wrapper_error_codes(tool_error=False),
     ),
@@ -91,7 +91,7 @@ async def system_list(runtime: Runtime) -> None:
     await call_and_echo_field(
         runtime,
         "list_systems",
-        retry_command="dh-mcp system list",
+        retry_command="dhcli system list",
         arguments={},
         field="systems",
         default=[],
@@ -130,7 +130,7 @@ _OUTPUT_STATUS = OutputSpec(
     ),
     note=(
         "Array of per-system status records (Enterprise/Core+ only; community "
-        "systems are not reported). Health only — use 'dh-mcp config show' for "
+        "systems are not reported). Health only — use 'dhcli config show' for "
         "configuration. When discovery is still running or has failed, a "
         "phase-summary warning (with per-system details when available) is written to stderr."
     ),
@@ -151,11 +151,11 @@ _OUTPUT_STATUS = OutputSpec(
         ),
         output=_OUTPUT_STATUS,
         examples=(
-            "$ dh-mcp system status",
-            "$ dh-mcp system status --system prod --connect",
-            "$ dh-mcp -o json system status | jq '.[].liveness_status'",
+            "$ dhcli system status",
+            "$ dhcli system status --system prod --connect",
+            "$ dhcli -o json system status | jq '.[].liveness_status'",
         ),
-        see_also=("dh-mcp system list",),
+        see_also=("dhcli system list",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -165,7 +165,7 @@ _OUTPUT_STATUS = OutputSpec(
     "system",
     default=None,
     help=(
-        "Enterprise system name to report on; see 'dh-mcp system list'. "
+        "Enterprise system name to report on; see 'dhcli system list'. "
         "Omit to report all configured systems."
     ),
 )
@@ -190,7 +190,7 @@ async def system_status(
     await call_and_echo_field(
         runtime,
         "enterprise_systems_status",
-        retry_command="dh-mcp system status",
+        retry_command="dhcli system status",
         arguments=arguments,
         field="systems",
         default=[],
@@ -231,13 +231,13 @@ def _enterprise_system(runtime: Runtime, name: str) -> EnterpriseSystemConfig:
     if name == SystemType.COMMUNITY.value:
         raise CliError(
             "'community' is the local Community umbrella, not an Enterprise "
-            "system, and has no web console. Use 'dh-mcp session url ID' for a "
+            "system, and has no web console. Use 'dhcli session url ID' for a "
             "Community session.",
             code=ErrorCode.SYSTEM_NOT_FOUND,
         )
     raise CliError(
         f"No Enterprise system named '{name}' is configured. "
-        f"Run 'dh-mcp system list' to see the configured systems.",
+        f"Run 'dhcli system list' to see the configured systems.",
         code=ErrorCode.SYSTEM_NOT_FOUND,
     )
 
@@ -290,14 +290,14 @@ _OUTPUT_URL = OutputSpec("text", note="The Enterprise web console URL, one line.
             "— this does not contact the daemon."
         ),
         arguments=(
-            HelpEntry("NAME", "Enterprise system name. Run 'dh-mcp system list'."),
+            HelpEntry("NAME", "Enterprise system name. Run 'dhcli system list'."),
         ),
         output=_OUTPUT_URL,
         examples=(
-            "$ dh-mcp system url prod",
-            '$ open "$(dh-mcp system url prod)"',
+            "$ dhcli system url prod",
+            '$ open "$(dhcli system url prod)"',
         ),
-        see_also=("dh-mcp system open NAME", "dh-mcp system list"),
+        see_also=("dhcli system open NAME", "dhcli system list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.SYSTEM_NOT_FOUND, ErrorCode.CONFIG_INVALID),
     ),
@@ -341,14 +341,14 @@ _OUTPUT_OPEN = OutputSpec(
             "open it manually."
         ),
         arguments=(
-            HelpEntry("NAME", "Enterprise system name. Run 'dh-mcp system list'."),
+            HelpEntry("NAME", "Enterprise system name. Run 'dhcli system list'."),
         ),
         output=_OUTPUT_OPEN,
         examples=(
-            "$ dh-mcp system open prod",
-            "$ dh-mcp system open prod --print",
+            "$ dhcli system open prod",
+            "$ dhcli system open prod --print",
         ),
-        see_also=("dh-mcp system url NAME", "dh-mcp system list"),
+        see_also=("dhcli system url NAME", "dhcli system list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.SYSTEM_NOT_FOUND,

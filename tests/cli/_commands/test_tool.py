@@ -405,7 +405,7 @@ def test_tool_list_registry_corrupt(tmp_path: Path) -> None:
         result = _invoke(["tool", "list"], rt)
     assert result.exit_code == 2
     assert "to recover" in result.output.lower()
-    assert "dh-mcp tool list" in result.output
+    assert "dhcli tool list" in result.output
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-"""Entry point for the ``dh-mcp`` CLI.
+"""Entry point for the ``dhcli`` CLI.
 
 This module assembles the click command tree and dispatches to the
 noun groups defined in :mod:`deephaven_mcp.cli._commands`. It is the
@@ -10,7 +10,7 @@ The root callback does no configuration I/O: it stashes a cheap
 :meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke` materializes
 the full :class:`~deephaven_mcp.cli._runtime.Runtime` from it right
 before a leaf command's body runs. ``--help`` / ``--agents`` /
-``dh-mcp agents`` therefore work without a valid configuration tree
+``dhcli agents`` therefore work without a valid configuration tree
 with no special-casing: the first two exit during argument parsing
 (before any body), and the ``agents`` verbs are declared
 ``needs_runtime=False``.
@@ -43,6 +43,7 @@ from deephaven_mcp.cli._commands.config import config as config_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
 from deephaven_mcp.cli._commands.docs import docs as docs_group
 from deephaven_mcp.cli._commands.pq import pq as pq_group
+from deephaven_mcp.cli._commands.self_cmd import self_group
 from deephaven_mcp.cli._commands.session import session as session_group
 from deephaven_mcp.cli._commands.system import system as system_group
 from deephaven_mcp.cli._commands.table import table as table_group
@@ -128,40 +129,49 @@ def _quiet_dependency_loggers(verbose: int) -> None:
 
 
 @click.group(
-    name="dh-mcp",
+    name="dhcli",
     cls=HelpfulGroup,
     help_spec=HelpSpec(
         summary=(
-            "Local CLI for the Deephaven MCP systems server: manage a "
-            "per-user daemon and call MCP tools."
+            "Deephaven command-line tool for humans and AI agents: "
+            "sessions, tables, queries, docs Q&A, and more."
         ),
         description=(
-            "dh-mcp manages a per-user background daemon that hosts the "
-            "Deephaven MCP systems server, then connects to it to inspect "
-            "and invoke tools. Getting started: run 'dh-mcp session list' to "
-            "see the available sessions (the daemon auto-starts on first "
-            "use), then use a verb like 'dh-mcp table data' to read a table "
-            "or 'dh-mcp session exec' to run a script. "
+            "dhcli is the Deephaven command-line tool, designed for "
+            "humans and especially AI agents. It inspects and operates "
+            "Deephaven systems — sessions, tables, catalogs, persistent "
+            "queries, documentation Q&A — from the shell, with "
+            "machine-first structured output on every command. Today its "
+            "runtime commands are backed by a per-user background daemon "
+            "hosting the Deephaven MCP systems server; that is the "
+            "current mechanism, not the tool's scope. Getting started: "
+            "run 'dhcli session list' to see the available sessions (the "
+            "daemon auto-starts on first use), then use a verb like "
+            "'dhcli table data' to read a table or 'dhcli session exec' "
+            "to run a script. "
             "Use the 'daemon' group to manage the daemon lifecycle (start, "
             "stop, status, restart, repair, logs); the 'session', 'system', "
             "'table', 'catalog', and 'pq' groups to inspect and "
             "operate sessions and Enterprise resources with first-class "
             "flags; 'tool' to list, show, and call any MCP tool directly; "
             "'docs' to ask the Deephaven documentation assistant a "
-            "question; and 'config' to inspect and validate configuration. "
+            "question; 'config' to inspect and validate configuration; "
+            "and 'self' to manage the dhcli tool itself (e.g. 'self "
+            "completion' for shell tab completion). "
             "Pass --no-auto-start to require an already-running daemon "
-            "instead of spawning one. AI agents should run 'dh-mcp "
+            "instead of spawning one. AI agents should run 'dhcli "
             "agents tree' for a machine-readable summary of every "
             "command (--full for every option and error code) rather "
             "than scraping --help, or append --agents to any command "
             "for its full node."
         ),
         examples=(
-            "$ dh-mcp tool list",
-            "$ dh-mcp tool call sessions_list --arg type=community",
-            "$ dh-mcp daemon status",
-            "$ dh-mcp config validate",
-            "$ dh-mcp agents tree | jq '.commands | keys'",
+            "$ dhcli tool list",
+            "$ dhcli tool call sessions_list --arg type=community",
+            "$ dhcli daemon status",
+            "$ dhcli config validate",
+            "$ dhcli agents tree | jq '.commands | keys'",
+            '$ eval "$(dhcli self completion zsh)"',
         ),
     ),
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -173,7 +183,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     default=None,
     help=(
         "Configuration directory. When unset, defaults to the "
-        "'config' subdirectory under $DH_MCP_DATA_DIR (or the "
+        "'config' subdirectory under $DH_AI_DATA_DIR (or the "
         "platform default user-data root). Must be a directory the "
         "current user owns at mode 0o700."
     ),
@@ -186,7 +196,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     help=(
         "Runtime directory for the daemon registry. When unset, "
         "defaults to the 'runtime' subdirectory under "
-        "$DH_MCP_DATA_DIR (or the platform default user-data root)."
+        "$DH_AI_DATA_DIR (or the platform default user-data root)."
     ),
 )
 @click.option(
@@ -196,10 +206,10 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     envvar=OUTPUT_ENV_VAR,
     default=None,
     # Eager so it is resolved before the eager ``--agents`` callback,
-    # which reads the root output mode (e.g. ``dh-mcp -o json --agents``).
+    # which reads the root output mode (e.g. ``dhcli -o json --agents``).
     is_eager=True,
     help=(
-        "Output format. Takes precedence over the DH_MCP_OUTPUT "
+        "Output format. Takes precedence over the DHCLI_OUTPUT "
         "environment variable and the 'output.format' setting in cli.json."
     ),
 )
@@ -240,7 +250,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
 )
 @click.version_option(
     package_name="deephaven-mcp",
-    prog_name="dh-mcp",
+    prog_name="dhcli",
     message="%(prog)s %(version)s",
 )
 @click.pass_context
@@ -254,7 +264,7 @@ def cli(
     quiet: bool,
     no_auto_start: bool,
 ) -> None:
-    """Local CLI entry point — see ``dh-mcp --help`` for the command tree."""
+    """Root of the ``dhcli`` command tree — see ``dhcli --help``."""
     if verbose and quiet:
         raise CliError(
             "-v/--verbose and -q/--quiet are mutually exclusive.",
@@ -292,6 +302,7 @@ cli.add_command(pq_group)
 cli.add_command(docs_group)
 cli.add_command(config_group)
 cli.add_command(agents_group)
+cli.add_command(self_group)
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +311,7 @@ cli.add_command(agents_group)
 
 
 def _env_output_mode() -> OutputMode | None:
-    """Return ``DH_MCP_OUTPUT`` if it names a valid output mode, else ``None``."""
+    """Return ``DHCLI_OUTPUT`` if it names a valid output mode, else ``None``."""
     candidate = os.environ.get(OUTPUT_ENV_VAR)
     if candidate in OUTPUT_MODES:
         # mypy narrows ``candidate`` to ``OutputMode`` via the runtime
@@ -315,7 +326,7 @@ def _output_from_argv(argv: list[str]) -> OutputMode:
     Used by :func:`main` after ``cli.main`` returned and the live click
     context is gone, so the resolution is reconstructed from the raw
     argv plus the environment. Precedence mirrors the live path: an
-    explicit ``-o/--output`` flag wins, then ``DH_MCP_OUTPUT``, then
+    explicit ``-o/--output`` flag wins, then ``DHCLI_OUTPUT``, then
     :data:`DEFAULT_OUTPUT_MODE`. All four argv shapes click accepts are
     recognized:
 
@@ -351,7 +362,7 @@ def _output_from_argv(argv: list[str]) -> OutputMode:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Console entry point for ``dh-mcp``.
+    """Console entry point for ``dhcli``.
 
     Args:
         argv (list[str] | None): Optional argument list (used by
@@ -360,8 +371,8 @@ def main(argv: list[str] | None = None) -> None:
     Before delegating to :meth:`click.Group.main`, every recognized
     root-level option in ``argv`` (including occurrences that appear
     *after* the subcommand) is lifted to the front via
-    :func:`_lift_root_options`, so ``dh-mcp config show -o json`` is
-    accepted identically to ``dh-mcp -o json config show``. See that
+    :func:`_lift_root_options`, so ``dhcli config show -o json`` is
+    accepted identically to ``dhcli -o json config show``. See that
     function for the precise contract.
     """
     # Normalize argv exactly once: every downstream reader (cli.main,
@@ -370,7 +381,7 @@ def main(argv: list[str] | None = None) -> None:
     # handles the ``None`` fallback to ``sys.argv[1:]`` itself.
     argv_lifted = _lift_root_options(argv)
     try:
-        cli.main(args=argv_lifted, prog_name="dh-mcp", standalone_mode=False)
+        cli.main(args=argv_lifted, prog_name="dhcli", standalone_mode=False)
     except CliError as exc:
         # ``standalone_mode=False`` lets us intercept ``CliError``
         # globally and render it according to the active output
@@ -425,7 +436,7 @@ def _liftable_options(
             :class:`click.Argument` instances are silently skipped.
 
     ``--help`` / ``-h`` and ``--version`` are intentionally excluded:
-    Click resolves these per-command, so ``dh-mcp daemon --help`` is
+    Click resolves these per-command, so ``dhcli daemon --help`` is
     expected to render the *daemon* group's help, not the root's;
     lifting them would change that semantics.
     """
@@ -463,7 +474,7 @@ def _lift_root_options(argv: list[str] | None = None) -> list[str]:
     """Return ``argv`` with every recognized root option moved to the front.
 
     Click requires group-level options to precede the subcommand, so
-    ``dh-mcp config show --output human`` would otherwise fail with
+    ``dhcli config show --output human`` would otherwise fail with
     ``No such option '--output'``. This rewrite makes option position
     immaterial without subclassing :class:`click.Group` or duplicating
     options onto every subcommand.
@@ -502,8 +513,8 @@ def _lift_root_options(argv: list[str] | None = None) -> list[str]:
       accept as ``-o human``) is **not** lifted: the lexical pass has
       no per-option arity table to know ``-o`` consumes the rest of the
       token, and the trailing chars are not all value-less bundle
-      spellings. So ``dh-mcp -ohuman config show`` works but
-      ``dh-mcp config show -ohuman`` does not — use the spaced
+      spellings. So ``dhcli -ohuman config show`` works but
+      ``dhcli config show -ohuman`` does not — use the spaced
       (``-o human``) or long ``=`` (``--output=human``) form after the
       subcommand.
     - A token matching a value-less root option (boolean ``is_flag``
@@ -513,8 +524,8 @@ def _lift_root_options(argv: list[str] | None = None) -> list[str]:
       parser collapses ``-vvv`` once the token is at the front).
 
     Lifted tokens preserve their relative order, so
-    ``dh-mcp config show -o json --timeout 5`` becomes
-    ``dh-mcp -o json --timeout 5 config show``, not the reverse.
+    ``dhcli config show -o json --timeout 5`` becomes
+    ``dhcli -o json --timeout 5 config show``, not the reverse.
 
     Limitation: the lift is purely lexical — it has no grammar for
     subcommand options, so a token that *equals* a root spelling is
@@ -615,7 +626,7 @@ def _argv_command_path(argv: list[str]) -> str:
                 skip_next = True
             continue
         non_options.append(tok)
-    return " ".join(non_options[:2]) or "dh-mcp"
+    return " ".join(non_options[:2]) or "dhcli"
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -12,14 +12,16 @@ a config model, or wiring an environment variable into the code.
 
 Authoritative end-user reference: `docs/CONFIGURATION.md`. This
 skill is the *internal-to-the-codebase* counterpart and explains
-**how** to extend the configuration safely. The only env var the
-server itself reads is `DH_MCP_DATA_DIR` (consumed by
-`deephaven_mcp.config.resolve_config_dir`); every
-other tunable lives in the JSON tree.
+**how** to extend the configuration safely. The only
+configuration-location env var the server itself reads is
+`DH_AI_DATA_DIR` (consumed by
+`deephaven_mcp.config.resolve_data_root`); the log level comes
+from `PYTHONLOGLEVEL` (see `docs/ENV.md`). Every other tunable
+lives in the JSON tree.
 
 ## Architecture in one sentence
 
-Configuration lives in **JSON5 files** under `DH_MCP_DATA_DIR`,
+Configuration lives in **JSON5 files** under `DH_AI_DATA_DIR`,
 is shaped by **Pydantic v2 models** (which double as the wire-
 format schema and the runtime types), and pulls in env-vars or
 file contents through a **templating engine** that runs *before*
@@ -31,7 +33,7 @@ Pydantic validation.
 
 Every tunable lives in one of the JSON files described in
 `docs/CONFIGURATION.md`. The only exception is the
-`DH_MCP_DATA_DIR` env var itself, which tells the server *where*
+`DH_AI_DATA_DIR` env var itself, which tells the server *where*
 to find the JSON tree.
 
 Do **not** add ad-hoc `os.environ[...]` reads inside tool code,

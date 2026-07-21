@@ -1,7 +1,7 @@
 """Tests for ``deephaven_mcp.cli`` package surface.
 
 Pins the package's public re-exports — currently none. The CLI is
-exposed exclusively via the ``dh-mcp`` console script in
+exposed exclusively via the ``dhcli`` console script in
 ``pyproject.toml`` (which references :func:`deephaven_mcp.cli._main.main`),
 not via ``from deephaven_mcp.cli import ...``. This test exists so a
 refactor that adds a public name to ``__all__`` is a deliberate change
@@ -16,7 +16,7 @@ import deephaven_mcp.cli as cli_pkg
 def test_all_is_empty_by_design() -> None:
     """The CLI package exposes no public names via ``from deephaven_mcp.cli import``.
 
-    The entry point is wired via the ``dh-mcp`` console script in
+    The entry point is wired via the ``dhcli`` console script in
     ``pyproject.toml``, which directly references
     :func:`deephaven_mcp.cli._main.main`.
     """

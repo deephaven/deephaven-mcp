@@ -193,7 +193,7 @@ def _decide_for_live_entry(
             detail = describe_difference(expected_identity, entry.build_identity)
             render_warning(
                 f"Reusing daemon (pid {entry.pid}) that differs from this CLI: "
-                f"{detail}. Run 'dh-mcp daemon restart' to replace it.",
+                f"{detail}. Run 'dhcli daemon restart' to replace it.",
                 output=output_mode,
             )
             return _ReuseVerdict.REUSE
@@ -201,7 +201,7 @@ def _decide_for_live_entry(
             detail = describe_difference(expected_identity, entry.build_identity)
             raise DaemonReuseRefusedError(
                 f"The running daemon (pid {entry.pid}) is a different build than "
-                f"this CLI: {detail}. Run 'dh-mcp daemon restart' to replace it, "
+                f"this CLI: {detail}. Run 'dhcli daemon restart' to replace it, "
                 f"or adjust the daemon.reuse policy in cli.json.",
                 differing=decision.differing,
             )
@@ -347,7 +347,7 @@ async def get_or_start_daemon(
         RegistryCorruptError: When ``daemon.json`` exists but cannot
             be parsed. Propagated unchanged to the command layer,
             which translates to ``CliError(DAEMON_REGISTRY_CORRUPT)``
-            with a recovery hint pointing at ``dh-mcp daemon repair``.
+            with a recovery hint pointing at ``dhcli daemon repair``.
     """
     spawned = False
     with ctx.directory.locked() as reg:
@@ -385,7 +385,7 @@ async def get_or_start_daemon(
         if not auto_start:
             raise DaemonClientError(
                 "No daemon is running and auto-start is disabled. "
-                "Run `dh-mcp daemon start` or set "
+                "Run `dhcli daemon start` or set "
                 "`daemon.auto_start: true` in cli.json."
             )
         spawned = _spawn_or_defer(
@@ -412,7 +412,7 @@ async def stop_daemon(directory: DaemonDirectory, *, kill_after_seconds: int) ->
 
     Holds the :meth:`DaemonDirectory.locked` session for the entire
     operation — read → SIGTERM → wait → (optional) SIGKILL →
-    delete — so a peer ``dh-mcp`` cannot publish a replacement
+    delete — so a peer ``dhcli`` cannot publish a replacement
     daemon while this one is being torn down. Other CLI commands
     block on the lock for the duration of the stop (typically well
     under one second; up to ``kill_after_seconds`` on a stuck
