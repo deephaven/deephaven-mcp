@@ -826,7 +826,12 @@ _OUTPUT_SET = OutputSpec(
         OutputField("paths", "array", "The logical paths that were set."),
         OutputField("files", "array", "Absolute paths of the files written."),
     ),
-    note="All assignments in one invocation land atomically across every file they touch.",
+    note=(
+        "All assignments are validated before any file is written; each file "
+        "is then written atomically, and a mid-batch failure rolls back the "
+        "files already written. Concurrent readers are not locked out, so a "
+        "load racing a multi-file write may briefly see a partial update."
+    ),
 )
 
 
@@ -842,8 +847,9 @@ _OUTPUT_SET = OutputSpec(
             "naming a whole file takes a JSON object that replaces the "
             "file's contents outright (assignment, not a merge). "
             "Assignments may span multiple files; every touched file is "
-            "schema-validated, then all are written atomically in one "
-            "batch. 'set' edits an existing entity — it cannot create a "
+            "schema-validated, then each is written atomically, with the "
+            "already-written files rolled back if a later one fails. 'set' "
+            "edits an existing entity — it cannot create a "
             "new session or system (use 'config session/system add' for "
             "that); unnamed files (cli.json, server.json, "
             "community/settings.json, enterprise/settings.json) are "
@@ -935,7 +941,12 @@ _OUTPUT_UNSET = OutputSpec(
         OutputField("paths", "array", "The logical paths that were unset."),
         OutputField("files", "array", "Absolute paths of the files written."),
     ),
-    note="All removals in one invocation land atomically across every file they touch.",
+    note=(
+        "All removals are validated before any file is written; each file is "
+        "then written atomically, and a mid-batch failure rolls back the files "
+        "already written. Concurrent readers are not locked out, so a load "
+        "racing a multi-file write may briefly see a partial update."
+    ),
 )
 
 

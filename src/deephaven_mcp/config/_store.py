@@ -83,8 +83,14 @@ def _ensure_private_parents(config_dir: Path, file_path: Path) -> None:
     for part in relative_parent.parts:
         levels.append(levels[-1] / part)
     for level in levels:
-        if not level.exists():
-            level.mkdir(mode=0o700)
+        was_absent = not level.exists()
+        # exist_ok=True: two first-time authoring processes can race to
+        # create the same level on a fresh machine; the loser must
+        # proceed (to the advisory lock and its write) rather than
+        # surface FileExistsError. exist_ok ignores only an existing
+        # directory, so a non-directory collision still raises.
+        level.mkdir(mode=0o700, exist_ok=True)
+        if was_absent:
             _LOGGER.debug(
                 f"[_store:_ensure_private_parents] Created directory: {level}"
             )
@@ -134,7 +140,7 @@ def _error_at_unresolved_location(
 
 @dataclass(frozen=True, slots=True)
 class _StagedFile:
-    """One serialized file staged for an atomic batch commit."""
+    """One serialized file staged for a rollback-protected batch commit."""
 
     temp_path: Path
     """Same-directory temp file holding the new content."""
@@ -490,7 +496,7 @@ class ConfigStore:
     def write_all(
         self, entries: list[tuple[ConfigFieldLocation, dict[str, Any]]]
     ) -> list[str]:
-        """Validate every entry, then write all files as an atomic batch.
+        """Validate every entry, then write each file atomically with batch rollback.
 
         All entries are schema-validated before any file is touched;
         the serialized contents are then staged as same-directory temp
@@ -511,6 +517,15 @@ class ConfigStore:
         is preserved on disk at a reported backup path rather than
         lost, and the raised error names exactly which file(s) are
         affected. Leftover staging temp files are always removed.
+
+        The guarantee is per-file atomic writes with all-or-nothing
+        batch *rollback*, not cross-file atomic visibility: files
+        commit one at a time, and readers (:class:`ConfigTreeLoader`)
+        do not take the authoring advisory lock, so a load running
+        concurrently with a multi-file commit can briefly observe some
+        files already updated and others not. Authoring commands
+        serialize against one another through the lock; concurrent
+        readers do not participate.
 
         Args:
             entries (list[tuple[ConfigFieldLocation, dict[str, Any]]]):
@@ -593,9 +608,15 @@ class ConfigStore:
             )
         warnings = self.validate(location, parsed)
         final_path = self.path_of(location)
-        _ensure_private_parents(self._config_dir, final_path)
-        temp_path = _stage_file(final_path, text)
+        # Directory creation and staging are inside the OSError->
+        # ConfigurationError conversion (as in write_all): a permission
+        # or disk failure there must surface the documented structured
+        # config error, not leak a raw OSError that 'config edit' — which
+        # catches only ConfigurationError — would report as internal_error.
+        temp_path: Path | None = None
         try:
+            _ensure_private_parents(self._config_dir, final_path)
+            temp_path = _stage_file(final_path, text)
             os.replace(temp_path, final_path)
             _LOGGER.info(f"[_store:ConfigStore.write_text] Wrote {final_path}")
         except OSError as exc:
@@ -603,13 +624,17 @@ class ConfigStore:
                 f"Failed to write configuration file {final_path}: {exc}"
             ) from exc
         finally:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                _LOGGER.warning(
-                    f"[_store:ConfigStore.write_text] Could not remove "
-                    f"leftover temp file {temp_path}"
-                )
+            # Only a successfully staged temp needs removing; _stage_file
+            # cleans up after its own failure, and a pre-staging failure
+            # leaves temp_path None.
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    _LOGGER.warning(
+                        f"[_store:ConfigStore.write_text] Could not remove "
+                        f"leftover temp file {temp_path}"
+                    )
         return warnings
 
     def delete(self, location: ConfigFieldLocation) -> Path:

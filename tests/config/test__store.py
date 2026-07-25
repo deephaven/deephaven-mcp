@@ -663,6 +663,30 @@ def test_write_text_commit_failure_raises_and_cleans_temp(
     assert list(config_dir.rglob("*.tmp")) == []
 
 
+def test_write_text_stage_failure_raises_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A staging OSError surfaces as ConfigurationError, not raw OSError.
+
+    Regression: directory creation and staging ran outside the
+    OSError->ConfigurationError conversion, so a permission or disk
+    failure there leaked a raw OSError — which 'config edit' (catching
+    only ConfigurationError) would report as internal_error rather than
+    the documented structured config error. No temp is left behind
+    (staging never produced one).
+    """
+    config_dir = tmp_path / "config"
+    store = ConfigStore(config_dir)
+
+    def _boom(final_path: Path, text: str) -> Path:
+        raise OSError("simulated staging failure")
+
+    monkeypatch.setattr(_store, "_stage_file", _boom)
+    with pytest.raises(ConfigurationError, match="Failed to write"):
+        store.write_text(_CLI, "{}")
+    assert list(config_dir.rglob("*.tmp")) == []
+
+
 def test_write_text_temp_cleanup_failure_preserves_original_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
