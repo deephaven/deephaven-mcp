@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from deephaven_mcp._dictutil import deep_merge
-from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp._exceptions import ConfigurationError, NoSystemsConfiguredError
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.config import (
@@ -112,6 +112,12 @@ class RuntimeSpec:
     """Nested partial ``cli.json`` overrides from top-level CLI flags
     (``-o``, ``--timeout``, ``--no-auto-start``), or ``None``."""
 
+    no_input: bool = False
+    """The root ``--no-input`` flag: when ``True``, commands never
+    prompt interactively. Read by the ``needs_runtime=False``
+    configuration-authoring verbs (which receive the spec itself);
+    not part of the loaded :class:`Runtime`."""
+
     def resolve(self) -> Runtime:
         """Load, validate, and return the :class:`Runtime` this spec describes.
 
@@ -130,7 +136,8 @@ class RuntimeSpec:
         Raises:
             CliError: With :attr:`ErrorCode.CONFIG_INVALID` when the
                 permission audit fails or any configuration file is
-                malformed.
+                malformed, or :attr:`ErrorCode.NO_SYSTEMS_CONFIGURED`
+                when the tree is valid but declares no systems.
         """
         return run_async(load_runtime)(
             config_dir_override=self.config_dir_override,
@@ -213,7 +220,10 @@ async def load_runtime(
     Raises:
         CliError: With :attr:`ErrorCode.CONFIG_INVALID` when the
             permission audit fails or any configuration file is
-            malformed.
+            malformed, or :attr:`ErrorCode.NO_SYSTEMS_CONFIGURED` when
+            every file is valid but the tree declares no community
+            session (or session_creation block) and no enterprise
+            system.
     """
     config_dir = resolve_config_dir(config_dir_override)
     runtime_dir = resolve_runtime_dir(runtime_dir_override)
@@ -221,6 +231,8 @@ async def load_runtime(
 
     try:
         tree = await ConfigTreeLoader(config_dir=config_dir).initialize()
+    except NoSystemsConfiguredError as exc:
+        raise CliError(str(exc), code=ErrorCode.NO_SYSTEMS_CONFIGURED) from exc
     except ConfigurationError as exc:
         raise CliError(str(exc), code=ErrorCode.CONFIG_INVALID) from exc
 

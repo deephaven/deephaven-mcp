@@ -57,6 +57,10 @@ __all__ = [
     "RegistryItemNotFoundError",
     # Configuration exceptions
     "ConfigurationError",
+    "ConfigurationPathError",
+    "ConfigurationFieldMissingError",
+    "TemplateResolutionError",
+    "NoSystemsConfiguredError",
     "SystemNotConfiguredError",
     "EnterpriseNotConfiguredError",
     "CommunityNotConfiguredError",
@@ -478,6 +482,64 @@ class ConfigurationError(McpError):
             logger.error(f"Configuration error: {e}")
             # Provide guidance to user on fixing configuration
         ```
+    """
+
+    pass
+
+
+class ConfigurationPathError(ConfigurationError):
+    """A logical configuration path is malformed or does not resolve.
+
+    Raised by :mod:`deephaven_mcp.config._logical_paths` when a dot-separated
+    configuration path (e.g. ``community.sessions.local_dev.port``)
+    cannot be parsed (unbalanced quotes, empty segment) or does not
+    resolve to a known configuration file or field location.
+    """
+
+    pass
+
+
+class ConfigurationFieldMissingError(ConfigurationPathError):
+    """A structurally valid configuration path has no value set.
+
+    Raised by :mod:`deephaven_mcp.config._fields` when a field path
+    resolves cleanly through the data but the addressed value is
+    absent. Distinct from the base :class:`ConfigurationPathError`
+    raised for path-shape errors (an intermediate segment holding a
+    non-object) so callers can report "not found" separately from
+    "malformed path".
+    """
+
+    pass
+
+
+class TemplateResolutionError(ConfigurationError):
+    """A syntactically valid templating placeholder could not be resolved.
+
+    Raised by :mod:`deephaven_mcp.config._templating` when a
+    ``${env:VAR}`` names an unset variable or a ``${file:PATH}`` names a
+    file that is missing, unreadable, oversized, or not UTF-8. Distinct
+    from the plain :class:`ConfigurationError` raised for placeholder
+    *syntax* errors so callers that validate files written for a
+    different environment (e.g. the CLI config writer) can downgrade
+    resolution failures to warnings while still blocking on syntax
+    errors.
+    """
+
+    pass
+
+
+class NoSystemsConfiguredError(ConfigurationError):
+    """The configuration tree contains no systems at all.
+
+    Raised by :class:`deephaven_mcp.config.tree.ConfigTreeLoader` when
+    every file in the directory is individually valid but neither the
+    community nor the enterprise section declares a system. Distinct
+    from the plain :class:`ConfigurationError` raised for malformed
+    files so callers (e.g. the CLI's runtime loader) can surface a
+    "half-finished configuration" diagnostic instead of a generic
+    validation failure. Distinct from :class:`SystemNotConfiguredError`,
+    which reports one *section* absent at tool-invocation time.
     """
 
     pass

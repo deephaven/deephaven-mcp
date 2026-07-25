@@ -365,7 +365,7 @@ async def load_cli(config_dir: Path) -> CliConfig:
         CliConfig,
         path=path,
         config_dir=config_dir,
-        error_label="cli.json",
+        error_label="CLI config",
         log_label="_cli:cli.json",
         logger=_LOGGER,
     )

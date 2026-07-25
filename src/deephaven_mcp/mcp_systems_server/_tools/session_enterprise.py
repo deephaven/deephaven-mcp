@@ -389,7 +389,7 @@ def _generate_session_name_if_none(
         return session_name
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    creds = system_config.credentials
+    creds = system_config.auth.credentials
     username = creds.username if isinstance(creds, PasswordCredentials) else None
     if username:
         generated = f"mcp-{username}-{timestamp}"

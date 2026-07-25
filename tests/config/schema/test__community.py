@@ -275,13 +275,16 @@ def test_defaults_auth_block_dispatches_to_credentials_union():
         )
 
 
-def test_defaults_auth_unwraps_to_credentials_field():
+def test_defaults_auth_carries_typed_credentials():
     cfg = CommunitySettings.model_validate(
         _settings_with_defaults({"auth": {"credentials": {"type": "anonymous"}}})
     )
     assert cfg.session_creation is not None
     assert cfg.session_creation.defaults is not None
-    assert isinstance(cfg.session_creation.defaults.credentials, AnonymousCredentials)
+    assert cfg.session_creation.defaults.auth is not None
+    assert isinstance(
+        cfg.session_creation.defaults.auth.credentials, AnonymousCredentials
+    )
 
 
 def test_defaults_auth_accepts_literal_psk_token():
@@ -299,7 +302,7 @@ def test_defaults_auth_accepts_literal_psk_token():
             }
         )
     )
-    creds = cfg.session_creation.defaults.credentials  # type: ignore[union-attr]
+    creds = cfg.session_creation.defaults.auth.credentials  # type: ignore[union-attr]
     assert isinstance(creds, PSKCredentials)
     assert creds.token.get_secret_value() == "from-env"
 
@@ -317,7 +320,7 @@ def test_defaults_startup_retries_must_be_non_negative():
 
 
 def test_defaults_rejects_auth_with_extra_keys():
-    with pytest.raises(ValidationError, match="only a 'credentials'"):
+    with pytest.raises(ValidationError, match="Extra inputs"):
         CommunitySettings.model_validate(
             _settings_with_defaults(
                 {"auth": {"credentials": {"type": "anonymous"}, "extra": 1}}
@@ -326,7 +329,7 @@ def test_defaults_rejects_auth_with_extra_keys():
 
 
 def test_defaults_rejects_auth_missing_credentials():
-    with pytest.raises(ValidationError, match="'auth.credentials' is required"):
+    with pytest.raises(ValidationError, match="credentials"):
         CommunitySettings.model_validate(_settings_with_defaults({"auth": {}}))
 
 
@@ -342,7 +345,7 @@ def test_redacted_dump_replaces_defaults_credentials_token():
         )
     )
     out = cfg.model_dump(mode="json", context={"redact": True})
-    creds = out["session_creation"]["defaults"]["credentials"]
+    creds = out["session_creation"]["defaults"]["auth"]["credentials"]
     assert creds["token"] == REDACTED
     assert "shh" not in str(out)
 

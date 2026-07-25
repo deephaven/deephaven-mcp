@@ -150,8 +150,10 @@ redacted) and `dhcli config validate` to confirm it is valid.
 Configuration is loaded **once per invocation, just before the
 command body runs**. Any malformed file under the configuration
 directory fails fast with `config_invalid` (exit code `2`) before
-any subcommand body runs. There is no recovery mode — fix the file
-the error message names, then retry.
+any subcommand body runs; a tree whose files are all valid but that
+declares no systems at all fails the same way with
+`no_systems_configured`. There is no recovery mode — fix the file
+the error message names (or add a system), then retry.
 
 The single load runs when a command is dispatched (after its
 arguments parse, before its body):
@@ -577,10 +579,48 @@ dhcli docs status
 
 ### `dhcli config`
 
+The configuration is one **logical JSON document** addressed by
+dot-separated paths (`cli.output.format`,
+`community.settings.session_creation`,
+`enterprise.systems.prod.auth.credentials`), stored across several
+files under the configuration directory. A path segment may be
+double-quoted to contain literal dots (`defaults.session_arguments."my.key"`,
+TOML dotted-key style); session/system names themselves can never
+contain dots. File boundaries surface only in `config files`.
+
 | Verb        | Purpose                                                                                       |
 |-------------|-----------------------------------------------------------------------------------------------|
-| `show`      | Prints the resolved configuration with secrets redacted.                                      |
-| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. Validation runs before every command body, so this is CI-friendly. |
+| `show`      | Prints the resolved configuration with secrets redacted (requires a valid tree).             |
+| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed (`no_systems_configured` if the tree is valid but declares no systems). Validation runs before every command body, so this is CI-friendly. |
+| `files`     | Lists every configuration file: logical path, absolute file path, exists, valid, first validation error, template-resolution warnings. Works even when the configuration is broken or empty — the first command to run when diagnosing configuration problems. |
+| `init`      | Guided first-time wizard: prompts to declare one community session and/or one enterprise system, delegating to the same prompts as `session add`/`system add` with no flags. Interactive only (`no_tty` without a TTY or with `--no-input`). |
+| `get [PATH]` | Prints the raw on-disk value at `PATH` (or the whole tree when omitted): a JSON object for a subtree, the bare scalar for a leaf. Works on a broken or partial tree and shows raw values with templating refs unresolved — unlike `show`, which prints the validated, template-resolved view. |
+| `set ASSIGNMENT...` | Sets one or more fields via `PATH=VALUE` tokens (VALUE parsed as JSON first, falling back to a plain string). Intermediate objects are created as needed; a `PATH` naming a whole file takes a JSON object that **replaces** the file's contents (assignment, not a merge). Assignments spanning multiple files are validated and written atomically as one batch. Cannot create a new session/system (use `session/system add`); refuses to rewrite a file with JSON5-only syntax (`config_not_rewritable` — use `config edit` instead). |
+| `unset PATH...` | Removes one or more fields, reverting each to its schema default. Cannot unset a whole file (use `session/system remove`); same JSON5-rewrite refusal as `set`. |
+| `keys [PATH]` | Lists every settable logical path below `PATH` (or the whole tree), with type and description — the discovery companion to `get`/`set`. |
+| `edit PATH` | Opens the whole file named by `PATH` in `$EDITOR`/`$VISUAL` and writes back exactly what was saved, comments and formatting included — the only authoring verb that can touch a JSON5-only file. Parses and schema-validates before writing; a failure leaves the file untouched. Interactive only (`no_tty` without a TTY or with `--no-input`). |
+| `session add NAME` | Declares a community session file (`community/sessions/<NAME>.json`). Flags: `--host`, `--port`, `--language`, `--auth anonymous\|psk\|password\|custom` plus the matching credential flags (`--token`; `--username`/`--password`/`--effective-user`; `--auth-type`/`--auth-token`). Missing values are prompted for on a terminal (stderr); non-interactive runs fail with `missing_required_option`. Refuses to overwrite (`already_exists`). |
+| `session remove NAME` | Deletes the session file. Confirms on a terminal; requires `--yes` otherwise.       |
+| `session list` | Lists declared session files with per-file validity. Contrast: `dhcli session list` shows *live* sessions. |
+| `system add NAME` | Declares an enterprise system file (`enterprise/systems/<NAME>.json`). Flags: `--url` (connection.json URL), `--auth password\|private_key` plus the matching credential flags (`--username`/`--password`/`--effective-user`; `--key` — use `${file:/path/key.pem}`), optional `--max-sessions`, `--heap-gb`. `community` is a reserved name. |
+| `system remove NAME` | Deletes the system file. Confirms on a terminal; requires `--yes` otherwise.        |
+| `system list` | Lists declared system files with per-file validity. Contrast: `dhcli system list` shows what the daemon serves. |
+
+Secret-bearing flags (`--token`, `--password`, `--key`, `--auth-token`)
+accept templating refs — `${env:VAR}`, `${env:VAR:-default}`,
+`${file:/path}` — stored verbatim in the file and resolved when the
+server loads it; a literal value is accepted with a stderr hint
+recommending a ref. Authoring verbs never write an invalid file: every
+change is schema-validated and written atomically, and a ref that does
+not resolve in *your* shell (e.g. an env var only the daemon has) is a
+warning, not an error — even on a typed field such as `port`, whose
+type is checked when the server resolves the ref.
+
+Every `config` verb except `show` and `validate` operates on the raw
+files without loading the runtime, and so honors the root
+`-o/--output` flag and `DHCLI_OUTPUT` but not `cli.json`'s
+`output.format` (the file may be the thing being inspected or
+repaired).
 
 ### `dhcli agents`
 
@@ -725,6 +765,7 @@ argument parsing and exits `2`.
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
+| `--no-input`        |                      | Never prompt interactively; a command missing a required value fails with a structured `missing_required_option` error naming the flag to supply. Prompting is already disabled when stdin is not a TTY. |
 | `--version`         |                      | Print the package version and exit.                                                  |
 
 These flags accept any position on the command line — before the
@@ -833,6 +874,13 @@ registry programmatically via `dhcli agents errors` (or the
 | `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
 | `system_not_found`            | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
 | `config_invalid`              | The configuration tree failed validation.                          |
+| `no_systems_configured`       | Every configuration file is individually valid, but no system is declared (no community session file, no `session_creation` block, no enterprise system file). Add one (`dhcli config session add`, `dhcli config system add`, or `dhcli config init`), or check that `--config-dir` / `DH_AI_DATA_DIR` points at the intended directory. |
+| `config_path_invalid`         | A configuration path argument is malformed or does not name a known location. Run `dhcli config files` to list files and `dhcli config keys` to list settable paths. |
+| `missing_required_option`     | A required option was not provided and interactive prompting is unavailable (stdin is not a TTY, or `--no-input` was given). The error message names the exact flag(s) to supply. |
+| `already_exists`              | The target configuration entity already exists and the command refuses to overwrite it; remove it first with `dhcli config session/system remove`. |
+| `not_found`                   | The named configuration entity or file does not exist, or the addressed field has no value set. |
+| `config_not_rewritable`       | `config set`/`unset` refused to touch a file that uses JSON5-only syntax (comments, trailing commas) a programmatic rewrite would destroy; edit the file directly, or with `dhcli config edit`. |
+| `no_tty`                      | The command is interactive-only (e.g. `config edit`, `config init`) but stdin is not a TTY or `--no-input` was given; use the non-interactive equivalents. |
 | `internal_error`              | An unexpected internal failure not attributable to a specific subsystem. |
 
 ## Troubleshooting

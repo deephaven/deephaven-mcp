@@ -43,7 +43,11 @@ from pathlib import Path
 
 from pydantic import Field
 
-from deephaven_mcp._exceptions import ConfigurationError, InternalError
+from deephaven_mcp._exceptions import (
+    ConfigurationError,
+    InternalError,
+    NoSystemsConfiguredError,
+)
 from deephaven_mcp._pydantic import StrictSchema
 from deephaven_mcp._taxonomy import SystemRef, SystemType
 
@@ -204,6 +208,10 @@ class ConfigTreeLoader:
         Raises:
             ConfigurationError: When the permission audit fails or
                 any configuration file cannot be loaded or validated.
+            NoSystemsConfiguredError: When every file is valid but
+                neither the community nor the enterprise section
+                declares a system (a subclass of
+                :class:`ConfigurationError`).
             InternalError: When :meth:`initialize` has already been
                 awaited on this instance.
         """
@@ -236,13 +244,21 @@ class ConfigTreeLoader:
             raise ConfigurationError(msg)
 
         if community is None and enterprise is None:
+            # A zero-system tree is refused rather than served: a running
+            # server (or daemon) with nothing configured returns
+            # plausible-looking empty results that mask a mistyped
+            # --config-dir or DH_AI_DATA_DIR. Failing fast here is the
+            # only guaranteed-visible surface for the guidance.
             msg = (
                 f"No systems configured in {config_dir}. Add at least one "
-                "community session under community/sessions/ or one "
-                "enterprise system under enterprise/systems/."
+                "of: a community session file under community/sessions/, "
+                "a community/settings.json with a session_creation block "
+                "(enables dynamically created sessions), or an enterprise "
+                "system file under enterprise/systems/. Run 'dhcli config "
+                "init' for guided setup."
             )
             _LOGGER.error(f"[tree:ConfigTreeLoader._load] {msg}")
-            raise ConfigurationError(msg)
+            raise NoSystemsConfiguredError(msg)
 
         # ``cli`` is ``None`` only when ``_safe`` swallowed an error,
         # which would have already triggered the ``raise`` above. The

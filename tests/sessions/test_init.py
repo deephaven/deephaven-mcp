@@ -8,11 +8,12 @@ resolves to.
 from __future__ import annotations
 
 import deephaven_mcp.sessions as sessions_pkg
-from deephaven_mcp.sessions import _community, _enterprise
+from deephaven_mcp.sessions import _auth, _community, _enterprise
 
 _EXPECTED_PUBLIC_NAMES = {
     "VALID_LAUNCH_METHODS",
     "VALID_PROGRAMMING_LANGUAGES",
+    "AuthConfig",
     "CommunitySessionConfig",
     "EnterpriseSessionCreation",
     "EnterpriseSessionCreationDefaults",
@@ -35,6 +36,7 @@ def test_all_names_in_all_are_resolvable_attributes() -> None:
 
 def test_reexports_are_same_objects_as_internal_definitions() -> None:
     """Package re-exports are the same objects defined in the private modules."""
+    assert sessions_pkg.AuthConfig is _auth.AuthConfig
     assert sessions_pkg.CommunitySessionConfig is _community.CommunitySessionConfig
     assert (
         sessions_pkg.EnterpriseSessionCreation is _enterprise.EnterpriseSessionCreation

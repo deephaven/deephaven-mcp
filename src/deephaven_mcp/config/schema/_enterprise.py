@@ -145,7 +145,7 @@ async def load_enterprise(config_dir: Path) -> EnterpriseConfig | None:
             EnterpriseSettings,
             path=settings_path,
             config_dir=config_dir,
-            error_label="enterprise/settings.json",
+            error_label="enterprise settings",
             log_label="_enterprise:enterprise/settings.json",
             logger=_LOGGER,
         )

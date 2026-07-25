@@ -19,7 +19,11 @@ from unittest.mock import patch
 
 import pytest
 
-from deephaven_mcp._exceptions import ConfigurationError, InternalError
+from deephaven_mcp._exceptions import (
+    ConfigurationError,
+    InternalError,
+    NoSystemsConfiguredError,
+)
 from deephaven_mcp._taxonomy import SystemRef, SystemType
 from deephaven_mcp.auth.credentials import (
     PasswordCredentials,
@@ -104,8 +108,9 @@ def test_manager_config_dir_default_when_env_unset() -> None:
 
 @pytest.mark.asyncio
 async def test_load_empty_config_dir_fails(config_dir: Path) -> None:
+    """A tree with zero systems is refused with the dedicated subtype."""
     manager = _make_manager(config_dir)
-    with pytest.raises(ConfigurationError, match="No systems configured"):
+    with pytest.raises(NoSystemsConfiguredError, match="No systems configured"):
         await manager.initialize()
 
 
@@ -127,6 +132,8 @@ async def test_config_before_initialize_raises(config_dir: Path) -> None:
 async def test_config_after_failed_initialize_still_raises(
     config_dir: Path,
 ) -> None:
+    sessions_dir = _make_dir(config_dir / "community" / "sessions")
+    (sessions_dir / "bad.json").write_text("{ not valid json")
     manager = _make_manager(config_dir)
     with pytest.raises(ConfigurationError):
         await manager.initialize()
@@ -351,9 +358,9 @@ async def test_enterprise_password_with_literal(config_dir: Path) -> None:
     cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
     sys_cfg = cfg.enterprise.systems["prod"]
-    assert isinstance(sys_cfg.credentials, PasswordCredentials)
-    assert sys_cfg.credentials.username == "alice"
-    assert sys_cfg.credentials.password.get_secret_value() == "hunter2"
+    assert isinstance(sys_cfg.auth.credentials, PasswordCredentials)
+    assert sys_cfg.auth.credentials.username == "alice"
+    assert sys_cfg.auth.credentials.password.get_secret_value() == "hunter2"
 
 
 @pytest.mark.asyncio
@@ -379,7 +386,7 @@ async def test_enterprise_password_via_env_template(
     )
     cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
-    creds = cfg.enterprise.systems["prod"].credentials
+    creds = cfg.enterprise.systems["prod"].auth.credentials
     assert isinstance(creds, PasswordCredentials)
     assert creds.password.get_secret_value() == "secretpw"
 
@@ -408,7 +415,7 @@ async def test_enterprise_private_key_via_file_template(config_dir: Path) -> Non
     )
     cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
-    creds = cfg.enterprise.systems["prod"].credentials
+    creds = cfg.enterprise.systems["prod"].auth.credentials
     assert isinstance(creds, PrivateKeyCredentials)
     assert creds.key_text.get_secret_value() == key_text
 
@@ -828,10 +835,10 @@ async def test_examples_ai_config_loads_end_to_end(
     assert cfg.enterprise is not None
     assert set(cfg.enterprise.systems) == {"prod", "staging"}
     prod = cfg.enterprise.systems["prod"]
-    assert isinstance(prod.credentials, PasswordCredentials)
-    assert prod.credentials.password.get_secret_value() == "test-prod-pw"
+    assert isinstance(prod.auth.credentials, PasswordCredentials)
+    assert prod.auth.credentials.password.get_secret_value() == "test-prod-pw"
     staging = cfg.enterprise.systems["staging"]
-    assert isinstance(staging.credentials, PrivateKeyCredentials)
-    assert staging.credentials.key_text.get_secret_value().startswith(
+    assert isinstance(staging.auth.credentials, PrivateKeyCredentials)
+    assert staging.auth.credentials.key_text.get_secret_value().startswith(
         "-----BEGIN FAKE KEY-----"
     )

@@ -1,0 +1,66 @@
+# Exercises the dhcli configuration-authoring surface end-to-end.
+#
+# This drives the real dhcli binary as an OS subprocess through the offline
+# config verbs (get/set/unset/keys/files/validate/show, session add/list/
+# remove, system add/list/remove, and the interactive-only refusal paths of
+# init/edit). It is the fast, worker-free counterpart to the CLI E2E
+# (Community) workflow: no Java and no Deephaven worker are needed because
+# the authoring verbs operate purely on configuration files.
+#
+# The pytest file (tests/cli/test__config_integration.py) is the single
+# source of truth and doubles as the local harness:
+#
+#     uv run pytest -s -m integration tests/cli/test__config_integration.py
+#
+# Every invocation is sandboxed twice over — explicit --config-dir /
+# --runtime-dir flags at a pytest tmp_path, plus DH_AI_DATA_DIR pointing at
+# the sandbox — so a developer's real ~/.deephaven/ai is never touched.
+#
+# The broader Integration Tests workflow also picks these tests up via
+# `pytest -m integration`; this workflow exists for targeted, fast signal
+# and failure isolation (the same relationship CLI E2E (Community) has).
+
+name: CLI E2E (Config)
+
+on:
+  push:
+    branches: ["main", "mcp2"]
+  pull_request:
+    branches: ["main", "mcp2"]
+  workflow_dispatch:
+
+jobs:
+  cli-e2e-config:
+    name: dhcli CLI end-to-end (config authoring)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --extra test
+
+      - name: Verify dhcli entry point
+        run: uv run dhcli --help
+
+      # -s matches the project-wide integration-test convention (pytest
+      # output capture interferes with subprocess stdio pipes).
+      - name: Run CLI config integration tests
+        run: >-
+          uv run pytest -s -v --no-cov --log-cli-level=INFO
+          -m integration tests/cli/test__config_integration.py

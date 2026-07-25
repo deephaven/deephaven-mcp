@@ -15,10 +15,10 @@ from deephaven_mcp._pydantic import (
     StrictSchema,
     as_configuration_error,
     dump_redacted,
+    format_error_details,
     format_validation_error,
     log_redacted,
     reconcile_filename_stem,
-    unwrap_auth_credentials,
 )
 from deephaven_mcp._redaction import REDACTED
 
@@ -226,6 +226,52 @@ def test_format_validation_error_uses_root_for_empty_loc():
 
 
 # ---------------------------------------------------------------------------
+# format_error_details
+# ---------------------------------------------------------------------------
+
+
+def test_format_error_details_single():
+    msg = format_error_details("ctx", [{"loc": ("port",), "msg": "bad int"}])
+    assert msg == "ctx: port: bad int"
+
+
+def test_format_error_details_multiple_joined_with_semicolons():
+    msg = format_error_details(
+        "ctx",
+        [
+            {"loc": ("a",), "msg": "first"},
+            {"loc": ("b", "c"), "msg": "second"},
+        ],
+    )
+    assert msg == "ctx: a: first; b.c: second"
+
+
+def test_format_error_details_nested_loc_is_dotted_with_indices():
+    # Integer loc segments (list indices) render as bare numbers.
+    msg = format_error_details("ctx", [{"loc": ("items", 0, "x"), "msg": "bad"}])
+    assert msg == "ctx: items.0.x: bad"
+
+
+def test_format_error_details_empty_loc_labeled_root():
+    msg = format_error_details("ctx", [{"loc": (), "msg": "model-level"}])
+    assert msg == "ctx: <root>: model-level"
+
+
+def test_format_error_details_empty_errors_is_bare_context():
+    msg = format_error_details("ctx", [])
+    assert msg == "ctx: "
+
+
+def test_format_validation_error_delegates_to_format_error_details():
+    # The two formatters must render an exception's errors identically.
+    with pytest.raises(ValidationError) as exc:
+        _Strict.model_validate({"name": 1})
+    assert format_validation_error("ctx", exc.value) == format_error_details(
+        "ctx", exc.value.errors()
+    )
+
+
+# ---------------------------------------------------------------------------
 # as_configuration_error
 # ---------------------------------------------------------------------------
 
@@ -245,87 +291,6 @@ def test_as_configuration_error_returns_configurationerror():
 # resolved by :mod:`deephaven_mcp.config._templating` at config-load time; the
 # direct test coverage for the templating engine lives in
 # ``tests/config/test__templating.py``.
-
-
-# ---------------------------------------------------------------------------
-# unwrap_auth_credentials
-# ---------------------------------------------------------------------------
-
-
-class TestUnwrapAuthCredentials:
-    """Tests for the shared ``auth.credentials`` unwrap helper."""
-
-    def test_non_dict_passes_through(self) -> None:
-        assert unwrap_auth_credentials("not-a-dict") == "not-a-dict"
-        assert unwrap_auth_credentials(42) == 42
-        assert unwrap_auth_credentials(None) is None
-
-    def test_wire_format_auth_block_is_unwrapped(self) -> None:
-        out = unwrap_auth_credentials(
-            {"name": "x", "auth": {"credentials": {"type": "anonymous"}}}
-        )
-        assert out == {"name": "x", "credentials": {"type": "anonymous"}}
-
-    def test_already_unwrapped_top_level_passes_through(self) -> None:
-        data = {"name": "x", "credentials": {"type": "anonymous"}}
-        out = unwrap_auth_credentials(data)
-        assert out == data
-        # Returned dict is a copy.
-        assert out is not data
-
-    def test_both_auth_and_top_level_credentials_rejected(self) -> None:
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            unwrap_auth_credentials(
-                {
-                    "auth": {"credentials": {"type": "anonymous"}},
-                    "credentials": {"type": "anonymous"},
-                }
-            )
-
-    def test_missing_auth_rejected_when_required(self) -> None:
-        with pytest.raises(ValueError, match="'auth' is required"):
-            unwrap_auth_credentials({"name": "x"})
-
-    def test_missing_auth_allowed_when_not_required(self) -> None:
-        data = {"name": "x"}
-        out = unwrap_auth_credentials(data, allow_top_level=False)
-        assert out == data
-        assert out is not data
-
-    def test_auth_not_a_dict_rejected(self) -> None:
-        with pytest.raises(ValueError, match="only a 'credentials'"):
-            unwrap_auth_credentials({"auth": "oops"})
-
-    def test_auth_with_extra_keys_rejected(self) -> None:
-        with pytest.raises(ValueError, match="only a 'credentials'"):
-            unwrap_auth_credentials({"auth": {"credentials": {}, "extra": 1}})
-
-    def test_auth_without_credentials_key_rejected(self) -> None:
-        with pytest.raises(ValueError, match="'auth.credentials' is required"):
-            unwrap_auth_credentials({"auth": {}})
-
-    def test_allow_top_level_false_still_unwraps_auth(self) -> None:
-        """``allow_top_level=False`` does not block the wire-format unwrap."""
-        out = unwrap_auth_credentials(
-            {"auth": {"credentials": {"type": "psk", "token": "t"}}},
-            allow_top_level=False,
-        )
-        assert out == {"credentials": {"type": "psk", "token": "t"}}
-
-    def test_allow_top_level_false_rejects_pre_unwrapped(self) -> None:
-        """``allow_top_level=False`` callers cannot supply a top-level credentials.
-
-        The sub-block variant only sees the on-disk wire-format and is
-        permitted to omit credentials entirely; a stray ``credentials``
-        without ``auth`` is unusual and the helper passes the dict
-        through unchanged (extras are caught by the model's
-        ``extra='forbid'`` config).
-        """
-        data = {"credentials": {"type": "anonymous"}}
-        out = unwrap_auth_credentials(data, allow_top_level=False)
-        # ``credentials`` survives untouched; the model's strict-extra
-        # config decides whether the field is allowed.
-        assert out == data
 
 
 # ---------------------------------------------------------------------------

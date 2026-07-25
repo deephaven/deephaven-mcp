@@ -248,6 +248,17 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     default=False,
     help="If the daemon is not running, fail rather than auto-spawning it.",
 )
+@click.option(
+    "--no-input",
+    is_flag=True,
+    default=False,
+    help=(
+        "Never prompt interactively; a command missing a required value "
+        "fails with a structured missing_required_option error naming the "
+        "flag to supply. Prompting is already disabled when stdin is not "
+        "a TTY."
+    ),
+)
 @click.version_option(
     package_name="deephaven-mcp",
     prog_name="dhcli",
@@ -263,6 +274,7 @@ def cli(
     verbose: int,
     quiet: bool,
     no_auto_start: bool,
+    no_input: bool,
 ) -> None:
     """Root of the ``dhcli`` command tree — see ``dhcli --help``."""
     if verbose and quiet:
@@ -288,6 +300,7 @@ def cli(
         config_dir_override=config_dir,
         runtime_dir_override=runtime_dir,
         cli_overrides=overrides or None,
+        no_input=no_input,
     )
 
 

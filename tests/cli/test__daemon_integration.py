@@ -26,6 +26,12 @@ Prerequisites:
 
 - ``deephaven-server`` must be importable in the current environment.
 - ``dhcli`` must be on ``$PATH`` (provided by ``uv sync``).
+
+The offline ``config`` authoring verbs (``get``/``set``/``unset``/
+``keys``/``files``, ``session``/``system`` entity verbs, ``init``/
+``edit``) are covered subprocess-level by the worker-free sibling
+``test__config_integration.py``; this file only touches ``config
+validate``/``show`` where the daemon flows need them.
 """
 
 from __future__ import annotations

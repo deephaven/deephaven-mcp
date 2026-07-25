@@ -1340,7 +1340,7 @@ class CoreSession(BaseSession[Session]):
         )
 
         return await cls.from_credentials(
-            cfg.credentials,
+            cfg.auth.credentials,
             timeouts,
             host=cfg.host,
             port=cfg.port,

@@ -164,7 +164,7 @@ async def load_server(config_dir: Path) -> ServerConfig | None:
         ServerConfig,
         path=path,
         config_dir=config_dir,
-        error_label="server.json",
+        error_label="server config",
         log_label="_server:server.json",
         logger=_LOGGER,
     )

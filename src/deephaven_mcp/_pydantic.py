@@ -26,14 +26,15 @@ Contents:
   :class:`~pydantic.ValidationError` into the project's
   :class:`~deephaven_mcp._exceptions.ConfigurationError` message
   style.
+- :func:`format_error_details` - the same formatting over an
+  explicit sequence of Pydantic error dicts, for callers that
+  format a subset of an exception's errors.
 - :func:`as_configuration_error` - build a
   :class:`~deephaven_mcp._exceptions.ConfigurationError` from a
   caught :class:`~pydantic.ValidationError`.
 
 *Model validators* (helpers for ``@model_validator(mode="before")``)
 
-- :func:`unwrap_auth_credentials` - unwrap the wire-format
-  ``auth.credentials`` block into a top-level ``credentials`` field.
 - :func:`reconcile_filename_stem` - cross-check an optional
   declared name field against the filename stem carried via
   ``name``.
@@ -54,16 +55,17 @@ from __future__ import annotations
 __all__ = [
     "as_configuration_error",
     "dump_redacted",
+    "format_error_details",
     "format_validation_error",
     "log_redacted",
     "reconcile_filename_stem",
-    "unwrap_auth_credentials",
     "RedactableSchema",
     "StrictSchema",
 ]
 
 import logging
 import types
+from collections.abc import Mapping, Sequence
 from typing import Any, Union, get_args, get_origin
 
 import json5
@@ -222,11 +224,8 @@ def _annotation_contains_secret(ann: Any) -> bool:
 def format_validation_error(context: str, exc: ValidationError) -> str:
     """Translate a Pydantic :class:`ValidationError` into the project's style.
 
-    Produces a one-line summary of every reported error, each prefixed
-    by the JSON-pointer-style ``loc`` path (e.g.
-    ``"session_creation.defaults.heap_size_gb"``). When multiple
-    errors are present they are joined with ``"; "`` so the result
-    fits on a single log line.
+    Thin wrapper over :func:`format_error_details` for the common case
+    of formatting every error the exception reports.
 
     Args:
         context (str): Identifier of the surrounding config used as
@@ -239,8 +238,30 @@ def format_validation_error(context: str, exc: ValidationError) -> str:
         str: A human-readable error message ready for embedding in a
             :class:`ConfigurationError`.
     """
+    return format_error_details(context, exc.errors())
+
+
+def format_error_details(context: str, errors: Sequence[Mapping[str, Any]]) -> str:
+    """Format Pydantic error dicts into the project's one-line style.
+
+    Produces a one-line summary of every entry in ``errors``, each
+    prefixed by the JSON-pointer-style ``loc`` path (e.g.
+    ``"session_creation.defaults.heap_size_gb"``). Multiple entries
+    are joined with ``"; "`` so the result fits on a single log line.
+
+    Args:
+        context (str): Identifier of the surrounding config used as
+            the message prefix.
+        errors (Sequence[Mapping[str, Any]]): Error dicts in the shape
+            of :meth:`pydantic.ValidationError.errors` (``loc`` and
+            ``msg`` keys are read).
+
+    Returns:
+        str: A human-readable error message ready for embedding in a
+            :class:`ConfigurationError`.
+    """
     parts: list[str] = []
-    for err in exc.errors():
+    for err in errors:
         loc = ".".join(str(p) for p in err["loc"]) or "<root>"
         parts.append(f"{loc}: {err['msg']}")
     return f"{context}: " + "; ".join(parts)
@@ -347,79 +368,6 @@ def as_configuration_error(context: str, exc: ValidationError) -> ConfigurationE
     msg = format_validation_error(context, exc)
     _LOGGER.error(f"[deephaven_mcp._pydantic:as_configuration_error] {msg}")
     return ConfigurationError(msg)
-
-
-def unwrap_auth_credentials(data: Any, *, allow_top_level: bool = True) -> Any:
-    """Unwrap a ``{"auth": {"credentials": ...}}`` wrapper into top-level ``credentials``.
-
-    The community session, enterprise system, and community session-
-    creation defaults JSON schemas all nest credentials under
-    ``auth.credentials``. This helper performs the unwrap in a
-    ``model_validator(mode="before")`` so the resulting Pydantic field
-    can be a single
-    :class:`~deephaven_mcp.auth.credentials.CredentialsUnion`.
-
-    Two wire-format shapes are recognized:
-
-    - ``{"auth": {"credentials": ...}}`` — the on-disk shape.
-    - ``{"credentials": ...}`` — the post-``model_dump`` round-trip
-      shape; only accepted when ``allow_top_level`` is ``True``.
-
-    The two shapes are mutually exclusive.
-
-    Args:
-        data (Any): The raw mapping passed to
-            :meth:`pydantic.BaseModel.model_validate`. Non-dict inputs
-            pass through unchanged.
-        allow_top_level (bool): When ``True`` (the default), a
-            pre-unwrapped ``{"credentials": ...}`` mapping is accepted
-            (the shape produced by ``model_dump`` round-trips); when
-            absent, an explicit ``ValueError`` requests credentials.
-            When ``False``, ``auth`` is the only accepted source and
-            absence of both ``auth`` and ``credentials`` is allowed
-            (used by settings sub-blocks where credentials are
-            optional).
-
-    Returns:
-        Any: A new mapping with ``auth`` removed and ``credentials``
-            populated when ``auth`` was present. Non-dict inputs are
-            returned unchanged. When ``allow_top_level`` is ``False``
-            and neither key is present, the (copied) input is
-            returned unchanged.
-
-    Raises:
-        ValueError: When ``auth`` is malformed (not a dict, contains
-            keys other than ``credentials``, or lacks ``credentials``),
-            when both forms are present simultaneously, or when
-            ``allow_top_level`` is ``True`` and neither form is
-            present.
-    """
-    if not isinstance(data, dict):
-        return data
-    out = dict(data)
-    auth = out.pop("auth", None)
-    has_unwrapped = out.get("credentials") is not None
-    if auth is None and not has_unwrapped:
-        if allow_top_level:
-            raise ValueError(
-                "'auth' is required. Use "
-                "{'credentials': {'type': 'anonymous'}} for anonymous "
-                "callers."
-            )
-        # Sub-block variant: missing auth is allowed.
-        return out
-    if auth is not None and has_unwrapped:
-        raise ValueError(
-            "'auth' and 'credentials' are mutually exclusive at the "
-            "top level; supply only one."
-        )
-    if auth is not None:
-        if not isinstance(auth, dict) or set(auth.keys()) - {"credentials"}:
-            raise ValueError("'auth' must contain only a 'credentials' sub-block.")
-        if "credentials" not in auth:
-            raise ValueError("'auth.credentials' is required when 'auth' is set.")
-        out["credentials"] = auth["credentials"]
-    return out
 
 
 def reconcile_filename_stem(

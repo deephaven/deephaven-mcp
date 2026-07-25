@@ -53,6 +53,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -124,6 +125,12 @@ _ENTERPRISE_DEFAULTS_FIELDS = {
 }
 
 _PSK_HANDLER_CLASS = "io.deephaven.authentication.psk.PskAuthenticationHandler"
+
+_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+"""v2 resource-name rule (mirrors ``deephaven_mcp._names``): ASCII
+alphanumerics plus ``_`` and ``-``, starting with an alphanumeric. Dots are
+not allowed — a name must work as one segment of a dot-separated
+configuration path (``community.sessions.<name>.port``)."""
 
 
 # --- JSON5-lite parsing (stdlib only) ----------------------------------------------------
@@ -243,6 +250,30 @@ class ConversionResult:
 
 
 # --- Shared helpers ----------------------------------------------------------------------
+
+
+def _check_name(name: str, where: str) -> None:
+    """Reject a session/system name that is not a valid v2 resource name.
+
+    v1 accepted any JSON key as a name; v2 names become filename stems and
+    segments of dot-separated configuration paths, so they must match
+    :data:`_NAME_PATTERN`. The converter will not invent a new name, so
+    conversion stops and nothing is written.
+
+    Args:
+        name (str): The v1 session or system name.
+        where (str): Context label for the error message.
+
+    Raises:
+        ConversionError: When ``name`` does not satisfy the v2 name rule.
+    """
+    if not _NAME_PATTERN.match(name):
+        raise ConversionError(
+            f"{where}: name {name!r} is not a valid v2 name. v2 names must "
+            "start with a letter or digit and contain only letters, digits, "
+            "'_', and '-' (dots are not allowed). Rename it in the v1 file "
+            "and retry."
+        )
 
 
 def _secret(literal: Any, env_var: Any) -> Any:
@@ -463,6 +494,7 @@ def _convert_community_session(
 ) -> dict[str, Any]:
     """Convert one v1 community session into a v2 session file body."""
     where = f"community session '{name}'"
+    _check_name(name, where)
     if not isinstance(cfg, dict):
         raise ConversionError(f"{where}: expected an object.")
     out: dict[str, Any] = {"session_name": name}
@@ -679,6 +711,7 @@ def _convert_enterprise_system(
 ) -> dict[str, Any]:
     """Convert one v1 enterprise system into a v2 system file body."""
     where = f"enterprise system '{name}'"
+    _check_name(name, where)
     if not isinstance(cfg, dict):
         raise ConversionError(f"{where}: expected an object.")
     out: dict[str, Any] = {"system_name": name}

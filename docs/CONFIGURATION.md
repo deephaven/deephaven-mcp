@@ -292,12 +292,15 @@ mapping is fixed:
 
 ## `community/sessions/<name>.json`
 
-One file per static community session. Fields:
+One file per static community session. The filename stem is the
+session name: ASCII letters, digits, `_`, and `-` only, starting with a
+letter or digit (dots are not allowed — the name must work as one
+segment of a dotted `dhcli config` path). Fields:
 
 | Field                | Type    | Required | Description                                                                 |
 | -------------------- | ------- | -------- | --------------------------------------------------------------------------- |
 | `host`               | str     | no       | Hostname; defaults to whatever the SDK derives.                             |
-| `port`               | int     | no       | Port number.                                                                |
+| `port`               | int (1–65535) | no | Port number.                                                                |
 | `programming_language` | enum  | no       | Exactly `"Python"` or `"Groovy"`.                                            |
 | `never_timeout`      | bool    | no       | Disables client-side idle timeout.                                          |
 | `tls`                | object  | no       | Presence enables TLS. See [TLS](#tls).                                      |
@@ -412,7 +415,10 @@ enterprise system. All fields are optional.
 
 ## `enterprise/systems/<name>.json`
 
-One file per Deephaven Enterprise system. Fields:
+One file per Deephaven Enterprise system. The filename stem is the
+system name, under the same character rule as session names (letters,
+digits, `_`, `-`; no dots); `community` is reserved for the community
+umbrella system. Fields:
 
 | Field                                 | Type   | Required | Default | Description                                                                 |
 | ------------------------------------- | ------ | -------- | ------- | --------------------------------------------------------------------------- |

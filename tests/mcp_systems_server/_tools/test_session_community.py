@@ -389,7 +389,7 @@ async def test_session_community_create_invalid_session_name_returns_error():
     The early ``validate_resource_name`` guard exists because the name
     doubles as a Docker container name, Python process tag, and the
     hash input for the :class:`SessionId`; any character outside
-    ``[A-Za-z0-9_.-]`` would break at least one of those downstream
+    ``[A-Za-z0-9_-]`` would break at least one of those downstream
     surfaces. This test pins the guard so it cannot regress to a
     silent late failure.
     """
@@ -2055,9 +2055,9 @@ async def test_register_session_manager_custom_auth_handler():
     # declaration's ``custom`` credentials type) with the opaque token.
     from deephaven_mcp.auth.credentials import CustomTokenCredentials
 
-    assert isinstance(cfg.credentials, CustomTokenCredentials)
-    assert cfg.credentials.auth_token.get_secret_value() == "opaque"
-    assert cfg.credentials.auth_type == "com.example.CustomAuthHandler"
+    assert isinstance(cfg.auth.credentials, CustomTokenCredentials)
+    assert cfg.auth.credentials.auth_token.get_secret_value() == "opaque"
+    assert cfg.auth.credentials.auth_type == "com.example.CustomAuthHandler"
 
 
 @pytest.mark.asyncio
@@ -2083,7 +2083,7 @@ async def test_register_session_manager_anonymous_auth():
 
     mock_registry.add_dynamic_session.assert_awaited_once()
     kwargs = mock_registry.add_dynamic_session.call_args.kwargs
-    assert isinstance(kwargs["session_config"].credentials, AnonymousCredentials)
+    assert isinstance(kwargs["session_config"].auth.credentials, AnonymousCredentials)
 
 
 @pytest.mark.asyncio
@@ -2151,7 +2151,7 @@ async def test_session_community_credentials_static_session_unsupported_creds():
     # format schema, so we hand-build a typed declaration that bypasses
     # the JSON validator by constructing the field directly.
     from deephaven_mcp.auth.credentials import PasswordCredentials
-    from deephaven_mcp.sessions import CommunitySessionConfig
+    from deephaven_mcp.sessions import AuthConfig, CommunitySessionConfig
 
     session_config = CommunitySessionConfig.model_construct(
         name="pw-session",
@@ -2160,7 +2160,7 @@ async def test_session_community_credentials_static_session_unsupported_creds():
         programming_language=None,
         never_timeout=None,
         tls=None,
-        credentials=PasswordCredentials(username="u", password="p"),
+        auth=AuthConfig(credentials=PasswordCredentials(username="u", password="p")),
     )
     manager = StaticCommunitySessionManager(
         name="pw-session",
@@ -2496,10 +2496,11 @@ def test_credentials_to_auth_type_password_rejected():
 def test_resolve_community_session_parameters_password_credentials_rejected():
     """PasswordCredentials in defaults trigger the dynamic-session rejection."""
     from deephaven_mcp.auth.credentials import PasswordCredentials
+    from deephaven_mcp.sessions import AuthConfig
 
     defaults = CommunitySessionCreationDefaults.model_construct(
         launch_method="docker",
-        credentials=PasswordCredentials(username="u", password="p"),
+        auth=AuthConfig(credentials=PasswordCredentials(username="u", password="p")),
         programming_language="Python",
         docker_image=None,
         docker_memory_limit_gb=None,
@@ -2535,10 +2536,11 @@ def test_resolve_community_session_parameters_password_credentials_rejected():
 def test_resolve_community_session_parameters_rejects_unknown_launch_method():
     """An unrecognized launch_method fails fast with a clear error."""
     from deephaven_mcp.auth.credentials import AnonymousCredentials
+    from deephaven_mcp.sessions import AuthConfig
 
     defaults = CommunitySessionCreationDefaults.model_construct(
         launch_method="docker",
-        credentials=AnonymousCredentials(),
+        auth=AuthConfig(credentials=AnonymousCredentials()),
         programming_language="Python",
         docker_image=None,
         docker_memory_limit_gb=None,

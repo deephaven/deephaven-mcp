@@ -1128,6 +1128,16 @@ uv run pytest tests/resource_manager/test_launcher_integration.py::TestOrphanCle
 uv run pytest tests/resource_manager/test_launcher_integration.py::TestInstanceTrackerIntegration -m integration
 ```
 
+#### CLI Config-Authoring Integration Tests
+
+`tests/cli/test__config_integration.py` drives the real `dhcli` binary as an OS subprocess through the offline configuration-authoring verbs (`config get/set/unset/keys/files/validate/show`, `config session add/list/remove`, `config system add/list/remove`, and the interactive-only refusal paths of `config init`/`config edit`). No daemon, Deephaven worker, Docker, or Java is required.
+
+```sh
+uv run pytest -s -m integration tests/cli/test__config_integration.py
+```
+
+Every invocation is sandboxed twice over — explicit `--config-dir`/`--runtime-dir` flags at a pytest `tmp_path`, plus `DH_AI_DATA_DIR` pointing at the sandbox in the subprocess environment — so a locally configured `~/.deephaven/ai` is never touched. CI runs this file in the dedicated `CLI E2E (Config)` workflow (`.github/workflows/cli-e2e-config.yml`); the daemon-backed CLI flows live in `tests/cli/test__daemon_integration.py` and the `CLI E2E (Community)` workflow.
+
 #### Troubleshooting Integration Tests
 
 **Problem:** Tests fail and you need to see Deephaven subprocess output

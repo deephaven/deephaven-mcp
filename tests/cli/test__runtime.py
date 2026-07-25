@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp._exceptions import ConfigurationError, NoSystemsConfiguredError
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._runtime import (
     Runtime,
@@ -307,3 +307,24 @@ async def test_load_runtime_rejects_malformed_systems_section(
         )
     assert excinfo.value.code == ErrorCode.CONFIG_INVALID
     assert isinstance(excinfo.value.__cause__, ConfigurationError)
+
+
+@pytest.mark.asyncio
+async def test_load_runtime_rejects_empty_tree_with_dedicated_code(
+    tmp_path: Path,
+) -> None:
+    """A valid tree with zero systems maps to ``NO_SYSTEMS_CONFIGURED``.
+
+    Distinct from ``CONFIG_INVALID`` so agents can tell a half-finished
+    configuration apart from a malformed one.
+    """
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    os.chmod(cfg_dir, 0o700)
+
+    with pytest.raises(CliError) as excinfo:
+        await load_runtime(
+            config_dir_override=cfg_dir, runtime_dir_override=tmp_path / "rt"
+        )
+    assert excinfo.value.code == ErrorCode.NO_SYSTEMS_CONFIGURED
+    assert isinstance(excinfo.value.__cause__, NoSystemsConfiguredError)

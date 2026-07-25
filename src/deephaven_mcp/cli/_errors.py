@@ -167,9 +167,10 @@ class ErrorCode(StrEnum):
         "option_not_applicable",
         (
             "An option/argument combination is invalid for the selected "
-            "--system type: an option that does not apply (e.g. a Docker option "
-            "with an Enterprise system), or a missing required one (e.g. no "
-            "session name for a Community session)."
+            "--system or --auth type: an option that does not apply (e.g. a "
+            "Docker option with an Enterprise system, or --token with "
+            "--auth password), or a missing required one (e.g. no session "
+            "name for a Community session)."
         ),
     )
     BROWSER_LAUNCH_FAILED = (
@@ -186,6 +187,69 @@ class ErrorCode(StrEnum):
     CONFIG_INVALID = (
         "config_invalid",
         "The configuration tree failed validation.",
+    )
+    NO_SYSTEMS_CONFIGURED = (
+        "no_systems_configured",
+        (
+            "Every configuration file is individually valid, but no system "
+            "is declared: there is no community session file, no "
+            "session_creation block in community/settings.json, and no "
+            "enterprise system file. Distinct from config_invalid so a "
+            "half-finished configuration is distinguishable from a "
+            "malformed one. Add a system ('dhcli config session add', "
+            "'dhcli config system add', or 'dhcli config init'), or check "
+            "that --config-dir / DH_AI_DATA_DIR points at the intended "
+            "directory."
+        ),
+    )
+    CONFIG_PATH_INVALID = (
+        "config_path_invalid",
+        (
+            "A configuration path argument is malformed or does not name a "
+            "known location. Run 'dhcli config files' to list files and "
+            "'dhcli config keys' to list settable paths."
+        ),
+    )
+    MISSING_REQUIRED_OPTION = (
+        "missing_required_option",
+        (
+            "A required option was not provided and interactive prompting is "
+            "unavailable (stdin is not a TTY, or --no-input was given). The "
+            "error message names the exact flag(s) to supply."
+        ),
+    )
+    ALREADY_EXISTS = (
+        "already_exists",
+        (
+            "The target configuration entity already exists and the command "
+            "refuses to overwrite it. Remove it first with 'dhcli config "
+            "session/system remove'."
+        ),
+    )
+    NOT_FOUND = (
+        "not_found",
+        (
+            "The named configuration entity or file does not exist, or the "
+            "addressed field has no value set."
+        ),
+    )
+    CONFIG_NOT_REWRITABLE = (
+        "config_not_rewritable",
+        (
+            "The target file uses JSON5-only syntax (comments, trailing "
+            "commas) that a programmatic read-modify-write would silently "
+            "destroy. 'config set'/'unset' refuse to touch it; edit the "
+            "file directly, or with 'dhcli config edit', instead."
+        ),
+    )
+    NO_TTY = (
+        "no_tty",
+        (
+            "The command is interactive-only (e.g. 'config edit', 'config "
+            "init') but stdin is not a TTY or --no-input was given. Use the "
+            "non-interactive equivalents ('config set', 'config session add' "
+            "with flags) instead."
+        ),
     )
     INTERNAL_ERROR = (
         "internal_error",

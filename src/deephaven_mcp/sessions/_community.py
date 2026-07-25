@@ -4,9 +4,7 @@
 describes how to connect to one community session: host, port,
 optional transport TLS, and required outbound credentials. It is
 *not* the live session itself — see
-:class:`deephaven_mcp.client.CoreSession` for that — and it is *not*
-inherently a file-format schema, though today it is the typed result
-of loading one ``community/sessions/<name>.json`` file.
+:class:`deephaven_mcp.client.CoreSession` for that.
 
 The same class is produced from two sources:
 
@@ -18,18 +16,6 @@ The same class is produced from two sources:
    (:mod:`deephaven_mcp.mcp_systems_server._tools.session_community`),
    which constructs an instance directly from caller-supplied
    parameters for runtime-launched sessions.
-
-The Pydantic model owns the schema:
-
-- ``host`` / ``port`` / ``programming_language`` / ``never_timeout`` are
-  optional transport options.
-- ``tls`` is the optional transport-layer TLS block; presence (even
-  ``{}``) enables TLS, absence means plaintext.
-- ``auth.credentials`` is required; the model unwraps it to the
-  top-level :attr:`credentials` field at validation time so the
-  resulting instance carries a pre-built
-  :class:`~deephaven_mcp.auth.credentials.CredentialsUnion` ready
-  for :meth:`deephaven_mcp.client.CoreSession.from_credentials`.
 
 Schema::
 
@@ -61,19 +47,18 @@ __all__ = [
     "CommunitySessionConfig",
 ]
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from deephaven_mcp._names import validate_resource_name
 from deephaven_mcp._pydantic import (
     RedactableSchema,
     reconcile_filename_stem,
-    unwrap_auth_credentials,
 )
-from deephaven_mcp.auth.credentials import CredentialsUnion
 from deephaven_mcp.auth.tls import TlsConfig
 
+from ._auth import AuthConfig
 from ._types import ProgrammingLanguage
 
 
@@ -85,25 +70,24 @@ class CommunitySessionConfig(RedactableSchema):
     session manager.
     """
 
-    name: str
-    """Session name. Equal to the filename stem of the source JSON file
-    and to any ``session_name`` field declared inside that file (the
-    loader cross-checks both)."""
+    name: str = Field(json_schema_extra={"non_wire": True})
+    """Session name. Not a wire field: the loader injects the filename
+    stem of the source JSON file, cross-checked against any
+    ``session_name`` field declared inside that file."""
 
     host: str | None = None
     """Optional Deephaven Community server hostname. ``None`` falls
     back to the upstream client's default (typically ``localhost``)."""
 
-    port: int | None = None
-    """Optional Deephaven Community server port. ``None`` falls back
-    to the upstream client's default (typically ``10000``)."""
+    port: Annotated[int, Field(gt=0, lt=65536)] | None = None
+    """Optional Deephaven Community server port (1-65535). ``None``
+    falls back to the upstream client's default (typically
+    ``10000``)."""
 
     programming_language: ProgrammingLanguage | None = None
     """Optional scripting language for the worker session: exactly
-    ``"Python"`` or ``"Groovy"``. ``None`` falls back to the upstream
-    client's default. The title-case form is the canonical wire format
-    and matches the enterprise side; consumers that talk to
-    ``pydeephaven`` lowercase at the call boundary."""
+    ``"Python"`` or ``"Groovy"`` (title-case is the canonical wire
+    form). ``None`` falls back to the upstream client's default."""
 
     never_timeout: bool | None = None
     """Optional flag disabling the worker-side session idle timeout.
@@ -116,10 +100,8 @@ class CommunitySessionConfig(RedactableSchema):
     :class:`~deephaven_mcp.auth.tls.TlsConfig` otherwise. Presence is
     what enables TLS, not the value of any individual sub-field."""
 
-    credentials: CredentialsUnion
-    """Pre-resolved outbound bearer credentials parsed from the
-    required ``auth.credentials`` block. Hands directly to
-    :meth:`deephaven_mcp.client.CoreSession.from_credentials`."""
+    auth: AuthConfig
+    """Authentication details for connecting to the Community server."""
 
     @field_validator("name")
     @classmethod
@@ -137,11 +119,10 @@ class CommunitySessionConfig(RedactableSchema):
 
     @model_validator(mode="before")
     @classmethod
-    def _validate_and_unwrap(cls, data: Any) -> Any:
-        """Cross-check ``session_name`` and unwrap ``auth.credentials``."""
-        data = reconcile_filename_stem(
+    def _reconcile_name(cls, data: Any) -> Any:
+        """Cross-check ``session_name`` against the filename stem."""
+        return reconcile_filename_stem(
             data,
             declared_field="session_name",
             model_label="CommunitySessionConfig",
         )
-        return unwrap_auth_credentials(data)
