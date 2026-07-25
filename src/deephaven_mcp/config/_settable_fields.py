@@ -7,11 +7,13 @@ wire-format path, JSON type, required/secret flags, scalar default,
 and description. Powers the ``dhcli config keys`` verb.
 
 The walk is depth-first over nested models, in schema declaration
-order. Model fields marked ``non_wire`` in their
-``json_schema_extra`` metadata (loader-injected fields such as
-``name``) are omitted. Discriminated unions (outbound credentials)
-and open dicts/lists are reported as single ``object`` / ``array``
-fields rather than recursed into.
+order. Each nested-model block is itself emitted as an ``object``
+entry (it is a valid whole-object assignment target for ``config
+set``) before its children. Model fields marked ``non_wire`` in
+their ``json_schema_extra`` metadata (loader-injected fields such
+as ``name``) are omitted. Discriminated unions (outbound
+credentials) and open dicts/lists are reported as single ``object``
+/ ``array`` fields rather than recursed into.
 """
 
 from __future__ import annotations
@@ -210,8 +212,10 @@ def _model_settable_fields(model: type[BaseModel]) -> list[SettableField]:
 
     Recurses depth-first into nested model fields, prefixing child
     paths with the field name and demoting ``required`` for children
-    of optional blocks. Skips fields marked ``non_wire`` in their
-    ``json_schema_extra`` metadata.
+    of optional blocks. Each nested-model field also contributes its
+    own ``object`` entry (before its children), since a whole block
+    is itself a settable target. Skips fields marked ``non_wire`` in
+    their ``json_schema_extra`` metadata.
 
     Args:
         model (type[BaseModel]): The schema class to walk.
@@ -228,6 +232,16 @@ def _model_settable_fields(model: type[BaseModel]) -> list[SettableField]:
         path = FieldPath((name,))
         nested_model = _as_model_type(field_info.annotation)
         if nested_model is not None:
+            fields.append(
+                SettableField(
+                    path=path,
+                    json_type="object",
+                    required=field_info.is_required(),
+                    secret=_contains_secret(field_info.annotation),
+                    default=None,
+                    description=_to_plain_text(field_info.description),
+                )
+            )
             fields.extend(
                 replace(
                     child,
@@ -260,7 +274,8 @@ def settable_fields(kind: ConfigFileKind) -> list[SettableField]:
 
     Returns:
         list[SettableField]: One entry per settable field, in schema
-            declaration order (nested models flattened depth-first),
-            with paths in wire format relative to the file.
+            declaration order (nested models flattened depth-first,
+            each block emitted as an ``object`` entry before its
+            children), with paths in wire format relative to the file.
     """
     return _model_settable_fields(kind.schema)

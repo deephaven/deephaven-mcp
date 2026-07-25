@@ -147,13 +147,19 @@ redacted) and `dhcli config validate` to confirm it is valid.
 
 ### Configuration loading
 
-Configuration is loaded **once per invocation, just before the
-command body runs**. Any malformed file under the configuration
-directory fails fast with `config_invalid` (exit code `2`) before
-any subcommand body runs; a tree whose files are all valid but that
-declares no systems at all fails the same way with
-`no_systems_configured`. There is no recovery mode — fix the file
-the error message names (or add a system), then retry.
+For every **runtime-dependent** command, configuration is loaded
+**once per invocation, just before the command body runs**. Any
+malformed file under the configuration directory fails fast with
+`config_invalid` (exit code `2`) before the body runs; a tree whose
+files are all valid but that declares no systems at all fails the
+same way with `no_systems_configured`.
+
+The offline authoring verbs — `config files`, `config get`,
+`config set`, `config unset`, `config keys`, `config edit`,
+`config init`, and the `config session` / `config system`
+sub-groups — are exempt: they operate on the raw files without the
+full-tree load, so they keep working against a broken or empty
+tree. They are the recovery mode (see below).
 
 The single load runs when a command is dispatched (after its
 arguments parse, before its body):
@@ -177,17 +183,21 @@ absent) configuration tree, with no special-casing:
 #### Recovering from a broken configuration
 
 Pre-body validation means a typo in any config file blocks every
-subcommand body. Workarounds when you can't run `dhcli` itself:
+runtime-dependent subcommand body. The offline authoring verbs stay
+available:
 
-- **Diagnose the error**: `dhcli config validate` surfaces the
-  structured `config_invalid` payload identifying the offending
-  file. (Validation runs in the pre-body load, so the error appears
-  even though the verb itself never executes.)
+- **Locate the failure**: `dhcli config files` lists every
+  configuration file with its validity status and first error;
+  `dhcli config validate` surfaces the full structured
+  `config_invalid` payload. (Validation runs in the pre-body load,
+  so the error appears even though the verb itself never executes.)
+- **Fix it in place**: `dhcli config set` / `dhcli config unset`
+  rewrite one field, `dhcli config edit <path>` opens the whole
+  file in `$EDITOR`, and `dhcli config get` reads raw on-disk
+  contents even from a partial or invalid tree.
 - **Stuck daemon**: read `daemon.json` directly under
   `<runtime_dir>/daemon/`, then `kill <pid>`. Optionally `rm`
   the registry file once the process is gone.
-- **Edit the offending file by hand** based on the error message,
-  then re-run the command.
 
 ### `cli.json`
 

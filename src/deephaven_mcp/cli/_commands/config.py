@@ -974,7 +974,9 @@ _OUTPUT_KEYS = OutputSpec(
             "'default' (only when the field has a plain scalar default), "
             "'description' (only when documented), 'present' (boolean; "
             "only when true, and only for a path resolved against a real "
-            "entity, not a '<name>' template).",
+            "entity, not a '<name>' template). Nested blocks appear as "
+            "'object' entries alongside their children; either level is "
+            "a valid 'config set' target.",
         ),
     ),
 )
@@ -1047,7 +1049,12 @@ def _read_raw_if_present(
             "Generated from the Pydantic schemas, so it can never drift "
             "from what 'config set' actually accepts. With no PATH, lists "
             "every path across every file kind; named kinds (sessions, "
-            "systems) are shown once as a '<name>' template. A PATH scopes "
+            "systems) are shown once as a '<name>' template. Nested "
+            "blocks appear as 'object' entries (settable as whole JSON "
+            "objects) alongside their leaf children. Two settable target "
+            "families are not enumerated here: a whole file (its logical "
+            "path; run 'config files') and free-form children below an "
+            "open 'object' entry such as environment_vars. A PATH scopes "
             "the listing to one file kind or one field within it, and — "
             "when it names a real entity rather than a template — adds a "
             "'present' flag showing which paths are currently set."
@@ -1259,9 +1266,11 @@ _OUTPUT_FILES = OutputSpec(
             "files",
             "array",
             "One entry per configuration file: 'path' (logical path, the "
-            "address 'config get/set' use), 'file' (absolute on-disk path), "
+            "address 'config get/set' use; omitted when the filename is "
+            "not addressable as a path), 'file' (absolute on-disk path), "
             "'exists' (boolean), 'valid' (boolean; only when the file "
-            "exists), 'error' (first validation error; only when invalid), "
+            "exists), 'error' (first validation error, or why the "
+            "filename is not addressable; only when invalid), "
             "'warnings' (template-resolution notes such as an unset env "
             "var; only when present).",
         ),
@@ -1310,8 +1319,26 @@ async def config_files(ctx: click.Context) -> None:
     entries: list[dict[str, Any]] = []
     for target in ConfigSection(FieldPath.ROOT).files(store.config_dir):
         path = store.path_of(target)
+        try:
+            # Rejects a filename stem that is not addressable as a
+            # logical path (illegal characters, reserved names); such
+            # a file is listed as invalid rather than crashing the
+            # diagnostic listing.
+            resolve_path(target.logical_path)
+            logical = str(target.logical_path)
+        except ConfigurationPathError as exc:
+            entries.append(
+                {
+                    "file": str(path),
+                    "exists": path.is_file(),
+                    "valid": False,
+                    "error": f"filename is not addressable as a "
+                    f"configuration path (rename the file): {exc}",
+                }
+            )
+            continue
         entry: dict[str, Any] = {
-            "path": str(target.logical_path),
+            "path": logical,
             "file": str(path),
             "exists": path.is_file(),
         }

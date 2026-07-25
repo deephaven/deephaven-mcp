@@ -243,7 +243,14 @@ class ConfigTreeLoader:
             _LOGGER.error(f"[tree:ConfigTreeLoader._load] {msg}")
             raise ConfigurationError(msg)
 
-        if community is None and enterprise is None:
+        # A section is only "configured" when it declares a usable
+        # system: a settings-only file (e.g. community/settings.json
+        # holding just timeouts) does not count.
+        has_community_system = community is not None and (
+            bool(community.sessions) or community.settings.session_creation is not None
+        )
+        has_enterprise_system = enterprise is not None and bool(enterprise.systems)
+        if not has_community_system and not has_enterprise_system:
             # A zero-system tree is refused rather than served: a running
             # server (or daemon) with nothing configured returns
             # plausible-looking empty results that mask a mistyped

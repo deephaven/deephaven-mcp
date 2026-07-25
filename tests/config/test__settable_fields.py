@@ -191,6 +191,27 @@ def test_list_field_reported_as_array() -> None:
     assert volumes.json_type == "array"
 
 
+def test_nested_model_block_emitted_as_object_entry() -> None:
+    """A nested block is itself a 'config set' target and precedes its children."""
+    fields = settable_fields(ConfigFileKind.CLI)
+    paths = [f.path for f in fields]
+    block = next(f for f in fields if f.path == FieldPath(("output",)))
+    assert block.json_type == "object"
+    assert paths.index(FieldPath(("output",))) < paths.index(
+        FieldPath(("output", "format"))
+    )
+
+
+def test_nested_model_block_entry_flags() -> None:
+    """The block entry carries the field's own required/secret status."""
+    fields = _by_path(ConfigFileKind.COMMUNITY_SESSION)
+    auth = fields[("auth",)]
+    assert auth.json_type == "object"
+    assert auth.required is True
+    assert auth.secret is True
+    assert auth.default is None
+
+
 def test_every_kind_has_fields() -> None:
     for kind in ConfigFileKind:
         assert settable_fields(kind), f"{kind} produced no fields"

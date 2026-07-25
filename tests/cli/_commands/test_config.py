@@ -996,7 +996,7 @@ def _files_payload(config_dir: Path) -> dict:
 
 
 def _entry(payload: dict, path: str) -> dict:
-    matches = [f for f in payload["files"] if f["path"] == path]
+    matches = [f for f in payload["files"] if f.get("path") == path]
     assert len(matches) == 1, f"no unique entry for {path}: {payload['files']}"
     return matches[0]
 
@@ -1060,6 +1060,21 @@ def test_files_reports_template_warnings(tmp_path: Path) -> None:
     entry = _entry(_files_payload(tmp_path), "community.sessions.dev")
     assert entry["valid"] is True
     assert any("DOES_NOT_EXIST_XYZ" in w for w in entry["warnings"])
+
+
+def test_files_lists_unaddressable_filename_as_invalid(tmp_path: Path) -> None:
+    """A stem that cannot be a logical path is reported, not a crash."""
+    sessions = tmp_path / "community" / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "bad name.json").write_text("{}")
+    payload = _files_payload(tmp_path)
+    entry = next(f for f in payload["files"] if "path" not in f)
+    assert entry["file"] == str(sessions / "bad name.json")
+    assert entry["exists"] is True
+    assert entry["valid"] is False
+    assert "not addressable" in entry["error"]
+    # The rest of the tree is still listed normally.
+    assert _entry(payload, "cli")["exists"] is False
 
 
 def test_files_works_without_valid_tree(tmp_path: Path) -> None:

@@ -263,11 +263,28 @@ async def test_server_json_must_be_dict(config_dir: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_community_settings_only_no_sessions(config_dir: Path) -> None:
+async def test_community_settings_only_no_sessions_fails(config_dir: Path) -> None:
+    """A settings-only file (no sessions, no session_creation) is not a system."""
     community_dir = _make_dir(config_dir / "community")
     _write_json(
         community_dir / "settings.json",
         {"timeouts": {"eviction": {"session_idle_timeout_seconds": 30}}},
+    )
+    with pytest.raises(NoSystemsConfiguredError, match="No systems configured"):
+        await _load(config_dir)
+
+
+@pytest.mark.asyncio
+async def test_community_settings_with_session_creation_counts_as_system(
+    config_dir: Path,
+) -> None:
+    community_dir = _make_dir(config_dir / "community")
+    _write_json(
+        community_dir / "settings.json",
+        {
+            "session_creation": {"max_concurrent_sessions": 2},
+            "timeouts": {"eviction": {"session_idle_timeout_seconds": 30}},
+        },
     )
     cfg = (await _load(config_dir)).config
     assert cfg.community is not None
@@ -336,6 +353,15 @@ async def test_community_settings_invalid_field(config_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # Enterprise section
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enterprise_settings_only_no_systems_fails(config_dir: Path) -> None:
+    """A settings-only enterprise section (no systems) is not a system."""
+    enterprise_dir = _make_dir(config_dir / "enterprise")
+    _write_json(enterprise_dir / "settings.json", {})
+    with pytest.raises(NoSystemsConfiguredError, match="No systems configured"):
+        await _load(config_dir)
 
 
 @pytest.mark.asyncio
@@ -768,6 +794,22 @@ async def test_enterprise_settings_json_loads_and_logs(
     """An ``enterprise/settings.json`` file is loaded and logged at INFO."""
     enterprise_dir = _make_dir(config_dir / "enterprise")
     _write_json(enterprise_dir / "settings.json", {})  # empty schema today
+    # A settings-only tree fails the no-systems check; declare one system.
+    systems_dir = _make_dir(enterprise_dir / "systems")
+    _write_json(
+        systems_dir / "prod.json",
+        {
+            "system_name": "prod",
+            "connection_json_url": "https://x/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": "alice",
+                    "password": "hunter2",
+                }
+            },
+        },
+    )
     with caplog.at_level("INFO", logger="deephaven_mcp.config.schema._enterprise"):
         cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None

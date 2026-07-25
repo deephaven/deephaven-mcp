@@ -215,7 +215,7 @@ class FieldPath(tuple[str, ...]):
     # FieldPath only ever concatenates with another sequence of
     # segments (or a bare str, treated as exactly one segment — never
     # a heterogeneous tuple, and never decomposed into characters).
-    def __add__(self, other: FieldPath | str) -> FieldPath:  # type: ignore[override]
+    def __add__(self, other: FieldPath | tuple[str, ...] | str) -> FieldPath:  # type: ignore[override]
         if isinstance(other, str):
             return FieldPath((*self, other))
         return FieldPath((*self, *other))
