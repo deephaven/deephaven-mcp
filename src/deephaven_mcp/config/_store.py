@@ -421,7 +421,8 @@ class ConfigStore:
         integer field) is likewise downgraded to a warning; only
         genuine schema violations raise. Named kinds are validated
         with the filename stem injected as ``name``, matching the
-        loader contract.
+        loader contract; a file that supplies its own ``name`` is
+        rejected, since the name is derived from the filename.
 
         Args:
             location (ConfigFieldLocation): Which file the dict is
@@ -443,9 +444,20 @@ class ConfigStore:
         )
         warnings = list(expansion.warnings)
         expanded = expansion.value
-        payload = (
-            {"name": location.name, **expanded} if location.kind.named else expanded
-        )
+        if location.kind.named:
+            if "name" in expanded:
+                # 'name' is derived from the filename, not stored in the
+                # file. Injecting location.name last (as before) would let
+                # a raw 'name' override it, so foo.json could validate and
+                # write as 'bar' and the loader would then register a
+                # mismatched — and silently collision-prone — entity.
+                raise ConfigurationError(
+                    f"{source}: 'name' is derived from the filename and must "
+                    f"not appear in the file contents."
+                )
+            payload = {"name": location.name, **expanded}
+        else:
+            payload = expanded
         try:
             location.kind.schema.model_validate(payload)
         except ValidationError as exc:

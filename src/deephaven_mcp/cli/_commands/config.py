@@ -489,17 +489,15 @@ def config() -> None:
 
 
 _OUTPUT_SHOW = OutputSpec(
-    "object",
-    (
-        OutputField(
-            "config_dir", "string", "Directory the configuration was loaded from."
-        ),
-        OutputField("cli", "object", "dhcli CLI defaults (output, daemon, request)."),
-        OutputField("server", "object", "Parsed server.json; omitted when absent."),
-        OutputField("community", "object", "Community config; omitted when absent."),
-        OutputField("enterprise", "object", "Enterprise config; omitted when absent."),
+    "text",
+    note=(
+        "The resolved, post-merge configuration, secret-bearing fields "
+        "redacted to ***. With no PATH: a JSON object with 'config_dir' plus "
+        "'cli' and, when present, 'server'/'community'/'enterprise'. With a "
+        "PATH: the value at that path — a JSON object for a subtree or the "
+        "bare scalar for a leaf (mirroring 'config get', but resolved rather "
+        "than raw on-disk)."
     ),
-    note="Post-merge configuration; secret-bearing fields are redacted to ***.",
 )
 _OUTPUT_VALIDATE = OutputSpec(
     "object",

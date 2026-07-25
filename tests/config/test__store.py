@@ -139,6 +139,19 @@ def test_validate_named_declared_name_mismatch(tmp_path: Path) -> None:
         store.validate(_SESSION, _session_payload(session_name="other"))
 
 
+def test_validate_named_rejects_embedded_name(tmp_path: Path) -> None:
+    """A named-kind file that supplies its own 'name' key is rejected.
+
+    Regression: 'name' is derived from the filename; unpacking file
+    contents last let a raw 'name' override the injected one, so
+    foo.json could validate and write as 'bar' and the loader would
+    register a mismatched, silently collision-prone entity.
+    """
+    store = ConfigStore(tmp_path)
+    with pytest.raises(ConfigurationError, match="derived from the filename"):
+        store.validate(_SESSION, _session_payload(name="bar"))
+
+
 def test_validate_schema_failure_names_file(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path)
     with pytest.raises(ConfigurationError) as excinfo:
