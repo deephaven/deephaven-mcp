@@ -126,7 +126,7 @@ _ENTERPRISE_DEFAULTS_FIELDS = {
 
 _PSK_HANDLER_CLASS = "io.deephaven.authentication.psk.PskAuthenticationHandler"
 
-_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+_NAME_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 """v2 resource-name rule (mirrors ``deephaven_mcp._names``): ASCII
 alphanumerics plus ``_`` and ``-``, starting with an alphanumeric. Dots are
 not allowed — a name must work as one segment of a dot-separated

@@ -54,6 +54,8 @@ def test_resource_name_pattern_matches_valid_values(value: str) -> None:
         "a.b.c",  # dots are reserved for config-path separators
         "prod.us-east",
         "trailing.",
+        "prod\n",  # a trailing newline must not sneak past the end anchor
+        "prod\nevil",
     ],
 )
 def test_resource_name_pattern_rejects_invalid_values(value: str) -> None:
@@ -110,3 +112,9 @@ def test_validate_resource_name_rejects_dots_with_rename_hint() -> None:
     assert "'.'" in msg
     # The error must tell the user how to fix the name.
     assert "rename" in msg
+
+
+def test_validate_resource_name_rejects_trailing_newline() -> None:
+    """Regression: ``$`` matched before a final newline; ``\\Z`` does not."""
+    with pytest.raises(InvalidSessionNameError):
+        validate_resource_name("prod\n", field="system_name")

@@ -352,7 +352,10 @@ def test_convert_community_session_and_settings():
     }
 
 
-@pytest.mark.parametrize("bad_name", ["my.session", "-lead", "_lead", "has space", ""])
+@pytest.mark.parametrize(
+    "bad_name",
+    ["my.session", "-lead", "_lead", "has space", "", "trail\n", "line\nbreak"],
+)
 def test_convert_community_session_invalid_name_raises(bad_name):
     v1 = {"community": {"sessions": {bad_name: {"auth_type": "anonymous"}}}}
     with pytest.raises(conv.ConversionError, match="not a valid v2 name"):

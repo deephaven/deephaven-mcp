@@ -221,8 +221,12 @@ def require_confirmation(label: str, *, yes: bool, no_input: bool) -> None:
     Raises:
         CliError: With
             :attr:`~deephaven_mcp.cli._errors.ErrorCode.MISSING_REQUIRED_OPTION`
-            when ``--yes`` was not given and prompting is unavailable.
-        click.exceptions.Abort: When the user answers no.
+            when ``--yes`` was not given and prompting is unavailable,
+            or with
+            :attr:`~deephaven_mcp.cli._errors.ErrorCode.OPERATION_CANCELED`
+            when the user answers no. The latter is a deliberate
+            decline that exits 2, distinct from a Ctrl-C interruption
+            (exit 130).
     """
     if yes:
         return
@@ -236,7 +240,10 @@ def require_confirmation(label: str, *, yes: bool, no_input: bool) -> None:
             code=ErrorCode.MISSING_REQUIRED_OPTION,
         )
     if not confirm(label, no_input=no_input):
-        raise click.exceptions.Abort()
+        raise CliError(
+            "Canceled: confirmation declined.",
+            code=ErrorCode.OPERATION_CANCELED,
+        )
 
 
 def require_value(

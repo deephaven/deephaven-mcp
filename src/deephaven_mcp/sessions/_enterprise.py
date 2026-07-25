@@ -52,8 +52,9 @@ __all__ = [
 
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from deephaven_mcp._names import validate_resource_name
 from deephaven_mcp._pydantic import (
     RedactableSchema,
     StrictSchema,
@@ -171,6 +172,22 @@ class EnterpriseSystemConfig(RedactableSchema):
     """Optional ``session_creation`` block. ``None`` means MCP cannot
     create new workers on this system; only pre-existing PQs are
     discoverable."""
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        """Reject names that can't round-trip through a system reference.
+
+        The enterprise system name is embedded in the qualified
+        session id and used as the filename stem, so it must conform
+        to the resource-name character class (ASCII alphanumerics plus
+        ``_`` and ``-``; starting alphanumeric; non-empty; no dots).
+        Catches bad filename stems at config-load time before they
+        reach the registry, matching
+        :class:`~deephaven_mcp.sessions.CommunitySessionConfig`.
+        """
+        validate_resource_name(value, field="name")
+        return value
 
     @model_validator(mode="before")
     @classmethod

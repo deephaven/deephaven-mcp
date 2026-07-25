@@ -122,11 +122,14 @@ def _store_from_spec(spec: RuntimeSpec) -> ConfigStore:
         ConfigStore: Bound to the explicit ``--config-dir`` override
             when given, otherwise the platform default
             (``$DH_AI_DATA_DIR/config`` or the user-data root's
-            ``config`` subdirectory). Read :attr:`ConfigStore.config_dir`
-            when a verb needs the raw directory (e.g. to enumerate a
-            :class:`ConfigSection`).
+            ``config`` subdirectory). The root is resolved to an
+            absolute path so every emitted ``config_dir`` / ``file``
+            payload honors its documented absolute-path contract even
+            when ``--config-dir`` was given relative. Read
+            :attr:`ConfigStore.config_dir` when a verb needs the raw
+            directory (e.g. to enumerate a :class:`ConfigSection`).
     """
-    return ConfigStore(resolve_config_dir(spec.config_dir_override))
+    return ConfigStore(resolve_config_dir(spec.config_dir_override).resolve())
 
 
 def _map_config_error(exc: ConfigurationError) -> CliError:
@@ -1919,6 +1922,7 @@ async def config_session_add(
             ErrorCode.NOT_FOUND,
             ErrorCode.CONFIG_PATH_INVALID,
             ErrorCode.MISSING_REQUIRED_OPTION,
+            ErrorCode.OPERATION_CANCELED,
         ),
     ),
     needs_runtime=False,
@@ -2397,6 +2401,7 @@ async def config_system_add(
             ErrorCode.NOT_FOUND,
             ErrorCode.CONFIG_PATH_INVALID,
             ErrorCode.MISSING_REQUIRED_OPTION,
+            ErrorCode.OPERATION_CANCELED,
         ),
     ),
     needs_runtime=False,

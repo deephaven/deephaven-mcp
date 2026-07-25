@@ -31,7 +31,7 @@ from typing import Final
 from deephaven_mcp._exceptions import InvalidSessionNameError
 
 _RESOURCE_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z"
 )
 """Regex defining the resource-name rule.
 

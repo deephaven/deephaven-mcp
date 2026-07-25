@@ -251,6 +251,16 @@ class ErrorCode(StrEnum):
             "with flags) instead."
         ),
     )
+    OPERATION_CANCELED = (
+        "operation_canceled",
+        (
+            "The operator answered no to an interactive confirmation "
+            "prompt, so a destructive action was not performed. A "
+            "deliberate decline, distinct from a Ctrl-C interruption "
+            "(which exits 130): scripts can rely on exit code 2 with "
+            "this code to tell refusal from signal-style cancellation."
+        ),
+    )
     INTERNAL_ERROR = (
         "internal_error",
         "An unexpected internal failure not attributable to a specific subsystem.",

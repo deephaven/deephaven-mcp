@@ -16,7 +16,6 @@ Covers:
 
 from __future__ import annotations
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -197,8 +196,10 @@ def test_require_confirmation_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> N
     _allow_prompt(monkeypatch)
     runner = CliRunner()
     with runner.isolation(input="n\n"):
-        with pytest.raises(click.exceptions.Abort):
+        with pytest.raises(CliError) as exc:
             require_confirmation("Delete?", yes=False, no_input=False)
+    assert exc.value.code is ErrorCode.OPERATION_CANCELED
+    assert exc.value.exit_code == 2
 
 
 # ---------------------------------------------------------------------------

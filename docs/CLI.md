@@ -891,6 +891,7 @@ registry programmatically via `dhcli agents errors` (or the
 | `not_found`                   | The named configuration entity or file does not exist, or the addressed field has no value set. |
 | `config_not_rewritable`       | `config set`/`unset` refused to touch a file that uses JSON5-only syntax (comments, trailing commas) a programmatic rewrite would destroy; edit the file directly, or with `dhcli config edit`. |
 | `no_tty`                      | The command is interactive-only (e.g. `config edit`, `config init`) but stdin is not a TTY or `--no-input` was given; use the non-interactive equivalents. |
+| `operation_canceled`         | The operator answered no to an interactive confirmation prompt, so a destructive action was not performed. A deliberate decline (exit `2`), distinct from a Ctrl-C interruption (exit `130`). |
 | `internal_error`              | An unexpected internal failure not attributable to a specific subsystem. |
 
 ## Troubleshooting

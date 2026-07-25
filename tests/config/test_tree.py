@@ -491,6 +491,27 @@ async def test_enterprise_private_key_not_utf8(config_dir: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_enterprise_dotted_filename_stem_rejected(config_dir: Path) -> None:
+    """A dotted stem (e.g. prod.east.json) is not a valid system name."""
+    systems_dir = _make_dir(config_dir / "enterprise" / "systems")
+    _write_json(
+        systems_dir / "prod.east.json",
+        {
+            "connection_json_url": "https://x/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": "u",
+                    "password": "p",
+                }
+            },
+        },
+    )
+    with pytest.raises(ConfigurationError, match="name"):
+        await _load(config_dir)
+
+
+@pytest.mark.asyncio
 async def test_enterprise_filename_must_match_system_name(config_dir: Path) -> None:
     systems_dir = _make_dir(config_dir / "enterprise" / "systems")
     _write_json(

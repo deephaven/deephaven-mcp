@@ -1077,6 +1077,19 @@ def test_files_lists_unaddressable_filename_as_invalid(tmp_path: Path) -> None:
     assert _entry(payload, "cli")["exists"] is False
 
 
+def test_files_relative_config_dir_emits_absolute_paths() -> None:
+    """A relative --config-dir is normalized so payload paths stay absolute."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli, ["--config-dir", "reldir", "-o", "json", "config", "files"]
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+    assert Path(payload["config_dir"]).is_absolute()
+    assert all(Path(f["file"]).is_absolute() for f in payload["files"])
+
+
 def test_files_works_without_valid_tree(tmp_path: Path) -> None:
     """The verb is needs_runtime=False: it lists the layout without
     performing the full tree load, so even a broken tree cannot block it."""
@@ -1503,7 +1516,10 @@ def test_session_remove_interactive_decline_aborts(
     _add(tmp_path, "add", "s1", "--auth", "anonymous", "--no-input")
     _enable_prompts(monkeypatch)
     result = _add(tmp_path, "remove", "s1", input="n\n")
-    assert result.exit_code != 0
+    assert result.exit_code == 2
+    assert _session_file(tmp_path, "s1").exists()
+    result = _add(tmp_path, "remove", "s1", input="n\n", standalone=False)
+    assert _error_code(result) == "operation_canceled"
     assert _session_file(tmp_path, "s1").exists()
 
 
@@ -1836,7 +1852,10 @@ def test_system_remove_interactive_decline_aborts(
     _add_password(tmp_path)
     _enable_prompts(monkeypatch)
     result = _system(tmp_path, "remove", "prod", input="n\n")
-    assert result.exit_code != 0
+    assert result.exit_code == 2
+    assert _system_file(tmp_path, "prod").exists()
+    result = _system(tmp_path, "remove", "prod", input="n\n", standalone=False)
+    assert _error_code(result) == "operation_canceled"
     assert _system_file(tmp_path, "prod").exists()
 
 
