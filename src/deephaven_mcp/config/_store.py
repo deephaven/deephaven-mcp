@@ -357,23 +357,6 @@ class ConfigStore:
         """Return ``location``'s absolute file path under :attr:`config_dir`."""
         return self._config_dir / location.relative_file_path
 
-    def ensure_parent_dirs(self, file_path: Path) -> None:
-        """Create ``file_path``'s parent directories under :attr:`config_dir` at 0o700.
-
-        Every directory level from :attr:`config_dir` down to
-        ``file_path``'s parent is created when absent and, when newly
-        created, tightened to owner-only mode. Exposed so callers that
-        place an auxiliary file in the configuration directory (e.g. the
-        CLI's advisory lock file) create the directory with the same
-        private permissions the write path uses, rather than letting a
-        looser default mode leak in on a fresh machine.
-
-        Args:
-            file_path (Path): A path under :attr:`config_dir` whose
-                parent directories should exist and be private.
-        """
-        _ensure_private_parents(self._config_dir, file_path)
-
     def read(self, location: ConfigFieldLocation) -> RawConfigFile:
         """Read and parse ``location``'s file without template expansion.
 

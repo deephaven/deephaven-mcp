@@ -150,24 +150,40 @@ def _config_write_lock(ctx: click.Context) -> Iterator[None]:
     so the lock spans the whole transaction — existence check, prompt,
     validation, and commit — closing the check-then-act race in which
     two concurrent invocations both observe an absent file and then
-    both write it. The lock file lives at ``<config_dir>/.dhcli.lock``;
-    its parent directory is created at owner-only mode first so a fresh
-    machine does not get a looser-permissioned configuration directory.
+    both write it. The lock file lives at ``<config_dir>/.dhcli.lock``.
+
+    When the configuration directory does not exist yet, no lock is
+    taken: there is no on-disk state to serialize against (the first
+    write creates the directory atomically), and creating the directory
+    solely to place a lock file would leave an empty directory and lock
+    file behind for a command that then fails before writing. Once the
+    directory exists, every mutating verb locks normally.
+
+    The lock file is created at owner-only mode (``0o600``) before
+    :class:`AdvisoryFileLock` opens it: the configuration directory
+    permission audit rejects any group/other-accessible file, and
+    ``open('ab+')`` would otherwise create it at the umask default
+    (commonly ``0o644``).
 
     Args:
         ctx (click.Context): The verb's click context, used to resolve
             the configuration directory from the per-invocation spec.
 
     Yields:
-        None: Control returns to the command body with the lock held.
+        None: Control returns to the command body, with the lock held
+            when the configuration directory already exists.
 
     Raises:
         CliError: With :attr:`ErrorCode.CONFIG_LOCKED` when another
             process holds the lock past the acquisition timeout.
     """
-    store = _store_from_spec(_authoring_spec(ctx))
-    lock_path = store.config_dir / _LOCK_FILENAME
-    store.ensure_parent_dirs(lock_path)
+    config_dir = _store_from_spec(_authoring_spec(ctx)).config_dir
+    if not config_dir.exists():
+        yield
+        return
+    lock_path = config_dir / _LOCK_FILENAME
+    lock_path.touch(mode=0o600, exist_ok=True)
+    lock_path.chmod(0o600)
     try:
         with AdvisoryFileLock(lock_path):
             yield

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1091,9 +1092,30 @@ def test_files_relative_config_dir_emits_absolute_paths() -> None:
 
 
 def test_mutating_verb_creates_and_holds_lock_file(tmp_path: Path) -> None:
-    """A successful authoring verb writes through the advisory lock file."""
+    """A successful verb locks when the config dir already exists.
+
+    ``tmp_path`` exists, so the write serializes on the advisory lock,
+    which is created at owner-only mode so it passes the config-dir
+    permission audit.
+    """
     _run(tmp_path, "set", "cli.output.format=json", "--no-input")
-    assert (tmp_path / ".dhcli.lock").exists()
+    lock_path = tmp_path / ".dhcli.lock"
+    assert lock_path.exists()
+    assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+
+
+def test_mutating_verb_skips_lock_when_config_dir_absent(tmp_path: Path) -> None:
+    """A first write to an absent config dir takes no lock and leaves none.
+
+    Regression: locking eagerly created the directory (and lock file)
+    even for a command that then failed before writing; skipping the
+    lock when there is no directory to serialize against keeps a fresh
+    machine's failed authoring commands from leaving state behind.
+    """
+    fresh = tmp_path / "nope"  # deliberately not created
+    _run(fresh, "set", "cli.output.format=json", "--no-input")
+    assert fresh.is_dir()
+    assert not (fresh / ".dhcli.lock").exists()
 
 
 def test_mutating_verb_fails_config_locked_when_lock_held(
