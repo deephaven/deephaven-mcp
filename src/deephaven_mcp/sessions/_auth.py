@@ -29,6 +29,4 @@ class AuthConfig(RedactableSchema):
     """Validated ``auth`` block of a session or system declaration."""
 
     credentials: CredentialsUnion
-    """Outbound bearer credentials as a discriminated
-    :class:`~deephaven_mcp.auth.credentials.CredentialsUnion`. Hands
-    directly to the client factories' ``from_credentials`` methods."""
+    """How to authenticate the outbound connection to the target server."""

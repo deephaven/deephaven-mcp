@@ -259,7 +259,7 @@ def test_config_validate_help_describes_pre_body_validation() -> None:
     from deephaven_mcp.cli._commands.config import config as config_group
 
     help_text = config_group.commands["validate"].help or ""
-    assert "before every command body" in help_text
+    assert "before every runtime-dependent command body" in help_text
     assert "re-load" not in help_text.lower()
 
 
@@ -1088,6 +1088,44 @@ def test_files_relative_config_dir_emits_absolute_paths() -> None:
         payload = json.loads(result.stdout)
     assert Path(payload["config_dir"]).is_absolute()
     assert all(Path(f["file"]).is_absolute() for f in payload["files"])
+
+
+def test_mutating_verb_creates_and_holds_lock_file(tmp_path: Path) -> None:
+    """A successful authoring verb writes through the advisory lock file."""
+    _run(tmp_path, "set", "cli.output.format=json", "--no-input")
+    assert (tmp_path / ".dhcli.lock").exists()
+
+
+def test_mutating_verb_fails_config_locked_when_lock_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A concurrently held config lock makes an authoring verb fail fast.
+
+    Regression: the check-then-act race is closed by serializing every
+    mutating verb on a per-directory advisory lock; when another holder
+    has it, the verb surfaces ``config_locked`` rather than racing.
+    """
+    from deephaven_mcp._platform.fsutil import AdvisoryFileLock
+    from deephaven_mcp.cli._commands import config as config_mod
+
+    # Shorten the acquire timeout so the test does not wait the 60s
+    # default while the lock is (deliberately) held below.
+    real_lock = AdvisoryFileLock
+
+    def _fast_lock(path: Path) -> AdvisoryFileLock:
+        return real_lock(path, timeout_seconds=0.2, poll_interval_seconds=0.05)
+
+    monkeypatch.setattr(config_mod, "AdvisoryFileLock", _fast_lock)
+
+    # The command resolves its config dir with .resolve(); hold the lock
+    # at the same resolved path so the two contend on one inode.
+    lock_path = tmp_path.resolve() / ".dhcli.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with real_lock(lock_path):
+        result = _run(
+            tmp_path, "set", "cli.output.format=json", "--no-input", standalone=False
+        )
+    assert _error_code(result) == "config_locked"
 
 
 def test_files_works_without_valid_tree(tmp_path: Path) -> None:

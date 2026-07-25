@@ -493,6 +493,24 @@ def test_lenient_syntax_error_still_raises():
         expand_tree_lenient({"x": "${vault:secret}"}, source="t.json")
 
 
+def test_syntax_error_after_unresolvable_still_raises(monkeypatch):
+    """A malformed placeholder is fatal even when an earlier one is unresolvable.
+
+    Regression: resolution stops at the first failure, so without an
+    up-front syntax pass the trailing ``${vault:...}`` would never be
+    validated and a malformed template could be persisted.
+    """
+    monkeypatch.delenv("DH_MISSING", raising=False)
+    with pytest.raises(ConfigurationError, match="unknown placeholder kind"):
+        expand_string("${env:DH_MISSING}${vault:secret}", source="t.json", path="x")
+
+
+def test_lenient_syntax_error_after_unresolvable_still_raises(monkeypatch):
+    monkeypatch.delenv("DH_MISSING", raising=False)
+    with pytest.raises(ConfigurationError, match="unknown placeholder kind"):
+        expand_tree_lenient({"x": "${env:DH_MISSING}${vault:secret}"}, source="t.json")
+
+
 def test_lenient_does_not_mutate_input(monkeypatch):
     monkeypatch.delenv("DH_MISSING", raising=False)
     original = {"a": "${env:DH_MISSING}", "b": [1, "${env:DH_MISSING}"]}

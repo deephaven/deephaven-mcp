@@ -185,6 +185,57 @@ attacker-pinned files).
 """
 
 
+def _validate_placeholder_syntax(
+    match: re.Match[str], *, source: str, path: str
+) -> None:
+    """Raise :class:`ConfigurationError` when one placeholder is malformed.
+
+    Checks only *syntax* (kind, separator, argument shape); performs no
+    resolution and no I/O. Sole source of truth for the placeholder
+    grammar, run over every match before any resolution so a malformed
+    placeholder is always fatal — even in lenient mode and even when an
+    earlier placeholder in the same string is unresolvable.
+
+    Args:
+        match (re.Match[str]): One ``_PLACEHOLDER_RE`` match.
+        source (str): Human-readable label for the originating file.
+        path (str): Dotted JSON-path to the value, for error messages.
+
+    Raises:
+        ConfigurationError: When the placeholder has no kind separator,
+            an unknown kind, an empty env-var name, an empty file path,
+            or a ``:-`` fallback on a ``file`` placeholder.
+    """
+    body = match.group(1)
+    kind, sep, argument = body.partition(":")
+    if not sep:
+        raise ConfigurationError(
+            f"In {source} at {path}: malformed placeholder "
+            f"{match.group(0)!r}: expected '${{env:...}}' or '${{file:...}}'"
+        )
+    if kind == "env":
+        if not argument.partition(":-")[0]:
+            raise ConfigurationError(
+                f"In {source} at {path}: empty env-var name in "
+                f"'${{env:{argument}}}'"
+            )
+    elif kind == "file":
+        if not argument:
+            raise ConfigurationError(
+                f"In {source} at {path}: empty file path in '${{file:}}'"
+            )
+        if ":-" in argument:
+            raise ConfigurationError(
+                f"In {source} at {path}: '${{file:...}}' does not support "
+                f"':-default' fallback syntax; file paths are always required"
+            )
+    else:
+        raise ConfigurationError(
+            f"In {source} at {path}: unknown placeholder kind {kind!r} in "
+            f"{match.group(0)!r}; expected 'env' or 'file'"
+        )
+
+
 def expand_string(
     template: str,
     *,
@@ -224,27 +275,19 @@ def expand_string(
             not UTF-8, or exceeds :data:`_MAX_FILE_TEMPLATE_BYTES`.
             A subclass of :class:`ConfigurationError`.
     """
+    # Validate every placeholder's syntax before resolving any, so a
+    # malformed placeholder is fatal even when an earlier one is
+    # unresolvable (lenient mode stops resolving at the first failure).
+    for match in _PLACEHOLDER_RE.finditer(template):
+        _validate_placeholder_syntax(match, source=source, path=path)
 
     def _replace(match: re.Match[str]) -> str:
-        body = match.group(1)
-        kind, sep, argument = body.partition(":")
-        if not sep:
-            # No colon at all => bare ``${something}`` with no kind separator.
-            raise ConfigurationError(
-                f"In {source} at {path}: malformed placeholder "
-                f"{match.group(0)!r}: expected '${{env:...}}' or "
-                f"'${{file:...}}'"
-            )
+        # Syntax (kind, separator, argument shape) is already validated
+        # above, so ``kind`` is guaranteed to be 'env' or 'file' here.
+        kind, _sep, argument = match.group(1).partition(":")
         if kind == "env":
             return _resolve_env(argument, source=source, path=path)
-        if kind == "file":
-            return _resolve_file(
-                argument, source=source, path=path, config_dir=config_dir
-            )
-        raise ConfigurationError(
-            f"In {source} at {path}: unknown placeholder kind {kind!r} in "
-            f"{match.group(0)!r}; expected 'env' or 'file'"
-        )
+        return _resolve_file(argument, source=source, path=path, config_dir=config_dir)
 
     return _PLACEHOLDER_RE.sub(_replace, template)
 
@@ -434,12 +477,12 @@ def _walk_tree(
 
 
 def _resolve_env(argument: str, *, source: str, path: str) -> str:
-    """Resolve a single ``${env:...}`` placeholder argument."""
+    """Resolve a single ``${env:...}`` placeholder argument.
+
+    Assumes ``argument`` has already passed
+    :func:`_validate_placeholder_syntax` (non-empty env-var name).
+    """
     name, sep, default = argument.partition(":-")
-    if not name:
-        raise ConfigurationError(
-            f"In {source} at {path}: empty env-var name in " f"'${{env:{argument}}}'"
-        )
     value = os.environ.get(name, "")
     if value:
         return value
@@ -465,20 +508,11 @@ def _resolve_file(
     (otherwise against the process working directory); an absolute
     ``argument`` is used as-is. Symlinks are followed (common for
     system CA bundles such as ``/etc/ssl/cert.pem``).
-    """
-    if not argument:
-        raise ConfigurationError(
-            f"In {source} at {path}: empty file path in '${{file:}}'"
-        )
-    if ":-" in argument:
-        # File form has no fallback. Reject explicitly to avoid the
-        # silent-acceptance footgun of treating ``:-default`` as part of
-        # the path.
-        raise ConfigurationError(
-            f"In {source} at {path}: '${{file:...}}' does not support "
-            f"':-default' fallback syntax; file paths are always required"
-        )
 
+    Assumes ``argument`` has already passed
+    :func:`_validate_placeholder_syntax` (non-empty path, no ``:-``
+    fallback).
+    """
     file_path = Path(argument).expanduser()
     if config_dir is not None and not file_path.is_absolute():
         file_path = config_dir / file_path

@@ -412,10 +412,12 @@ def test_write_all_rollback_restores_existing_file_on_partial_failure(
     original = {"output": {"format": "human"}}
     store.write(_CLI, original)
 
-    # Commit order: CLI's backup rename (#1), CLI's new-content rename
-    # (#2), then SESSION's (new file) single rename (#3). Fail on #3
-    # so CLI is already committed when the batch fails.
-    _counting_replace(monkeypatch, fail_on={3})
+    # Commit order (the backup is a copy, not an os.replace, so it is
+    # not counted): CLI's new-content rename (#1), then SESSION's (new
+    # file) single rename (#2). Fail on #2 so CLI is already committed
+    # when the batch fails; the rollback's restore of CLI's backup is
+    # os.replace #3 and must succeed.
+    _counting_replace(monkeypatch, fail_on={2})
     with pytest.raises(ConfigurationError, match="Failed to write"):
         store.write_all(
             [(_CLI, {"output": {"format": "json"}}), (_SESSION, _session_payload())]
@@ -453,12 +455,13 @@ def test_write_all_rollback_double_failure_names_inconsistent_file(
     original = {"output": {"format": "human"}}
     store.write(_CLI, original)
 
-    # #1, #2 commit CLI's new content (backup, then place). #3 fails
-    # committing SERVER (new file), triggering rollback. #4 is the
-    # rollback's attempt to restore CLI's backup — also fails, so CLI
-    # is left holding its *new* content with the original preserved
-    # only in the (now stuck) backup file.
-    _counting_replace(monkeypatch, fail_on={3, 4})
+    # The backup is a copy, not an os.replace, so it is not counted.
+    # #1 places CLI's new content. #2 fails committing SERVER (new
+    # file), triggering rollback. #3 is the rollback's attempt to
+    # restore CLI's backup — also fails, so CLI is left holding its
+    # *new* content with the original preserved only in the (now stuck)
+    # backup file.
+    _counting_replace(monkeypatch, fail_on={2, 3})
     new_data = {"output": {"format": "json"}}
     with pytest.raises(
         ConfigurationError, match="could not be restored from backup"
@@ -471,6 +474,37 @@ def test_write_all_rollback_double_failure_names_inconsistent_file(
     assert len(backups) == 1
     assert json.loads(backups[0].read_text()) == original
     assert list(config_dir.rglob("*.tmp")) == []
+
+
+def test_write_overwrite_keeps_target_present_during_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overwriting an existing file never leaves a missing-file window.
+
+    Regression: the backup is a copy, not a move, so the live target is
+    still on disk at the instant os.replace atomically overwrites it. A
+    concurrent loader therefore observes either the old content or the
+    new, never a missing file.
+    """
+    config_dir = tmp_path / "config"
+    store = ConfigStore(config_dir)
+    store.write(_CLI, {"output": {"format": "human"}})
+    final = config_dir / "cli.json"
+
+    real_replace = _store.os.replace
+    seen: dict[str, bool] = {}
+
+    def _checking_replace(src: object, dst: object) -> None:
+        if Path(dst) == final:
+            seen["present_at_replace"] = final.exists()
+        real_replace(src, dst)
+
+    monkeypatch.setattr(_store.os, "replace", _checking_replace)
+    store.write(_CLI, {"output": {"format": "json"}})
+
+    assert seen["present_at_replace"] is True
+    assert json.loads(final.read_text()) == {"output": {"format": "json"}}
+    assert list(config_dir.rglob("*.bak")) == []
 
 
 def test_write_stage_failure_cleans_temp(

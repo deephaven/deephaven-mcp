@@ -26,6 +26,7 @@ __all__ = [
 import json
 import logging
 import os
+import shutil
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -150,7 +151,7 @@ class _CommittedFile:
     """The committed destination path."""
 
     backup_path: Path | None
-    """Same-directory rename of the pre-existing content, or ``None``
+    """Same-directory copy of the pre-existing content, or ``None``
     when :attr:`final_path` did not exist before this batch."""
 
 
@@ -202,7 +203,7 @@ def _reserve_backup_path(final_path: Path) -> Path:
 def _rollback_commits(committed: list[_CommittedFile]) -> list[_CommittedFile]:
     """Undo already-committed renames in ``committed``, most-recent-first.
 
-    An entry with a backup held pre-existing content that was moved
+    An entry with a backup held pre-existing content that was copied
     aside before the new content was renamed in (undo: rename the
     backup back over the destination); an entry without one did not
     exist before this batch (undo: delete it).
@@ -269,9 +270,13 @@ def _batch_failure_message(exc: OSError, stuck: list[_CommittedFile]) -> str:
 def _commit_staged(staged: list[_StagedFile]) -> None:
     """Commit staged files, rolling back on failure.
 
-    Each entry's pre-existing target (if any) is backed up via a
-    same-directory rename before the new content is renamed in. On
-    failure, every already-committed entry is rolled back via
+    Each entry's pre-existing target (if any) is *copied* aside to a
+    same-directory backup — leaving the target in place — and then the
+    staged file is renamed directly over it with :func:`os.replace`.
+    Because the target is never moved out of the way first, it is
+    always present on disk: a concurrent reader sees either the old
+    content or (atomically) the new, never a missing file. On failure,
+    every already-committed entry is rolled back via
     :func:`_rollback_commits`; on full success, now-unneeded backups
     are removed.
 
@@ -279,8 +284,8 @@ def _commit_staged(staged: list[_StagedFile]) -> None:
         staged (list[_StagedFile]): The files to commit.
 
     Raises:
-        ConfigurationError: When any rename fails. The message names
-            any file(s) left inconsistent if rollback itself also
+        ConfigurationError: When any copy or rename fails. The message
+            names any file(s) left inconsistent if rollback itself also
             failed.
     """
     committed: list[_CommittedFile] = []
@@ -289,10 +294,12 @@ def _commit_staged(staged: list[_StagedFile]) -> None:
             backup_path: Path | None = None
             if item.final_path.exists():
                 backup_path = _reserve_backup_path(item.final_path)
-                os.replace(item.final_path, backup_path)
-                # Recorded before the content rename below: if that
-                # rename fails, rollback must already know to restore
-                # this backup.
+                # Copy (not move) so the target stays in place; the
+                # os.replace below then atomically overwrites it with no
+                # window in which the file is absent. Recorded before the
+                # replace: if that replace fails, rollback must already
+                # know to restore this backup.
+                shutil.copy2(item.final_path, backup_path)
                 committed.append(
                     _CommittedFile(final_path=item.final_path, backup_path=backup_path)
                 )
@@ -349,6 +356,23 @@ class ConfigStore:
     def path_of(self, location: ConfigFieldLocation) -> Path:
         """Return ``location``'s absolute file path under :attr:`config_dir`."""
         return self._config_dir / location.relative_file_path
+
+    def ensure_parent_dirs(self, file_path: Path) -> None:
+        """Create ``file_path``'s parent directories under :attr:`config_dir` at 0o700.
+
+        Every directory level from :attr:`config_dir` down to
+        ``file_path``'s parent is created when absent and, when newly
+        created, tightened to owner-only mode. Exposed so callers that
+        place an auxiliary file in the configuration directory (e.g. the
+        CLI's advisory lock file) create the directory with the same
+        private permissions the write path uses, rather than letting a
+        looser default mode leak in on a fresh machine.
+
+        Args:
+            file_path (Path): A path under :attr:`config_dir` whose
+                parent directories should exist and be private.
+        """
+        _ensure_private_parents(self._config_dir, file_path)
 
     def read(self, location: ConfigFieldLocation) -> RawConfigFile:
         """Read and parse ``location``'s file without template expansion.
@@ -487,20 +511,23 @@ class ConfigStore:
 
         All entries are schema-validated before any file is touched;
         the serialized contents are then staged as same-directory temp
-        files (mode ``0o600``). Each is committed by backing up any
-        pre-existing target with a same-directory rename before
-        renaming the new content in. If a later entry in the batch
-        fails to commit, every already-committed entry is rolled back
-        by reversing those renames, restoring the configuration
-        directory to its pre-call state. Because both the commit and
-        the rollback are same-directory renames of content already on
-        disk — never a fresh write — rollback shares essentially none
-        of the failure modes (e.g. a full disk) that could cause the
-        original commit to fail. In the extreme case where a rollback
-        rename itself fails, the pre-existing content is preserved on
-        disk at a reported backup path rather than lost, and the
-        raised error names exactly which file(s) are affected.
-        Leftover staging temp files are always removed.
+        files (mode ``0o600``). Each is committed by copying any
+        pre-existing target aside to a same-directory backup — leaving
+        the target in place — and then renaming the staged file
+        directly over it with an atomic :func:`os.replace`. The target
+        is therefore never absent: a concurrent loader observes either
+        the old content or the new, never a missing file. If a later
+        entry in the batch fails to commit, every already-committed
+        entry is rolled back by renaming its backup back over the
+        destination, restoring the configuration directory to its
+        pre-call state. Rollback is pure same-directory renames of
+        content already on disk — never a fresh write — so it shares
+        essentially none of the failure modes (e.g. a full disk) that
+        could cause the original commit to fail. In the extreme case
+        where a rollback rename itself fails, the pre-existing content
+        is preserved on disk at a reported backup path rather than
+        lost, and the raised error names exactly which file(s) are
+        affected. Leftover staging temp files are always removed.
 
         Args:
             entries (list[tuple[ConfigFieldLocation, dict[str, Any]]]):

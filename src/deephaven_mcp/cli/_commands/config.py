@@ -21,6 +21,8 @@ from __future__ import annotations
 __all__ = ["config"]
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, assert_never, get_args
 
@@ -30,8 +32,10 @@ from deephaven_mcp._exceptions import (
     ConfigurationError,
     ConfigurationFieldMissingError,
     ConfigurationPathError,
+    FileLockTimeoutError,
     InternalError,
 )
+from deephaven_mcp._platform.fsutil import AdvisoryFileLock
 from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._commands._wrapping import parse_key_value
@@ -130,6 +134,49 @@ def _store_from_spec(spec: RuntimeSpec) -> ConfigStore:
             directory (e.g. to enumerate a :class:`ConfigSection`).
     """
     return ConfigStore(resolve_config_dir(spec.config_dir_override).resolve())
+
+
+_LOCK_FILENAME = ".dhcli.lock"
+"""Name of the advisory write-lock file, held in the configuration
+directory for the duration of every mutating ``config`` verb."""
+
+
+@contextmanager
+def _config_write_lock(ctx: click.Context) -> Iterator[None]:
+    """Hold the configuration directory's advisory write lock.
+
+    Every mutating ``config`` verb enters this on ``ctx`` (via
+    :meth:`click.Context.with_resource`) before its first store access,
+    so the lock spans the whole transaction — existence check, prompt,
+    validation, and commit — closing the check-then-act race in which
+    two concurrent invocations both observe an absent file and then
+    both write it. The lock file lives at ``<config_dir>/.dhcli.lock``;
+    its parent directory is created at owner-only mode first so a fresh
+    machine does not get a looser-permissioned configuration directory.
+
+    Args:
+        ctx (click.Context): The verb's click context, used to resolve
+            the configuration directory from the per-invocation spec.
+
+    Yields:
+        None: Control returns to the command body with the lock held.
+
+    Raises:
+        CliError: With :attr:`ErrorCode.CONFIG_LOCKED` when another
+            process holds the lock past the acquisition timeout.
+    """
+    store = _store_from_spec(_authoring_spec(ctx))
+    lock_path = store.config_dir / _LOCK_FILENAME
+    store.ensure_parent_dirs(lock_path)
+    try:
+        with AdvisoryFileLock(lock_path):
+            yield
+    except FileLockTimeoutError as exc:
+        raise CliError(
+            f"Another process holds the configuration write lock "
+            f"({lock_path}); retry once it finishes.",
+            code=ErrorCode.CONFIG_LOCKED,
+        ) from exc
 
 
 def _map_config_error(exc: ConfigurationError) -> CliError:
@@ -517,14 +564,17 @@ async def config_show(runtime: Runtime, path: str | None) -> None:
     help_spec=HelpSpec(
         summary="Confirm the configuration is valid (exit 0 / 2).",
         description=(
-            "Validation runs before every command body (paths that print "
-            "without running a body, such as --help, --agents, and the "
-            "agents verbs, skip it), so a malformed file exits 2 with "
-            "config_invalid — and a valid tree that declares no systems "
-            "exits 2 with no_systems_configured — before this command "
-            "prints. This verb performs no extra work: when the load "
-            "succeeds it emits a CI-friendly 'valid: true' payload. Use "
-            "it as the explicit config check in CI pipelines."
+            "Validation runs before every runtime-dependent command body, "
+            "so a malformed file exits 2 with config_invalid — and a valid "
+            "tree that declares no systems exits 2 with "
+            "no_systems_configured — before this command prints. Paths that "
+            "print without running a body (--help, --agents, the agents "
+            "verbs) skip it, as do the offline config authoring/inspection "
+            "verbs (needs_runtime=False, e.g. get/set/files), which operate "
+            "on files directly and never trigger a full-tree load. This "
+            "verb performs no extra work: when the load succeeds it emits a "
+            "CI-friendly 'valid: true' payload. Use it as the explicit "
+            "config check in CI pipelines."
         ),
         output=_OUTPUT_VALIDATE,
         examples=("$ dhcli config validate",),
@@ -810,6 +860,7 @@ _OUTPUT_SET = OutputSpec(
             ErrorCode.NOT_FOUND,
             ErrorCode.CONFIG_INVALID,
             ErrorCode.CONFIG_NOT_REWRITABLE,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -819,6 +870,7 @@ _OUTPUT_SET = OutputSpec(
 @run_async
 async def config_set(ctx: click.Context, assignment: tuple[str, ...]) -> None:
     """Set one or more configuration fields."""
+    ctx.with_resource(_config_write_lock(ctx))
     spec = _authoring_spec(ctx)
     store = _store_from_spec(spec)
     groups: dict[
@@ -903,6 +955,7 @@ _OUTPUT_UNSET = OutputSpec(
             ErrorCode.NOT_FOUND,
             ErrorCode.CONFIG_INVALID,
             ErrorCode.CONFIG_NOT_REWRITABLE,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -912,6 +965,7 @@ _OUTPUT_UNSET = OutputSpec(
 @run_async
 async def config_unset(ctx: click.Context, path: tuple[str, ...]) -> None:
     """Remove one or more configuration fields, reverting to default."""
+    ctx.with_resource(_config_write_lock(ctx))
     spec = _authoring_spec(ctx)
     store = _store_from_spec(spec)
     groups: dict[
@@ -1197,6 +1251,7 @@ def _open_editor(text: str) -> str | None:
             ErrorCode.NOT_FOUND,
             ErrorCode.CONFIG_INVALID,
             ErrorCode.NO_TTY,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -1214,6 +1269,7 @@ async def config_edit(ctx: click.Context, path: str) -> None:
             "for non-interactive field edits.",
             code=ErrorCode.NO_TTY,
         )
+    ctx.with_resource(_config_write_lock(ctx))
     store = _store_from_spec(spec)
     target = _resolve_field_target(path)
     if target.field_path:
@@ -1410,6 +1466,7 @@ _OUTPUT_INIT = OutputSpec(
             ErrorCode.ALREADY_EXISTS,
             ErrorCode.OPTION_NOT_APPLICABLE,
             ErrorCode.CONFIG_INVALID,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -1426,6 +1483,8 @@ async def config_init(ctx: click.Context) -> None:
             "system add' with flags for scripted setup.",
             code=ErrorCode.NO_TTY,
         )
+
+    ctx.with_resource(_config_write_lock(ctx))
 
     click.echo(
         "This wizard declares configuration files under the configuration "
@@ -1771,6 +1830,7 @@ async def _add_session_entity(
             ErrorCode.MISSING_REQUIRED_OPTION,
             ErrorCode.OPTION_NOT_APPLICABLE,
             ErrorCode.CONFIG_INVALID,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -1870,6 +1930,7 @@ async def config_session_add(
     auth_token: str | None,
 ) -> None:
     """Declare a new community session file."""
+    ctx.with_resource(_config_write_lock(ctx))
     payload = await _add_session_entity(
         ctx,
         name,
@@ -1923,6 +1984,8 @@ async def config_session_add(
             ErrorCode.CONFIG_PATH_INVALID,
             ErrorCode.MISSING_REQUIRED_OPTION,
             ErrorCode.OPERATION_CANCELED,
+            ErrorCode.CONFIG_INVALID,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -1938,6 +2001,7 @@ async def config_session_add(
 @run_async
 async def config_session_remove(ctx: click.Context, name: str, yes: bool) -> None:
     """Delete a declared community session file."""
+    ctx.with_resource(_config_write_lock(ctx))
     spec = _authoring_spec(ctx)
     store = _store_from_spec(spec)
     target = _resolve_entity(FieldPath(("community", "sessions", name)))
@@ -2261,6 +2325,7 @@ async def _add_system_entity(
             ErrorCode.MISSING_REQUIRED_OPTION,
             ErrorCode.OPTION_NOT_APPLICABLE,
             ErrorCode.CONFIG_INVALID,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -2351,6 +2416,7 @@ async def config_system_add(
     heap_gb: float | None,
 ) -> None:
     """Declare a new enterprise system file."""
+    ctx.with_resource(_config_write_lock(ctx))
     payload = await _add_system_entity(
         ctx,
         name,
@@ -2402,6 +2468,8 @@ async def config_system_add(
             ErrorCode.CONFIG_PATH_INVALID,
             ErrorCode.MISSING_REQUIRED_OPTION,
             ErrorCode.OPERATION_CANCELED,
+            ErrorCode.CONFIG_INVALID,
+            ErrorCode.CONFIG_LOCKED,
         ),
     ),
     needs_runtime=False,
@@ -2417,6 +2485,7 @@ async def config_system_add(
 @run_async
 async def config_system_remove(ctx: click.Context, name: str, yes: bool) -> None:
     """Delete a declared enterprise system file."""
+    ctx.with_resource(_config_write_lock(ctx))
     spec = _authoring_spec(ctx)
     store = _store_from_spec(spec)
     target = _resolve_entity(FieldPath(("enterprise", "systems", name)))

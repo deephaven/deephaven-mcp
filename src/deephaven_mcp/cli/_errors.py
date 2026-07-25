@@ -251,6 +251,17 @@ class ErrorCode(StrEnum):
             "with flags) instead."
         ),
     )
+    CONFIG_LOCKED = (
+        "config_locked",
+        (
+            "Another process holds the configuration write lock, so this "
+            "authoring command could not acquire it before timing out. The "
+            "'config' authoring verbs (add/set/unset/remove/edit/init) "
+            "serialize on a per-directory advisory lock to prevent "
+            "concurrent writers from clobbering each other; retry once the "
+            "other invocation finishes."
+        ),
+    )
     OPERATION_CANCELED = (
         "operation_canceled",
         (
