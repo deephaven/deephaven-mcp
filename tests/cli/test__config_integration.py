@@ -486,7 +486,9 @@ def test_authoring_error_paths(tmp_path: Path) -> None:
     assert _structured_error(result.stderr)["error_code"] == "config_path_invalid"
 
     # set refuses to rewrite a JSON5 file (comments would be destroyed).
-    cfg_dir.mkdir(mode=0o700)
+    # The earlier failing 'set' already created the private config dir
+    # (mutating verbs now always create + lock it), so tolerate it here.
+    cfg_dir.mkdir(mode=0o700, exist_ok=True)
     cli_json = cfg_dir / "cli.json"
     cli_json.write_text(
         '{\n  // hand-written comment\n  "output": {"format": "human"}\n}\n'
