@@ -35,6 +35,7 @@ from deephaven_mcp._exceptions import (
     FileLockTimeoutError,
     InternalError,
 )
+from deephaven_mcp._platform.dir_permissions import harden_private_dir
 from deephaven_mcp._platform.fsutil import AdvisoryFileLock
 from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.cli._async import run_async
@@ -152,12 +153,13 @@ def _config_write_lock(ctx: click.Context) -> Iterator[None]:
     two concurrent invocations both observe an absent file and then
     both write it. The lock file lives at ``<config_dir>/.dhcli.lock``.
 
-    When the configuration directory does not exist yet, no lock is
-    taken: there is no on-disk state to serialize against (the first
-    write creates the directory atomically), and creating the directory
-    solely to place a lock file would leave an empty directory and lock
-    file behind for a command that then fails before writing. Once the
-    directory exists, every mutating verb locks normally.
+    The private configuration directory is created (``0o700``) if
+    absent, then the lock is always held -- the first write is
+    serialized like any other, closing the greenfield race in which two
+    concurrent first-time writers both observe an absent directory and
+    then overwrite the same file. A command that fails before writing
+    may leave an empty directory and a ``.dhcli.lock`` file behind; that
+    artifact is preferred over a silent lost update.
 
     The lock file is created at owner-only mode (``0o600``) before
     :class:`AdvisoryFileLock` opens it: the configuration directory
@@ -170,17 +172,19 @@ def _config_write_lock(ctx: click.Context) -> Iterator[None]:
             the configuration directory from the per-invocation spec.
 
     Yields:
-        None: Control returns to the command body, with the lock held
-            when the configuration directory already exists.
+        None: Control returns to the command body with the lock held.
 
     Raises:
         CliError: With :attr:`ErrorCode.CONFIG_LOCKED` when another
             process holds the lock past the acquisition timeout.
     """
     config_dir = _store_from_spec(_authoring_spec(ctx)).config_dir
-    if not config_dir.exists():
-        yield
-        return
+    # Create the private config dir (0o700) if absent so the first-ever
+    # write is serialized like any other; without it, two concurrent
+    # greenfield writers both skip the lock and can lose an update.
+    # Created at 0o700 explicitly (not via AdvisoryFileLock's
+    # default-mode mkdir) so the permission audit accepts it.
+    harden_private_dir(config_dir)
     lock_path = config_dir / _LOCK_FILENAME
     lock_path.touch(mode=0o600, exist_ok=True)
     lock_path.chmod(0o600)

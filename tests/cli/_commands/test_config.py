@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1104,18 +1105,26 @@ def test_mutating_verb_creates_and_holds_lock_file(tmp_path: Path) -> None:
     assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
 
 
-def test_mutating_verb_skips_lock_when_config_dir_absent(tmp_path: Path) -> None:
-    """A first write to an absent config dir takes no lock and leaves none.
+def test_mutating_verb_creates_dir_and_locks_when_config_dir_absent(
+    tmp_path: Path,
+) -> None:
+    """A first write to an absent config dir creates it private and locks.
 
-    Regression: locking eagerly created the directory (and lock file)
-    even for a command that then failed before writing; skipping the
-    lock when there is no directory to serialize against keeps a fresh
-    machine's failed authoring commands from leaving state behind.
+    Regression: skipping the lock when the directory was absent left the
+    greenfield check-then-act path unserialized, so two concurrent
+    first-time writers could both overwrite the same file and lose an
+    update. The directory is now created at ``0o700`` and the lock is
+    always held; the resulting empty-dir/``.dhcli.lock`` artifact after a
+    failed first command is preferred over silent data loss.
     """
     fresh = tmp_path / "nope"  # deliberately not created
     _run(fresh, "set", "cli.output.format=json", "--no-input")
     assert fresh.is_dir()
-    assert not (fresh / ".dhcli.lock").exists()
+    lock_path = fresh / ".dhcli.lock"
+    assert lock_path.exists()
+    if os.name == "posix":
+        assert stat.S_IMODE(fresh.stat().st_mode) == 0o700
+        assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
 
 
 def test_mutating_verb_fails_config_locked_when_lock_held(
