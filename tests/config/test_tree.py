@@ -19,7 +19,10 @@ from unittest.mock import patch
 
 import pytest
 
-from deephaven_mcp._exceptions import ConfigurationError, InternalError
+from deephaven_mcp._exceptions import (
+    ConfigurationError,
+    InternalError,
+)
 from deephaven_mcp._taxonomy import SystemRef, SystemType
 from deephaven_mcp.auth.credentials import (
     PasswordCredentials,
@@ -103,10 +106,14 @@ def test_manager_config_dir_default_when_env_unset() -> None:
 
 
 @pytest.mark.asyncio
-async def test_load_empty_config_dir_fails(config_dir: Path) -> None:
+async def test_load_empty_config_dir_loads_zero_system_tree(config_dir: Path) -> None:
+    """A zero-system tree loads cleanly; the invariant is a consumer concern."""
     manager = _make_manager(config_dir)
-    with pytest.raises(ConfigurationError, match="No systems configured"):
-        await manager.initialize()
+    cfg = await manager.initialize()
+    assert cfg.community is None
+    assert cfg.enterprise is None
+    assert cfg.has_usable_system() is False
+    assert cfg.list_systems() == []
 
 
 @pytest.mark.asyncio
@@ -127,6 +134,8 @@ async def test_config_before_initialize_raises(config_dir: Path) -> None:
 async def test_config_after_failed_initialize_still_raises(
     config_dir: Path,
 ) -> None:
+    sessions_dir = _make_dir(config_dir / "community" / "sessions")
+    (sessions_dir / "bad.json").write_text("{ not valid json")
     manager = _make_manager(config_dir)
     with pytest.raises(ConfigurationError):
         await manager.initialize()
@@ -256,7 +265,10 @@ async def test_server_json_must_be_dict(config_dir: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_community_settings_only_no_sessions(config_dir: Path) -> None:
+async def test_community_settings_only_no_sessions_is_not_a_system(
+    config_dir: Path,
+) -> None:
+    """A settings-only file (no sessions, no session_creation) is not a system."""
     community_dir = _make_dir(config_dir / "community")
     _write_json(
         community_dir / "settings.json",
@@ -264,8 +276,30 @@ async def test_community_settings_only_no_sessions(config_dir: Path) -> None:
     )
     cfg = (await _load(config_dir)).config
     assert cfg.community is not None
+    assert cfg.has_usable_system() is False
+    assert cfg.list_systems() == []
+
+
+@pytest.mark.asyncio
+async def test_community_settings_with_session_creation_counts_as_system(
+    config_dir: Path,
+) -> None:
+    community_dir = _make_dir(config_dir / "community")
+    _write_json(
+        community_dir / "settings.json",
+        {
+            "session_creation": {"max_concurrent_sessions": 2},
+            "timeouts": {"eviction": {"session_idle_timeout_seconds": 30}},
+        },
+    )
+    cfg = (await _load(config_dir)).config
+    assert cfg.community is not None
     assert cfg.community.sessions == {}
     assert cfg.community.settings.timeouts.eviction.session_idle_timeout_seconds == 30.0
+    assert cfg.has_usable_system() is True
+    assert cfg.list_systems() == [
+        SystemRef(name="community", type=SystemType.COMMUNITY)
+    ]
 
 
 @pytest.mark.asyncio
@@ -289,6 +323,10 @@ async def test_community_sessions_only_no_settings(config_dir: Path) -> None:
     )
     assert cfg.community.settings.timeouts.eviction.sweep_interval_seconds == 60.0
     assert "alpha" in cfg.community.sessions
+    assert cfg.has_usable_system() is True
+    assert cfg.list_systems() == [
+        SystemRef(name="community", type=SystemType.COMMUNITY)
+    ]
 
 
 @pytest.mark.asyncio
@@ -332,6 +370,19 @@ async def test_community_settings_invalid_field(config_dir: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_enterprise_settings_only_no_systems_is_not_a_system(
+    config_dir: Path,
+) -> None:
+    """A settings-only enterprise section (no systems) is not a system."""
+    enterprise_dir = _make_dir(config_dir / "enterprise")
+    _write_json(enterprise_dir / "settings.json", {})
+    cfg = (await _load(config_dir)).config
+    assert cfg.enterprise is not None
+    assert cfg.has_usable_system() is False
+    assert cfg.list_systems() == []
+
+
+@pytest.mark.asyncio
 async def test_enterprise_password_with_literal(config_dir: Path) -> None:
     systems_dir = _make_dir(config_dir / "enterprise" / "systems")
     _write_json(
@@ -351,9 +402,9 @@ async def test_enterprise_password_with_literal(config_dir: Path) -> None:
     cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
     sys_cfg = cfg.enterprise.systems["prod"]
-    assert isinstance(sys_cfg.credentials, PasswordCredentials)
-    assert sys_cfg.credentials.username == "alice"
-    assert sys_cfg.credentials.password.get_secret_value() == "hunter2"
+    assert isinstance(sys_cfg.auth.credentials, PasswordCredentials)
+    assert sys_cfg.auth.credentials.username == "alice"
+    assert sys_cfg.auth.credentials.password.get_secret_value() == "hunter2"
 
 
 @pytest.mark.asyncio
@@ -379,7 +430,7 @@ async def test_enterprise_password_via_env_template(
     )
     cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
-    creds = cfg.enterprise.systems["prod"].credentials
+    creds = cfg.enterprise.systems["prod"].auth.credentials
     assert isinstance(creds, PasswordCredentials)
     assert creds.password.get_secret_value() == "secretpw"
 
@@ -408,7 +459,7 @@ async def test_enterprise_private_key_via_file_template(config_dir: Path) -> Non
     )
     cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
-    creds = cfg.enterprise.systems["prod"].credentials
+    creds = cfg.enterprise.systems["prod"].auth.credentials
     assert isinstance(creds, PrivateKeyCredentials)
     assert creds.key_text.get_secret_value() == key_text
 
@@ -454,6 +505,27 @@ async def test_enterprise_private_key_not_utf8(config_dir: Path) -> None:
         },
     )
     with pytest.raises(ConfigurationError, match="not valid UTF-8"):
+        await _load(config_dir)
+
+
+@pytest.mark.asyncio
+async def test_enterprise_dotted_filename_stem_rejected(config_dir: Path) -> None:
+    """A dotted stem (e.g. prod.east.json) is not a valid system name."""
+    systems_dir = _make_dir(config_dir / "enterprise" / "systems")
+    _write_json(
+        systems_dir / "prod.east.json",
+        {
+            "connection_json_url": "https://x/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": "u",
+                    "password": "p",
+                }
+            },
+        },
+    )
+    with pytest.raises(ConfigurationError, match="name"):
         await _load(config_dir)
 
 
@@ -761,6 +833,22 @@ async def test_enterprise_settings_json_loads_and_logs(
     """An ``enterprise/settings.json`` file is loaded and logged at INFO."""
     enterprise_dir = _make_dir(config_dir / "enterprise")
     _write_json(enterprise_dir / "settings.json", {})  # empty schema today
+    # A settings-only tree fails the no-systems check; declare one system.
+    systems_dir = _make_dir(enterprise_dir / "systems")
+    _write_json(
+        systems_dir / "prod.json",
+        {
+            "system_name": "prod",
+            "connection_json_url": "https://x/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": "alice",
+                    "password": "hunter2",
+                }
+            },
+        },
+    )
     with caplog.at_level("INFO", logger="deephaven_mcp.config.schema._enterprise"):
         cfg = (await _load(config_dir)).config
     assert cfg.enterprise is not None
@@ -828,10 +916,10 @@ async def test_examples_ai_config_loads_end_to_end(
     assert cfg.enterprise is not None
     assert set(cfg.enterprise.systems) == {"prod", "staging"}
     prod = cfg.enterprise.systems["prod"]
-    assert isinstance(prod.credentials, PasswordCredentials)
-    assert prod.credentials.password.get_secret_value() == "test-prod-pw"
+    assert isinstance(prod.auth.credentials, PasswordCredentials)
+    assert prod.auth.credentials.password.get_secret_value() == "test-prod-pw"
     staging = cfg.enterprise.systems["staging"]
-    assert isinstance(staging.credentials, PrivateKeyCredentials)
-    assert staging.credentials.key_text.get_secret_value().startswith(
+    assert isinstance(staging.auth.credentials, PrivateKeyCredentials)
+    assert staging.auth.credentials.key_text.get_secret_value().startswith(
         "-----BEGIN FAKE KEY-----"
     )

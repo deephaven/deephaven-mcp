@@ -56,6 +56,29 @@ project-private:
   resolving ``${env:VAR}`` / ``${env:VAR:-default}`` / ``${file:PATH}``
   inside a parsed JSON tree.
 
+Authoring tier
+--------------
+
+The write side of the package, consumed by the ``dhcli config``
+authoring commands (``cli/_commands/config.py``). Like the loading
+primitives above, these modules are intentionally project-private —
+importable across the project but not part of the package's exported
+surface:
+
+- :mod:`deephaven_mcp.config._field_path` —
+  :class:`~deephaven_mcp.config._field_path.FieldPath`, the dotted
+  logical-path type every other authoring module speaks.
+- :mod:`deephaven_mcp.config._file_kinds` — registry binding each of
+  the six configuration file kinds to its path prefix and schema.
+- :mod:`deephaven_mcp.config._logical_paths` — resolves a logical
+  path to a file (plus field within it) or a section scoping several.
+- :mod:`deephaven_mcp.config._fields` — get/set/unset of a field
+  within one file's raw wire-format dict.
+- :mod:`deephaven_mcp.config._settable_fields` — schema-derived
+  inventory of settable paths (``dhcli config keys``).
+- :mod:`deephaven_mcp.config._store` — validated, atomic file I/O for
+  one configuration directory.
+
 Schema tier
 -----------
 

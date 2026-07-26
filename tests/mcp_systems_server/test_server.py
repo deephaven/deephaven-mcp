@@ -75,6 +75,7 @@ def _multi_config_with(
     multi = MagicMock()
     multi.server = server_cfg
     multi.config_dir = config_dir if config_dir is not None else Path("/tmp/cfg")
+    multi.has_usable_system.return_value = True
     return multi
 
 
@@ -130,6 +131,27 @@ async def test_load_multi_config_exits_on_configuration_error():
         pytest.raises(SystemExit) as exc_info,
     ):
         await _load_multi_config_or_exit(None)
+    assert exc_info.value.code == 1
+
+
+@pytest.mark.asyncio
+async def test_load_multi_config_exits_on_zero_system_tree(tmp_path):
+    """A valid tree with no servable system is refused at server startup."""
+    multi = _multi_config_with(None, tmp_path)
+    multi.has_usable_system.return_value = False
+    with (
+        patch.object(
+            server_module,
+            "ConfigTreeLoader",
+            MagicMock(
+                return_value=MagicMock(
+                    initialize=AsyncMock(return_value=multi),
+                )
+            ),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        await _load_multi_config_or_exit(tmp_path)
     assert exc_info.value.code == 1
 
 

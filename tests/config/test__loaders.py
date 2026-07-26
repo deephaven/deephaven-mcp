@@ -65,13 +65,14 @@ async def test_load_named_json_validation_error_wrapped_as_configuration_error(
             _Model,
             path=f,
             config_dir=tmp_path,
-            error_label="bad.json",
+            error_label="bad config",
             log_label="test:bad",
             logger=logging.getLogger("test"),
         )
-    # The error_label appears in the wrapped message so operators can find
-    # the offending file.
-    assert "bad.json" in str(excinfo.value)
+    # The message carries both the human label and the full file path so
+    # a lone error line is self-contained.
+    assert "bad config" in str(excinfo.value)
+    assert str(f) in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -149,8 +150,9 @@ async def test_load_named_json_with_stem_validation_error_wrapped(
             _Model,
             path=f,
             config_dir=tmp_path,
-            error_label="broken.json",
+            error_label="broken config",
             log_label="test:broken",
             logger=logging.getLogger("test"),
         )
-    assert "broken.json" in str(excinfo.value)
+    assert "broken config" in str(excinfo.value)
+    assert str(f) in str(excinfo.value)

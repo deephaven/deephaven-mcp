@@ -101,6 +101,35 @@ represents, when it is used, validator behavior, wire-format
 examples. It does *not* list fields — the field declarations are the
 single source of truth for field documentation.
 
+**Content — state what the field holds, then stop.** A field
+docstring names the thing the field carries, in domain terms. Two
+opposite failures are both wrong:
+
+- **Vacuous restatement.** Re-spelling the field name and type
+  teaches nothing the declaration does not already state — name,
+  type, and required-ness are all already visible (the first WRONG
+  example below).
+- **Brittle over-specification.** Narrating a nested model's own
+  sub-fields, enumerating another type's members, or naming which
+  consumer calls what. That detail is owned by the nested type's own
+  field docstrings and by the calling code; restating it here drifts
+  the moment either changes.
+
+```python
+# WRONG — vacuous (restates name + type)
+auth: AuthConfig
+"""Required ``auth`` block."""
+
+# WRONG — brittle (documents AuthConfig's internals and a consumer)
+auth: AuthConfig
+"""Its ``credentials`` (an ``AnonymousCredentials`` for anonymous
+sessions) hands directly to ``CoreSession.from_credentials``."""
+
+# RIGHT — what the field holds, in domain terms
+auth: AuthConfig
+"""Authentication details for connecting to the Community server."""
+```
+
 #### 2c. Consumers read fields by attribute access
 
 Consumers read fields by **attribute access** on the typed model:

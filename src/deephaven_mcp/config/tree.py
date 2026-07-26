@@ -35,6 +35,7 @@ from __future__ import annotations
 __all__ = [
     "ConfigTree",
     "ConfigTreeLoader",
+    "no_systems_configured_message",
 ]
 
 import logging
@@ -45,7 +46,7 @@ from pydantic import Field
 
 from deephaven_mcp._exceptions import ConfigurationError, InternalError
 from deephaven_mcp._pydantic import StrictSchema
-from deephaven_mcp._taxonomy import SystemRef, SystemType
+from deephaven_mcp._taxonomy import COMMUNITY_SYSTEM_NAME, SystemRef, SystemType
 
 from . import resolve_config_dir, verify_config_directory_permissions
 from .schema import (
@@ -60,6 +61,25 @@ from .schema import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def no_systems_configured_message(config_dir: Path) -> str:
+    """Return the operator guidance for a tree that declares no usable system.
+
+    Args:
+        config_dir (Path): The configuration directory named in the message.
+
+    Returns:
+        str: The shared message emitted by every zero-system enforcement
+            point (systems-server startup and CLI daemon acquisition).
+    """
+    return (
+        f"No systems configured in {config_dir}. Add at least one of: a "
+        "community session file under community/sessions/, a "
+        "community/settings.json with a session_creation block (enables "
+        "dynamically created sessions), or an enterprise system file under "
+        "enterprise/systems/. Run 'dhcli config init' for guided setup."
+    )
 
 
 class ConfigTree(StrictSchema):
@@ -102,22 +122,57 @@ class ConfigTree(StrictSchema):
     ``enterprise/settings.json`` is absent and ``enterprise/systems/``
     is missing or empty (no enterprise systems are then served)."""
 
-    def list_systems(self) -> list[SystemRef]:
-        """Return a :class:`SystemRef` for every configured system.
+    def _community_is_servable(self) -> bool:
+        """Return whether the community section can serve a session.
+
+        The community section is servable only when it declares at least
+        one static session or a ``session_creation`` block (which enables
+        dynamically created sessions). A settings-only section (e.g.
+        ``community/settings.json`` holding only timeouts) is not.
 
         Returns:
-            list[SystemRef]: One entry per system, in stable order:
-                the umbrella community row first (when present, with
-                ``name == "community"``), then each enterprise
+            bool: True when the community section can serve or create a
+                session.
+        """
+        return self.community is not None and (
+            bool(self.community.sessions)
+            or self.community.settings.session_creation is not None
+        )
+
+    def list_systems(self) -> list[SystemRef]:
+        """Return a :class:`SystemRef` for every servable system.
+
+        Only servable systems are listed: the community umbrella appears
+        only when the community section can serve or create a session
+        (see :meth:`_community_is_servable`) — a settings-only section is
+        omitted — and each enterprise system appears in declaration order.
+
+        Returns:
+            list[SystemRef]: One entry per servable system, in stable
+                order: the umbrella community row first (when servable,
+                with ``name == "community"``), then each enterprise
                 system in declaration (filename) order.
         """
         out: list[SystemRef] = []
-        if self.community is not None:
-            out.append(SystemRef(name="community", type=SystemType.COMMUNITY))
+        if self._community_is_servable():
+            out.append(SystemRef(name=COMMUNITY_SYSTEM_NAME, type=SystemType.COMMUNITY))
         if self.enterprise is not None:
             for name in self.enterprise.systems:
                 out.append(SystemRef(name=name, type=SystemType.ENTERPRISE))
         return out
+
+    def has_usable_system(self) -> bool:
+        """Return whether the tree declares at least one servable system.
+
+        Equivalent to a non-empty :meth:`list_systems`: a servable
+        community section (a static session or a ``session_creation``
+        block) or at least one enterprise system. A settings-only
+        section does not count.
+
+        Returns:
+            bool: True when at least one system is servable.
+        """
+        return bool(self.list_systems())
 
 
 async def _safe[T](
@@ -201,6 +256,11 @@ class ConfigTreeLoader:
             ConfigTree: The validated, fully-populated configuration
                 tree.
 
+        A zero-system tree is a valid result and is returned like any
+        other: the zero-system invariant is enforced by system
+        consumers (systems-server startup and CLI daemon acquisition
+        via :meth:`ConfigTree.has_usable_system`), not by this loader.
+
         Raises:
             ConfigurationError: When the permission audit fails or
                 any configuration file cannot be loaded or validated.
@@ -235,14 +295,13 @@ class ConfigTreeLoader:
             _LOGGER.error(f"[tree:ConfigTreeLoader._load] {msg}")
             raise ConfigurationError(msg)
 
-        if community is None and enterprise is None:
-            msg = (
-                f"No systems configured in {config_dir}. Add at least one "
-                "community session under community/sessions/ or one "
-                "enterprise system under enterprise/systems/."
-            )
-            _LOGGER.error(f"[tree:ConfigTreeLoader._load] {msg}")
-            raise ConfigurationError(msg)
+        # A zero-system tree is a valid configuration and loads cleanly
+        # here: consumers that do not need a system (docs commands,
+        # daemon stop, the config authoring/inspection verbs, config
+        # validate/show) must be able to load it. The zero-system
+        # invariant is enforced only where a system is actually required
+        # -- systems-server startup and the CLI daemon-acquisition path
+        # (see ConfigTree.has_usable_system / no_systems_configured_message).
 
         # ``cli`` is ``None`` only when ``_safe`` swallowed an error,
         # which would have already triggered the ``raise`` above. The

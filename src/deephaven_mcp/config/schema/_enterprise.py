@@ -35,6 +35,7 @@ from pydantic import Field
 
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp._pydantic import StrictSchema
+from deephaven_mcp._taxonomy import COMMUNITY_SYSTEM_NAME
 from deephaven_mcp.client._timeouts import EnterpriseClientTimeouts
 from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
@@ -145,7 +146,7 @@ async def load_enterprise(config_dir: Path) -> EnterpriseConfig | None:
             EnterpriseSettings,
             path=settings_path,
             config_dir=config_dir,
-            error_label="enterprise/settings.json",
+            error_label="enterprise settings",
             log_label="_enterprise:enterprise/settings.json",
             logger=_LOGGER,
         )
@@ -156,11 +157,12 @@ async def load_enterprise(config_dir: Path) -> EnterpriseConfig | None:
     if systems_dir.is_dir():
         for path in sorted(systems_dir.glob("*.json")):
             name = path.stem
-            if name == "community":
+            if name == COMMUNITY_SYSTEM_NAME:
                 raise ConfigurationError(
-                    f"enterprise/systems/{path.name}: 'community' is "
-                    f"reserved for the community umbrella system and "
-                    f"cannot be used as an enterprise system_name."
+                    f"enterprise/systems/{path.name}: "
+                    f"'{COMMUNITY_SYSTEM_NAME}' is reserved for the "
+                    f"community umbrella system and cannot be used as an "
+                    f"enterprise system_name."
                 )
             system = await load_named_json_with_stem(
                 EnterpriseSystemConfig,

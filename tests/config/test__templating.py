@@ -9,9 +9,52 @@ import pytest
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.config._templating import (
     _MAX_FILE_TEMPLATE_BYTES,
+    JsonLoc,
     expand_string,
     expand_tree,
+    expand_tree_lenient,
 )
+
+# ---------------------------------------------------------------------------
+# JsonLoc
+# ---------------------------------------------------------------------------
+
+
+def test_jsonloc_root_is_empty() -> None:
+    assert JsonLoc.ROOT == ()
+    assert str(JsonLoc.ROOT) == "<root>"
+
+
+def test_jsonloc_render_mixed_segments() -> None:
+    loc = JsonLoc(("sessions", 0, "token"))
+    assert str(loc) == "sessions[0].token"
+
+
+def test_jsonloc_render_leading_index() -> None:
+    assert str(JsonLoc((0, "a"))) == "[0].a"
+
+
+def test_jsonloc_child_extends() -> None:
+    loc = JsonLoc.ROOT.child("a").child(1)
+    assert loc == ("a", 1)
+    assert isinstance(loc, JsonLoc)
+
+
+def test_jsonloc_equals_plain_tuple() -> None:
+    # Pydantic's err["loc"] tuples must compare and hash identically.
+    assert JsonLoc(("a", 0)) == ("a", 0)
+    assert JsonLoc(("a", 0)) in frozenset({("a", 0)})
+    assert ("a", 0) in frozenset({JsonLoc(("a", 0))})
+
+
+def test_jsonloc_rejects_bare_str() -> None:
+    with pytest.raises(TypeError, match="bare str"):
+        JsonLoc("abc")
+
+
+def test_jsonloc_repr() -> None:
+    assert repr(JsonLoc(("a", 0))) == "JsonLoc(('a', 0))"
+
 
 # ---------------------------------------------------------------------------
 # expand_string --- env placeholder
@@ -397,6 +440,95 @@ def test_tree_mixed_with_file(monkeypatch, tmp_path):
         "private_key": "KEY",
         "literal": "no-placeholders",
     }
+
+
+# ---------------------------------------------------------------------------
+# expand_tree_lenient
+# ---------------------------------------------------------------------------
+
+
+def test_lenient_resolvable_expands_with_no_warnings(monkeypatch):
+    monkeypatch.setenv("DH_TOKEN", "secret")
+    tree = {"credentials": {"token": "${env:DH_TOKEN}"}}
+    result = expand_tree_lenient(tree, source="t.json")
+    assert result.value == {"credentials": {"token": "secret"}}
+    assert result.warnings == []
+    assert result.unresolved_locations == frozenset()
+
+
+def test_lenient_unresolved_env_kept_verbatim_with_warning(monkeypatch):
+    monkeypatch.delenv("DH_MISSING", raising=False)
+    tree = {"token": "${env:DH_MISSING}"}
+    result = expand_tree_lenient(tree, source="t.json")
+    assert result.value == {"token": "${env:DH_MISSING}"}
+    assert len(result.warnings) == 1
+    assert "DH_MISSING" in result.warnings[0]
+    assert result.unresolved_locations == frozenset({("token",)})
+
+
+def test_lenient_unresolved_file_kept_verbatim_with_warning(tmp_path):
+    bogus = tmp_path / "nope.pem"
+    tree = {"key": f"${{file:{bogus}}}"}
+    result = expand_tree_lenient(tree, source="t.json")
+    assert result.value == tree
+    assert len(result.warnings) == 1
+    assert "does not exist" in result.warnings[0]
+    assert result.unresolved_locations == frozenset({("key",)})
+
+
+def test_lenient_collects_multiple_warnings_across_nesting(monkeypatch):
+    monkeypatch.delenv("DH_A", raising=False)
+    monkeypatch.delenv("DH_B", raising=False)
+    tree = {"outer": {"a": "${env:DH_A}"}, "items": ["${env:DH_B}"]}
+    result = expand_tree_lenient(tree, source="t.json")
+    assert result.value == tree
+    assert len(result.warnings) == 2
+    assert any("DH_A" in w for w in result.warnings)
+    assert any("DH_B" in w for w in result.warnings)
+    assert result.unresolved_locations == frozenset({("outer", "a"), ("items", 0)})
+
+
+def test_lenient_syntax_error_still_raises():
+    with pytest.raises(ConfigurationError, match="unknown placeholder kind"):
+        expand_tree_lenient({"x": "${vault:secret}"}, source="t.json")
+
+
+def test_syntax_error_after_unresolvable_still_raises(monkeypatch):
+    """A malformed placeholder is fatal even when an earlier one is unresolvable.
+
+    Regression: resolution stops at the first failure, so without an
+    up-front syntax pass the trailing ``${vault:...}`` would never be
+    validated and a malformed template could be persisted.
+    """
+    monkeypatch.delenv("DH_MISSING", raising=False)
+    with pytest.raises(ConfigurationError, match="unknown placeholder kind"):
+        expand_string("${env:DH_MISSING}${vault:secret}", source="t.json", path="x")
+
+
+def test_lenient_syntax_error_after_unresolvable_still_raises(monkeypatch):
+    monkeypatch.delenv("DH_MISSING", raising=False)
+    with pytest.raises(ConfigurationError, match="unknown placeholder kind"):
+        expand_tree_lenient({"x": "${env:DH_MISSING}${vault:secret}"}, source="t.json")
+
+
+def test_lenient_does_not_mutate_input(monkeypatch):
+    monkeypatch.delenv("DH_MISSING", raising=False)
+    original = {"a": "${env:DH_MISSING}", "b": [1, "${env:DH_MISSING}"]}
+    snapshot = {"a": "${env:DH_MISSING}", "b": [1, "${env:DH_MISSING}"]}
+    expand_tree_lenient(original, source="t.json")
+    assert original == snapshot
+
+
+def test_lenient_warnings_independent_per_call(monkeypatch):
+    # Regression: warnings must not accumulate across calls (the
+    # function owns a fresh list per invocation, never a shared or
+    # caller-supplied one).
+    monkeypatch.delenv("DH_MISSING", raising=False)
+    first = expand_tree_lenient({"x": "${env:DH_MISSING}"}, source="t.json")
+    second = expand_tree_lenient({"x": "${env:DH_MISSING}"}, source="t.json")
+    assert len(first.warnings) == 1
+    assert len(second.warnings) == 1
+    assert first.warnings is not second.warnings
 
 
 # ---------------------------------------------------------------------------

@@ -80,3 +80,10 @@ password login with no password, or a private-key login with no key path
 — the converter stops with an error and writes nothing. Add the secret to
 the v1 file (inline or as an environment-variable reference) and run the
 converter again.
+
+The converter also stops with an error when a session or system name is
+not a valid v2 name. v2 names must start with a letter or digit and
+contain only letters, digits, `_`, and `-` — dots are not allowed, because
+a name becomes a segment of dot-separated configuration paths like
+`community.sessions.<name>.port`. Rename the entry in the v1 file (for
+example, replace dots with `-` or `_`) and run the converter again.

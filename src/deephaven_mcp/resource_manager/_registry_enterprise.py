@@ -299,7 +299,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         super().__init__()
         self._system_name: str = system_config.name
         self._system_config: EnterpriseSystemConfig = system_config
-        self._creds = system_config.credentials
+        self._creds = system_config.auth.credentials
         self._timeouts = timeouts
         self._factory_manager: CorePlusSessionFactoryManager | None = None
         self._controller_client: CorePlusControllerClient | None = None

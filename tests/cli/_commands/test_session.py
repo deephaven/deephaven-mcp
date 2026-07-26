@@ -134,6 +134,20 @@ def test_list_no_partial_result_writes_no_stderr(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
+def test_list_no_systems_short_circuits_to_empty(tmp_path: Path) -> None:
+    """On a zero-system tree ``session list`` returns an empty list (exit 0)
+    with a stderr hint and never acquires the daemon."""
+    rt = make_runtime(tmp_path, with_system=False)
+    acquire_mock = AsyncMock(return_value=make_entry())
+    with patch.object(wrapping_mod, "acquire", acquire_mock):
+        result = _invoke(["-o", "json", "session", "list"], rt)
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == []
+    assert "No systems configured" in result.stderr
+    assert "dhcli config init" in result.stderr
+    acquire_mock.assert_not_awaited()
+
+
 def test_list_forwards_filters(tmp_path: Path) -> None:
     result, call = _run(
         ["session", "list", "--type", "community", "--origin", "dynamic"],

@@ -75,6 +75,12 @@ _NON_TOOL_PARAMS = frozenset({"help"})
 # flow cannot raise.
 _DIRECT_URL_WRAPPERS = frozenset({"dhcli docs ask"})
 
+# Discovery wrappers that short-circuit to an empty list on a zero-system
+# tree (via ``empty_on_no_systems``) instead of hitting the acquire guard,
+# so their help omits ``no_systems_configured`` but lists every other
+# acquire error code.
+_NO_SYSTEMS_EXEMPT_WRAPPERS = frozenset({"dhcli system list", "dhcli session list"})
+
 
 @cache
 def _tool_schemas() -> dict[str, dict]:
@@ -191,11 +197,16 @@ def test_wrapper_help_lists_acquire_error_codes(path: str, cmd: HelpfulCommand) 
     a new wrapper that forgets to splice it in.
     """
     help_text = cmd.help or ""
-    required = (
-        (ErrorCode.MCP_REQUEST_FAILED, ErrorCode.MCP_REQUEST_TIMEOUT)
-        if path in _DIRECT_URL_WRAPPERS
-        else wrapper_error_codes(tool_error=False)
-    )
+    if path in _DIRECT_URL_WRAPPERS:
+        required = (ErrorCode.MCP_REQUEST_FAILED, ErrorCode.MCP_REQUEST_TIMEOUT)
+    elif path in _NO_SYSTEMS_EXEMPT_WRAPPERS:
+        required = wrapper_error_codes(tool_error=False, no_systems=False)
+        assert ErrorCode.NO_SYSTEMS_CONFIGURED.value not in help_text, (
+            f"{path}: short-circuits on a zero-system tree (empty_on_no_systems), "
+            f"so its help must NOT list no_systems_configured"
+        )
+    else:
+        required = wrapper_error_codes(tool_error=False)
     missing = [ec.value for ec in required if ec.value not in help_text]
     assert not missing, (
         f"{path}: help omits acquire error codes {missing}; "

@@ -26,6 +26,12 @@ Prerequisites:
 
 - ``deephaven-server`` must be importable in the current environment.
 - ``dhcli`` must be on ``$PATH`` (provided by ``uv sync``).
+
+The offline ``config`` authoring verbs (``get``/``set``/``unset``/
+``keys``/``files``, ``session``/``system`` entity verbs, ``init``/
+``edit``) are covered subprocess-level by the worker-free sibling
+``test__config_integration.py``; this file only touches ``config
+validate``/``show`` where the daemon flows need them.
 """
 
 from __future__ import annotations
@@ -782,7 +788,9 @@ async def test_session_wrapper_verbs_e2e(
     try:
         assert run(["daemon", "start"]).returncode == 0
 
-        # system list → the community umbrella is always present.
+        # system list → the community umbrella is present because the seeded
+        # community section has a static session (a settings-only section
+        # would be omitted; see ConfigTree.list_systems).
         result = run(["system", "list"])
         assert result.returncode == 0, result.stderr
         systems = json.loads(result.stdout)

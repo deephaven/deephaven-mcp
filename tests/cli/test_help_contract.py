@@ -60,7 +60,14 @@ _ALL_IDS = [path for path, _ in _ALL]
 # because it can raise COMMAND_NOT_FOUND for an unresolvable path.
 # ``self completion`` only prints a click-generated script; its sole
 # failure mode (bad SHELL) is a click argument-parse error.
-_NO_ERROR_CODES = {"agents tree", "agents errors", "self completion"}
+_NO_ERROR_CODES = {
+    "agents tree",
+    "agents errors",
+    "self completion",
+    "config files",
+    "config session list",
+    "config system list",
+}
 
 
 @pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)

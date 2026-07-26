@@ -17,6 +17,7 @@ These operations are slow by nature, not hung — set generous timeouts:
 ## Version Control
 
 - When moving or renaming files, use `git mv` rather than delete + create. When removing files, use `git rm`. Preserving history matters.
+- Never stage or commit. Do not run `git add`, `git commit`, `git reset`, or anything else that mutates the index or history unless the USER explicitly requests that exact operation. The USER reviews and stages every change personally; staging on their behalf destroys partial-review state (e.g., hunks staged with `git add -p`) irrecoverably. The `git mv` / `git rm` rule above is the sole carve-out, and only for the files the task itself moves or removes. When work is done, leave all changes unstaged and report.
 
 ## Agent Skills
 

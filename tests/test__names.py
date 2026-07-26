@@ -30,9 +30,8 @@ from deephaven_mcp._names import (
         "abc",
         "ABC",
         "abc123",
-        "a.b.c",
-        "a_b-c.d",
-        "name_with-dots.and-dashes",
+        "a_b-c",
+        "name_with-dashes",
         "9start",
     ],
 )
@@ -52,6 +51,11 @@ def test_resource_name_pattern_matches_valid_values(value: str) -> None:
         ".leading-dot",
         "_leading-underscore",  # underscore is allowed in body, not at start
         "unicode\u00e9",
+        "a.b.c",  # dots are reserved for config-path separators
+        "prod.us-east",
+        "trailing.",
+        "prod\n",  # a trailing newline must not sneak past the end anchor
+        "prod\nevil",
     ],
 )
 def test_resource_name_pattern_rejects_invalid_values(value: str) -> None:
@@ -65,7 +69,7 @@ def test_resource_name_pattern_rejects_invalid_values(value: str) -> None:
 
 
 def test_validate_resource_name_returns_value_unchanged() -> None:
-    assert validate_resource_name("ok-name.1", field="system") == "ok-name.1"
+    assert validate_resource_name("ok-name_1", field="system") == "ok-name_1"
 
 
 def test_validate_resource_name_rejects_empty() -> None:
@@ -98,3 +102,19 @@ def test_validate_resource_name_reports_illegal_characters() -> None:
     # The bad-char list should reference the actual offending characters.
     assert "' '" in msg
     assert "'/'" in msg
+
+
+def test_validate_resource_name_rejects_dots_with_rename_hint() -> None:
+    with pytest.raises(InvalidSessionNameError) as exc:
+        validate_resource_name("prod.us-east", field="system_name")
+    msg = str(exc.value)
+    assert "system_name" in msg
+    assert "'.'" in msg
+    # The error must tell the user how to fix the name.
+    assert "rename" in msg
+
+
+def test_validate_resource_name_rejects_trailing_newline() -> None:
+    """Regression: ``$`` matched before a final newline; ``\\Z`` does not."""
+    with pytest.raises(InvalidSessionNameError):
+        validate_resource_name("prod\n", field="system_name")

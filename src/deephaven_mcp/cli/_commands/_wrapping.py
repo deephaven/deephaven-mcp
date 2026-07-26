@@ -48,12 +48,14 @@ from deephaven_mcp.cli._mcp_client import (
     McpRequestTimeoutError,
 )
 from deephaven_mcp.cli._runtime import Runtime
+from deephaven_mcp.config.tree import no_systems_configured_message
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
 _BOOKKEEPING_KEYS = frozenset({"success", "isError"})
 """Envelope keys stripped from a tool payload before it is rendered."""
 
 _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
+    ErrorCode.NO_SYSTEMS_CONFIGURED,
     ErrorCode.DAEMON_NOT_RUNNING,
     ErrorCode.DAEMON_STARTUP_TIMEOUT,
     ErrorCode.DAEMON_REGISTRY_CORRUPT,
@@ -65,7 +67,7 @@ _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
 
 
 def wrapper_error_codes(
-    *, tool_error: bool = True, request_timeout: bool = True
+    *, tool_error: bool = True, request_timeout: bool = True, no_systems: bool = True
 ) -> tuple[ErrorCode, ...]:
     """Return the error codes a tool-wrapping command surfaces in its help.
 
@@ -79,6 +81,12 @@ def wrapper_error_codes(
             Pass ``False`` for a verb that only lists tools (``tool list`` /
             ``tool show``): ``list_tools`` applies no per-request read
             timeout, so the timeout code is unreachable there.
+        no_systems (bool): Whether to include
+            :attr:`~deephaven_mcp.cli._errors.ErrorCode.NO_SYSTEMS_CONFIGURED`.
+            Pass ``False`` for the discovery verbs that short-circuit to an
+            empty list on a zero-system tree (``system list`` /
+            ``session list``, via ``empty_on_no_systems``): they never reach
+            the ``acquire`` guard that raises it.
 
     Returns:
         tuple[ErrorCode, ...]: ``TOOL_RETURNED_ERROR`` (when ``tool_error``)
@@ -88,6 +96,8 @@ def wrapper_error_codes(
     codes = _ACQUIRE_ERROR_CODES
     if not request_timeout:
         codes = tuple(ec for ec in codes if ec is not ErrorCode.MCP_REQUEST_TIMEOUT)
+    if not no_systems:
+        codes = tuple(ec for ec in codes if ec is not ErrorCode.NO_SYSTEMS_CONFIGURED)
     if tool_error:
         return (ErrorCode.TOOL_RETURNED_ERROR, *codes)
     return codes
@@ -106,9 +116,16 @@ async def acquire(runtime: Runtime, *, retry_command: str) -> DaemonRegistryEntr
             running daemon.
 
     Raises:
-        CliError: When the daemon cannot be acquired (startup timeout,
-            client error, or corrupt registry).
+        CliError: ``no_systems_configured`` when the loaded tree declares
+            no servable system (the daemon serves systems, so acquiring
+            one is refused up front), or when the daemon cannot be
+            acquired (startup timeout, client error, or corrupt registry).
     """
+    if not runtime.config.has_usable_system():
+        raise CliError(
+            no_systems_configured_message(runtime.config_dir),
+            code=ErrorCode.NO_SYSTEMS_CONFIGURED,
+        )
     return await acquire_daemon(
         runtime,
         auto_start=runtime.config.cli.daemon.auto_start,
@@ -501,6 +518,7 @@ async def call_and_echo_field(
     default: Any,
     reasons_in_rows: bool = False,
     truncation_hint: str | None = None,
+    empty_on_no_systems: bool = False,
 ) -> None:
     """Acquire, invoke ``tool``, surface diagnostics, and print ``payload[field]``.
 
@@ -517,7 +535,8 @@ async def call_and_echo_field(
             recovery hint.
         arguments (dict[str, Any]): The tool arguments.
         field (str): The payload key to emit on stdout.
-        default (Any): The value emitted when ``field`` is absent.
+        default (Any): The value emitted when ``field`` is absent, and the value
+            emitted by the ``empty_on_no_systems`` short-circuit.
         reasons_in_rows (bool, optional): Forwarded to
             :func:`_warn_if_incomplete`. Set ``True`` when the emitted rows
             already carry per-system error reasons, so a ``"completed"``
@@ -525,11 +544,26 @@ async def call_and_echo_field(
         truncation_hint (str | None, optional): Forwarded to
             :func:`_warn_if_incomplete`. Sentence appended to the
             ``is_complete: false`` warning naming the verb's recovery flags.
+        empty_on_no_systems (bool, optional): For discovery verbs whose result
+            is provably empty on a zero-system tree (``system list``,
+            ``session list``). When ``True`` and the loaded tree declares no
+            servable system, emit ``default`` (an empty list) on stdout with a
+            ``no_systems_configured`` guidance warning on stderr and return —
+            without acquiring the daemon. Friendlier than the ``acquire``
+            guard's hard error for these enumeration entry points; every other
+            verb keeps the guard's error.
 
     Raises:
         CliError: When the daemon cannot be acquired, the MCP transport
             fails, or the tool reports ``success=False`` (exit 3).
     """
+    if empty_on_no_systems and not runtime.config.has_usable_system():
+        render_warning(
+            no_systems_configured_message(runtime.config_dir),
+            output=runtime.config.cli.output.format,
+        )
+        echo_payload(runtime, default)
+        return
     payload = await call_for_payload(
         runtime, tool, retry_command=retry_command, arguments=arguments
     )

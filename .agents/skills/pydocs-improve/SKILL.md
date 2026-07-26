@@ -45,8 +45,19 @@ canonical rule and examples; in summary:
 - Per-caller behavioral exposition (each caller's reason for using the function belongs in that caller's docstring or in a design comment, not here)
 - Future-evolution hedging like "current rules", "at present, only...", or "additional rules can be added" (the docstring describes what the function does today; future changes are documented when they happen)
 - Implementation rationale beyond what a caller needs to use the function correctly (rationale belongs in commit messages, design docs, or inline comments at the implementation site)
+- Another type's internal structure — its sub-fields, its members, or its validation mechanics. Name the type and stop; that type's own docstrings own those details. Applies to module, class, and field docstrings alike.
 
-If a docstring describes the world *outside* the function (callers, design history, future plans), it's wrong.
+If a docstring describes the world *outside* the function — its callers, its design history, its future plans, or the internals of a type it merely references — it's wrong. This holds for module and class docstrings with the same force.
+
+```text
+# WRONG — re-narrates AuthConfig's internals; duplicates the Schema::
+# block and AuthConfig's own field docstrings, and drifts when either changes
+"""... the `auth` block validates to `AuthConfig`, whose `credentials`
+is a `CredentialsUnion` at `auth.credentials` ..."""
+
+# RIGHT — name the type and stop
+"""... the `auth` block (an `AuthConfig`) carries the connection credentials ..."""
+```
 
 **Module and package docstrings**: A package `__init__.py` docstring is a one-line statement of what the package is, plus a list of its **surface** submodules — nothing more. The "Contract, not context" rule applies with the same force here; module/package docstrings are the most common place it is violated. Specifically:
 

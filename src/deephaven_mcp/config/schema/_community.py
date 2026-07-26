@@ -39,20 +39,19 @@ __all__ = [
 
 import logging
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from deephaven_mcp._pydantic import (
     RedactableSchema,
     StrictSchema,
-    unwrap_auth_credentials,
 )
-from deephaven_mcp.auth.credentials import CredentialsUnion
 from deephaven_mcp.client._timeouts import CommunityClientTimeouts
 from deephaven_mcp.config._loaders import load_named_json, load_named_json_with_stem
 from deephaven_mcp.resource_manager._evictor import EvictionTimeouts
 from deephaven_mcp.sessions import (
+    AuthConfig,
     CommunitySessionConfig,
     LaunchMethod,
     ProgrammingLanguage,
@@ -175,9 +174,8 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     Mode-specific defaults live in nested blocks (``docker``,
     ``python``); both blocks are always present so operators can flip
     ``launch_method`` per call without rewriting the defaults. The
-    ``credentials`` field (unwrapped from the wire-format
-    ``auth.credentials`` sub-block at validation time) is the default
-    bearer material for those sessions.
+    optional ``auth`` block carries the default bearer material for
+    those sessions.
     """
 
     launch_method: LaunchMethod = "docker"
@@ -196,12 +194,11 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     ``launch_method`` is ``"python"``; otherwise its fields are
     ignored. The block is always present (default-constructed)."""
 
-    credentials: CredentialsUnion | None = None
-    """Default outbound bearer credentials applied to dynamic
-    community sessions when the request does not override them.
-    ``None`` means the request must always supply its own
-    credentials. Unwrapped at validation time from the wire-format
-    ``auth.credentials`` sub-block."""
+    auth: AuthConfig | None = None
+    """Optional ``auth`` block whose credentials are applied to
+    dynamic community sessions when the request does not override
+    them. ``None`` means the request must always supply its own
+    credentials."""
 
     programming_language: ProgrammingLanguage = "Python"
     """Default scripting language for dynamic community sessions:
@@ -235,16 +232,6 @@ class CommunitySessionCreationDefaults(RedactableSchema):
     """Number of times the launcher retries worker creation after a
     failure before giving up. ``0`` disables retry; the launcher
     fails on the first error."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _unwrap_auth(cls, data: Any) -> Any:
-        """Unwrap the wire-format ``auth.credentials`` into ``credentials``.
-
-        Settings sub-block variant: missing ``auth`` is allowed (the
-        defaults block need not specify credentials at all).
-        """
-        return unwrap_auth_credentials(data, allow_top_level=False)
 
 
 class CommunitySessionCreation(StrictSchema):
@@ -343,7 +330,7 @@ async def load_community(config_dir: Path) -> CommunityConfig | None:
             CommunitySettings,
             path=settings_path,
             config_dir=config_dir,
-            error_label="community/settings.json",
+            error_label="community settings",
             log_label="_community:community/settings.json",
             logger=_LOGGER,
         )

@@ -43,7 +43,7 @@ def test_non_dict_input_passes_through_to_pydantic():
 def test_minimal_anonymous_session_construct():
     cfg = CommunitySessionConfig.model_validate(_session_payload())
     assert cfg.name == "local"
-    assert isinstance(cfg.credentials, AnonymousCredentials)
+    assert isinstance(cfg.auth.credentials, AnonymousCredentials)
     assert cfg.tls is None
     assert cfg.host is None
     assert cfg.port is None
@@ -63,10 +63,25 @@ def test_construct_psk_session_with_literal_token():
             never_timeout=True,
         )
     )
-    assert isinstance(cfg.credentials, PSKCredentials)
-    assert cfg.credentials.token.get_secret_value() == "from-env"
+    assert isinstance(cfg.auth.credentials, PSKCredentials)
+    assert cfg.auth.credentials.token.get_secret_value() == "from-env"
     assert cfg.host == "localhost"
     assert cfg.port == 10000
+
+
+@pytest.mark.parametrize("bad_port", [0, -1, 65536, 100000])
+def test_out_of_range_port_rejected(bad_port):
+    """Ports must be valid TCP port numbers (1-65535)."""
+    with pytest.raises(ValidationError, match="port"):
+        CommunitySessionConfig.model_validate(_session_payload(port=bad_port))
+
+
+def test_boundary_ports_accepted():
+    assert CommunitySessionConfig.model_validate(_session_payload(port=1)).port == 1
+    assert (
+        CommunitySessionConfig.model_validate(_session_payload(port=65535)).port
+        == 65535
+    )
 
 
 @pytest.mark.parametrize("wrong_case", ["python", "GROOVY"])
@@ -104,11 +119,17 @@ def test_name_with_leading_underscore_rejected():
 
 
 def test_name_with_allowed_punctuation_accepted():
-    """Underscores, dots, and dashes after the first char are fine."""
+    """Underscores and dashes after the first char are fine."""
     cfg = CommunitySessionConfig.model_validate(
-        _session_payload(name="worker_1.v2-prod")
+        _session_payload(name="worker_1-v2-prod")
     )
-    assert cfg.name == "worker_1.v2-prod"
+    assert cfg.name == "worker_1-v2-prod"
+
+
+def test_name_with_dot_rejected():
+    """Dots are reserved for config-path separators — must be rejected."""
+    with pytest.raises(ValidationError, match="name"):
+        CommunitySessionConfig.model_validate(_session_payload(name="worker.v2"))
 
 
 def test_legacy_session_type_rejected():
@@ -123,7 +144,7 @@ def test_rejects_unknown_field():
 
 
 def test_requires_auth_block():
-    with pytest.raises(ValidationError, match="'auth' is required"):
+    with pytest.raises(ValidationError, match="auth"):
         CommunitySessionConfig.model_validate({"name": "local", "host": "localhost"})
 
 
@@ -152,19 +173,20 @@ def test_rejects_unknown_credential_type():
 
 
 def test_rejects_auth_with_extra_keys():
-    with pytest.raises(ValidationError, match="only a 'credentials'"):
+    with pytest.raises(ValidationError, match="Extra inputs"):
         CommunitySessionConfig.model_validate(
             _session_payload(auth={"credentials": {"type": "anonymous"}, "extra": 1})
         )
 
 
 def test_rejects_auth_missing_credentials():
-    with pytest.raises(ValidationError, match="'auth.credentials' is required"):
+    with pytest.raises(ValidationError, match="credentials"):
         CommunitySessionConfig.model_validate(_session_payload(auth={}))
 
 
-def test_rejects_both_auth_and_top_level_credentials():
-    with pytest.raises(ValidationError, match="mutually exclusive"):
+def test_rejects_top_level_credentials():
+    """Credentials live only inside the ``auth`` block."""
+    with pytest.raises(ValidationError, match="Extra inputs"):
         CommunitySessionConfig.model_validate(
             {
                 "name": "local",
@@ -174,11 +196,10 @@ def test_rejects_both_auth_and_top_level_credentials():
         )
 
 
-def test_accepts_top_level_credentials_round_trip():
-    """Round-trip via model_dump produces a top-level ``credentials`` key."""
+def test_model_dump_round_trip():
+    """model_dump emits the wire shape, which re-validates to an equal model."""
     original = CommunitySessionConfig.model_validate(_session_payload())
     dumped = original.model_dump(mode="json", context={"reveal": True})
-    # Reconstruct from the dumped shape (which has no ``auth`` wrapper).
     rebuilt = CommunitySessionConfig.model_validate(dumped)
     assert rebuilt == original
 
@@ -247,16 +268,16 @@ def test_redacted_dump_replaces_secret_token():
         _session_payload(auth={"credentials": {"type": "psk", "token": "shh"}})
     )
     out = cfg.model_dump(mode="json", context={"redact": True})
-    assert out["credentials"]["token"] == REDACTED
+    assert out["auth"]["credentials"]["token"] == REDACTED
     assert "shh" not in str(out)
 
 
-def test_redacted_dump_no_auth_block_present():
-    """Round-trip dump uses the unwrapped ``credentials`` key, not ``auth``."""
+def test_redacted_dump_uses_wire_shape():
+    """Dump nests credentials under ``auth``, matching the wire format."""
     cfg = CommunitySessionConfig.model_validate(_session_payload())
     out = cfg.model_dump(mode="json", context={"redact": True})
-    assert "auth" not in out
-    assert out["credentials"] == {"type": "anonymous"}
+    assert "credentials" not in out
+    assert out["auth"]["credentials"] == {"type": "anonymous"}
 
 
 def test_redacted_dump_keeps_tls_root_certs_visible():

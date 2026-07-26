@@ -60,9 +60,9 @@ def test_construct_minimal_password_config():
     cfg = EnterpriseSystemConfig.model_validate(_password_payload())
     assert cfg.name == "prod"
     assert cfg.connection_json_url.startswith("https://")
-    assert isinstance(cfg.credentials, PasswordCredentials)
-    assert cfg.credentials.username == "alice"
-    assert cfg.credentials.password.get_secret_value() == "shh"
+    assert isinstance(cfg.auth.credentials, PasswordCredentials)
+    assert cfg.auth.credentials.username == "alice"
+    assert cfg.auth.credentials.password.get_secret_value() == "shh"
 
 
 def test_rejects_missing_connection_json_url():
@@ -119,23 +119,21 @@ def test_requires_name():
 def test_auth_requires_credentials():
     payload = _password_payload()
     payload["auth"] = {}
-    with pytest.raises(ValidationError, match="'auth.credentials' is required"):
+    with pytest.raises(ValidationError, match="credentials"):
         EnterpriseSystemConfig.model_validate(payload)
 
 
-def test_auth_required_when_no_top_level_credentials():
-    """Passing a payload with neither ``auth`` nor a pre-unwrapped
-    top-level ``credentials`` is rejected with a pointed message."""
+def test_auth_block_required():
     payload = _password_payload()
     del payload["auth"]
-    with pytest.raises(ValidationError, match="'auth' is required"):
+    with pytest.raises(ValidationError, match="auth"):
         EnterpriseSystemConfig.model_validate(payload)
 
 
 def test_auth_rejects_extra_keys():
     payload = _password_payload()
     payload["auth"]["extra"] = 1
-    with pytest.raises(ValidationError, match="only a 'credentials'"):
+    with pytest.raises(ValidationError, match="Extra inputs"):
         EnterpriseSystemConfig.model_validate(payload)
 
 
@@ -146,15 +144,17 @@ def test_auth_credentials_rejects_unknown_type():
         EnterpriseSystemConfig.model_validate(payload)
 
 
-def test_top_level_credentials_round_trip():
+def test_model_dump_round_trip():
+    """model_dump emits the wire shape, which re-validates to an equal model."""
     original = EnterpriseSystemConfig.model_validate(_password_payload())
     dumped = original.model_dump(mode="json", context={"reveal": True})
     rebuilt = EnterpriseSystemConfig.model_validate(dumped)
     assert rebuilt == original
 
 
-def test_rejects_both_auth_and_top_level_credentials():
-    with pytest.raises(ValidationError, match="mutually exclusive"):
+def test_rejects_top_level_credentials():
+    """Credentials live only inside the ``auth`` block."""
+    with pytest.raises(ValidationError, match="Extra inputs"):
         EnterpriseSystemConfig.model_validate(
             {
                 "name": "prod",
@@ -276,14 +276,14 @@ def test_session_creation_accepts_full_valid_block():
 def test_redacted_dump_replaces_password():
     cfg = EnterpriseSystemConfig.model_validate(_password_payload())
     out = cfg.model_dump(mode="json", context={"redact": True})
-    assert out["credentials"]["password"] == REDACTED
+    assert out["auth"]["credentials"]["password"] == REDACTED
     assert "shh" not in str(out)
 
 
 def test_redacted_dump_keeps_username():
     cfg = EnterpriseSystemConfig.model_validate(_password_payload())
     out = cfg.model_dump(mode="json", context={"redact": True})
-    assert out["credentials"]["username"] == "alice"
+    assert out["auth"]["credentials"]["username"] == "alice"
 
 
 def test_redacted_dump_password_is_redacted():
@@ -302,7 +302,7 @@ def test_redacted_dump_password_is_redacted():
         )
     )
     out = cfg.model_dump(mode="json", context={"redact": True})
-    assert out["credentials"]["password"] == REDACTED
+    assert out["auth"]["credentials"]["password"] == REDACTED
     assert "from-env" not in str(out)
 
 

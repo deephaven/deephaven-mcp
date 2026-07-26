@@ -67,10 +67,11 @@ async def load_named_json[M: BaseModel](
         config_dir (Path): The audited configuration root, forwarded
             to the file loader so ``${file:PATH}`` placeholders
             inside the file are resolved against it.
-        error_label (str): Human-readable file label (e.g.
-            ``"community/settings.json"``) used in the
+        error_label (str): Human-readable file description (e.g.
+            ``"community settings"``) used in the
             :class:`~deephaven_mcp._exceptions.ConfigurationError`
-            message when validation fails.
+            message when validation fails; the message also names
+            ``path``, so the label should not repeat it.
         log_label (str): Label prefix for the redacted audit-trail
             log line emitted on successful validation.
         logger (logging.Logger): Logger used for the redacted
@@ -87,7 +88,7 @@ async def load_named_json[M: BaseModel](
     try:
         model = model_cls.model_validate(raw)
     except ValidationError as exc:
-        raise as_configuration_error(error_label, exc) from exc
+        raise as_configuration_error(f"{error_label} ({path})", exc) from exc
     log_redacted(model, label=log_label, logger=logger)
     return model
 
@@ -117,9 +118,11 @@ async def load_named_json_with_stem[M: BaseModel](
             filename stem becomes the model's ``name``.
         config_dir (Path): The audited configuration root, forwarded
             to the file loader for ``${file:PATH}`` resolution.
-        error_label (str): Human-readable file label used in the
+        error_label (str): Human-readable file description (e.g.
+            ``"community session 'local'"``) used in the
             :class:`~deephaven_mcp._exceptions.ConfigurationError`
-            message when validation fails.
+            message when validation fails; the message also names
+            ``path``, so the label should not repeat it.
         log_label (str): Label prefix for the redacted audit-trail
             log line emitted on successful validation.
         logger (logging.Logger): Logger used for the redacted
@@ -138,6 +141,6 @@ async def load_named_json_with_stem[M: BaseModel](
     try:
         model = model_cls.model_validate({"name": name, **raw})
     except ValidationError as exc:
-        raise as_configuration_error(error_label, exc) from exc
+        raise as_configuration_error(f"{error_label} ({path})", exc) from exc
     log_redacted(model, label=log_label, logger=logger)
     return model

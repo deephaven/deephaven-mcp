@@ -38,7 +38,10 @@ from pathlib import Path
 import click
 from mcp.server.fastmcp import FastMCP
 
-from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp._exceptions import (
+    ConfigurationError,
+    NoSystemsConfiguredError,
+)
 from deephaven_mcp._logging import (
     setup_global_exception_logging,
     setup_logging,
@@ -47,7 +50,11 @@ from deephaven_mcp._logging import (
 from deephaven_mcp._monkeypatch import monkeypatch_uvicorn_exception_handling
 from deephaven_mcp.config import DATA_DIR_ENV_VAR, resolve_runtime_dir
 from deephaven_mcp.config.schema import ServerConfig
-from deephaven_mcp.config.tree import ConfigTree, ConfigTreeLoader
+from deephaven_mcp.config.tree import (
+    ConfigTree,
+    ConfigTreeLoader,
+    no_systems_configured_message,
+)
 
 from . import _fastmcp
 from ._http import _plan_daemon, _plan_default, _run_http
@@ -79,11 +86,17 @@ async def _load_multi_config_or_exit(
 
     Raises:
         SystemExit: When configuration loading fails with a
-            :class:`ConfigurationError`.
+            :class:`ConfigurationError`, or when the tree is valid but
+            declares no servable system (the server serves systems, so a
+            zero-system tree is refused here rather than served empty).
     """
     mgr = ConfigTreeLoader(config_dir)
     try:
         multi = await mgr.initialize()
+        if not multi.has_usable_system():
+            raise NoSystemsConfiguredError(
+                no_systems_configured_message(multi.config_dir)
+            )
     except ConfigurationError as exc:
         _LOGGER.error(
             f"[mcp_systems_server:_load_multi_config_or_exit] "

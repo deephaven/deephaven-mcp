@@ -8,11 +8,6 @@ session-creation defaults. It is *not* the live
 is *not* inherently a file-format schema, though today it is the
 typed result of loading one ``enterprise/systems/<name>.json`` file.
 
-The discriminated ``auth.credentials`` block is unwrapped to a top-
-level ``credentials`` field via a ``model_validator(mode="before")``
-so the resulting instance carries a ready-to-use
-:class:`~deephaven_mcp.auth.credentials.CredentialsUnion`.
-
 Schema (all fields at the top level)::
 
     {
@@ -57,16 +52,16 @@ __all__ = [
 
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from deephaven_mcp._names import validate_resource_name
 from deephaven_mcp._pydantic import (
     RedactableSchema,
     StrictSchema,
     reconcile_filename_stem,
-    unwrap_auth_credentials,
 )
-from deephaven_mcp.auth.credentials import CredentialsUnion
 
+from ._auth import AuthConfig
 from ._types import ProgrammingLanguage
 
 
@@ -158,39 +153,46 @@ class EnterpriseSessionCreation(StrictSchema):
 
 
 class EnterpriseSystemConfig(RedactableSchema):
-    """Validated declaration of one Deephaven Enterprise system.
+    """Validated declaration of one Deephaven Enterprise system."""
 
-    The ``auth.credentials`` JSON block is unwrapped into the top-
-    level :attr:`credentials` field at validation time, so the model
-    carries a pre-built
-    :class:`~deephaven_mcp.auth.credentials.CredentialsUnion` ready
-    for :meth:`deephaven_mcp.client.CorePlusSessionFactory.from_credentials`.
-    """
-
-    name: str
-    """System name. Equal to the filename stem of the source JSON
-    file and to any ``system_name`` field declared inside that file
-    (the loader cross-checks both)."""
+    name: str = Field(json_schema_extra={"non_wire": True})
+    """System name. Not a wire field: the loader injects the filename
+    stem of the source JSON file, cross-checked against any
+    ``system_name`` field declared inside that file."""
 
     connection_json_url: str
     """URL of the Enterprise ``connection.json`` document. The upstream
     SessionManager fetches this URL to discover endpoints and the
     truststore for outbound TLS."""
 
-    credentials: CredentialsUnion
-    """Pre-resolved bearer credentials parsed from the required
-    ``auth.credentials`` block. Hands directly to
-    :meth:`deephaven_mcp.client.CorePlusSessionFactory.from_credentials`."""
+    auth: AuthConfig
+    """Authentication details for connecting to the Enterprise system."""
 
     session_creation: EnterpriseSessionCreation | None = None
     """Optional ``session_creation`` block. ``None`` means MCP cannot
     create new workers on this system; only pre-existing PQs are
     discoverable."""
 
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        """Reject names that can't round-trip through a system reference.
+
+        The enterprise system name is embedded in the qualified
+        session id and used as the filename stem, so it must conform
+        to the resource-name character class (ASCII alphanumerics plus
+        ``_`` and ``-``; starting alphanumeric; non-empty; no dots).
+        Catches bad filename stems at config-load time before they
+        reach the registry, matching
+        :class:`~deephaven_mcp.sessions.CommunitySessionConfig`.
+        """
+        validate_resource_name(value, field="name")
+        return value
+
     @model_validator(mode="before")
     @classmethod
-    def _validate_and_unwrap(cls, data: Any) -> Any:
-        """Reject ``tls``, cross-check ``system_name``, unwrap ``auth.credentials``.
+    def _reject_tls_and_reconcile_name(cls, data: Any) -> Any:
+        """Reject ``tls`` and cross-check ``system_name`` against the filename stem.
 
         Args:
             data (Any): The raw mapping passed to
@@ -198,14 +200,13 @@ class EnterpriseSystemConfig(RedactableSchema):
                 a dict.
 
         Returns:
-            Any: A new mapping with ``auth`` unwrapped to
-                ``credentials`` and ``system_name`` removed in favor
+            Any: A new mapping with ``system_name`` removed in favor
                 of the caller-supplied ``name`` (the filename stem).
 
         Raises:
             ValueError: When ``tls`` is present, ``system_name``
-                disagrees with the filename stem, ``auth`` is
-                missing or malformed, or ``name`` is absent.
+                disagrees with the filename stem, or ``name`` is
+                absent.
         """
         if isinstance(data, dict) and "tls" in data:
             raise ValueError(
@@ -214,9 +215,8 @@ class EnterpriseSystemConfig(RedactableSchema):
                 "connection.json's 'truststore_url' and has no per-system "
                 "mTLS client-certificate support. Remove the 'tls' block."
             )
-        data = reconcile_filename_stem(
+        return reconcile_filename_stem(
             data,
             declared_field="system_name",
             model_label="EnterpriseSystemConfig",
         )
-        return unwrap_auth_credentials(data)

@@ -38,9 +38,15 @@ def test_session_id_constructs_from_valid_string() -> None:
 
 
 def test_session_id_accepts_alphanumeric_and_punctuation() -> None:
-    for value in ("a", "0", "A0", "worker_1", "my.session", "name-with-dash"):
+    for value in ("a", "0", "A0", "worker_1", "my_session", "name-with-dash"):
         sid = SessionId(value)
         assert sid == value
+
+
+def test_session_id_rejects_dot() -> None:
+    """Dots are reserved for config-path separators — must be rejected."""
+    with pytest.raises(InvalidSessionNameError):
+        SessionId("my.session")
 
 
 def test_session_id_accepts_purely_digit_string() -> None:

@@ -351,7 +351,7 @@ def _resolve_community_session_parameters(
     It validates parameters, normalizes values, and returns a complete set of resolved parameters for session creation.
 
     The worker-side authentication handler (``auth_type``) is derived
-    from ``defaults.credentials`` via :func:`_credentials_to_auth_type`
+    from ``defaults.auth.credentials`` via :func:`_credentials_to_auth_type`
     rather than exposed as an independent knob; see that function's
     docstring for the rationale.
 
@@ -390,7 +390,9 @@ def _resolve_community_session_parameters(
     # Resolve auth type
     # Derive worker-side auth handler FQCN from credentials kind (single
     # source of truth; no parallel auth_type knob to drift out of sync).
-    resolved_auth_type = _credentials_to_auth_type(defaults.credentials)
+    resolved_auth_type = _credentials_to_auth_type(
+        defaults.auth.credentials if defaults.auth is not None else None
+    )
 
     # Validate method-specific parameters
     _validate_launch_method_params(
@@ -557,7 +559,7 @@ def _resolve_auth_token(
     # Env-var indirection in the JSON has already been collapsed at
     # validation time (the templating engine resolved ${env:VAR} into
     # the literal value before the model was built).
-    creds = defaults.credentials
+    creds = defaults.auth.credentials if defaults.auth is not None else None
     if isinstance(creds, PSKCredentials):
         token = creds.token.get_secret_value()
         if token:
@@ -610,8 +612,7 @@ async def _register_session_manager(
     """
     # Build a typed CommunitySessionConfig describing how to connect to
     # the launched session. Authentication lives entirely inside
-    # ``auth.credentials``; the model unwraps that to the typed
-    # ``credentials`` field.
+    # ``auth.credentials``.
     credentials_block: dict[str, Any]
     if resolved_auth_type == _PSK_AUTH_HANDLER:
         credentials_block = {
@@ -1487,7 +1488,7 @@ def _static_credentials_view(
     port = session_cfg.port
     scheme = "https" if session_cfg.tls is not None else "http"
     server = f"{scheme}://{host}:{port}" if host else ""
-    creds = session_cfg.credentials
+    creds = session_cfg.auth.credentials
     if isinstance(creds, PSKCredentials):
         auth_token = creds.token.get_secret_value()
         auth_type = "PSK"

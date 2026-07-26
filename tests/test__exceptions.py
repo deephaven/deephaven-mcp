@@ -4,6 +4,8 @@ from deephaven_mcp._exceptions import (
     AuthenticationError,
     CommunityNotConfiguredError,
     ConfigurationError,
+    ConfigurationFieldMissingError,
+    ConfigurationPathError,
     DaemonAlreadyPublishedError,
     DaemonClientError,
     DaemonRegistryError,
@@ -16,6 +18,7 @@ from deephaven_mcp._exceptions import (
     McpClientError,
     McpError,
     McpRequestTimeoutError,
+    NoSystemsConfiguredError,
     QueryError,
     RegistryCorruptError,
     ResourceError,
@@ -24,6 +27,7 @@ from deephaven_mcp._exceptions import (
     SessionLaunchError,
     SpawnError,
     SystemNotConfiguredError,
+    TemplateResolutionError,
     UnsupportedOperationError,
 )
 
@@ -85,6 +89,26 @@ class TestExceptionParameterized:
             (DeephavenConnectionError, [McpError], "connection error"),
             (ResourceError, [McpError], "resource error"),
             (ConfigurationError, [McpError], "configuration error"),
+            (
+                ConfigurationPathError,
+                [ConfigurationError, McpError],
+                "bad config path",
+            ),
+            (
+                ConfigurationFieldMissingError,
+                [ConfigurationPathError, ConfigurationError, McpError],
+                "field not set",
+            ),
+            (
+                TemplateResolutionError,
+                [ConfigurationError, McpError],
+                "env var not set",
+            ),
+            (
+                NoSystemsConfiguredError,
+                [ConfigurationError, McpError],
+                "no systems configured",
+            ),
             (
                 SystemNotConfiguredError,
                 [ConfigurationError, McpError],

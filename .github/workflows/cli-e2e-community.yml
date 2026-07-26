@@ -10,6 +10,10 @@
 # scripts/run_cli_e2e.py covers the same path for local dev plus an
 # operator-only --enterprise mode that CI cannot provision, so it is not run
 # here. Java 17 is required because the worker subprocess runs the Deephaven JVM.
+#
+# The offline config-authoring verbs are covered by the worker-free CLI E2E
+# (Config) workflow (cli-e2e-config.yml), which needs neither Java nor a
+# worker.
 
 name: CLI E2E (Community)
 

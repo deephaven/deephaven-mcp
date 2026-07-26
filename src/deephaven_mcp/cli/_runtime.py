@@ -112,6 +112,12 @@ class RuntimeSpec:
     """Nested partial ``cli.json`` overrides from top-level CLI flags
     (``-o``, ``--timeout``, ``--no-auto-start``), or ``None``."""
 
+    no_input: bool = False
+    """The root ``--no-input`` flag: when ``True``, commands never
+    prompt interactively. Read by the ``needs_runtime=False``
+    configuration-authoring verbs (which receive the spec itself);
+    not part of the loaded :class:`Runtime`."""
+
     def resolve(self) -> Runtime:
         """Load, validate, and return the :class:`Runtime` this spec describes.
 
@@ -209,6 +215,12 @@ async def load_runtime(
 
     Returns:
         Runtime: The frozen, fully-validated runtime context.
+
+    A zero-system tree loads successfully here: the zero-system
+    invariant is enforced only where a system is required (the CLI
+    daemon-acquisition path and systems-server startup), so
+    system-independent verbs (``docs``, ``daemon stop``, and the
+    ``config`` authoring/inspection verbs) work on an empty tree.
 
     Raises:
         CliError: With :attr:`ErrorCode.CONFIG_INVALID` when the

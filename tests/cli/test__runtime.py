@@ -307,3 +307,24 @@ async def test_load_runtime_rejects_malformed_systems_section(
         )
     assert excinfo.value.code == ErrorCode.CONFIG_INVALID
     assert isinstance(excinfo.value.__cause__, ConfigurationError)
+
+
+@pytest.mark.asyncio
+async def test_load_runtime_accepts_empty_tree(
+    tmp_path: Path,
+) -> None:
+    """A valid zero-system tree loads: the no-systems invariant lives elsewhere.
+
+    ``load_runtime`` powers system-independent verbs (``docs``,
+    ``daemon stop``, the ``config`` verbs), so it must not reject an
+    empty tree; the invariant is enforced by systems-server startup and
+    the CLI daemon-acquisition path instead.
+    """
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    os.chmod(cfg_dir, 0o700)
+
+    runtime = await load_runtime(
+        config_dir_override=cfg_dir, runtime_dir_override=tmp_path / "rt"
+    )
+    assert runtime.config.has_usable_system() is False

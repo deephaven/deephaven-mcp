@@ -86,7 +86,11 @@ def _make_config(
     payload: dict = {
         "name": system_name,
         "connection_json_url": "https://example.com/iris/connection.json",
-        "credentials": resolved_creds.model_dump(mode="json", context={"reveal": True}),
+        "auth": {
+            "credentials": resolved_creds.model_dump(
+                mode="json", context={"reveal": True}
+            )
+        },
     }
     if raw:
         # Filter out keys that aren't part of the EnterpriseSystemConfig
@@ -387,7 +391,7 @@ def test_init_default_state():
     # manager and ``CorePlusSessionFactory.from_credentials``) accept
     # the typed value, eliminating the previous reveal round-trip.
     assert registry._system_config is cfg
-    assert registry._creds is cfg.credentials
+    assert registry._creds is cfg.auth.credentials
     # Per-run state stays at defaults until initialize() runs.
     assert registry._factory_manager is None
     assert registry._controller_client is None
