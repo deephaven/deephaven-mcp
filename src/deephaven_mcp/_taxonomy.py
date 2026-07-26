@@ -8,9 +8,10 @@ Defines :class:`SystemType` (community vs enterprise),
 from __future__ import annotations
 
 import enum
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 __all__ = [
+    "COMMUNITY_SYSTEM_NAME",
     "SessionOrigin",
     "SystemRef",
     "SystemType",
@@ -43,6 +44,12 @@ class SystemType(enum.StrEnum):
     def __str__(self) -> str:
         """Return the lowercase string value of the member."""
         return self.value
+
+
+COMMUNITY_SYSTEM_NAME: Final[str] = SystemType.COMMUNITY.value
+"""The community umbrella system identifier (``"community"``). Names the
+single community row in ``list_systems`` and is reserved as an enterprise
+``system_name`` (an ``enterprise/systems/community.json`` is rejected)."""
 
 
 class SessionOrigin(enum.StrEnum):

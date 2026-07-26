@@ -244,7 +244,7 @@ _OUTPUT_LIST = OutputSpec(
         ),
         see_also=("dhcli session show ID", "dhcli system list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
-        error_codes=wrapper_error_codes(tool_error=False),
+        error_codes=wrapper_error_codes(tool_error=False, no_systems=False),
     ),
 )
 @click.option(
@@ -292,6 +292,7 @@ async def session_list(
         arguments=arguments,
         field="sessions",
         default=[],
+        empty_on_no_systems=True,
     )
 
 

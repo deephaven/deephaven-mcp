@@ -128,10 +128,9 @@ class MultiSystemRegistry:
         Raises:
             InternalError: If exactly one of a pair is ``None`` (the
                 pair must be passed together), or if neither section
-                is configured at all (the config layer rejects an
-                empty tree with ``NoSystemsConfiguredError`` before
-                this constructor can run, so reaching the guard is a
-                bug).
+                is configured at all (systems-server startup rejects an
+                empty tree with ``NoSystemsConfiguredError`` before the
+                registry is built, so reaching the guard is a bug).
         """
         if (community_sessions is None) != (community_client_timeouts is None):
             raise InternalError(

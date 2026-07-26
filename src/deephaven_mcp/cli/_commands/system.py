@@ -81,7 +81,7 @@ _OUTPUT_LIST = OutputSpec(
         ),
         see_also=("dhcli system status", "dhcli session list"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
-        error_codes=wrapper_error_codes(tool_error=False),
+        error_codes=wrapper_error_codes(tool_error=False, no_systems=False),
     ),
 )
 @click.pass_obj
@@ -95,6 +95,7 @@ async def system_list(runtime: Runtime) -> None:
         arguments={},
         field="systems",
         default=[],
+        empty_on_no_systems=True,
     )
 
 

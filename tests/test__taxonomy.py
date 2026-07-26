@@ -12,7 +12,12 @@ import json
 
 import pytest
 
-from deephaven_mcp._taxonomy import SessionOrigin, SystemRef, SystemType
+from deephaven_mcp._taxonomy import (
+    COMMUNITY_SYSTEM_NAME,
+    SessionOrigin,
+    SystemRef,
+    SystemType,
+)
 
 # ---------------------------------------------------------------------------
 # Module surface
@@ -22,7 +27,17 @@ from deephaven_mcp._taxonomy import SessionOrigin, SystemRef, SystemType
 def test_all_lists_every_public_symbol() -> None:
     from deephaven_mcp import _taxonomy
 
-    assert set(_taxonomy.__all__) == {"SessionOrigin", "SystemRef", "SystemType"}
+    assert set(_taxonomy.__all__) == {
+        "COMMUNITY_SYSTEM_NAME",
+        "SessionOrigin",
+        "SystemRef",
+        "SystemType",
+    }
+
+
+def test_community_system_name_matches_system_type() -> None:
+    assert COMMUNITY_SYSTEM_NAME == "community"
+    assert COMMUNITY_SYSTEM_NAME == SystemType.COMMUNITY
 
 
 def test_every_name_in_all_is_resolvable() -> None:

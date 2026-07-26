@@ -150,9 +150,18 @@ redacted) and `dhcli config validate` to confirm it is valid.
 For every **runtime-dependent** command, configuration is loaded
 **once per invocation, just before the command body runs**. Any
 malformed file under the configuration directory fails fast with
-`config_invalid` (exit code `2`) before the body runs; a tree whose
-files are all valid but that declares no systems at all fails the
-same way with `no_systems_configured`.
+`config_invalid` (exit code `2`) before the body runs. A tree whose
+files are all valid but that declares no systems is itself **valid**
+and loads cleanly; the no-systems invariant is enforced only where a
+system is actually required — systems-server startup and the daemon
+acquisition performed by the tool-wrapping verbs (`system`, `session`,
+`table`, `catalog`, `pq`, `tool`), which fail with
+`no_systems_configured`. The two discovery verbs `system list` and
+`session list` are the exception: on a zero-system tree they return an
+empty list (exit `0`) with the same guidance on **stderr** instead of
+failing, since the result is provably empty. System-independent verbs
+(`docs`, `daemon stop`, and every `config` verb) work against a
+zero-system tree.
 
 The offline authoring verbs — `config files`, `config get`,
 `config set`, `config unset`, `config keys`, `config edit`,
@@ -601,7 +610,7 @@ contain dots. File boundaries surface only in `config files`.
 | Verb        | Purpose                                                                                       |
 |-------------|-----------------------------------------------------------------------------------------------|
 | `show`      | Prints the resolved configuration with secrets redacted (requires a valid tree).             |
-| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed (`no_systems_configured` if the tree is valid but declares no systems). Validation runs before every command body, so this is CI-friendly. |
+| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. A zero-system tree is valid (the no-systems invariant is enforced only where a system is required, not by this check). Validation runs before every command body, so this is CI-friendly. |
 | `files`     | Lists every configuration file: logical path, absolute file path, exists, valid, first validation error, template-resolution warnings. Works even when the configuration is broken or empty — the first command to run when diagnosing configuration problems. |
 | `init`      | Guided first-time wizard: prompts to declare one community session and/or one enterprise system, delegating to the same prompts as `session add`/`system add` with no flags. Interactive only (`no_tty` without a TTY or with `--no-input`). |
 | `get [PATH]` | Prints the raw on-disk value at `PATH` (or the whole tree when omitted): a JSON object for a subtree, the bare scalar for a leaf. Works on a broken or partial tree and shows raw values with templating refs unresolved — unlike `show`, which prints the validated, template-resolved view. |
@@ -884,7 +893,7 @@ registry programmatically via `dhcli agents errors` (or the
 | `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
 | `system_not_found`            | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
 | `config_invalid`              | The configuration tree failed validation.                          |
-| `no_systems_configured`       | Every configuration file is individually valid, but no system is declared (no community session file, no `session_creation` block, no enterprise system file). Add one (`dhcli config session add`, `dhcli config system add`, or `dhcli config init`), or check that `--config-dir` / `DH_AI_DATA_DIR` points at the intended directory. |
+| `no_systems_configured`       | A system-dependent verb (`system`, `session`, `table`, `catalog`, `pq`, `tool`) ran against a valid tree that declares no system (no community session file, no `session_creation` block, no enterprise system file); the daemon serves systems, so acquiring one is refused. (The systems server likewise refuses to start on a zero-system tree.) The discovery verbs `system list` / `session list` are exempt — they return an empty list with this guidance on stderr instead of exiting non-zero. Add one (`dhcli config session add`, `dhcli config system add`, or `dhcli config init`), or check that `--config-dir` / `DH_AI_DATA_DIR` points at the intended directory. |
 | `config_path_invalid`         | A configuration path argument is malformed or does not name a known location. Run `dhcli config files` to list files and `dhcli config keys` to list settable paths. |
 | `missing_required_option`     | A required option was not provided and interactive prompting is unavailable (stdin is not a TTY, or `--no-input` was given). The error message names the exact flag(s) to supply. |
 | `already_exists`              | The target configuration entity already exists and the command refuses to overwrite it; remove it first with `dhcli config session/system remove`. |

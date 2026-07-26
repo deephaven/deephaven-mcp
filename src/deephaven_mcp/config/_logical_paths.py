@@ -59,6 +59,7 @@ from pathlib import Path
 
 from deephaven_mcp._exceptions import ConfigurationPathError, InvalidSessionNameError
 from deephaven_mcp._names import validate_resource_name
+from deephaven_mcp._taxonomy import COMMUNITY_SYSTEM_NAME
 from deephaven_mcp.config._field_path import FieldPath
 from deephaven_mcp.config._file_kinds import ConfigFileKind
 
@@ -254,10 +255,11 @@ def _resolve_field_location(path: FieldPath) -> ConfigFieldLocation | None:
             validate_resource_name(name, field=f"{kind.prefix} name")
         except InvalidSessionNameError as exc:
             raise ConfigurationPathError(str(exc)) from exc
-        if kind is ConfigFileKind.ENTERPRISE_SYSTEM and name == "community":
+        if kind is ConfigFileKind.ENTERPRISE_SYSTEM and name == COMMUNITY_SYSTEM_NAME:
             raise ConfigurationPathError(
-                "'community' is reserved for the community umbrella system "
-                "and cannot be used as an enterprise system name."
+                f"'{COMMUNITY_SYSTEM_NAME}' is reserved for the community "
+                "umbrella system and cannot be used as an enterprise "
+                "system name."
             )
         return ConfigFieldLocation(
             kind=kind,

@@ -548,7 +548,6 @@ _OUTPUT_VALIDATE = OutputSpec(
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
             ErrorCode.CONFIG_INVALID,
-            ErrorCode.NO_SYSTEMS_CONFIGURED,
             ErrorCode.CONFIG_PATH_INVALID,
             ErrorCode.NOT_FOUND,
         ),
@@ -579,14 +578,16 @@ async def config_show(runtime: Runtime, path: str | None) -> None:
         summary="Confirm the configuration is valid (exit 0 / 2).",
         description=(
             "Validation runs before every runtime-dependent command body, "
-            "so a malformed file exits 2 with config_invalid — and a valid "
-            "tree that declares no systems exits 2 with "
-            "no_systems_configured — before this command prints. Paths that "
-            "print without running a body (--help, --agents, the agents "
-            "verbs) skip it, as do the offline config authoring/inspection "
-            "verbs (needs_runtime=False, e.g. get/set/files), which operate "
-            "on files directly and never trigger a full-tree load. This "
-            "verb performs no extra work: when the load succeeds it emits a "
+            "so a malformed file exits 2 with config_invalid before this "
+            "command prints. A zero-system tree is valid here: the "
+            "no-systems invariant is enforced only where a system is "
+            "required (systems-server startup and daemon acquisition), not "
+            "by this check. Paths that print without running a body "
+            "(--help, --agents, the agents verbs) skip validation, as do "
+            "the offline config authoring/inspection verbs "
+            "(needs_runtime=False, e.g. get/set/files), which operate on "
+            "files directly and never trigger a full-tree load. This verb "
+            "performs no extra work: when the load succeeds it emits a "
             "CI-friendly 'valid: true' payload. Use it as the explicit "
             "config check in CI pipelines."
         ),
@@ -594,7 +595,7 @@ async def config_show(runtime: Runtime, path: str | None) -> None:
         examples=("$ dhcli config validate",),
         see_also=("dhcli config show",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
-        error_codes=(ErrorCode.CONFIG_INVALID, ErrorCode.NO_SYSTEMS_CONFIGURED),
+        error_codes=(ErrorCode.CONFIG_INVALID,),
     ),
 )
 @click.pass_obj
@@ -603,10 +604,10 @@ async def config_validate(runtime: Runtime) -> None:
     """Confirm the configuration directory is valid.
 
     Always succeeds: a malformed tree exits with
-    :attr:`ErrorCode.CONFIG_INVALID` (and a systems-less one with
-    :attr:`ErrorCode.NO_SYSTEMS_CONFIGURED`) during runtime
-    materialization, before this handler runs. Emits the
-    ``valid: true`` payload in the active output mode.
+    :attr:`ErrorCode.CONFIG_INVALID` during runtime materialization,
+    before this handler runs. A zero-system tree is valid here (the
+    no-systems invariant is enforced only where a system is required).
+    Emits the ``valid: true`` payload in the active output mode.
     """
     payload = {
         "valid": True,

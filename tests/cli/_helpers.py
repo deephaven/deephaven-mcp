@@ -11,7 +11,13 @@ from unittest.mock import MagicMock
 from pydantic import SecretStr
 
 from deephaven_mcp.cli._runtime import Runtime, apply_cli_overrides
-from deephaven_mcp.config.schema import CliConfig, ServerConfig
+from deephaven_mcp.config.schema import (
+    CliConfig,
+    CommunityConfig,
+    CommunitySessionCreation,
+    CommunitySettings,
+    ServerConfig,
+)
 from deephaven_mcp.config.tree import ConfigTree
 from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
@@ -20,6 +26,7 @@ def make_runtime(
     tmp_path: Path | None = None,
     *,
     output_format: str | None = None,
+    with_system: bool = True,
     **overrides: object,
 ) -> Runtime:
     """Construct a :class:`Runtime` populated with safe defaults.
@@ -33,6 +40,12 @@ def make_runtime(
     rendered output mode (e.g. ``"human"``): the CLI now defaults to
     ``json``, so tests asserting human-formatted output must request it
     explicitly. Ignored when an explicit ``cli_config`` override is given.
+
+    ``with_system`` (default True) seeds a minimal community
+    ``session_creation`` block so :meth:`ConfigTree.has_usable_system`
+    is True, letting tool-wrapping commands pass the daemon-acquisition
+    guard. Pass ``with_system=False`` for a zero-system tree. Ignored
+    when an explicit ``config`` override is given.
     """
     base = tmp_path or Path("/tmp")
     cli_config = overrides.get("cli_config")
@@ -42,10 +55,19 @@ def make_runtime(
             if output_format is not None
             else CliConfig()
         )
+    community = (
+        CommunityConfig(
+            settings=CommunitySettings(session_creation=CommunitySessionCreation()),
+            sessions={},
+        )
+        if with_system
+        else None
+    )
     config = overrides.get("config") or ConfigTree(
         config_dir=base / "cfg",
         cli=cli_config,  # type: ignore[arg-type]
         server=ServerConfig(),
+        community=community,
     )
     return Runtime(
         config_dir=base / "cfg",

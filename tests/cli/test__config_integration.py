@@ -176,9 +176,14 @@ def test_greenfield_field_authoring_lifecycle(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == "human"
 
-    # A cli.json-only tree fails validation (no_systems_configured),
-    # so author the minimal community settings block — still using only
-    # field verbs — before validating.
+    # A cli.json-only (zero-system) tree is valid: validation no longer
+    # requires a servable system.
+    result = _run_cli(["config", "validate"], sandbox=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["valid"] is True
+
+    # Author a minimal community settings block so 'show' has a system
+    # to display — still using only field verbs.
     result = _run_cli(
         [
             "config",
@@ -220,19 +225,19 @@ def test_greenfield_field_authoring_lifecycle(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(300)
 @_requires_dhcli
-def test_validate_empty_config_dir_reports_no_systems(tmp_path: Path) -> None:
-    """An empty (but existing) config dir fails with the dedicated code.
+def test_validate_empty_config_dir_is_valid(tmp_path: Path) -> None:
+    """An empty (but existing) config dir is a valid zero-system tree.
 
-    ``no_systems_configured`` is distinct from ``config_invalid`` so a
-    half-finished configuration is distinguishable from a malformed one.
+    ``config validate`` checks validity, not servability: the
+    no-systems invariant is enforced only where a system is required
+    (systems-server startup and CLI daemon acquisition), so validation
+    of a half-finished tree succeeds.
     """
     cfg_dir = tmp_path / "cfg"
     cfg_dir.mkdir(mode=0o700)
     result = _run_cli(["config", "validate"], sandbox=tmp_path)
-    assert result.returncode == 2, (result.stdout, result.stderr)
-    error = _structured_error(result.stderr)
-    assert error["error_code"] == "no_systems_configured"
-    assert "dhcli config init" in error["error"]
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert json.loads(result.stdout)["valid"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -69,6 +69,31 @@ async def test_acquire_forwards_config_and_recovery_hint(tmp_path: Path) -> None
     assert "dhcli system list" in err.message
 
 
+@pytest.mark.asyncio
+async def test_acquire_refuses_zero_system_tree(tmp_path: Path) -> None:
+    """acquire refuses a zero-system tree before spawning a daemon.
+
+    The daemon serves systems, so acquiring one against a tree with no
+    servable system fails up front with ``no_systems_configured`` rather
+    than starting a doomed daemon.
+    """
+    rt = make_runtime(tmp_path, with_system=False)
+    called = False
+
+    async def fake_acquire_daemon(*args: object, **kwargs: object) -> object:
+        nonlocal called
+        called = True
+        return make_entry()
+
+    with patch.object(_wrapping, "acquire_daemon", fake_acquire_daemon):
+        with pytest.raises(CliError) as excinfo:
+            await acquire(rt, retry_command="dhcli system list")
+
+    assert excinfo.value.code is ErrorCode.NO_SYSTEMS_CONFIGURED
+    assert "dhcli config init" in excinfo.value.message
+    assert called is False
+
+
 # ---------------------------------------------------------------------------
 # call_tool
 # ---------------------------------------------------------------------------
@@ -282,6 +307,14 @@ def test_wrapper_error_codes_request_timeout_false_excludes_timeout() -> None:
     codes = wrapper_error_codes(tool_error=False, request_timeout=False)
     assert ErrorCode.MCP_REQUEST_TIMEOUT not in codes
     assert ErrorCode.MCP_REQUEST_FAILED in codes
+
+
+def test_wrapper_error_codes_no_systems_false_excludes_no_systems() -> None:
+    """Discovery verbs that short-circuit on a zero-system tree (system list /
+    session list) never reach the acquire guard that raises it."""
+    codes = wrapper_error_codes(tool_error=False, no_systems=False)
+    assert ErrorCode.NO_SYSTEMS_CONFIGURED not in codes
+    assert ErrorCode.NO_SYSTEMS_CONFIGURED in wrapper_error_codes(tool_error=False)
 
 
 # ---------------------------------------------------------------------------
@@ -596,6 +629,55 @@ async def test_call_and_echo_field_emits_field_and_asserts_call(
     assert call_mock.await_args.args[3] == {"x": 1}
     assert "prod" in captured.out
     assert captured.err == ""
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_empty_on_no_systems_short_circuits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With ``empty_on_no_systems`` and a zero-system tree, the helper emits the
+    default on stdout plus a stderr hint and never acquires the daemon."""
+    rt = make_runtime(tmp_path, with_system=False)
+    acquire_mock = AsyncMock()
+    with patch.object(_wrapping, "acquire", acquire_mock):
+        await call_and_echo_field(
+            rt,
+            "list_systems",
+            retry_command="dhcli system list",
+            arguments={},
+            field="systems",
+            default=[],
+            empty_on_no_systems=True,
+        )
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "[]"
+    assert "No systems configured" in captured.err
+    acquire_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_call_and_echo_field_empty_on_no_systems_proceeds_when_configured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``empty_on_no_systems`` is a no-op when the tree has a servable system:
+    the tool is still invoked and its field emitted."""
+    rt = make_runtime(tmp_path)
+    result = CallToolResult(
+        content=[], structuredContent={"success": True, "systems": [{"name": "prod"}]}
+    )
+    acq, call = _patched_call(result)
+    with acq, call as call_mock:
+        await call_and_echo_field(
+            rt,
+            "list_systems",
+            retry_command="dhcli system list",
+            arguments={},
+            field="systems",
+            default=[],
+            empty_on_no_systems=True,
+        )
+    assert call_mock.await_args.args[2] == "list_systems"
+    assert "prod" in capsys.readouterr().out
 
 
 @pytest.mark.asyncio

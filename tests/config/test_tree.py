@@ -22,7 +22,6 @@ import pytest
 from deephaven_mcp._exceptions import (
     ConfigurationError,
     InternalError,
-    NoSystemsConfiguredError,
 )
 from deephaven_mcp._taxonomy import SystemRef, SystemType
 from deephaven_mcp.auth.credentials import (
@@ -107,11 +106,14 @@ def test_manager_config_dir_default_when_env_unset() -> None:
 
 
 @pytest.mark.asyncio
-async def test_load_empty_config_dir_fails(config_dir: Path) -> None:
-    """A tree with zero systems is refused with the dedicated subtype."""
+async def test_load_empty_config_dir_loads_zero_system_tree(config_dir: Path) -> None:
+    """A zero-system tree loads cleanly; the invariant is a consumer concern."""
     manager = _make_manager(config_dir)
-    with pytest.raises(NoSystemsConfiguredError, match="No systems configured"):
-        await manager.initialize()
+    cfg = await manager.initialize()
+    assert cfg.community is None
+    assert cfg.enterprise is None
+    assert cfg.has_usable_system() is False
+    assert cfg.list_systems() == []
 
 
 @pytest.mark.asyncio
@@ -263,15 +265,19 @@ async def test_server_json_must_be_dict(config_dir: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_community_settings_only_no_sessions_fails(config_dir: Path) -> None:
+async def test_community_settings_only_no_sessions_is_not_a_system(
+    config_dir: Path,
+) -> None:
     """A settings-only file (no sessions, no session_creation) is not a system."""
     community_dir = _make_dir(config_dir / "community")
     _write_json(
         community_dir / "settings.json",
         {"timeouts": {"eviction": {"session_idle_timeout_seconds": 30}}},
     )
-    with pytest.raises(NoSystemsConfiguredError, match="No systems configured"):
-        await _load(config_dir)
+    cfg = (await _load(config_dir)).config
+    assert cfg.community is not None
+    assert cfg.has_usable_system() is False
+    assert cfg.list_systems() == []
 
 
 @pytest.mark.asyncio
@@ -290,6 +296,10 @@ async def test_community_settings_with_session_creation_counts_as_system(
     assert cfg.community is not None
     assert cfg.community.sessions == {}
     assert cfg.community.settings.timeouts.eviction.session_idle_timeout_seconds == 30.0
+    assert cfg.has_usable_system() is True
+    assert cfg.list_systems() == [
+        SystemRef(name="community", type=SystemType.COMMUNITY)
+    ]
 
 
 @pytest.mark.asyncio
@@ -313,6 +323,10 @@ async def test_community_sessions_only_no_settings(config_dir: Path) -> None:
     )
     assert cfg.community.settings.timeouts.eviction.sweep_interval_seconds == 60.0
     assert "alpha" in cfg.community.sessions
+    assert cfg.has_usable_system() is True
+    assert cfg.list_systems() == [
+        SystemRef(name="community", type=SystemType.COMMUNITY)
+    ]
 
 
 @pytest.mark.asyncio
@@ -356,12 +370,16 @@ async def test_community_settings_invalid_field(config_dir: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_enterprise_settings_only_no_systems_fails(config_dir: Path) -> None:
+async def test_enterprise_settings_only_no_systems_is_not_a_system(
+    config_dir: Path,
+) -> None:
     """A settings-only enterprise section (no systems) is not a system."""
     enterprise_dir = _make_dir(config_dir / "enterprise")
     _write_json(enterprise_dir / "settings.json", {})
-    with pytest.raises(NoSystemsConfiguredError, match="No systems configured"):
-        await _load(config_dir)
+    cfg = (await _load(config_dir)).config
+    assert cfg.enterprise is not None
+    assert cfg.has_usable_system() is False
+    assert cfg.list_systems() == []
 
 
 @pytest.mark.asyncio

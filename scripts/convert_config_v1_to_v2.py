@@ -712,6 +712,17 @@ def _convert_enterprise_system(
     """Convert one v1 enterprise system into a v2 system file body."""
     where = f"enterprise system '{name}'"
     _check_name(name, where)
+    if name == "community":
+        # 'community' is the reserved community umbrella system; load_enterprise
+        # rejects enterprise/systems/community.json, so writing it here would
+        # yield a v2 tree the systems server refuses to load. The literal is
+        # duplicated deliberately: this script is stdlib-only and cannot import
+        # deephaven_mcp._taxonomy.COMMUNITY_SYSTEM_NAME; keep the two in sync.
+        raise ConversionError(
+            f"{where}: 'community' is reserved for the community umbrella "
+            f"system and cannot be used as an enterprise system name. Rename "
+            f"it in the v1 file and retry."
+        )
     if not isinstance(cfg, dict):
         raise ConversionError(f"{where}: expected an object.")
     out: dict[str, Any] = {"system_name": name}

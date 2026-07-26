@@ -530,16 +530,18 @@ class TemplateResolutionError(ConfigurationError):
 
 
 class NoSystemsConfiguredError(ConfigurationError):
-    """The configuration tree contains no systems at all.
+    """The configuration tree contains no servable system at all.
 
-    Raised by :class:`deephaven_mcp.config.tree.ConfigTreeLoader` when
-    every file in the directory is individually valid but neither the
-    community nor the enterprise section declares a system. Distinct
-    from the plain :class:`ConfigurationError` raised for malformed
-    files so callers (e.g. the CLI's runtime loader) can surface a
-    "half-finished configuration" diagnostic instead of a generic
-    validation failure. Distinct from :class:`SystemNotConfiguredError`,
-    which reports one *section* absent at tool-invocation time.
+    Raised at systems-server startup when a loaded tree is otherwise
+    valid but neither the community nor the enterprise section declares
+    a system (the server serves systems, so it refuses to start empty).
+    A zero-system tree is *valid* to load; the invariant belongs to
+    system consumers, not the generic loader (the CLI daemon-acquisition
+    path enforces the same rule via :class:`~deephaven_mcp.cli._errors.CliError`
+    with ``ErrorCode.NO_SYSTEMS_CONFIGURED``). Distinct from the plain
+    :class:`ConfigurationError` raised for malformed files, and from
+    :class:`SystemNotConfiguredError`, which reports one *section* absent
+    at tool-invocation time.
     """
 
     pass

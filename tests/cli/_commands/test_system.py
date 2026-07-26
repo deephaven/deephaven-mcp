@@ -111,6 +111,33 @@ def test_list_tool_failure_exits_3(tmp_path: Path) -> None:
     assert "boom" in result.output
 
 
+def test_list_no_systems_short_circuits_to_empty(tmp_path: Path) -> None:
+    """On a zero-system tree ``system list`` returns an empty list (exit 0) with
+    a stderr hint and never acquires the daemon."""
+    rt = make_runtime(tmp_path, with_system=False)
+    acquire_mock = AsyncMock(return_value=make_entry())
+    with patch.object(wrapping_mod, "acquire", acquire_mock):
+        result = _invoke(["-o", "json", "system", "list"], rt)
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == []
+    assert "No systems configured" in result.stderr
+    assert "dhcli config init" in result.stderr
+    acquire_mock.assert_not_awaited()
+
+
+def test_list_no_systems_human_shows_empty_message(tmp_path: Path) -> None:
+    """Human mode renders the empty-list placeholder, matching a normal empty
+    listing; the guidance stays on stderr."""
+    rt = make_runtime(tmp_path, with_system=False, output_format="human")
+    acquire_mock = AsyncMock(return_value=make_entry())
+    with patch.object(wrapping_mod, "acquire", acquire_mock):
+        result = _invoke(["system", "list"], rt)
+    assert result.exit_code == 0
+    assert "(none)" in result.stdout
+    assert "No systems configured" in result.stderr
+    acquire_mock.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # system status
 # ---------------------------------------------------------------------------

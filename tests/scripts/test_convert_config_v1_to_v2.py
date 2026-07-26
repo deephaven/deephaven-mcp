@@ -379,6 +379,29 @@ def test_convert_enterprise_system_invalid_name_raises():
         conv.convert(v1)
 
 
+def test_convert_enterprise_system_reserved_community_name_raises():
+    """The reserved enterprise name 'community' is rejected at conversion.
+
+    load_enterprise rejects enterprise/systems/community.json, so the
+    converter must refuse it rather than report success while writing a
+    v2 tree the systems server cannot load.
+    """
+    v1 = {
+        "enterprise": {
+            "systems": {
+                "community": {
+                    "connection_json_url": "https://x/iris/connection.json",
+                    "auth_type": "password",
+                    "username": "u",
+                    "password": "p",
+                }
+            }
+        }
+    }
+    with pytest.raises(conv.ConversionError, match="'community' is reserved"):
+        conv.convert(v1)
+
+
 def test_convert_names_with_dash_underscore_accepted():
     v1 = {"community": {"sessions": {"my-session_2": {"auth_type": "anonymous"}}}}
     result = conv.convert(v1)

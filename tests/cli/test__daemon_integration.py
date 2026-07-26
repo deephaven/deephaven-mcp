@@ -788,7 +788,9 @@ async def test_session_wrapper_verbs_e2e(
     try:
         assert run(["daemon", "start"]).returncode == 0
 
-        # system list → the community umbrella is always present.
+        # system list → the community umbrella is present because the seeded
+        # community section has a static session (a settings-only section
+        # would be omitted; see ConfigTree.list_systems).
         result = run(["system", "list"])
         assert result.returncode == 0, result.stderr
         systems = json.loads(result.stdout)

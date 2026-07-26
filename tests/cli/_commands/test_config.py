@@ -130,7 +130,7 @@ def _invoke_runtime(args: list[str], runtime: Runtime):
 
 def test_config_show_outputs_paths_and_models(tmp_path: Path) -> None:
     """Default tree (cli + server populated, others absent) dumps cleanly."""
-    rt = make_runtime(tmp_path)
+    rt = make_runtime(tmp_path, with_system=False)
     result = _invoke_runtime(["-o", "json", "config", "show"], rt)
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
