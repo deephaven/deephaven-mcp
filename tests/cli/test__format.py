@@ -340,6 +340,60 @@ def test_human_format_other_repr() -> None:
     assert format_output(42, output="human") == "42"
 
 
+def test_human_format_dict_renders_null_scalar_as_none_token() -> None:
+    """A null value reads as (none), never Python's None repr."""
+    out = format_output({"session": None}, output="human")
+    assert out == "session: (none)"
+    assert "None" not in out
+
+
+def test_human_format_bare_none_renders_none_token() -> None:
+    """A top-level null does not fall through to repr(None)."""
+    assert format_output(None, output="human") == "(none)"
+
+
+def test_human_format_list_of_scalars_renders_null_as_none_token() -> None:
+    """A null among scalars renders as (none)."""
+    assert format_output(["trades", None], output="human") == "trades\n(none)"
+
+
+def test_human_format_dict_scalar_list_renders_null_bullet_as_none_token() -> None:
+    """A null inside a bulleted list renders as (none)."""
+    out = format_output({"args": ["-Xss2m", None]}, output="human")
+    assert "- (none)" in out
+    assert "- None" not in out
+
+
+def test_human_format_table_distinguishes_null_cell_from_missing_cell() -> None:
+    """An explicit null renders (none); a key the row omits stays blank.
+
+    Two different facts: a sparse payload omits a key that does not
+    apply, while an explicit null says the field applies but holds no
+    value. Collapsing both to blank would discard that.
+    """
+    lines = format_output([{"a": 1, "b": None}, {"a": 2}], output="human").splitlines()
+    assert "(none)" in lines[1]
+    assert "(none)" not in lines[2]
+    assert "None" not in "\n".join(lines)
+
+
+def test_structured_modes_still_emit_a_real_null() -> None:
+    """The (none) token is human-mode only; machine modes keep null."""
+    import yaml
+
+    payload = {"session": None}
+    assert json.loads(format_output(payload, output="json")) == payload
+    assert yaml.safe_load(format_output(payload, output="yaml")) == payload
+    assert "(none)" not in format_output(payload, output="json")
+
+
+def test_human_format_leaves_booleans_python_cased() -> None:
+    """Only None is a repr leak; True/False read as correct English."""
+    out = format_output({"is_complete": True, "ok": False}, output="human")
+    assert "is_complete: True" in out
+    assert "ok: False" in out
+
+
 # ---------------------------------------------------------------------------
 # YAML format
 # ---------------------------------------------------------------------------

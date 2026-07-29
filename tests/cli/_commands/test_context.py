@@ -97,6 +97,21 @@ def test_show_all_unset(tmp_path: Path) -> None:
     }
 
 
+def test_show_human_mode_renders_unset_without_python_none(tmp_path: Path) -> None:
+    """An unset key reads as (none) on a terminal, not as Python's None.
+
+    ``show`` always reports all three keys, so it is the command most
+    likely to render a null; the JSON mode keeps a real ``null``.
+    """
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SYSTEM, "prod")
+    result, _ = _run(["-o", "human", "context", "show"], tmp_path, runtime=rt)
+    assert result.exit_code == 0
+    assert "None" not in result.output
+    assert "value: (none)" in result.output
+    assert "value: prod" in result.output
+
+
 def test_show_reflects_file_value(tmp_path: Path) -> None:
     rt = make_runtime(tmp_path)
     rt.context_store.set(ContextKey.SYSTEM, "community")

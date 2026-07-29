@@ -151,12 +151,37 @@ def _is_row_list(value: Any) -> bool:
     )
 
 
+_HUMAN_NONE = "(none)"
+"""Human-mode spelling for an absent value.
+
+Covers both a JSON ``null`` scalar and an empty collection: a terminal
+reader needs one word for "nothing here", and Python's ``None`` repr is
+not it. One constant rather than two so the two flavors of absence
+cannot drift into separate spellings. ``json``/``yaml`` modes are
+unaffected -- they emit a real ``null``.
+"""
+
+
+# ``Any``: ``value`` is one already-known-scalar cell or item; callers
+# have excluded dicts and lists before reaching here.
+def _human_scalar(value: Any) -> str:
+    """Render one scalar as human-mode text.
+
+    The single place a scalar becomes text in ``human`` mode, so a
+    ``None`` cannot surface as Python's ``None`` repr down one path while
+    rendering as :data:`_HUMAN_NONE` down another.
+    """
+    return _HUMAN_NONE if value is None else str(value)
+
+
 # ``Any``: ``value`` is any subcommand return value (tool results,
 # redacted-config dicts, scalars); the render path dispatches on type.
-def _format_human(value: Any, *, empty_message: str = "(none)") -> str:
+def _format_human(value: Any, *, empty_message: str = _HUMAN_NONE) -> str:
     """Render ``value`` for a human reader on a terminal.
 
-    Unrecognized types render via ``repr`` as a best-effort fallback.
+    ``None`` renders as :data:`_HUMAN_NONE`; other unrecognized types
+    render via ``repr`` as a best-effort fallback, which keeps more
+    detail than ``str`` for an object with no display form.
     """
     if isinstance(value, CallToolResult):
         return _format_tool_result_human(value)
@@ -167,11 +192,13 @@ def _format_human(value: Any, *, empty_message: str = "(none)") -> str:
             return _format_tool_list(value)
         if _is_row_list(value):
             return _format_row_list(value)
-        return "\n".join(str(v) for v in value)
+        return "\n".join(_human_scalar(v) for v in value)
     if isinstance(value, dict):
         return _format_dict(value)
     if isinstance(value, str):
         return value
+    if value is None:
+        return _HUMAN_NONE
     return repr(value)
 
 
@@ -195,9 +222,9 @@ def _format_dict(value: dict[str, Any]) -> str:
             lines.append(_indent(_format_dict(v)))
         elif isinstance(v, list) and v:
             lines.append(f"{k}:")
-            lines.append(_indent("\n".join(f"- {item}" for item in v)))
+            lines.append(_indent("\n".join(f"- {_human_scalar(item)}" for item in v)))
         else:
-            lines.append(f"{k}: {v}")
+            lines.append(f"{k}: {_human_scalar(v)}")
     return "\n".join(lines)
 
 
@@ -231,21 +258,35 @@ def _indent(text: str, prefix: str = "  ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())
 
 
+def _table_cell(row: dict[str, Any], column: str) -> str:
+    """Render one table cell, distinguishing an absent key from a null value.
+
+    A key the row omits renders blank, while a key present with a
+    ``None`` value renders :data:`_HUMAN_NONE`. The two are different
+    facts -- a sparse payload omits a key that does not apply, whereas an
+    explicit ``null`` says the field applies but holds no value -- so
+    collapsing both to blank would discard that distinction.
+    """
+    if column not in row:
+        return ""
+    return _human_scalar(row[column])
+
+
 def _format_table(rows: list[dict[str, Any]]) -> str:
     """Render a list of row dicts as an aligned, header-topped text table.
 
     Callers pass a non-empty list (:func:`_is_row_list` gates this path); the
     column-width math assumes at least one row. Columns are ordered by first
     appearance across the rows (the first row's keys, then any keys that only
-    later rows introduce). Cell values render via ``str``; missing cells render
-    empty. Columns are not truncated.
+    later rows introduce). Cells render via :func:`_table_cell`. Columns are
+    not truncated.
     """
     columns: list[str] = []
     for row in rows:
         for key in row:
             if key not in columns:
                 columns.append(key)
-    cells = [[str(row.get(col, "")) for col in columns] for row in rows]
+    cells = [[_table_cell(row, col) for col in columns] for row in rows]
     widths = [
         max(len(col), max((len(row[i]) for row in cells), default=0))
         for i, col in enumerate(columns)
