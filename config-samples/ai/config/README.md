@@ -38,7 +38,7 @@ best-effort).
 ## Files in This Example
 
 - `server.json` — PSK material for the HTTP transport.
-- `cli.json` — `dhcli` CLI defaults (output format, daemon control, request timeouts, docs server); all defaults shown.
+- `cli.json` — `dhcli` CLI defaults (output format, daemon control, request timeouts, docs server, sticky context); all defaults shown.
 - `community/settings.json` — community-wide settings + session_creation defaults.
 - `community/sessions/local_dev.json` — a static community session.
 - `enterprise/settings.json` — enterprise-wide settings (timeouts; may be `{}` to take defaults).

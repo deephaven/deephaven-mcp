@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.config.schema._cli import (
     CliConfig,
+    ContextConfig,
     DaemonControlConfig,
     DaemonReuseAction,
     DaemonReusePolicy,
@@ -37,6 +38,8 @@ def test_defaults_empty_object() -> None:
     assert cfg.daemon.auto_start is True
     assert cfg.daemon.timeouts.startup_deadline_seconds == 30
     assert cfg.request.timeouts.default_seconds == 60
+    assert cfg.context == ContextConfig()
+    assert cfg.context.enabled is True
 
 
 def test_defaults_subsections_accept_empty_objects() -> None:
@@ -381,6 +384,51 @@ def test_accepts_http_and_https_docs_url(value: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ContextConfig
+# ---------------------------------------------------------------------------
+
+
+def test_context_config_defaults() -> None:
+    cfg = ContextConfig()
+    assert cfg.enabled is True
+    assert cfg.confirm_destructive is False
+
+
+def test_context_section_accepts_empty_object() -> None:
+    """``context: {}`` yields all-defaults for that nested level."""
+    cfg = CliConfig.model_validate({"context": {}})
+    assert cfg.context == ContextConfig()
+
+
+def test_context_enabled_override() -> None:
+    cfg = CliConfig.model_validate({"context": {"enabled": False}})
+    assert cfg.context.enabled is False
+    # The untouched sibling keeps its default.
+    assert cfg.context.confirm_destructive is False
+
+
+def test_context_confirm_destructive_override() -> None:
+    cfg = CliConfig.model_validate({"context": {"confirm_destructive": True}})
+    assert cfg.context.confirm_destructive is True
+    assert cfg.context.enabled is True
+
+
+def test_rejects_unknown_field_in_context_section() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        CliConfig.model_validate({"context": {"default_session": "dev"}})
+
+
+def test_rejects_non_bool_context_enabled() -> None:
+    with pytest.raises(ValidationError, match="enabled"):
+        CliConfig.model_validate({"context": {"enabled": "sideways"}})
+
+
+def test_rejects_non_bool_context_confirm_destructive() -> None:
+    with pytest.raises(ValidationError, match="confirm_destructive"):
+        CliConfig.model_validate({"context": {"confirm_destructive": "maybe"}})
+
+
+# ---------------------------------------------------------------------------
 # load_cli
 # ---------------------------------------------------------------------------
 
@@ -446,3 +494,10 @@ async def test_load_cli_rejects_unknown_subsection_key(tmp_path: Path) -> None:
     (tmp_path / "cli.json").write_text(json.dumps({"daemon": {"log_level": "DEBUG"}}))
     with pytest.raises(ConfigurationError, match="Extra inputs"):
         await load_cli(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_load_cli_context_override(tmp_path: Path) -> None:
+    (tmp_path / "cli.json").write_text(json.dumps({"context": {"enabled": False}}))
+    cfg = await load_cli(tmp_path)
+    assert cfg.context.enabled is False

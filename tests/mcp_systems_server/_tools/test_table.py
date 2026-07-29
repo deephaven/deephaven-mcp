@@ -8,10 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import (
-    MockContext,
-    create_mock_instance_tracker,
-)
 
 from deephaven_mcp import config
 from deephaven_mcp.mcp_systems_server._tools.table import (
@@ -27,6 +23,11 @@ from deephaven_mcp.resource_manager import (
     QualifiedSessionId,
     ResourceLivenessStatus,
     SystemType,
+)
+
+from ._helpers import (
+    MockContext,
+    create_mock_instance_tracker,
 )
 
 

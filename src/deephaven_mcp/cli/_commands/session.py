@@ -7,38 +7,52 @@ Every session is addressed by a fully qualified id
 ``type:system:name`` (``type`` is ``community`` or ``enterprise``).
 Verbs that take an existing id route to the right backend tool by the
 id's prefix; ``create`` chooses the backend from ``--system``. Type is
-never a command subgroup — see the ``_cli-tool-wrapping`` skill.
+never a command subgroup — see the ``ref-cli-tool-wrapping`` skill.
 """
 
 from __future__ import annotations
 
 __all__ = ["session"]
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, assert_never, cast
 
 import click
 
 from deephaven_mcp._taxonomy import SystemType
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._browser import launch_browser
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
     call_for_payload,
-    echo_payload,
     parse_key_value,
     read_local_script,
     wrapper_error_codes,
+    yes_option,
 )
+from deephaven_mcp.cli._context import (
+    CONTEXT_HINT,
+    CONTEXT_RISK_DESTRUCTIVE,
+    CONTEXT_RISK_STATEFUL,
+    ContextKey,
+    ContextProvenance,
+    clear_matching,
+    require_context_target,
+    require_context_value,
+    resolve_for_runtime,
+)
+from deephaven_mcp.cli._echo import echo_payload
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,
 )
+from deephaven_mcp.cli._params import param_label
 from deephaven_mcp.cli._runtime import Runtime
 
 _COMMUNITY_SYSTEM = SystemType.COMMUNITY.value
@@ -75,6 +89,53 @@ _ENTERPRISE_ONLY_CREATE = (
     "viewer_groups",
     "session_arguments",
 )
+
+
+def _create_flags(names: Iterable[str]) -> str:
+    """Render ``session create`` parameter names as the flags a user types.
+
+    The spelling comes from the command's own option declarations, so a
+    repeatable option is named singular where its parameter is plural
+    (``--admin-group`` for ``admin_groups``).
+
+    Args:
+        names (Iterable[str]): Parameter names of ``session create``.
+
+    Returns:
+        str: The flags, comma-joined in the order given.
+    """
+    labels = {param.name: param_label(param) for param in session_create.params}
+    return ", ".join(labels[name] for name in names)
+
+
+def _system_origin(system: str, provenance: ContextProvenance) -> str:
+    """Describe which system was selected and where the choice came from.
+
+    An "option does not apply to a *branch* session" message is only
+    actionable if the user can see why that branch was chosen — and with
+    the sticky context they may never have typed ``--system`` at all, so
+    naming the flag alone would describe an argument they did not pass.
+
+    Args:
+        system (str): The resolved system name.
+        provenance (ContextProvenance): Where the value came from.
+
+    Returns:
+        str: A parenthetical-ready phrase naming the system and, when it
+            was not typed, the source that supplied it.
+    """
+    match provenance:
+        case ContextProvenance.ARGUMENT:
+            return f"--system {system!r}"
+        case ContextProvenance.FILE:
+            return (
+                f"system {system!r}, from the sticky context; see "
+                "'dhcli context show'"
+            )
+        case ContextProvenance.DISABLED | ContextProvenance.UNSET:
+            return f"system {system!r}, the default"
+        case _ as unexpected:
+            assert_never(unexpected)
 
 
 @click.group(cls=HelpfulGroup)
@@ -324,18 +385,24 @@ _OUTPUT_SHOW = OutputSpec(
             "and verify liveness (slower, more accurate). An unknown or missing "
             "session exits 3."
         ),
-        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Fully qualified id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_SHOW,
         examples=(
             "$ dhcli session show community:community:my-session",
             "$ dhcli session show community:community:my-session --connect",
         ),
-        see_also=("dhcli session list",),
+        see_also=("dhcli session list", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.option(
     "--connect",
     "attempt_to_connect",
@@ -345,8 +412,11 @@ _OUTPUT_SHOW = OutputSpec(
 )
 @click.pass_obj
 @run_async
-async def session_show(runtime: Runtime, id: str, attempt_to_connect: bool) -> None:
+async def session_show(
+    runtime: Runtime, id: str | None, attempt_to_connect: bool
+) -> None:
     """Show detailed information about one session."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     arguments: dict[str, Any] = {"id": id}
     if attempt_to_connect:
         arguments["attempt_to_connect"] = True
@@ -378,6 +448,7 @@ _OUTPUT_CREATE = OutputSpec(
     "create",
     wraps_tools=("session_community_create", "session_enterprise_create"),
     router_params=frozenset({"system"}),
+    client_only_params=frozenset({"no_set_context"}),
     help_spec=HelpSpec(
         summary="Create a session on a system (Community or Enterprise).",
         description=(
@@ -394,18 +465,34 @@ _OUTPUT_CREATE = OutputSpec(
             "(--server, --engine, --auto-delete-timeout, --admin-group, "
             "--viewer-group, --session-arg) are mutually exclusive; supplying "
             "one for the wrong --system exits 2 with option_not_applicable. A "
-            "backend that rejects the request exits 3."
+            "backend that rejects the request exits 3. " + CONTEXT_RISK_STATEFUL
         ),
         arguments=(
             HelpEntry("SESSION_NAME", "Session name (required for Community)."),
         ),
-        output=_OUTPUT_CREATE,
+        output=OutputSpec(
+            _OUTPUT_CREATE.mode,
+            (
+                *_OUTPUT_CREATE.fields,
+                OutputField(
+                    "context",
+                    "object",
+                    "Present when the sticky context was updated: the keys set "
+                    "and their new values.",
+                ),
+            ),
+            note=_OUTPUT_CREATE.note,
+        ),
         examples=(
             "$ dhcli session create dev --launch-method python",
             "$ dhcli session create rpt --system prod --engine DeephavenEnterprise",
             "$ dhcli session create dev --env LOG_LEVEL=DEBUG --jvm-arg -Xmx2g",
         ),
-        see_also=("dhcli session delete ID", "dhcli system list"),
+        see_also=(
+            "dhcli session delete ID",
+            "dhcli system list",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.OPTION_NOT_APPLICABLE,
@@ -418,11 +505,13 @@ _OUTPUT_CREATE = OutputSpec(
 @click.option(
     "--system",
     "system",
-    default=_COMMUNITY_SYSTEM,
-    show_default=True,
+    default=None,
+    show_default=False,
     help=(
         "Target system: 'community' for a local Community worker, or a configured "
-        "Enterprise system name (run 'dhcli system list'). The system's type "
+        "Enterprise system name (run 'dhcli system list'). Defaults to the "
+        f"sticky context system if set, else 'community'. {CONTEXT_HINT} "
+        "The system's type "
         "selects which options apply."
     ),
 )
@@ -529,12 +618,25 @@ _OUTPUT_CREATE = OutputSpec(
     metavar="KEY=VALUE",
     help="[Enterprise] Controller session argument (repeatable; JSON values).",
 )
+@click.option(
+    "--no-set-context",
+    "no_set_context",
+    is_flag=True,
+    default=False,
+    help=(
+        "Do not update the sticky context on success. Without this flag a "
+        "successful create sets the 'session' key, and for an Enterprise "
+        "session the 'system' and 'pq' keys too (an Enterprise session id "
+        "is its PQ id). This governs only the write; --no-context governs "
+        "whether an omitted id reads from the sticky context."
+    ),
+)
 @click.pass_obj
 @run_async
 async def session_create(  # noqa: PLR0913 — a wrapper mirrors its tool's full surface
     runtime: Runtime,
     session_name: str | None,
-    system: str,
+    system: str | None,
     programming_language: str | None,
     heap_size_gb: float | None,
     extra_jvm_args: tuple[str, ...],
@@ -552,8 +654,14 @@ async def session_create(  # noqa: PLR0913 — a wrapper mirrors its tool's full
     admin_groups: tuple[str, ...],
     viewer_groups: tuple[str, ...],
     session_arguments: tuple[str, ...],
+    no_set_context: bool,
 ) -> None:
     """Create a session on a Community or Enterprise system."""
+    system_provenance = ContextProvenance.ARGUMENT
+    if system is None:
+        resolved = resolve_for_runtime(runtime, ContextKey.SYSTEM, None)
+        system = resolved.value or _COMMUNITY_SYSTEM
+        system_provenance = resolved.provenance
     community = system == _COMMUNITY_SYSTEM
     opts: dict[str, Any] = {
         "session_name": session_name,
@@ -580,9 +688,10 @@ async def session_create(  # noqa: PLR0913 — a wrapper mirrors its tool's full
     misused = sorted(name for name in wrong if _provided(opts[name]))
     if misused:
         branch = "Community" if community else "Enterprise"
+        flags = _create_flags(misused)
         raise CliError(
-            f"Options {misused} do not apply to a {branch} session "
-            f"(--system {system!r}).",
+            f"{flags} do not apply to a {branch} session "
+            f"({_system_origin(system, system_provenance)}).",
             code=ErrorCode.OPTION_NOT_APPLICABLE,
         )
     if community and not session_name:
@@ -607,9 +716,18 @@ async def session_create(  # noqa: PLR0913 — a wrapper mirrors its tool's full
     keep = relevant | shared | ({"system"} if not community else set())
     arguments = {k: v for k, v in opts.items() if k in keep and v is not None}
 
-    await call_and_echo(
+    payload = await call_for_payload(
         runtime, tool, retry_command="dhcli session create", arguments=arguments
     )
+    new_id = payload.get("id")
+    if not no_set_context and new_id:
+        updates = {ContextKey.SESSION: new_id}
+        if not community:
+            updates[ContextKey.SYSTEM] = system
+            updates[ContextKey.PQ] = new_id
+        runtime.context_store.set_many(updates)
+        payload = {**payload, "context": {k.value: v for k, v in updates.items()}}
+    echo_payload(runtime, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -626,37 +744,62 @@ _OUTPUT_DELETE = OutputSpec(
 @session.command(
     "delete",
     wraps_tools=("session_community_delete", "session_enterprise_delete"),
+    client_only_params=frozenset({"yes"}),
     help_spec=HelpSpec(
         summary="Delete a session by id.",
         description=(
-            "Permanently deletes the session with ID; this cannot be "
-            "undone. For an enterprise session, this also deletes its "
-            "underlying Persistent Query from the system (equivalent to "
-            "'pq delete' with the same id). A community session "
-            "can be deleted only if it was dynamically created; those defined "
-            "in static config cannot."
+            "Permanently deletes the session with ID; this cannot be undone. "
+            "Deleting an enterprise session also deletes the Persistent Query "
+            "backing it, so only a session created by 'session create' is "
+            "eligible. A session that already existed — one from static "
+            "community config, or an enterprise PQ found on the controller — "
+            "is refused with exit 3; use 'pq delete' to remove such a PQ "
+            "deliberately. On success the sticky session and pq keys are "
+            "cleared if they pointed at the deleted id. " + CONTEXT_RISK_DESTRUCTIVE
         ),
-        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Fully qualified id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_DELETE,
         examples=("$ dhcli session delete community:community:my-session",),
-        see_also=("dhcli session create", "dhcli session list"),
+        see_also=(
+            "dhcli session create",
+            "dhcli session list",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
+            ErrorCode.OPERATION_CANCELED,
+            *wrapper_error_codes(),
+        ),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
+@yes_option
 @click.pass_obj
 @run_async
-async def session_delete(runtime: Runtime, id: str) -> None:
+async def session_delete(runtime: Runtime, id: str | None, yes: bool) -> None:
     """Delete a session by id, routing on the id's type prefix."""
+    id = require_context_target(
+        runtime, ContextKey.SESSION, id, action="Delete", yes=yes
+    )
     community = id.startswith(f"{_COMMUNITY_SYSTEM}:")
     tool = "session_community_delete" if community else "session_enterprise_delete"
-    await call_and_echo(
+    payload = await call_for_payload(
         runtime,
         tool,
         retry_command="dhcli session delete",
         arguments={"id": id},
     )
+    clear_matching(
+        runtime.context_store, frozenset({id}), (ContextKey.SESSION, ContextKey.PQ)
+    )
+    echo_payload(runtime, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -673,6 +816,7 @@ _OUTPUT_EXEC = OutputSpec(
 @session.command(
     "exec",
     wraps_tool="session_script_run",
+    client_only_params=frozenset({"yes"}),
     help_spec=HelpSpec(
         summary="Run a script in a session.",
         description=(
@@ -681,18 +825,27 @@ _OUTPUT_EXEC = OutputSpec(
             "standard input with '--script-path -'; supply exactly one source. "
             "The file is read by the CLI itself, so a relative path resolves "
             "against your working directory; an unreadable file exits 2. "
-            "Supplying no source or several exits 2; a script error exits 3."
+            "Supplying no source or several exits 2; a script error exits 3. "
+            + CONTEXT_RISK_DESTRUCTIVE
         ),
-        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Fully qualified id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_EXEC,
         examples=(
             "$ dhcli session exec community:community:dev --script 'print(1+1)'",
             "$ dhcli session exec community:community:dev --script-path /tmp/job.py",
             "$ cat job.py | dhcli session exec community:community:dev --script-path -",
         ),
-        see_also=("dhcli session pip-list ID",),
+        see_also=("dhcli session pip-list ID", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
+            ErrorCode.OPERATION_CANCELED,
             ErrorCode.MISSING_ARGUMENT,
             ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
             ErrorCode.FILE_READ_FAILED,
@@ -700,7 +853,7 @@ _OUTPUT_EXEC = OutputSpec(
         ),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.option("--script", "script", default=None, help="Inline script source.")
 @click.option(
     "--script-path",
@@ -708,12 +861,21 @@ _OUTPUT_EXEC = OutputSpec(
     default=None,
     help="Path to a local script file (read by the CLI), or '-' to read stdin.",
 )
+@yes_option
 @click.pass_obj
 @run_async
 async def session_exec(
-    runtime: Runtime, id: str, script: str | None, script_path: str | None
+    runtime: Runtime,
+    id: str | None,
+    script: str | None,
+    script_path: str | None,
+    yes: bool,
 ) -> None:
     """Run a script in a session."""
+    # Both guards run before the target is resolved: confirming a run
+    # against the sticky-context session and only then rejecting the flag
+    # combination wastes the user's decision. Reading the file stays
+    # after the confirmation, so a declined run does not touch the disk.
     if script is not None and script_path is not None:
         raise CliError(
             "--script and --script-path cannot be combined; supply exactly one.",
@@ -724,6 +886,9 @@ async def session_exec(
             "Provide a script source: --script, --script-path, or --script-path -.",
             code=ErrorCode.MISSING_ARGUMENT,
         )
+    id = require_context_target(
+        runtime, ContextKey.SESSION, id, action="Run script in", yes=yes
+    )
     if script_path is not None:
         script = read_local_script(script_path)
     arguments: dict[str, Any] = {"id": id, "script": script}
@@ -759,22 +924,29 @@ _OUTPUT_PIP_LIST = OutputSpec(
             "as a list of {package, version}. Use it to confirm a library is "
             "present before running a script that imports it."
         ),
-        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Fully qualified id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_PIP_LIST,
         examples=(
             "$ dhcli session pip-list community:community:dev",
             "$ dhcli -o json session pip-list community:community:dev | jq '.[].package'",
         ),
-        see_also=("dhcli session exec ID",),
+        see_also=("dhcli session exec ID", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.pass_obj
 @run_async
-async def session_pip_list(runtime: Runtime, id: str) -> None:
+async def session_pip_list(runtime: Runtime, id: str | None) -> None:
     """List a session's installed pip packages."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     await call_and_echo_field(
         runtime,
         "session_pip_list",
@@ -818,19 +990,30 @@ _CREDENTIALS_DESCRIPTION = (
     help_spec=HelpSpec(
         summary="Print a Community session's browser-login credentials.",
         description=_CREDENTIALS_DESCRIPTION,
-        arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Community session id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_CREDENTIALS,
         examples=("$ dhcli session credentials community:community:my-session",),
-        see_also=("dhcli session url ID", "dhcli session open ID"),
+        see_also=(
+            "dhcli session url ID",
+            "dhcli session open ID",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.pass_obj
 @run_async
-async def session_credentials(runtime: Runtime, id: str) -> None:
+async def session_credentials(runtime: Runtime, id: str | None) -> None:
     """Fetch one Community session's browser-login credentials."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     payload = await _fetch_credentials(
         runtime, id, retry_command="dhcli session credentials"
     )
@@ -857,22 +1040,33 @@ _OUTPUT_URL = OutputSpec("text", note="The authenticated browser URL, one line."
             "affects the structured error on failure. Same Community-only scope "
             "and security gate as 'session credentials'."
         ),
-        arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Community session id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_URL,
         examples=(
             "$ dhcli session url community:community:my-session",
             '$ open "$(dhcli session url community:community:my-session)"',
         ),
-        see_also=("dhcli session credentials ID", "dhcli session open ID"),
+        see_also=(
+            "dhcli session credentials ID",
+            "dhcli session open ID",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.pass_obj
 @run_async
-async def session_url(runtime: Runtime, id: str) -> None:
+async def session_url(runtime: Runtime, id: str | None) -> None:
     """Print a Community session's authenticated browser URL."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     payload = await _fetch_credentials(runtime, id, retry_command="dhcli session url")
     click.echo(_authenticated_url(payload))
 
@@ -904,18 +1098,32 @@ _OUTPUT_OPEN = OutputSpec(
             "launched, exits 2 (browser_launch_failed) with the URL in the "
             "message so you can open it manually."
         ),
-        arguments=(HelpEntry("ID", "Community session id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Community session id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_OPEN,
         examples=(
             "$ dhcli session open community:community:my-session",
             "$ dhcli session open community:community:my-session --print",
         ),
-        see_also=("dhcli session url ID", "dhcli session credentials ID"),
+        see_also=(
+            "dhcli session url ID",
+            "dhcli session credentials ID",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=(ErrorCode.BROWSER_LAUNCH_FAILED, *wrapper_error_codes()),
+        error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
+            ErrorCode.BROWSER_LAUNCH_FAILED,
+            *wrapper_error_codes(),
+        ),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.option(
     "--print",
     "print_only",
@@ -925,8 +1133,9 @@ _OUTPUT_OPEN = OutputSpec(
 )
 @click.pass_obj
 @run_async
-async def session_open(runtime: Runtime, id: str, print_only: bool) -> None:
+async def session_open(runtime: Runtime, id: str | None, print_only: bool) -> None:
     """Open a Community session in the default web browser."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     payload = await _fetch_credentials(runtime, id, retry_command="dhcli session open")
     url = _authenticated_url(payload)
     launched = False if print_only else launch_browser(url)

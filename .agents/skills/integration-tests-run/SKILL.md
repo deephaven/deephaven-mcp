@@ -1,6 +1,6 @@
 ---
 name: integration-tests-run
-description: Run integration tests (Docker / pip / subprocess-based) — encodes the -s flag requirement and other gotchas that cause silent failures otherwise
+description: Run the integration tests (Docker / pip / subprocess-based) — invoke when verifying a change that touches session launching, packaging, or subprocess handling, since these tests are excluded from the default run. Encodes the required -s flag and the other gotchas that cause silent failures
 ---
 
 Integration tests are marked `@pytest.mark.integration` and are **excluded by default** in `pyproject.toml`'s `addopts` (`-m 'not integration'`).
@@ -24,5 +24,5 @@ uv run pytest -m integration -s
 
 ## Cross-references
 
-- Naming convention: `test_<file>_integration.py` (see `_python-coding-practices` rule 5).
+- Naming convention: `test_<file>_integration.py` (see `ref-python-coding-practices` rule 5).
 - For unit-test-only runs, see `tests-run` and `tests-run-file`.

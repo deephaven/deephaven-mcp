@@ -9,10 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import (
-    MockContext,
-    create_mock_instance_tracker,
-)
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
@@ -45,6 +41,11 @@ from deephaven_mcp.resource_manager import (
     ResourceLivenessStatus,
     SessionOrigin,
     SystemType,
+)
+
+from ._helpers import (
+    MockContext,
+    create_mock_instance_tracker,
 )
 
 _TEST_SYSTEM_NAME = "system"
@@ -350,6 +351,7 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.close = AsyncMock()
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
@@ -384,6 +386,7 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.close = AsyncMock()
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
@@ -421,6 +424,7 @@ async def test_session_enterprise_delete_pq_deletion_failure():
     mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.close = AsyncMock()
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
@@ -452,6 +456,57 @@ async def test_session_enterprise_delete_pq_deletion_failure():
     mock_session_manager.close.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "origin", [SessionOrigin.DISCOVERED, SessionOrigin.STATIC], ids=lambda o: o.value
+)
+@pytest.mark.asyncio
+async def test_session_enterprise_delete_refuses_non_dynamic_session(origin):
+    """A session MCP did not create is refused without touching the controller.
+
+    A ``DISCOVERED`` session is a persistent query that pre-existed MCP and
+    outlives it. Deleting the PQ is irreversible, so the guard must fire
+    *before* any controller call -- asserting the refusal alone would still
+    pass if the PQ had already been destroyed.
+    """
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+    mock_config_manager = MagicMock()
+    mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = origin
+    mock_session_manager.close = AsyncMock()
+
+    enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
+
+    mock_registry.get = AsyncMock(return_value=mock_session_manager)
+    mock_registry.remove = AsyncMock(return_value=mock_session_manager)
+    mock_controller = MagicMock()
+    mock_controller.delete_query = AsyncMock()
+    mock_factory = MagicMock(controller_client=mock_controller)
+    mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_registry,
+        }
+    )
+
+    full_config = {"enterprise": {"systems": enterprise_config}}
+    mock_config_manager.get_config = AsyncMock(return_value=full_config)
+    result = await session_enterprise_delete(context, "enterprise:system:16")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not a dynamically created session" in result["error"]
+    assert f"origin: '{origin.value}'" in result["error"]
+    assert "pq_delete" in result["error"]
+    # The point of the guard: the PQ must survive, and the session must stay
+    # usable rather than being half-torn-down.
+    mock_controller.delete_query.assert_not_awaited()
+    mock_registry.remove.assert_not_awaited()
+    mock_session_manager.close.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_session_enterprise_delete_registry_pop_raises_error():
     """Covers error path on removal (lines 1973-1977)."""
@@ -464,6 +519,7 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
     mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.close = AsyncMock()
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
@@ -497,6 +553,7 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     mock_registry.system_name = _TEST_SYSTEM_NAME
     mock_config_manager = MagicMock()
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.close = AsyncMock()
 
     enterprise_config = {"system": {"session_creation": {"max_concurrent_sessions": 5}}}
@@ -1646,6 +1703,7 @@ async def test_session_enterprise_delete_success():
 
     # Mock existing enterprise session manager
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.close = AsyncMock()
     mock_session_manager.name = "test-worker"
 
@@ -1805,6 +1863,7 @@ async def test_session_enterprise_delete_close_failure_continues():
 
     # Mock session manager that fails to close
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.close = AsyncMock(side_effect=Exception("Close failed"))
 
     # Provide nested enterprise systems config via async get_config()
@@ -2352,6 +2411,7 @@ async def test_session_enterprise_delete_success_v2():
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_session_manager = MagicMock(spec=EnterpriseSessionManager)
+    mock_session_manager.origin = SessionOrigin.DYNAMIC
     mock_session_manager.name = "test-session"
 
     # Mock config

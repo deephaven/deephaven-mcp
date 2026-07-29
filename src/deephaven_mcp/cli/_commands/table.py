@@ -12,16 +12,21 @@ from typing import Any
 import click
 
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
     call_and_echo_table,
     wrapper_error_codes,
 )
-from deephaven_mcp.cli._errors import ExitCode
+from deephaven_mcp.cli._context import (
+    CONTEXT_HINT,
+    ContextKey,
+    require_context_value,
+)
+from deephaven_mcp.cli._errors import ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,
@@ -57,19 +62,30 @@ _OUTPUT_LIST = OutputSpec(
             "Lightweight discovery of table names without schemas. Follow up "
             "with 'table schema' for column definitions or 'table data' for rows."
         ),
-        arguments=(HelpEntry("ID", "Fully qualified id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Fully qualified id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_LIST,
         examples=("$ dhcli table list community:community:dev",),
-        see_also=("dhcli table schema ID TABLE", "dhcli table data ID TABLE"),
+        see_also=(
+            "dhcli table schema ID TABLE",
+            "dhcli table data ID TABLE",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.pass_obj
 @run_async
-async def table_list(runtime: Runtime, id: str) -> None:
+async def table_list(runtime: Runtime, id: str | None) -> None:
     """List the table names in a session."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     await call_and_echo_field(
         runtime,
         "session_tables_list",

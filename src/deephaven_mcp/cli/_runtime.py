@@ -14,7 +14,7 @@ touch configuration at all. The root callback in
 :mod:`deephaven_mcp.cli._main` stores a cheap :class:`RuntimeSpec`
 (the load recipe: directory overrides + CLI flag overrides) on
 ``ctx.obj``;
-:meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke` swaps it for a
+:meth:`~deephaven_mcp.cli._command.HelpfulCommand.invoke` swaps it for a
 fully-loaded :class:`Runtime` via :meth:`RuntimeSpec.resolve` right
 before the body runs. Commands declared ``needs_runtime=False`` (the
 ``agents`` verbs) skip the swap and never load configuration.
@@ -52,6 +52,7 @@ from pathlib import Path
 from deephaven_mcp._dictutil import deep_merge
 from deephaven_mcp._exceptions import ConfigurationError
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._context import ContextStore
 from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.config import (
     harden_private_dir,
@@ -96,7 +97,7 @@ class RuntimeSpec:
 
     The root callback constructs one per invocation — cheaply, with no
     I/O and no validation — and stores it on ``ctx.obj``.
-    :meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke` calls
+    :meth:`~deephaven_mcp.cli._command.HelpfulCommand.invoke` calls
     :meth:`resolve` to swap it for the real :class:`Runtime` right
     before a leaf command's body runs. Fields mirror
     :func:`load_runtime`'s keyword parameters.
@@ -115,8 +116,9 @@ class RuntimeSpec:
     no_input: bool = False
     """The root ``--no-input`` flag: when ``True``, commands never
     prompt interactively. Read by the ``needs_runtime=False``
-    configuration-authoring verbs (which receive the spec itself);
-    not part of the loaded :class:`Runtime`."""
+    configuration-authoring verbs (which receive the spec itself), and
+    forwarded to :attr:`Runtime.no_input` by :meth:`resolve` for
+    runtime-dependent verbs that may prompt."""
 
     def resolve(self) -> Runtime:
         """Load, validate, and return the :class:`Runtime` this spec describes.
@@ -142,6 +144,7 @@ class RuntimeSpec:
             config_dir_override=self.config_dir_override,
             runtime_dir_override=self.runtime_dir_override,
             cli_overrides=self.cli_overrides,
+            no_input=self.no_input,
         )
 
 
@@ -169,12 +172,30 @@ class Runtime:
     """Typed handle to ``runtime_dir/daemon/`` exposing the registry
     / lock / log artifact paths and atomic registry CRUD."""
 
+    no_input: bool = False
+    """The root ``--no-input`` flag, forwarded from :class:`RuntimeSpec`.
+
+    Read with :func:`~deephaven_mcp.cli._prompt.can_prompt` by leaf
+    verbs that may prompt (the destructive context confirmation in
+    :func:`~deephaven_mcp.cli._context.require_context_target`)."""
+
+    @property
+    def context_store(self) -> ContextStore:
+        """Typed handle to this runtime's ``<runtime_dir>/context.json``.
+
+        Computed from :attr:`runtime_dir` on every access;
+        :class:`ContextStore` holds no file handles or locks, so each
+        call returns an equivalent handle.
+        """
+        return ContextStore.for_runtime_dir(self.runtime_dir)
+
 
 async def load_runtime(
     *,
     config_dir_override: Path | None = None,
     runtime_dir_override: Path | None = None,
     cli_overrides: dict[str, object] | None = None,
+    no_input: bool = False,
 ) -> Runtime:
     """Resolve paths, validate the entire config tree, return a :class:`Runtime`.
 
@@ -212,6 +233,8 @@ async def load_runtime(
             partial mapping of raw field values deep-merged into
             ``config.cli`` after loading. ``None`` (or an empty dict)
             leaves the on-disk value unchanged.
+        no_input (bool): The root ``--no-input`` flag, stored on the
+            returned :class:`Runtime` for verbs that may prompt.
 
     Returns:
         Runtime: The frozen, fully-validated runtime context.
@@ -250,4 +273,5 @@ async def load_runtime(
         runtime_dir=runtime_dir,
         config=tree,
         daemon_dir=DaemonDirectory.for_runtime_dir(runtime_dir),
+        no_input=no_input,
     )

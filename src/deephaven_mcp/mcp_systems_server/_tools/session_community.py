@@ -1186,7 +1186,7 @@ async def session_community_create(
         # (SessionLaunchError is a subclass). The message is a complete
         # user-facing string authored by this codebase, so it is adopted
         # verbatim per the rule-20 translation carve-out
-        # (_python-coding-practices): an exception_summary() prefix would
+        # (ref-python-coding-practices): an exception_summary() prefix would
         # stack wrapper noise onto an already-rendered message.
         _LOGGER.error(f"[mcp_systems_server:session_community_create] {e}")
         return error_response(str(e))

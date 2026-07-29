@@ -39,17 +39,15 @@ from deephaven_mcp._platform.dir_permissions import harden_private_dir
 from deephaven_mcp._platform.fsutil import AdvisoryFileLock
 from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._command import HelpfulCommand, HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import parse_key_value
+from deephaven_mcp.cli._echo import echo_payload, echo_payload_no_runtime
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
-from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulCommand,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,
-    emit_payload,
 )
 from deephaven_mcp.cli._prompt import (
     can_prompt,
@@ -78,7 +76,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Raw on-disk configuration is arbitrary JSON with no fixed shape, so the
 # ``dict[str, Any]`` values throughout this module are genuinely open (per
-# _python-coding-practices rule 6) rather than an under-specified type.
+# ref-python-coding-practices rule 6) rather than an under-specified type.
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +566,7 @@ async def config_show(runtime: Runtime, path: str | None) -> None:
             payload = get_field(payload, FieldPath.parse(path))
         except ConfigurationPathError as exc:
             raise _map_config_error(exc) from exc
-    click.echo(format_output(payload, output=runtime.config.cli.output.format))
+    echo_payload(runtime, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -618,7 +616,7 @@ async def config_validate(runtime: Runtime) -> None:
         "config_dir": str(runtime.config_dir),
         "message": "Configuration validated successfully.",
     }
-    click.echo(format_output(payload, output=runtime.config.cli.output.format))
+    echo_payload(runtime, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -697,9 +695,9 @@ async def config_get(ctx: click.Context, path: str | None) -> None:
     resolved = _resolve_logical_path(path)
     match resolved:
         case ConfigFieldLocation() as target:
-            emit_payload(ctx, _read_field(store, target))
+            echo_payload_no_runtime(ctx, _read_field(store, target))
         case ConfigSection() as section:
-            emit_payload(ctx, _read_section_tree(store, section))
+            echo_payload_no_runtime(ctx, _read_section_tree(store, section))
         case _:
             assert_never(resolved)
 
@@ -925,7 +923,7 @@ async def config_set(ctx: click.Context, assignment: tuple[str, ...]) -> None:
         raise _map_config_error(exc) from exc
     _warn_template_resolution(warnings)
     _warn_restart_hint()
-    emit_payload(
+    echo_payload_no_runtime(
         ctx,
         {
             "paths": rendered_paths,
@@ -1036,7 +1034,7 @@ async def config_unset(ctx: click.Context, path: tuple[str, ...]) -> None:
         raise _map_config_error(exc) from exc
     _warn_template_resolution(warnings)
     _warn_restart_hint()
-    emit_payload(
+    echo_payload_no_runtime(
         ctx,
         {
             "paths": rendered_paths,
@@ -1201,7 +1199,7 @@ async def config_keys(ctx: click.Context, path: str | None) -> None:
                     )
         case _:
             assert_never(resolved)
-    emit_payload(ctx, {"keys": keys})
+    echo_payload_no_runtime(ctx, {"keys": keys})
 
 
 # ---------------------------------------------------------------------------
@@ -1330,7 +1328,7 @@ async def config_edit(ctx: click.Context, path: str) -> None:
 
     edited_text = _open_editor(original_text)
     if edited_text is None or edited_text == original_text:
-        emit_payload(ctx, {"file": str(file_path), "changed": False})
+        echo_payload_no_runtime(ctx, {"file": str(file_path), "changed": False})
         return
 
     try:
@@ -1339,7 +1337,7 @@ async def config_edit(ctx: click.Context, path: str) -> None:
         raise _map_config_error(exc) from exc
     _warn_template_resolution(warnings)
     _warn_restart_hint()
-    emit_payload(ctx, {"file": str(file_path), "changed": True})
+    echo_payload_no_runtime(ctx, {"file": str(file_path), "changed": True})
 
 
 # ---------------------------------------------------------------------------
@@ -1434,7 +1432,9 @@ async def config_files(ctx: click.Context) -> None:
         if entry["exists"]:
             entry.update(_validity_fields(store, target))
         entries.append(entry)
-    emit_payload(ctx, {"config_dir": str(store.config_dir), "files": entries})
+    echo_payload_no_runtime(
+        ctx, {"config_dir": str(store.config_dir), "files": entries}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1536,7 +1536,7 @@ async def config_init(ctx: click.Context) -> None:
         name = prompt_text("System name", no_input=spec.no_input)
         payload["enterprise_system"] = await _add_system_entity(ctx, name)
 
-    emit_payload(ctx, payload)
+    echo_payload_no_runtime(ctx, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -1975,7 +1975,7 @@ async def config_session_add(
         auth_type=auth_type,
         auth_token=auth_token,
     )
-    emit_payload(ctx, payload)
+    echo_payload_no_runtime(ctx, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -2044,7 +2044,7 @@ async def config_session_remove(ctx: click.Context, name: str, yes: bool) -> Non
     except ConfigurationError as exc:
         raise _map_config_error(exc) from exc
     _warn_restart_hint()
-    emit_payload(ctx, {"name": name, "file": str(path)})
+    echo_payload_no_runtime(ctx, {"name": name, "file": str(path)})
 
 
 # ---------------------------------------------------------------------------
@@ -2083,7 +2083,7 @@ async def config_session_list(ctx: click.Context) -> None:
     spec = _authoring_spec(ctx)
     store = _store_from_spec(spec)
     entries = _entity_status_entries(store, FieldPath(("community", "sessions")))
-    emit_payload(ctx, {"sessions": entries})
+    echo_payload_no_runtime(ctx, {"sessions": entries})
 
 
 # ---------------------------------------------------------------------------
@@ -2459,7 +2459,7 @@ async def config_system_add(
         max_sessions=max_sessions,
         heap_gb=heap_gb,
     )
-    emit_payload(ctx, payload)
+    echo_payload_no_runtime(ctx, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -2528,7 +2528,7 @@ async def config_system_remove(ctx: click.Context, name: str, yes: bool) -> None
     except ConfigurationError as exc:
         raise _map_config_error(exc) from exc
     _warn_restart_hint()
-    emit_payload(ctx, {"name": name, "file": str(path)})
+    echo_payload_no_runtime(ctx, {"name": name, "file": str(path)})
 
 
 # ---------------------------------------------------------------------------
@@ -2567,7 +2567,7 @@ async def config_system_list(ctx: click.Context) -> None:
     spec = _authoring_spec(ctx)
     store = _store_from_spec(spec)
     entries = _entity_status_entries(store, FieldPath(("enterprise", "systems")))
-    emit_payload(ctx, {"systems": entries})
+    echo_payload_no_runtime(ctx, {"systems": entries})
 
 
 # ---------------------------------------------------------------------------

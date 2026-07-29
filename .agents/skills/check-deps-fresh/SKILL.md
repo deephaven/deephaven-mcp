@@ -1,6 +1,6 @@
 ---
 name: check-deps-fresh
-description: Run the dependency freshness check (fresh resolve + mypy + pytest) and diagnose any failures
+description: Run the dependency freshness check — invoke before a release, or after changing dependencies in pyproject.toml. Performs a fresh resolve then runs mypy and pytest against it, and diagnoses any failures
 ---
 
 ## Steps

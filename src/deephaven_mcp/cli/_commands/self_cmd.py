@@ -36,11 +36,10 @@ from click.shell_completion import (
     ZshComplete,
 )
 
+from deephaven_mcp.cli._command import HelpfulCommand, HelpfulGroup
 from deephaven_mcp.cli._errors import ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulCommand,
-    HelpfulGroup,
     HelpSpec,
     OutputSpec,
 )

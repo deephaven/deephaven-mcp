@@ -20,6 +20,7 @@ from deephaven_mcp.config.schema import (
 _EXPECTED_PUBLIC_NAMES = {
     # cli.json
     "CliConfig",
+    "ContextConfig",
     "DaemonControlConfig",
     "DaemonReuseAction",
     "DaemonReusePolicy",

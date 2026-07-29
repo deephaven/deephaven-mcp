@@ -9,11 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import (
-    MockContext,
-    create_mock_instance_tracker,
-    stub_session_config,
-)
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
@@ -41,6 +36,12 @@ from deephaven_mcp.resource_manager import (
     SessionId,
     SessionOrigin,
     SystemType,
+)
+
+from ._helpers import (
+    MockContext,
+    create_mock_instance_tracker,
+    stub_session_config,
 )
 
 _DEFAULT_ORIGINS = {
@@ -122,7 +123,7 @@ async def test_session_community_create_with_auth_token_parameter():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
@@ -212,7 +213,7 @@ async def test_session_community_create_with_auth_token_env_var_set():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
@@ -294,7 +295,7 @@ async def test_session_community_create_with_auth_token_from_defaults():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
@@ -367,7 +368,7 @@ async def test_session_community_create_session_already_exists():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
@@ -412,7 +413,7 @@ async def test_session_community_create_health_check_timeout_with_cleanup():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
@@ -489,7 +490,7 @@ async def test_session_community_create_with_python_launch_method():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config

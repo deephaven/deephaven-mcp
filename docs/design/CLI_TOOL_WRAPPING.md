@@ -131,7 +131,7 @@ forward them.)
 
 ## Wrapper categories
 
-Every wrapper is one of five shapes. The `_cli-tool-wrapping` skill
+Every wrapper is one of five shapes. The `ref-cli-tool-wrapping` skill
 maps each to a code template; the first four route through the shared
 flow in
 [`cli/_commands/_wrapping.py`](../../src/deephaven_mcp/cli/_commands/_wrapping.py).

@@ -1,6 +1,6 @@
 ---
 name: mcp-stress-test
-description: Stress test a deephaven-docs MCP server (dev or prod) by calling docs_chat N times sequentially (default N=100)
+description: Stress test a deephaven-docs MCP server — invoke when checking a dev or prod docs server for timeouts, rate limiting, or response variation under sustained load. Calls docs_chat N times sequentially (default N=100) and reports pass/fail counts
 ---
 
 # MCP Stress Test Workflow

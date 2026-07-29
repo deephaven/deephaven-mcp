@@ -9,12 +9,12 @@ import yaml
 from click.testing import CliRunner
 
 from deephaven_mcp.cli._errors import ErrorCode
-from deephaven_mcp.cli._help import (
+from deephaven_mcp.cli._main import cli
+from deephaven_mcp.cli._manifest import (
     build_manifest,
     build_summary_tree,
     describe_command,
 )
-from deephaven_mcp.cli._main import cli
 
 # ---------------------------------------------------------------------------
 # agents tree — summary by default, --full for the complete manifest

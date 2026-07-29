@@ -153,7 +153,12 @@ class ErrorCode(StrEnum):
     )
     MISSING_ARGUMENT = (
         "missing_argument",
-        "A required positional argument or option was not provided.",
+        (
+            "A required positional argument or option was not provided, or "
+            "was provided as a blank string. No dhcli parameter accepts a "
+            "blank value; note that a KEY=VALUE option such as --env "
+            "'DEBUG=' is not blank and remains valid."
+        ),
     )
     MUTUALLY_EXCLUSIVE_OPTIONS = (
         "mutually_exclusive_options",
@@ -183,6 +188,16 @@ class ErrorCode(StrEnum):
     SYSTEM_NOT_FOUND = (
         "system_not_found",
         "The named Enterprise system is not configured (run 'dhcli system list').",
+    )
+    CONTEXT_NOT_SET = (
+        "context_not_set",
+        (
+            "A session/system/PQ id was omitted and no sticky context supplies "
+            "one: pass it explicitly, run 'dhcli context set <key> <value>' to "
+            "establish a default, or check 'dhcli context show' if one was "
+            "expected. Context fallback is skipped entirely when --no-context "
+            "was given or cli.json's context.enabled is false."
+        ),
     )
     CONFIG_INVALID = (
         "config_invalid",

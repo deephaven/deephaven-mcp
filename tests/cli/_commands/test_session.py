@@ -15,6 +15,7 @@ from deephaven_mcp.cli import _browser as browser_mod
 from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
 from deephaven_mcp.cli._commands import session as session_mod
+from deephaven_mcp.cli._context import ContextKey
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
 
@@ -57,9 +58,10 @@ def _run(
     *,
     standalone_mode: bool = True,
     input: str | None = None,
+    runtime: Runtime | None = None,
 ):
     """Invoke ``args`` with the call_tool seam returning ``payload``."""
-    rt = make_runtime(tmp_path)
+    rt = runtime or make_runtime(tmp_path)
     acquire_p, call_p = _patch(_result(payload))
     with acquire_p, call_p as call:
         result = _invoke(args, rt, standalone_mode=standalone_mode, input=input)
@@ -202,6 +204,21 @@ def test_show_not_found_exits_3(tmp_path: Path) -> None:
     )
     assert result.exit_code == 3
     assert "no such session" in result.output
+
+
+def test_show_falls_back_to_context_session(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SESSION, _SID)
+    result, call = _run(["session", "show"], _SHOW, tmp_path, runtime=rt)
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": _SID}
+
+
+def test_show_no_id_and_no_context_fails(tmp_path: Path) -> None:
+    result, call = _run(["session", "show"], _SHOW, tmp_path)
+    assert result.exit_code == 2
+    assert "no sticky context session is set" in result.output
+    call.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +387,36 @@ def test_create_community_missing_name_errors(tmp_path: Path) -> None:
     assert "SESSION_NAME is required" in str(result.exception)
 
 
+def test_system_origin_unhandled_provenance_hits_assert_never() -> None:
+    """An out-of-band provenance trips the runtime safety net.
+
+    Statically unreachable: the ``match`` covers all four
+    ``ContextProvenance`` members, so mypy proves exhaustiveness. We
+    bypass type checking to confirm the runtime net is covered rather
+    than a new member silently rendering as the default.
+    """
+    with pytest.raises(AssertionError):
+        session_mod._system_origin("prod", "bogus")  # type: ignore[arg-type]
+    # Suppression justified: deliberately passing a value the parameter's
+    # type rejects so the runtime ``assert_never`` branch is covered.
+    # Bracketed ``arg-type`` names what is silenced; mypy still flags any
+    # unintentional misuse at real call sites.
+
+
+def test_type_specific_create_params_are_declared_options() -> None:
+    """Every name in the type-specific tuples is a real command parameter.
+
+    '_create_flags' looks each misused name up among the command's own
+    declared params, so a name that matches none of them would raise
+    KeyError instead of the intended message.
+    """
+    declared = {param.name for param in session_mod.session_create.params}
+    assert {
+        *session_mod._COMMUNITY_ONLY_CREATE,
+        *session_mod._ENTERPRISE_ONLY_CREATE,
+    } <= declared
+
+
 def test_create_community_with_enterprise_option_errors(tmp_path: Path) -> None:
     result, _ = _run(
         ["session", "create", "dev", "--server", "pool-a"],
@@ -379,7 +426,8 @@ def test_create_community_with_enterprise_option_errors(tmp_path: Path) -> None:
     )
     assert _error_code(result) == "option_not_applicable"
     assert result.exception.exit_code == 2
-    assert "server" in str(result.exception)
+    # The flag as typed, not the tool parameter name.
+    assert "--server" in str(result.exception)
     assert "Community" in str(result.exception)
 
 
@@ -392,8 +440,33 @@ def test_create_enterprise_with_community_option_errors(tmp_path: Path) -> None:
     )
     assert _error_code(result) == "option_not_applicable"
     assert result.exception.exit_code == 2
-    assert "docker_volumes" in str(result.exception)
-    assert "Enterprise" in str(result.exception)
+    # '--docker-volume' is singular where its tool parameter is plural, so
+    # this also pins that the message is not a dash-substituted param name.
+    message = str(result.exception)
+    assert "--docker-volume" in message
+    assert "docker_volumes" not in message
+    assert "Enterprise" in message
+
+
+def test_create_names_sticky_context_as_the_system_source(tmp_path: Path) -> None:
+    """When --system came from the context, the error says so.
+
+    Naming '--system' alone would describe an argument the user never
+    typed, leaving them unable to see why the Enterprise branch applied.
+    """
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SYSTEM, "prod")
+    result, _ = _run(
+        ["session", "create", "rpt", "--docker-volume", "/a:/b"],
+        _CREATED,
+        tmp_path,
+        runtime=rt,
+        standalone_mode=False,
+    )
+    assert _error_code(result) == "option_not_applicable"
+    message = str(result.exception)
+    assert "sticky context" in message
+    assert "dhcli context show" in message
 
 
 def test_create_bad_env_token_exits_2(tmp_path: Path) -> None:
@@ -409,6 +482,84 @@ def test_create_tool_failure_exits_3(tmp_path: Path) -> None:
     )
     assert result.exit_code == 3
     assert "quota exceeded" in result.output
+
+
+def test_create_community_sets_sticky_session(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    result, _ = _run(
+        ["-o", "json", "session", "create", "dev", "--launch-method", "python"],
+        _CREATED,
+        tmp_path,
+        runtime=rt,
+    )
+    assert result.exit_code == 0
+    updated = rt.context_store.read()
+    assert updated.session == _SID
+    assert updated.system is None
+    payload = json.loads(result.output)
+    assert payload["context"] == {"session": _SID}
+
+
+def test_create_enterprise_sets_sticky_session_system_and_pq(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    result, _ = _run(
+        ["-o", "json", "session", "create", "rpt", "--system", "prod"],
+        {"success": True, "id": _EID},
+        tmp_path,
+        runtime=rt,
+    )
+    assert result.exit_code == 0
+    updated = rt.context_store.read()
+    assert updated.session == _EID
+    assert updated.system == "prod"
+    assert updated.pq == _EID
+    payload = json.loads(result.output)
+    assert payload["context"] == {"session": _EID, "system": "prod", "pq": _EID}
+
+
+def test_create_no_set_context_skips_update(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    result, _ = _run(
+        [
+            "-o",
+            "json",
+            "session",
+            "create",
+            "dev",
+            "--launch-method",
+            "python",
+            "--no-set-context",
+        ],
+        _CREATED,
+        tmp_path,
+        runtime=rt,
+    )
+    assert result.exit_code == 0
+    assert rt.context_store.read().session is None
+    payload = json.loads(result.output)
+    assert "context" not in payload
+
+
+def test_create_falls_back_to_context_system(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SYSTEM, "prod")
+    result, call = _run(
+        ["session", "create", "rpt"],
+        {"success": True, "id": _EID},
+        tmp_path,
+        runtime=rt,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[2] == "session_enterprise_create"
+    assert call.await_args.args[3]["system"] == "prod"
+
+
+def test_create_defaults_to_community_without_context(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "create", "dev", "--launch-method", "python"], _CREATED, tmp_path
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[2] == "session_community_create"
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +591,45 @@ def test_delete_tool_failure_exits_3(tmp_path: Path) -> None:
         tmp_path,
     )
     assert result.exit_code == 3
+
+
+def test_delete_clears_matching_sticky_context(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    rt.context_store.set_many({ContextKey.SESSION: _SID, ContextKey.PQ: _SID})
+    result, _ = _run(
+        ["session", "delete", _SID], {"success": True, "id": _SID}, tmp_path, runtime=rt
+    )
+    assert result.exit_code == 0
+    updated = rt.context_store.read()
+    assert updated.session is None
+    assert updated.pq is None
+
+
+def test_delete_leaves_unrelated_context_untouched(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SESSION, _EID)
+    result, _ = _run(
+        ["session", "delete", _SID], {"success": True, "id": _SID}, tmp_path, runtime=rt
+    )
+    assert result.exit_code == 0
+    assert rt.context_store.read().session == _EID
+
+
+def test_delete_falls_back_to_context_session(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SESSION, _SID)
+    result, call = _run(
+        ["session", "delete"], {"success": True, "id": _SID}, tmp_path, runtime=rt
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": _SID}
+
+
+def test_delete_no_id_and_no_context_fails(tmp_path: Path) -> None:
+    result, call = _run(["session", "delete"], {"success": True}, tmp_path)
+    assert result.exit_code == 2
+    assert "no sticky context session is set" in result.output
+    call.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -539,6 +729,24 @@ def test_exec_rejects_both_sources(tmp_path: Path) -> None:
     assert _error_code(result) == "mutually_exclusive_options"
     assert result.exception.exit_code == 2
     assert "cannot be combined" in str(result.exception)
+    call.assert_not_awaited()
+
+
+def test_exec_checks_the_script_source_before_resolving_the_target(
+    tmp_path: Path,
+) -> None:
+    """A missing source is rejected before the target is resolved.
+
+    'require_context_target' can prompt to confirm a sticky-context
+    session, so validating the source afterwards would make the user
+    decide on a run that is then refused anyway.
+    """
+    with patch.object(session_mod, "require_context_target") as target:
+        result, call = _run(
+            ["session", "exec"], {"success": True}, tmp_path, standalone_mode=False
+        )
+    assert _error_code(result) == "missing_argument"
+    target.assert_not_called()
     call.assert_not_awaited()
 
 

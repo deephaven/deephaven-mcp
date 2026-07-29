@@ -1,6 +1,6 @@
 ---
 name: pydocs-improve
-description: Comprehensively improve Python docstrings — correct inaccuracies, add missing sections, improve clarity; also enforces required MCP tool sections (Terminology Note, Format Accuracy for AI Agents)
+description: Comprehensively improve Python docstrings — invoke when a file's docstrings are thin, stale, or missing required sections; use pydocs-accuracy for correctness-only fixes. Corrects inaccuracies, adds missing sections, and enforces the required MCP tool sections (Terminology Note, Format Accuracy for AI Agents)
 ---
 
 > **Single source of truth.** The canonical, exact-match wording for the "Terminology Note" and "Format Accuracy for AI Agents" sections lives in [mcp-tool-sections.md](mcp-tool-sections.md). Other skills reference that file rather than duplicating the wording — duplicates drift. Load it when a tool docstring needs those sections.
@@ -21,7 +21,7 @@ Only make a change if there is a significant improvement. Unnecessary changes ma
 
 **Pydantic fields**: Every field on a `StrictSchema` /
 `RedactableSchema` subclass needs runtime-introspectable
-documentation. Apply the `_configuration-conventions` skill for the
+documentation. Apply the `ref-configuration-conventions` skill for the
 canonical rule and examples; in summary:
 
 - Each field carries a PEP 257 trailing docstring (triple-quoted
@@ -34,10 +34,10 @@ canonical rule and examples; in summary:
 - Explicit `Field(description="...")` works at runtime but violates
   project style — convert to the trailing-docstring form
   opportunistically.
-- Verify with `python -c "from <module> import <Model>; print(<Model>.model_fields['<field>'].description)"`;
+- Verify with `uv run python -c "from <module> import <Model>; print(<Model>.model_fields['<field>'].description)"`;
   `None` or an empty string means the field is undocumented at
   runtime regardless of what the class docstring says.
-- Enforced by `tests/test__pydantic_field_docs.py`.
+- Enforced by `tests/test_field_docs_contract.py`.
 
 **Contract, not context**: A docstring documents what the function accepts, returns, and raises — not its surrounding context. Specifically, do not include:
 

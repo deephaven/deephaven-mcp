@@ -47,6 +47,7 @@ from pydantic import Field
 from deephaven_mcp._exceptions import ConfigurationError, InternalError
 from deephaven_mcp._pydantic import StrictSchema
 from deephaven_mcp._taxonomy import COMMUNITY_SYSTEM_NAME, SystemRef, SystemType
+from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
 
 from . import resolve_config_dir, verify_config_directory_permissions
 from .schema import (
@@ -122,6 +123,32 @@ class ConfigTree(StrictSchema):
     ``enterprise/settings.json`` is absent and ``enterprise/systems/``
     is missing or empty (no enterprise systems are then served)."""
 
+    @property
+    def community_sessions(self) -> dict[str, CommunitySessionConfig]:
+        """The declared static community sessions, keyed by session name.
+
+        Null-safe view of ``community.sessions``: empty when no
+        community section is configured. The empty result merges two
+        distinct states — an absent community section, and a
+        settings-only section that declares no static sessions but may
+        still serve dynamically created ones via ``session_creation``.
+        Callers that must tell those apart read :attr:`community`
+        directly instead.
+        """
+        return self.community.sessions if self.community is not None else {}
+
+    @property
+    def enterprise_systems(self) -> dict[str, EnterpriseSystemConfig]:
+        """The declared Enterprise systems, keyed by system name.
+
+        Null-safe view of ``enterprise.systems``: empty when no
+        enterprise section is configured. The empty result merges an
+        absent section with a settings-only one, exactly as
+        :attr:`community_sessions` does; see that attribute for when to
+        read :attr:`enterprise` directly instead.
+        """
+        return self.enterprise.systems if self.enterprise is not None else {}
+
     def _community_is_servable(self) -> bool:
         """Return whether the community section can serve a session.
 
@@ -135,7 +162,7 @@ class ConfigTree(StrictSchema):
                 session.
         """
         return self.community is not None and (
-            bool(self.community.sessions)
+            bool(self.community_sessions)
             or self.community.settings.session_creation is not None
         )
 
@@ -156,9 +183,8 @@ class ConfigTree(StrictSchema):
         out: list[SystemRef] = []
         if self._community_is_servable():
             out.append(SystemRef(name=COMMUNITY_SYSTEM_NAME, type=SystemType.COMMUNITY))
-        if self.enterprise is not None:
-            for name in self.enterprise.systems:
-                out.append(SystemRef(name=name, type=SystemType.ENTERPRISE))
+        for name in self.enterprise_systems:
+            out.append(SystemRef(name=name, type=SystemType.ENTERPRISE))
         return out
 
     def has_usable_system(self) -> bool:

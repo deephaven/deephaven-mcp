@@ -14,21 +14,26 @@ import click
 from deephaven_mcp._taxonomy import SystemType
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._browser import launch_browser
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo_field,
-    echo_payload,
     wrapper_error_codes,
 )
+from deephaven_mcp.cli._context import (
+    CONTEXT_HINT,
+    ContextKey,
+    require_context_value,
+)
+from deephaven_mcp.cli._echo import echo_payload
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,
 )
 from deephaven_mcp.cli._runtime import Runtime
-from deephaven_mcp.sessions._enterprise import EnterpriseSystemConfig
+from deephaven_mcp.sessions import EnterpriseSystemConfig
 
 _WEB_CONSOLE_PATH = "/iriside"
 """Path of the Deephaven Enterprise web console under a system's origin."""
@@ -224,9 +229,7 @@ def _enterprise_system(runtime: Runtime, name: str) -> EnterpriseSystemConfig:
             (exit 2, ``system_not_found``). The Community umbrella
             ('community') is reported with a pointer to ``session url``.
     """
-    enterprise = runtime.config.enterprise
-    systems = enterprise.systems if enterprise is not None else {}
-    system_config = systems.get(name)
+    system_config = runtime.config.enterprise_systems.get(name)
     if system_config is not None:
         return system_config
     if name == SystemType.COMMUNITY.value:
@@ -291,23 +294,36 @@ _OUTPUT_URL = OutputSpec("text", note="The Enterprise web console URL, one line.
             "— this does not contact the daemon."
         ),
         arguments=(
-            HelpEntry("NAME", "Enterprise system name. Run 'dhcli system list'."),
+            HelpEntry(
+                "NAME",
+                "Enterprise system name. Run 'dhcli system list'. Defaults "
+                f"to the sticky context system if omitted. {CONTEXT_HINT}",
+            ),
         ),
         output=_OUTPUT_URL,
         examples=(
             "$ dhcli system url prod",
             '$ open "$(dhcli system url prod)"',
         ),
-        see_also=("dhcli system open NAME", "dhcli system list"),
+        see_also=(
+            "dhcli system open NAME",
+            "dhcli system list",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
-        error_codes=(ErrorCode.SYSTEM_NOT_FOUND, ErrorCode.CONFIG_INVALID),
+        error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
+            ErrorCode.SYSTEM_NOT_FOUND,
+            ErrorCode.CONFIG_INVALID,
+        ),
     ),
 )
-@click.argument("name")
+@click.argument("name", required=False)
 @click.pass_obj
 @run_async
-async def system_url(runtime: Runtime, name: str) -> None:
+async def system_url(runtime: Runtime, name: str | None) -> None:
     """Print an Enterprise system's web console URL."""
+    name = require_context_value(runtime, ContextKey.SYSTEM, name)
     system_config = _enterprise_system(runtime, name)
     url = _web_console_url(system_config.connection_json_url)
     click.echo(url)
@@ -342,23 +358,32 @@ _OUTPUT_OPEN = OutputSpec(
             "open it manually."
         ),
         arguments=(
-            HelpEntry("NAME", "Enterprise system name. Run 'dhcli system list'."),
+            HelpEntry(
+                "NAME",
+                "Enterprise system name. Run 'dhcli system list'. Defaults "
+                f"to the sticky context system if omitted. {CONTEXT_HINT}",
+            ),
         ),
         output=_OUTPUT_OPEN,
         examples=(
             "$ dhcli system open prod",
             "$ dhcli system open prod --print",
         ),
-        see_also=("dhcli system url NAME", "dhcli system list"),
+        see_also=(
+            "dhcli system url NAME",
+            "dhcli system list",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
             ErrorCode.SYSTEM_NOT_FOUND,
             ErrorCode.CONFIG_INVALID,
             ErrorCode.BROWSER_LAUNCH_FAILED,
         ),
     ),
 )
-@click.argument("name")
+@click.argument("name", required=False)
 @click.option(
     "--print",
     "print_only",
@@ -368,8 +393,9 @@ _OUTPUT_OPEN = OutputSpec(
 )
 @click.pass_obj
 @run_async
-async def system_open(runtime: Runtime, name: str, print_only: bool) -> None:
+async def system_open(runtime: Runtime, name: str | None, print_only: bool) -> None:
     """Open an Enterprise system's web console in the default web browser."""
+    name = require_context_value(runtime, ContextKey.SYSTEM, name)
     system_config = _enterprise_system(runtime, name)
     url = _web_console_url(system_config.connection_json_url)
     launched = False if print_only else launch_browser(url)

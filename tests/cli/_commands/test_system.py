@@ -13,6 +13,7 @@ from mcp.types import CallToolResult, TextContent
 from deephaven_mcp.cli import _browser as browser_mod
 from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
+from deephaven_mcp.cli._context import ContextKey
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
 from deephaven_mcp.config.schema import CliConfig, ServerConfig
@@ -318,6 +319,20 @@ def test_url_prints_web_console(tmp_path: Path) -> None:
     result = _invoke(["system", "url", "prod"], rt)
     assert result.exit_code == 0
     assert result.output.strip() == _WEB_CONSOLE_URL
+
+
+def test_url_falls_back_to_context_system(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    rt.context_store.set(ContextKey.SYSTEM, "prod")
+    result = _invoke(["system", "url"], rt)
+    assert result.exit_code == 0
+    assert result.output.strip() == _WEB_CONSOLE_URL
+
+
+def test_url_no_name_and_no_context_fails(tmp_path: Path) -> None:
+    rt = _enterprise_runtime(tmp_path, {"prod": _enterprise_system()})
+    result = _invoke(["system", "url"], rt, standalone_mode=False)
+    assert result.exception.code.value == "context_not_set"
 
 
 def test_url_unknown_system_exits_2(tmp_path: Path) -> None:

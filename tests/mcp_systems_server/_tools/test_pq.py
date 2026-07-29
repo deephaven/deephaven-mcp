@@ -7,7 +7,8 @@ import warnings
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import (
+
+from ._helpers import (
     MockContext,
     create_mock_instance_tracker,
 )
