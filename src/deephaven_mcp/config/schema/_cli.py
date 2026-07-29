@@ -8,7 +8,7 @@ request timeout, and whether the daemon is auto-started on demand.
 
 Loader: :func:`load_cli`.
 
-The schema is organized into four top-level domain sections:
+The schema is organized into five top-level domain sections:
 
 - :class:`OutputConfig` — presentation knobs (currently ``format``).
 - :class:`DaemonControlConfig` — CLI-side daemon lifecycle settings, including a
@@ -17,6 +17,9 @@ The schema is organized into four top-level domain sections:
   :class:`RequestTimeouts` sub-section for request-level timeouts.
 - :class:`DocsConfig` — docs MCP server settings (endpoint URL), including a
   :class:`DocsTimeouts` sub-section for docs-request timeouts.
+- :class:`ContextConfig` — whether the sticky-context fallback (default
+  session/system/PQ id) is honored, and whether a destructive verb
+  confirms a context-supplied target.
 
 Each section has its own ``timeouts:`` sub-section reserved from day one
 (on the sections that have any time-shaped knobs), so future timeouts
@@ -53,6 +56,10 @@ Wire format (JSON5; ``//`` comments are accepted)::
             "timeouts": {
                 "request_seconds": 120
             }
+        },
+        "context": {
+            "enabled": true,
+            "confirm_destructive": false
         }
     }
 """
@@ -61,6 +68,7 @@ from __future__ import annotations
 
 __all__ = [
     "CliConfig",
+    "ContextConfig",
     "DaemonControlConfig",
     "DaemonReuseAction",
     "DaemonReusePolicy",
@@ -313,6 +321,34 @@ class DocsConfig(RedactableSchema):
         return value
 
 
+class ContextConfig(RedactableSchema):
+    """How the CLI's sticky context (default session/system/pq) behaves.
+
+    Governs whether the feature is *on* and how cautiously it is used;
+    the context values themselves (the sticky session, system, and PQ
+    ids) are ephemeral per-user state in ``<runtime_dir>/context.json``,
+    set with ``dhcli context set`` and never stored in configuration.
+    """
+
+    enabled: bool = True
+    """When ``True`` (default), commands that take a session, system,
+    or PQ id fall back to the sticky context in ``context.json`` when
+    the argument is omitted. When ``False``, that fallback is skipped
+    and an omitted argument fails with ``context_not_set``. Overridden
+    per invocation by ``--no-context``."""
+
+    confirm_destructive: bool = False
+    """When ``True``, a verb that executes, destroys, or disrupts
+    (``session exec``/``delete``, ``pq delete``/``stop``/``restart``/``modify``)
+    asks for confirmation before acting on a target that came from
+    ``context.json`` rather than the command line; an explicitly named
+    target is never confirmed. Skipped per invocation by ``--yes``, and
+    skipped when prompting is unavailable (no TTY, or ``--no-input``) so
+    that enabling it never breaks a non-interactive caller. ``False``
+    (default) matches the prevailing CLI convention of acting silently
+    on a configured default."""
+
+
 class CliConfig(RedactableSchema):
     """Validated contents of ``cli.json``.
 
@@ -333,6 +369,9 @@ class CliConfig(RedactableSchema):
 
     docs: DocsConfig = Field(default_factory=DocsConfig)
     """Docs MCP server settings."""
+
+    context: ContextConfig = Field(default_factory=ContextConfig)
+    """Sticky-context settings."""
 
 
 async def load_cli(config_dir: Path) -> CliConfig:

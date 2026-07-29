@@ -12,18 +12,18 @@ import json
 import click
 
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
     acquire,
     call_tool,
-    echo_payload,
     parse_key_value,
     wrapper_error_codes,
 )
+from deephaven_mcp.cli._echo import echo_payload
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,

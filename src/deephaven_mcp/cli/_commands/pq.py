@@ -12,22 +12,34 @@ from __future__ import annotations
 
 __all__ = ["pq"]
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import click
 
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
+    call_for_payload,
     read_local_script,
     wrapper_error_codes,
+    yes_option,
 )
+from deephaven_mcp.cli._context import (
+    CONTEXT_HINT,
+    CONTEXT_RISK_DESTRUCTIVE,
+    CONTEXT_RISK_STATEFUL,
+    ContextKey,
+    clear_matching,
+    require_context_target,
+    require_context_value,
+)
+from deephaven_mcp.cli._echo import echo_payload
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,
@@ -89,22 +101,33 @@ _OUTPUT_LIST = OutputSpec(
             "Enterprise (Core+) only. Lists the PQs configured on SYSTEM. Use "
             "a returned id verbatim with the other pq and session verbs."
         ),
-        arguments=(HelpEntry("SYSTEM", "Enterprise system name. Run 'system list'."),),
+        arguments=(
+            HelpEntry(
+                "SYSTEM",
+                "Enterprise system name. Run 'system list'. Defaults to the "
+                f"sticky context system if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_LIST,
         examples=(
             "$ dhcli pq list prod",
             "$ dhcli pq list prod | jq '.[].id'",
         ),
-        see_also=("dhcli pq details ID", "dhcli pq name-to-id SYSTEM NAME"),
+        see_also=(
+            "dhcli pq details ID",
+            "dhcli pq name-to-id SYSTEM NAME",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("system")
+@click.argument("system", required=False)
 @click.pass_obj
 @run_async
-async def pq_list(runtime: Runtime, system: str) -> None:
+async def pq_list(runtime: Runtime, system: str | None) -> None:
     """List Persistent Queries on a system."""
+    system = require_context_value(runtime, ContextKey.SYSTEM, system)
     await call_and_echo_field(
         runtime,
         "pq_list",
@@ -125,21 +148,23 @@ async def pq_list(runtime: Runtime, system: str) -> None:
             HelpEntry(
                 "ID",
                 "Fully qualified PQ id 'enterprise:system:serial'. "
-                "Run 'pq list' or 'pq name-to-id'.",
+                "Run 'pq list' or 'pq name-to-id'. Defaults to the sticky "
+                f"context pq if omitted. {CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_OBJECT,
         examples=("$ dhcli pq details enterprise:prod:1234567890",),
-        see_also=("dhcli pq list SYSTEM",),
+        see_also=("dhcli pq list SYSTEM", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.pass_obj
 @run_async
-async def pq_details(runtime: Runtime, id: str) -> None:
+async def pq_details(runtime: Runtime, id: str | None) -> None:
     """Show details for one Persistent Query."""
+    id = require_context_value(runtime, ContextKey.PQ, id)
     await call_and_echo(
         runtime,
         "pq_details",
@@ -184,7 +209,7 @@ async def pq_name_to_id(runtime: Runtime, system: str, pq_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _norm(value: Any) -> Any:
+def _as_json_value(value: Any) -> Any:
     """Normalize a click value for an MCP argument (tuple → list)."""
     return list(value) if isinstance(value, tuple) else value
 
@@ -194,16 +219,33 @@ def _provided(value: Any) -> bool:
     return value is not None and value != ()
 
 
-def _create_modify_args(params: dict[str, Any]) -> dict[str, Any]:
+def _create_modify_args(params: Mapping[str, Any]) -> dict[str, Any]:
     """Build the MCP argument dict from a create/modify command's params.
 
     Drops unset options (``None`` / empty tuple) so the tool's own
-    defaults apply, and converts repeatable-option tuples to lists. Every
-    parameter maps directly to a tool argument except ``script_body_path``,
-    which is materialized client-side: the CLI reads the local file (or
-    stdin for ``'-'``) and forwards its contents as ``script_body``.
+    defaults apply, and converts repeatable-option tuples to lists.
+
+    ``script_body_path`` is the one client-only field that can reach here:
+    it is consumed rather than forwarded, so this function both reads the
+    local file (or stdin for ``'-'``) into ``script_body`` and removes the
+    original. The command's other ``client_only_params`` (``no_set_context``,
+    ``yes``) are named parameters of the callback, so they never enter its
+    ``**options`` and cannot reach this dict at all.
+
+    Args:
+        params (Mapping[str, Any]): The command's pass-through parameter
+            values, with any client-side resolution (sticky-context id,
+            system) already applied by the caller.
+
+    Returns:
+        dict[str, Any]: The arguments to send to ``pq_create`` /
+            ``pq_modify``.
     """
-    args = {name: _norm(value) for name, value in params.items() if _provided(value)}
+    args = {
+        name: _as_json_value(value)
+        for name, value in params.items()
+        if _provided(value)
+    }
     script_body_path = args.pop("script_body_path", None)
     if script_body_path is not None:
         args["script_body"] = read_local_script(script_body_path)
@@ -362,7 +404,7 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
 @pq.command(
     "create",
     wraps_tool="pq_create",
-    client_only_params=frozenset({"script_body_path"}),
+    client_only_params=frozenset({"script_body_path", "no_set_context"}),
     help_spec=HelpSpec(
         summary="Create a Persistent Query.",
         description=(
@@ -372,19 +414,35 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "and stored as the inline body), or from the controller's Git script "
             "repository with --git-script-path (at most one source). "
             "--auto-delete-timeout and --schedule are mutually exclusive. Unset "
-            "options use the controller's defaults."
+            "options use the controller's defaults. " + CONTEXT_RISK_STATEFUL
         ),
         arguments=(HelpEntry("PQ_NAME", "Name for the new PQ."),),
-        output=_OUTPUT_OBJECT,
+        output=OutputSpec(
+            _OUTPUT_OBJECT.mode,
+            (
+                OutputField(
+                    "context",
+                    "object",
+                    "Present when the sticky context was updated: the keys "
+                    "set and their new values.",
+                ),
+            ),
+            note=_OUTPUT_OBJECT.note,
+        ),
         examples=(
             "$ dhcli pq create nightly --system prod --heap-size-gb 4 "
             "--script-body-path ./nightly.py",
             "$ dhcli pq create nightly --system prod --heap-size-gb 4 "
             "--git-script-path IrisQueries/py/nightly.py",
         ),
-        see_also=("dhcli pq modify ID", "dhcli pq start ID"),
+        see_also=(
+            "dhcli pq modify ID",
+            "dhcli pq start ID",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
             ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
             ErrorCode.FILE_READ_FAILED,
             ErrorCode.MISSING_ARGUMENT,
@@ -396,8 +454,23 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
 @click.option(
     "--system",
     "system",
-    required=True,
-    help="Enterprise system name to create the PQ on (see 'dhcli system list').",
+    default=None,
+    help=(
+        "Enterprise system name to create the PQ on (see 'dhcli system "
+        f"list'). Defaults to the sticky context system if set. {CONTEXT_HINT}"
+    ),
+)
+@click.option(
+    "--no-set-context",
+    "no_set_context",
+    is_flag=True,
+    default=False,
+    help=(
+        "Do not update the sticky context on success. Without this flag a "
+        "successful create sets both the 'pq' and 'system' keys. This "
+        "governs only the write; --no-context governs whether an omitted "
+        "id reads from the sticky context."
+    ),
 )
 @click.option(
     "--heap-size-gb",
@@ -412,26 +485,44 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
 @_create_modify_options
 @click.pass_context
 @run_async
-async def pq_create(ctx: click.Context, **_options: Any) -> None:
+async def pq_create(
+    ctx: click.Context,
+    *,
+    system: str | None,
+    no_set_context: bool,
+    **options: Any,
+) -> None:
     """Create a Persistent Query.
 
-    Reads the create fields from ``ctx.params``; ``_options`` absorbs
-    click's per-option keyword arguments.
+    ``system`` and ``no_set_context`` are named because this body reasons
+    about them; ``options`` carries the remaining create fields, which
+    pass through to the tool unread.
     """
     runtime: Runtime = ctx.obj
-    _check_mutually_exclusive(ctx.params)
-    await call_and_echo(
+    if system is None:
+        system = require_context_value(runtime, ContextKey.SYSTEM, None)
+    _check_mutually_exclusive(options)
+    payload = await call_for_payload(
         runtime,
         "pq_create",
         retry_command="dhcli pq create",
-        arguments=_create_modify_args(ctx.params),
+        arguments=_create_modify_args({**options, "system": system}),
     )
+    new_id = payload.get("id")
+    if not no_set_context and new_id:
+        updates = {
+            ContextKey.PQ: new_id,
+            ContextKey.SYSTEM: system,
+        }
+        runtime.context_store.set_many(updates)
+        payload = {**payload, "context": {k.value: v for k, v in updates.items()}}
+    echo_payload(runtime, payload)
 
 
 @pq.command(
     "modify",
     wraps_tool="pq_modify",
-    client_only_params=frozenset({"script_body_path"}),
+    client_only_params=frozenset({"script_body_path", "yes"}),
     help_spec=HelpSpec(
         summary="Modify an existing Persistent Query.",
         description=(
@@ -439,13 +530,15 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
             "everything else is left unchanged. The script sources "
             "--script-body/--script-body-path/--git-script-path (and separately "
             "--auto-delete-timeout/--schedule) are mutually exclusive. Pass "
-            "--restart to restart the PQ after applying the change."
+            "--restart to restart the PQ after applying the change. "
+            + CONTEXT_RISK_DESTRUCTIVE
         ),
         arguments=(
             HelpEntry(
                 "ID",
                 "Fully qualified PQ id 'enterprise:system:serial'. "
-                "Run 'pq list' or 'pq name-to-id'.",
+                "Run 'pq list' or 'pq name-to-id'. Defaults to the sticky "
+                f"context pq if omitted. {CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_OBJECT,
@@ -453,9 +546,15 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
             "$ dhcli pq modify enterprise:prod:1234567890 --heap-size-gb 8 --restart",
             "$ dhcli pq modify enterprise:prod:1234567890 --disabled",
         ),
-        see_also=("dhcli pq details ID", "dhcli pq restart ID"),
+        see_also=(
+            "dhcli pq details ID",
+            "dhcli pq restart ID",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
+            ErrorCode.OPERATION_CANCELED,
             ErrorCode.MUTUALLY_EXCLUSIVE_OPTIONS,
             ErrorCode.FILE_READ_FAILED,
             ErrorCode.MISSING_ARGUMENT,
@@ -463,7 +562,7 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
         ),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.option(
     "--restart",
     "restart",
@@ -486,21 +585,38 @@ async def pq_create(ctx: click.Context, **_options: Any) -> None:
     help="Enable or disable the PQ (unchanged if omitted).",
 )
 @_create_modify_options
+@yes_option
 @click.pass_context
 @run_async
-async def pq_modify(ctx: click.Context, **_options: Any) -> None:
+async def pq_modify(
+    ctx: click.Context,
+    *,
+    id: str | None,
+    yes: bool,
+    **options: Any,
+) -> None:
     """Modify an existing Persistent Query.
 
-    Reads the modify fields from ``ctx.params``; ``_options`` absorbs
-    click's per-option keyword arguments.
+    Named/pass-through split as in :func:`pq_create`.
     """
     runtime: Runtime = ctx.obj
-    _check_mutually_exclusive(ctx.params)
+    # Validate the flag combination before asking anything: confirming a
+    # destructive action that then fails on a bad flag pair wastes the
+    # user's decision. Safe to reorder because the check reads only
+    # option keys, never 'id'.
+    _check_mutually_exclusive(options)
+    resolved_id = require_context_target(
+        runtime,
+        ContextKey.PQ,
+        id,
+        action="Modify",
+        yes=yes,
+    )
     await call_and_echo(
         runtime,
         "pq_modify",
         retry_command="dhcli pq modify",
-        arguments=_create_modify_args(ctx.params),
+        arguments=_create_modify_args({**options, "id": resolved_id}),
     )
 
 
@@ -509,37 +625,115 @@ async def pq_modify(ctx: click.Context, **_options: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _ids(id: tuple[str, ...]) -> list[str]:
-    """Validate and return the PQ id list from a variadic argument."""
-    if not id:
-        raise CliError("At least one ID is required.", code=ErrorCode.MISSING_ARGUMENT)
-    return list(id)
+def _ids(runtime: Runtime, id: tuple[str, ...]) -> list[str]:
+    """Validate and return the PQ id list from a variadic argument.
+
+    Falls back to the sticky context pq (as a single-element list) when
+    ``id`` is empty. For a verb that destroys or disrupts, use
+    :func:`_ids_confirmed` so the fallback can be confirmed.
+
+    Raises:
+        CliError: With :attr:`ErrorCode.CONTEXT_NOT_SET` when ``id`` is
+            empty and no context pq is available.
+    """
+    if id:
+        return list(id)
+    return [require_context_value(runtime, ContextKey.PQ, None)]
+
+
+def _ids_confirmed(
+    runtime: Runtime, id: tuple[str, ...], *, action: str, yes: bool
+) -> list[str]:
+    """Return the PQ id list, confirming a sticky-context fallback.
+
+    The :func:`_ids` counterpart for a verb that destroys or disrupts:
+    an explicitly listed id is used as given, while a value taken from
+    the sticky context goes through
+    :func:`~deephaven_mcp.cli._context.require_context_target`.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        id (tuple[str, ...]): The variadic ids as parsed by click.
+        action (str): Imperative phrase naming the operation, used to
+            build the confirmation prompt.
+        yes (bool): The verb's ``--yes`` flag; skips the confirmation.
+
+    Raises:
+        CliError: With :attr:`ErrorCode.CONTEXT_NOT_SET` when ``id`` is
+            empty and no context pq is available, or with
+            :attr:`ErrorCode.OPERATION_CANCELED` when the confirmation
+            is declined.
+    """
+    if id:
+        return list(id)
+    return [
+        require_context_target(runtime, ContextKey.PQ, None, action=action, yes=yes)
+    ]
+
+
+def _deleted_ids(payload: dict[str, Any]) -> frozenset[str]:
+    """Return the ids ``pq_delete`` reports as having actually been deleted.
+
+    ``pq_delete`` is best-effort: ``success: True`` means the batch
+    *ran*, not that every id succeeded, and the per-item ``results``
+    list records which did. Clearing the sticky context for every
+    *requested* id would therefore discard a pointer to a PQ that still
+    exists whenever a delete failed.
+
+    Args:
+        payload (dict[str, Any]): The ``pq_delete`` success payload.
+
+    Returns:
+        frozenset[str]: The ids whose per-item result reports success.
+            Empty when ``results`` is absent or not a list, so an
+            unrecognized payload shape clears nothing rather than
+            guessing.
+    """
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return frozenset()
+    return frozenset(
+        item["id"]
+        for item in results
+        if isinstance(item, dict)
+        and item.get("success")
+        and isinstance(item.get("id"), str)
+    )
 
 
 @pq.command(
     "delete",
     wraps_tool="pq_delete",
+    client_only_params=frozenset({"yes"}),
     help_spec=HelpSpec(
         summary="Delete one or more Persistent Queries.",
         description=(
             "Enterprise (Core+) only. Deletes every ID given. --max-concurrent "
             "caps how many deletions run in parallel. Best-effort: exit 0 means the "
             "batch ran, not that every id succeeded — check the summary and per-item "
-            "results for failures."
+            "results for failures. The sticky pq and session keys are cleared only "
+            "for ids actually reported deleted, so a failed delete leaves the "
+            "context pointing at the PQ that still exists. " + CONTEXT_RISK_DESTRUCTIVE
         ),
         arguments=(
             HelpEntry(
                 "ID",
-                "One or more fully qualified PQ ids ('enterprise:system:serial').",
+                "One or more fully qualified PQ ids ('enterprise:system:serial'). "
+                "Defaults to the sticky context pq (as a single id) if omitted. "
+                + CONTEXT_HINT,
             ),
         ),
         output=_OUTPUT_OBJECT,
         examples=(
             "$ dhcli pq delete enterprise:prod:1234567890 enterprise:prod:1234567891",
         ),
-        see_also=("dhcli pq list SYSTEM",),
+        see_also=("dhcli pq list SYSTEM", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
+        error_codes=(
+            ErrorCode.CONTEXT_NOT_SET,
+            ErrorCode.OPERATION_CANCELED,
+            *wrapper_error_codes(),
+        ),
     ),
 )
 @click.argument("id", nargs=-1)
@@ -550,47 +744,75 @@ def _ids(id: tuple[str, ...]) -> list[str]:
     default=None,
     help="Parallel-operation cap.",
 )
+@yes_option
 @click.pass_obj
 @run_async
 async def pq_delete(
-    runtime: Runtime, id: tuple[str, ...], max_concurrent: int | None
+    runtime: Runtime, id: tuple[str, ...], max_concurrent: int | None, yes: bool
 ) -> None:
     """Delete one or more Persistent Queries."""
-    arguments: dict[str, Any] = {"id": _ids(id)}
+    ids = _ids_confirmed(runtime, id, action="Delete", yes=yes)
+    arguments: dict[str, Any] = {"id": ids}
     if max_concurrent is not None:
         arguments["max_concurrent"] = max_concurrent
-    await call_and_echo(
+    payload = await call_for_payload(
         runtime, "pq_delete", retry_command="dhcli pq delete", arguments=arguments
     )
+    clear_matching(
+        runtime.context_store,
+        _deleted_ids(payload),
+        (ContextKey.PQ, ContextKey.SESSION),
+    )
+    echo_payload(runtime, payload)
 
 
-def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]:
-    """Build a start/stop/restart command (identical shape, distinct tool)."""
-    tool = f"pq_{verb}"
+def _lifecycle_command(name: str, summary: str, *, disruptive: bool) -> click.Command:
+    """Build a start/stop/restart command (identical shape, distinct tool).
+
+    Args:
+        name (str): The verb name as it appears in the command tree,
+            which is also the ``pq_<name>`` tool-name suffix.
+        summary (str): One-line help summary.
+        disruptive (bool): Whether acting on the wrong target disrupts a
+            running service. ``True`` for ``stop``/``restart``, which
+            therefore warn about an unintended context and confirm a
+            context-supplied id (``--yes`` to skip); ``False`` for
+            ``start``, which only leaves state behind and so warns
+            without asking.
+    """
+    tool = f"pq_{name}"
+    risk = CONTEXT_RISK_DESTRUCTIVE if disruptive else CONTEXT_RISK_STATEFUL
 
     @pq.command(
         name,
         wraps_tool=tool,
+        client_only_params=frozenset({"yes"}) if disruptive else frozenset(),
         help_spec=HelpSpec(
             summary=summary,
             description=(
                 f"Enterprise (Core+) only. {summary} --no-wait returns without "
                 "waiting for the state change; --max-concurrent caps parallelism "
                 "across multiple ids. Best-effort: exit 0 means the batch ran, not "
-                "that every id succeeded — check the per-item results for failures."
+                "that every id succeeded — check the per-item results for failures. "
+                + risk
             ),
             arguments=(
                 HelpEntry(
                     "ID",
                     "One or more fully qualified PQ ids "
-                    "('enterprise:system:serial').",
+                    "('enterprise:system:serial'). Defaults to the sticky "
+                    f"context pq if omitted. {CONTEXT_HINT}",
                 ),
             ),
             output=_OUTPUT_OBJECT,
             examples=(f"$ dhcli pq {name} enterprise:prod:1234567890",),
-            see_also=("dhcli pq details ID",),
+            see_also=("dhcli pq details ID", "dhcli context show"),
             exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-            error_codes=(ErrorCode.MISSING_ARGUMENT, *wrapper_error_codes()),
+            error_codes=(
+                ErrorCode.CONTEXT_NOT_SET,
+                *((ErrorCode.OPERATION_CANCELED,) if disruptive else ()),
+                *wrapper_error_codes(),
+            ),
         ),
     )
     @click.argument("id", nargs=-1)
@@ -607,20 +829,43 @@ def _lifecycle_command(name: str, summary: str, verb: str) -> Callable[..., Any]
     @click.pass_obj
     @run_async
     async def _cmd(
-        runtime: Runtime, id: tuple[str, ...], wait: bool, max_concurrent: int | None
+        runtime: Runtime,
+        id: tuple[str, ...],
+        wait: bool,
+        max_concurrent: int | None,
+        yes: bool = False,
     ) -> None:
-        arguments: dict[str, Any] = {"id": _ids(id), "wait": wait}
+        """Run the lifecycle tool for the resolved ids.
+
+        ``yes`` is only ever supplied by click in the ``disruptive``
+        case, where ``--yes`` is attached; ``start`` runs with the
+        default.
+        """
+        ids = (
+            _ids_confirmed(runtime, id, action=name.capitalize(), yes=yes)
+            if disruptive
+            else _ids(runtime, id)
+        )
+        arguments: dict[str, Any] = {"id": ids, "wait": wait}
         if max_concurrent is not None:
             arguments["max_concurrent"] = max_concurrent
         await call_and_echo(
             runtime, tool, retry_command=f"dhcli pq {name}", arguments=arguments
         )
 
-    return _cmd
+    return yes_option(_cmd) if disruptive else _cmd
 
 
-pq_start = _lifecycle_command("start", "Start one or more Persistent Queries.", "start")
-pq_stop = _lifecycle_command("stop", "Stop one or more Persistent Queries.", "stop")
+# Registration happens inside ``_lifecycle_command`` via the ``@pq.command``
+# decorator, so these names exist for symmetry with the other verbs in this
+# module rather than to be read. Assigning them also keeps the built command
+# reachable for tests.
+pq_start = _lifecycle_command(
+    "start", "Start one or more Persistent Queries.", disruptive=False
+)
+pq_stop = _lifecycle_command(
+    "stop", "Stop one or more Persistent Queries.", disruptive=True
+)
 pq_restart = _lifecycle_command(
-    "restart", "Restart one or more Persistent Queries.", "restart"
+    "restart", "Restart one or more Persistent Queries.", disruptive=True
 )

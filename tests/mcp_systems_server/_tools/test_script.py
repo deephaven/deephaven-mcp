@@ -9,10 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from conftest import (
-    MockContext,
-    create_mock_instance_tracker,
-)
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import RegistryItemNotFoundError
@@ -34,6 +30,11 @@ from deephaven_mcp.resource_manager import (
     ResourceLivenessStatus,
     SessionOrigin,
     SystemType,
+)
+
+from ._helpers import (
+    MockContext,
+    create_mock_instance_tracker,
 )
 
 # =============================================================================
@@ -58,7 +59,7 @@ async def test_session_community_create_with_pip_and_process_id():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config
@@ -142,7 +143,7 @@ async def test_session_community_create_cleanup_fails_on_timeout():
 
     full_config = community_config
     mock_config_manager.get_config = AsyncMock(return_value=full_config)
-    # Stash for conftest's lifespan adapter — exposes the community
+    # Stash for _helpers' lifespan adapter — exposes the community
     # settings dict to the multiplexed-server tool helpers without
     # rewriting every test's MockContext call site.
     mock_session_registry._community_settings = community_config

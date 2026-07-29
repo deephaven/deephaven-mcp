@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pyarrow as pa
 import pytest
-from conftest import MockContext
 
 from deephaven_mcp._exceptions import (
     CommunityNotConfiguredError,
@@ -34,6 +33,8 @@ from deephaven_mcp.resource_manager import (
     SystemType,
 )
 
+from ._helpers import MockContext
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -44,7 +45,7 @@ def _ctx(*, registry: object = None, multi_config: object = None) -> MockContext
 
     Mirrors the production ``LifespanContext`` shape (a frozen dataclass
     with ``registry``, ``multi_config``, ``evictors``, ``instance_tracker``).
-    Tests pass in mocks for the fields they assert on; the conftest's
+    Tests pass in mocks for the fields they assert on; ``_helpers``'
     ``_adapt_lifespan_context`` fills in defaults for the remaining
     fields so attribute access does not raise.
     """

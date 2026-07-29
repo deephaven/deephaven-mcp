@@ -103,6 +103,7 @@ def fake_load_runtime(
         config_dir_override: Path | None = None,
         runtime_dir_override: Path | None = None,
         cli_overrides: dict[str, object] | None = None,
+        no_input: bool = False,
     ) -> Runtime:
         if not cli_overrides:
             return runtime
@@ -113,6 +114,7 @@ def fake_load_runtime(
             runtime_dir=runtime.runtime_dir,
             config=new_config,
             daemon_dir=runtime.daemon_dir,
+            no_input=no_input or runtime.no_input,
         )
 
     return _load

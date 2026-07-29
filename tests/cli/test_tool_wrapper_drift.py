@@ -2,7 +2,7 @@
 
 Each runtime CLI command that fronts an MCP tool declares the binding
 via ``wraps_tool`` / ``wraps_tools`` on
-:class:`~deephaven_mcp.cli._help.HelpfulCommand`. This test reads those
+:class:`~deephaven_mcp.cli._command.HelpfulCommand`. This test reads those
 bindings off the live click tree, builds every tool's JSON input schema
 in-process (from the systems server's ``register_tools`` functions and
 the docs server's module-level FastMCP instance), and fails when a
@@ -40,9 +40,9 @@ import click
 import pytest
 from mcp.server.fastmcp import FastMCP
 
+from deephaven_mcp.cli._command import HelpfulCommand
 from deephaven_mcp.cli._commands._wrapping import wrapper_error_codes
 from deephaven_mcp.cli._errors import ErrorCode
-from deephaven_mcp.cli._help import HelpfulCommand
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.mcp_systems_server._tools import (
     catalog,
@@ -53,6 +53,11 @@ from deephaven_mcp.mcp_systems_server._tools import (
     session_enterprise,
     table,
 )
+
+# Project-wide convention enforcement across the CLI wrappers and the MCP
+# tools they front, not a mirror of one source file
+# (``ref-python-coding-practices`` rule 5).
+pytestmark = pytest.mark.guardrail
 
 # Every tool module whose tools the CLI may wrap. Registering all of
 # them on one server (no config gating) yields the full schema set.

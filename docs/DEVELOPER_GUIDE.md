@@ -727,7 +727,7 @@ The skills you'll reach for most:
 - `tests-run` / `tests-run-file` — unit suite with coverage.
 - `review-changes` — deep review of a change set before opening a PR.
 - `mcp-tool-add`, `cli-command-add`, `config-field-add` — add a tool, CLI command, or config field the project's way.
-- `docs-improve` / `docs-accuracy` — edit a markdown doc in scope (they load `_documentation-roles`).
+- `docs-improve` / `docs-accuracy` — edit a markdown doc in scope (they load `ref-documentation-roles`).
 
 For fork-and-PR mechanics, see [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
@@ -1116,24 +1116,24 @@ uv run pytest -m integration
 
 ```sh
 # Docker integration tests only
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestDockerLauncherIntegration -m integration
+uv run pytest tests/resource_manager/test__launcher_integration.py::TestDockerLauncherIntegration -m integration
 
 # Python integration tests only
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestPythonLauncherIntegration -m integration
+uv run pytest tests/resource_manager/test__launcher_integration.py::TestPythonLauncherIntegration -m integration
 
 # Orphan cleanup integration tests
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestOrphanCleanupIntegration -m integration
+uv run pytest tests/resource_manager/test__launcher_integration.py::TestOrphanCleanupIntegration -m integration
 
 # Instance tracker integration tests
-uv run pytest tests/resource_manager/test_launcher_integration.py::TestInstanceTrackerIntegration -m integration
+uv run pytest tests/resource_manager/test__launcher_integration.py::TestInstanceTrackerIntegration -m integration
 ```
 
 #### CLI Config-Authoring Integration Tests
 
-`tests/cli/test__config_integration.py` drives the real `dhcli` binary as an OS subprocess through the offline configuration-authoring verbs (`config get/set/unset/keys/files/validate/show`, `config session add/list/remove`, `config system add/list/remove`, and the interactive-only refusal paths of `config init`/`config edit`). No daemon, Deephaven worker, Docker, or Java is required.
+`tests/cli/_commands/test_config_integration.py` drives the real `dhcli` binary as an OS subprocess through the offline configuration-authoring verbs (`config get/set/unset/keys/files/validate/show`, `config session add/list/remove`, `config system add/list/remove`, and the interactive-only refusal paths of `config init`/`config edit`). No daemon, Deephaven worker, Docker, or Java is required.
 
 ```sh
-uv run pytest -s -m integration tests/cli/test__config_integration.py
+uv run pytest -s -m integration tests/cli/_commands/test_config_integration.py
 ```
 
 Every invocation is sandboxed twice over — explicit `--config-dir`/`--runtime-dir` flags at a pytest `tmp_path`, plus `DH_AI_DATA_DIR` pointing at the sandbox in the subprocess environment — so a locally configured `~/.deephaven/ai` is never touched. CI runs this file in the dedicated `CLI E2E (Config)` workflow (`.github/workflows/cli-e2e-config.yml`); the daemon-backed CLI flows live in `tests/cli/test__daemon_integration.py` and the `CLI E2E (Community)` workflow.

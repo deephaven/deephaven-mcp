@@ -4,7 +4,7 @@ These tests:
 
 - Launch a real Deephaven Community worker via
   :class:`PythonLaunchedSession` (the same fixture pattern used by
-  ``tests/resource_manager/test_launcher_integration.py``).
+  ``tests/resource_manager/test__launcher_integration.py``).
 - Seed a temporary configuration tree pointing the multiplexed
   systems server at that worker.
 - Drive the ``dhcli`` CLI as a real subprocess, exercising the
@@ -30,8 +30,8 @@ Prerequisites:
 The offline ``config`` authoring verbs (``get``/``set``/``unset``/
 ``keys``/``files``, ``session``/``system`` entity verbs, ``init``/
 ``edit``) are covered subprocess-level by the worker-free sibling
-``test__config_integration.py``; this file only touches ``config
-validate``/``show`` where the daemon flows need them.
+``_commands/test_config_integration.py``; this file only touches
+``config validate``/``show`` where the daemon flows need them.
 """
 
 from __future__ import annotations

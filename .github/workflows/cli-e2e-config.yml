@@ -7,10 +7,10 @@
 # (Community) workflow: no Java and no Deephaven worker are needed because
 # the authoring verbs operate purely on configuration files.
 #
-# The pytest file (tests/cli/test__config_integration.py) is the single
+# The pytest file (tests/cli/_commands/test_config_integration.py) is the single
 # source of truth and doubles as the local harness:
 #
-#     uv run pytest -s -m integration tests/cli/test__config_integration.py
+#     uv run pytest -s -m integration tests/cli/_commands/test_config_integration.py
 #
 # Every invocation is sandboxed twice over — explicit --config-dir /
 # --runtime-dir flags at a pytest tmp_path, plus DH_AI_DATA_DIR pointing at
@@ -63,4 +63,4 @@ jobs:
       - name: Run CLI config integration tests
         run: >-
           uv run pytest -s -v --no-cov --log-cli-level=INFO
-          -m integration tests/cli/test__config_integration.py
+          -m integration tests/cli/_commands/test_config_integration.py

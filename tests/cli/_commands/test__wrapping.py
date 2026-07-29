@@ -18,7 +18,6 @@ from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo_table,
     call_for_payload,
     call_tool,
-    echo_payload,
     parse_key_value,
     read_local_script,
     require_success,
@@ -318,7 +317,7 @@ def test_wrapper_error_codes_no_systems_false_excludes_no_systems() -> None:
 
 
 # ---------------------------------------------------------------------------
-# call_for_payload / echo_payload / call_and_echo
+# call_for_payload / call_and_echo
 # ---------------------------------------------------------------------------
 
 
@@ -357,87 +356,6 @@ async def test_call_for_payload_failure_exits_3(tmp_path: Path) -> None:
         with pytest.raises(CliError) as exc:
             await call_for_payload(rt, "t", retry_command="dhcli x", arguments={})
     assert exc.value.code is ErrorCode.TOOL_RETURNED_ERROR
-
-
-def test_echo_payload_renders_in_configured_mode(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """echo_payload prints the value via format_output in the runtime's mode."""
-    echo_payload(make_runtime(tmp_path, output_format="human"), {"a": 1, "b": 2})
-    out = capsys.readouterr().out
-    assert "a: 1" in out
-    assert "b: 2" in out
-
-
-def test_echo_payload_forwards_empty_message(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """echo_payload forwards empty_message to format_output for an empty list."""
-    echo_payload(
-        make_runtime(tmp_path, output_format="human"),
-        [],
-        empty_message="(nothing here)",
-    )
-    assert capsys.readouterr().out.strip() == "(nothing here)"
-
-
-def test_echo_payload_forwards_sort_keys(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """echo_payload forwards sort_keys to format_output.
-
-    The default sorts object keys alphabetically; ``sort_keys=False`` preserves
-    insertion order, which the daemon-reporting commands rely on.
-    """
-    rt = make_runtime(tmp_path, output_format="json")
-
-    echo_payload(rt, {"b": 1, "a": 2})
-    sorted_out = capsys.readouterr().out
-    assert sorted_out.index('"a"') < sorted_out.index('"b"')
-
-    echo_payload(rt, {"b": 1, "a": 2}, sort_keys=False)
-    insertion_out = capsys.readouterr().out
-    assert insertion_out.index('"b"') < insertion_out.index('"a"')
-
-
-def test_echo_payload_human_exclude_drops_keys_in_human_mode(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """human_exclude drops the named dict keys in human mode."""
-    echo_payload(
-        make_runtime(tmp_path, output_format="human"),
-        {"keep": 1, "drop": 2},
-        human_exclude=("drop",),
-    )
-    out = capsys.readouterr().out
-    assert "keep: 1" in out
-    assert "drop" not in out
-
-
-def test_echo_payload_human_exclude_ignored_in_json_mode(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """human_exclude is a no-op outside human mode; json keeps every key."""
-    echo_payload(
-        make_runtime(tmp_path, output_format="json"),
-        {"keep": 1, "drop": 2},
-        human_exclude=("drop",),
-    )
-    assert json.loads(capsys.readouterr().out) == {"keep": 1, "drop": 2}
-
-
-def test_echo_payload_human_exclude_ignored_for_non_dict(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """human_exclude only filters dicts; a list value passes through unchanged."""
-    echo_payload(
-        make_runtime(tmp_path, output_format="human"),
-        ["drop", "keep"],
-        human_exclude=("drop",),
-    )
-    out = capsys.readouterr().out
-    assert "drop" in out
-    assert "keep" in out
 
 
 # ---------------------------------------------------------------------------

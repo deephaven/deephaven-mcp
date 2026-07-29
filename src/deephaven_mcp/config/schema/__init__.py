@@ -27,6 +27,7 @@ __all__ = [
     "CommunitySessionCreationDefaults",
     "CommunitySettings",
     "CommunityTimeouts",
+    "ContextConfig",
     "DaemonControlConfig",
     "DaemonProcessConfig",
     "DaemonReuseAction",
@@ -56,6 +57,7 @@ __all__ = [
 
 from ._cli import (
     CliConfig,
+    ContextConfig,
     DaemonControlConfig,
     DaemonReuseAction,
     DaemonReusePolicy,

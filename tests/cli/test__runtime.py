@@ -165,6 +165,49 @@ async def test_load_runtime_applies_cli_overrides(tmp_path: Path) -> None:
     assert runtime.config.cli.daemon.auto_start is True
 
 
+def test_apply_cli_overrides_disables_sticky_context() -> None:
+    """The ``--no-context`` override shape lands on ``cli.context.enabled``.
+
+    Pins the seam between the override dict ``_build_cli_overrides``
+    emits and the ``CliConfig`` field it targets: a key-name mismatch
+    would otherwise be silently dropped by the deep merge.
+    """
+    out = apply_cli_overrides(CliConfig(), {"context": {"enabled": False}})
+    assert out.context.enabled is False
+    # Untouched siblings keep their defaults.
+    assert out.output.format == "json"
+
+
+@pytest.mark.asyncio
+async def test_load_runtime_no_context_override_beats_disk_value(
+    tmp_path: Path,
+) -> None:
+    """``--no-context`` wins over an explicit ``context.enabled`` in cli.json."""
+    cfg_dir = tmp_path / "cfg"
+    _seed_minimal_config_dir(cfg_dir)
+    cli_json = cfg_dir / "cli.json"
+    cli_json.write_text(json.dumps({"context": {"enabled": True}}))
+    os.chmod(cli_json, 0o600)
+
+    runtime = await load_runtime(
+        config_dir_override=cfg_dir,
+        runtime_dir_override=tmp_path / "rt",
+        cli_overrides={"context": {"enabled": False}},
+    )
+    assert runtime.config.cli.context.enabled is False
+
+
+@pytest.mark.asyncio
+async def test_load_runtime_context_enabled_by_default(tmp_path: Path) -> None:
+    """With no override and no cli.json, the sticky context is on."""
+    cfg_dir = tmp_path / "cfg"
+    _seed_minimal_config_dir(cfg_dir)
+    runtime = await load_runtime(
+        config_dir_override=cfg_dir, runtime_dir_override=tmp_path / "rt"
+    )
+    assert runtime.config.cli.context.enabled is True
+
+
 @pytest.mark.asyncio
 async def test_load_runtime_overrides_win_over_disk_value(
     tmp_path: Path,
@@ -328,3 +371,23 @@ async def test_load_runtime_accepts_empty_tree(
         config_dir_override=cfg_dir, runtime_dir_override=tmp_path / "rt"
     )
     assert runtime.config.has_usable_system() is False
+
+
+@pytest.mark.asyncio
+async def test_context_store_points_at_the_runtime_dir(tmp_path: Path) -> None:
+    """``context_store`` is derived from ``runtime_dir`` on every access.
+
+    The property holds no state, so two reads yield equivalent handles
+    addressing the same ``context.json`` beneath the resolved runtime
+    directory.
+    """
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    os.chmod(cfg_dir, 0o700)
+
+    runtime = await load_runtime(
+        config_dir_override=cfg_dir, runtime_dir_override=tmp_path / "rt"
+    )
+    store = runtime.context_store
+    assert store.path == runtime.runtime_dir / "context.json"
+    assert runtime.context_store.path == store.path

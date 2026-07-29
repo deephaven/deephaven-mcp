@@ -513,7 +513,7 @@ in the PQ id (form `<system>:<serial>`).
 *Enterprise sessions:*
 
 - `session_enterprise_create(system, ...)` - Create a worker session in the named DHE system
-- `session_enterprise_delete(id)` - Delete an enterprise session
+- `session_enterprise_delete(id)` - Delete a dynamically created enterprise session and the PQ backing it
 
 *Persistent Query (PQ) Management:*
 

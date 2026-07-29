@@ -1,6 +1,6 @@
 ---
 name: tests-run
-description: Run the full unit test suite with coverage (uv run pytest) and report test failures and uncovered lines
+description: Run the full unit test suite with coverage — invoke to verify a change across the whole project; use tests-run-file when assessing one source file's per-file coverage. Reports test failures and uncovered lines
 ---
 
 Run all unit tests with coverage:

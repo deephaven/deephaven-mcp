@@ -7,7 +7,7 @@ only module wired to ``[project.scripts]`` in ``pyproject.toml``.
 The root callback does no configuration I/O: it stashes a cheap
 :class:`~deephaven_mcp.cli._runtime.RuntimeSpec` (directory overrides
 + CLI flag overrides) on ``ctx.obj``, and
-:meth:`~deephaven_mcp.cli._help.HelpfulCommand.invoke` materializes
+:meth:`~deephaven_mcp.cli._command.HelpfulCommand.invoke` materializes
 the full :class:`~deephaven_mcp.cli._runtime.Runtime` from it right
 before a leaf command's body runs. ``--help`` / ``--agents`` /
 ``dhcli agents`` therefore work without a valid configuration tree
@@ -37,9 +37,11 @@ from pathlib import Path
 import click
 
 from deephaven_mcp._logging import setup_logging
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands.agents import agents as agents_group
 from deephaven_mcp.cli._commands.catalog import catalog as catalog_group
 from deephaven_mcp.cli._commands.config import config as config_group
+from deephaven_mcp.cli._commands.context import context as context_group
 from deephaven_mcp.cli._commands.daemon import daemon as daemon_group
 from deephaven_mcp.cli._commands.docs import docs as docs_group
 from deephaven_mcp.cli._commands.pq import pq as pq_group
@@ -55,7 +57,8 @@ from deephaven_mcp.cli._format import (
     OUTPUT_MODES,
     OutputMode,
 )
-from deephaven_mcp.cli._help import HelpfulGroup, HelpSpec
+from deephaven_mcp.cli._help import HelpSpec
+from deephaven_mcp.cli._params import NonBlankPath
 from deephaven_mcp.cli._runtime import RuntimeSpec
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,6 +74,7 @@ def _build_cli_overrides(
     output: OutputMode | None,
     timeout: int | None,
     no_auto_start: bool,
+    no_context: bool,
 ) -> dict[str, object]:
     """Build a ``cli_overrides`` dict for :func:`load_runtime`.
 
@@ -90,6 +94,8 @@ def _build_cli_overrides(
         overrides["docs"] = {"timeouts": {"request_seconds": timeout}}
     if no_auto_start:
         overrides["daemon"] = {"auto_start": False}
+    if no_context:
+        overrides["context"] = {"enabled": False}
     return overrides
 
 
@@ -148,7 +154,12 @@ def _quiet_dependency_loggers(verbose: int) -> None:
             "run 'dhcli session list' to see the available sessions (the "
             "daemon auto-starts on first use), then use a verb like "
             "'dhcli table data' to read a table or 'dhcli session exec' "
-            "to run a script. "
+            "to run a script. Set a default target once with 'dhcli "
+            "context set session ID' (or let 'session create' set it) and "
+            "later commands can omit the id — run 'dhcli context show' "
+            "before a destructive command if you are unsure what the "
+            "current context is, since acting on an unintended context "
+            "executes or destroys in the wrong worker. "
             "Use the 'daemon' group to manage the daemon lifecycle (start, "
             "stop, status, restart, repair, logs); the 'session', 'system', "
             "'table', 'catalog', and 'pq' groups to inspect and "
@@ -156,6 +167,8 @@ def _quiet_dependency_loggers(verbose: int) -> None:
             "flags; 'tool' to list, show, and call any MCP tool directly; "
             "'docs' to ask the Deephaven documentation assistant a "
             "question; 'config' to inspect and validate configuration; "
+            "'context' to inspect and manage the sticky default "
+            "session/system/PQ id; "
             "and 'self' to manage the dhcli tool itself (e.g. 'self "
             "completion' for shell tab completion). "
             "Pass --no-auto-start to require an already-running daemon "
@@ -179,7 +192,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
 @click.option(
     "--config-dir",
     "config_dir",
-    type=click.Path(path_type=Path),
+    type=NonBlankPath(path_type=Path),
     default=None,
     help=(
         "Configuration directory. When unset, defaults to the "
@@ -191,7 +204,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
 @click.option(
     "--runtime-dir",
     "runtime_dir",
-    type=click.Path(path_type=Path),
+    type=NonBlankPath(path_type=Path),
     default=None,
     help=(
         "Runtime directory for the daemon registry. When unset, "
@@ -249,6 +262,19 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     help="If the daemon is not running, fail rather than auto-spawning it.",
 )
 @click.option(
+    "--no-context",
+    is_flag=True,
+    default=False,
+    help=(
+        "Disable the sticky context for this invocation: when a session, "
+        "system, or PQ id is omitted, the command fails with "
+        "context_not_set instead of falling back to context.json. "
+        "Overrides cli.json's context.enabled. This governs only the "
+        "read: 'session create' and 'pq create' still record the new id "
+        "unless --no-set-context is given."
+    ),
+)
+@click.option(
     "--no-input",
     is_flag=True,
     default=False,
@@ -274,6 +300,7 @@ def cli(
     verbose: int,
     quiet: bool,
     no_auto_start: bool,
+    no_context: bool,
     no_input: bool,
 ) -> None:
     """Root of the ``dhcli`` command tree — see ``dhcli --help``."""
@@ -295,6 +322,7 @@ def cli(
         output=output,
         timeout=timeout,
         no_auto_start=no_auto_start,
+        no_context=no_context,
     )
     ctx.obj = RuntimeSpec(
         config_dir_override=config_dir,
@@ -314,6 +342,7 @@ cli.add_command(catalog_group)
 cli.add_command(pq_group)
 cli.add_command(docs_group)
 cli.add_command(config_group)
+cli.add_command(context_group)
 cli.add_command(agents_group)
 cli.add_command(self_group)
 

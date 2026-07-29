@@ -33,6 +33,7 @@ from deephaven_mcp.cli._errors import CliError, ErrorCode
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime, RuntimeSpec
 from deephaven_mcp.config._field_path import FieldPath
+from deephaven_mcp.config._settable_fields import SettableField
 from deephaven_mcp.config._store import ConfigStore
 from deephaven_mcp.config.schema import CliConfig, ServerConfig
 from deephaven_mcp.config.tree import ConfigTree
@@ -800,6 +801,26 @@ def test_keys_required_flag(tmp_path: Path) -> None:
     assert by_path["enterprise.systems.<name>.connection_json_url"]["required"] is True
 
 
+def test_keys_omits_description_when_schema_declares_none(tmp_path: Path) -> None:
+    """A field with no schema docstring yields no description key.
+
+    Every real field has one -- ``tests/test_field_docs_contract.py``
+    enforces that -- so the registry is patched here to reach the
+    defensive path and confirm it omits the key rather than emitting
+    null.
+    """
+    entry = SettableField(
+        path=FieldPath(("undocumented",)),
+        json_type="string",
+        required=False,
+        secret=False,
+    )
+    with patch.object(config_mod, "settable_fields", return_value=[entry]):
+        payload = json.loads(_run(tmp_path, "keys", "cli").stdout)
+    key = next(k for k in payload["keys"] if k["path"].endswith("undocumented"))
+    assert "description" not in key
+
+
 # ---------------------------------------------------------------------------
 # edit
 # ---------------------------------------------------------------------------
@@ -1421,6 +1442,29 @@ def test_add_password_with_effective_user(tmp_path: Path) -> None:
     }
 
 
+def test_add_password_without_effective_user(tmp_path: Path) -> None:
+    """Omitting --effective-user leaves the key out rather than writing null."""
+    result = _add(
+        tmp_path,
+        "add",
+        "s1",
+        "--auth",
+        "password",
+        "--username",
+        "alice",
+        "--password",
+        "${env:PW_XYZ:-fallback}",
+        "--no-input",
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(_session_file(tmp_path, "s1").read_text())
+    assert data["auth"]["credentials"] == {
+        "type": "password",
+        "username": "alice",
+        "password": "${env:PW_XYZ:-fallback}",
+    }
+
+
 def test_add_custom(tmp_path: Path) -> None:
     result = _add(
         tmp_path,
@@ -1792,6 +1836,22 @@ def test_add_session_creation_block(tmp_path: Path) -> None:
         "max_concurrent_sessions": 3,
         "defaults": {"heap_size_gb": 8.0},
     }
+
+
+def test_add_session_creation_max_sessions_only(tmp_path: Path) -> None:
+    """--max-sessions alone writes the block without a defaults sub-block."""
+    result = _add_password(tmp_path, "prod", "--max-sessions", "3")
+    assert result.exit_code == 0, result.output
+    data = json.loads(_system_file(tmp_path, "prod").read_text())
+    assert data["session_creation"] == {"max_concurrent_sessions": 3}
+
+
+def test_add_session_creation_heap_only(tmp_path: Path) -> None:
+    """--heap-gb alone writes only the defaults sub-block."""
+    result = _add_password(tmp_path, "prod", "--heap-gb", "8")
+    assert result.exit_code == 0, result.output
+    data = json.loads(_system_file(tmp_path, "prod").read_text())
+    assert data["session_creation"] == {"defaults": {"heap_size_gb": 8.0}}
 
 
 def test_add_omits_session_creation_by_default(tmp_path: Path) -> None:

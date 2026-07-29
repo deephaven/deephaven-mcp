@@ -11,15 +11,19 @@ from mcp.types import CallToolResult, TextContent
 
 from deephaven_mcp.cli import _runtime as runtime_mod
 from deephaven_mcp.cli._commands import _wrapping as wrapping_mod
+from deephaven_mcp.cli._context import ContextKey
 from deephaven_mcp.cli._main import cli
+from deephaven_mcp.cli._runtime import Runtime
 
 from .._helpers import fake_load_runtime, make_entry, make_runtime
 
 _SID = "enterprise:prod:rpt"
 
 
-def _run(args: list[str], payload: dict, tmp_path: Path):
-    rt = make_runtime(tmp_path)
+def _run(
+    args: list[str], payload: dict, tmp_path: Path, runtime: Runtime | None = None
+):
+    rt = runtime or make_runtime(tmp_path)
     result = CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload))],
         structuredContent=payload,
@@ -51,6 +55,23 @@ def test_tables_minimal(tmp_path: Path) -> None:
     assert json.loads(result.stdout) == _TABLES["tables"]
     assert call.await_args.args[2] == "catalog_tables_list"
     assert call.await_args.args[3] == {"id": _SID}
+
+
+def test_tables_falls_back_to_context_session(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SESSION, _SID)
+    result, call = _run(
+        ["-o", "json", "catalog", "tables"], _TABLES, tmp_path, runtime=rt
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": _SID}
+
+
+def test_tables_no_id_and_no_context_fails(tmp_path: Path) -> None:
+    result, call = _run(["catalog", "tables"], _TABLES, tmp_path)
+    assert result.exit_code == 2
+    assert "no sticky context session is set" in result.output
+    call.assert_not_awaited()
 
 
 def test_tables_with_options(tmp_path: Path) -> None:

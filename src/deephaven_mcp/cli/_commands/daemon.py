@@ -20,15 +20,15 @@ import click
 
 from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._acquire import (
     acquire_daemon,
     registry_corrupt_message,
 )
-from deephaven_mcp.cli._commands._wrapping import echo_payload
 from deephaven_mcp.cli._daemon import DaemonClientError, stop_daemon
+from deephaven_mcp.cli._echo import echo_payload
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,

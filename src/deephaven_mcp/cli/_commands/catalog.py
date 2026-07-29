@@ -15,16 +15,21 @@ from typing import Any
 import click
 
 from deephaven_mcp.cli._async import run_async
+from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo,
     call_and_echo_field,
     call_and_echo_table,
     wrapper_error_codes,
 )
-from deephaven_mcp.cli._errors import ExitCode
+from deephaven_mcp.cli._context import (
+    CONTEXT_HINT,
+    ContextKey,
+    require_context_value,
+)
+from deephaven_mcp.cli._errors import ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,
@@ -81,18 +86,25 @@ _OUTPUT_TABLES = OutputSpec(
             "cap rows with --max-rows. Follow up with 'catalog schema' or "
             "'catalog sample' for a specific table."
         ),
-        arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Enterprise session id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_TABLES,
         examples=("$ dhcli catalog tables enterprise:prod:rpt",),
         see_also=(
             "dhcli catalog namespaces ID",
             "dhcli catalog schema ID NAMESPACE TABLE",
+            "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.option(
     "--max-rows",
     "max_rows",
@@ -105,11 +117,12 @@ _OUTPUT_TABLES = OutputSpec(
 @run_async
 async def catalog_tables(
     runtime: Runtime,
-    id: str,
+    id: str | None,
     max_rows: int | None,
     filters: tuple[str, ...],
 ) -> None:
     """List tables in the Enterprise catalog."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     arguments: dict[str, Any] = {"id": id}
     if max_rows is not None:
         arguments["max_rows"] = max_rows
@@ -150,15 +163,21 @@ _OUTPUT_NAMESPACES = OutputSpec(
             "names. Narrow with repeatable --filter expressions and cap the "
             "count with --max-rows."
         ),
-        arguments=(HelpEntry("ID", "Enterprise session id. Run 'session list'."),),
+        arguments=(
+            HelpEntry(
+                "ID",
+                "Enterprise session id. Run 'session list'. Defaults to the "
+                f"sticky context session if omitted. {CONTEXT_HINT}",
+            ),
+        ),
         output=_OUTPUT_NAMESPACES,
         examples=("$ dhcli catalog namespaces enterprise:prod:rpt",),
-        see_also=("dhcli catalog tables ID",),
+        see_also=("dhcli catalog tables ID", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id")
+@click.argument("id", required=False)
 @click.option(
     "--max-rows",
     "max_rows",
@@ -171,11 +190,12 @@ _OUTPUT_NAMESPACES = OutputSpec(
 @run_async
 async def catalog_namespaces(
     runtime: Runtime,
-    id: str,
+    id: str | None,
     max_rows: int | None,
     filters: tuple[str, ...],
 ) -> None:
     """List namespaces in the Enterprise catalog."""
+    id = require_context_value(runtime, ContextKey.SESSION, id)
     arguments: dict[str, Any] = {"id": id}
     if max_rows is not None:
         arguments["max_rows"] = max_rows

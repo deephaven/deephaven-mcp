@@ -3,12 +3,12 @@
 Every runtime command that fronts an MCP tool follows the same flow:
 acquire the daemon, call the tool over MCP, unwrap the structured
 result, and render it. :func:`call_for_payload` is the fetch half,
-:func:`echo_payload` the render half, and :func:`call_and_echo` their
-composition for the common whole-payload case. These helpers centralize
-the flow so each wrapper stays a thin, declarative mapping of flags to
-tool arguments. The companion ``_cli-tool-wrapping`` skill and
-``docs/design/CLI_TOOL_WRAPPING.md`` describe the wrapper categories
-that build on this module.
+:func:`~deephaven_mcp.cli._echo.echo_payload` the render half, and
+:func:`call_and_echo` their composition for the common whole-payload
+case. These helpers centralize the flow so each wrapper stays a thin,
+declarative mapping of flags to tool arguments. The companion
+``ref-cli-tool-wrapping`` skill and ``docs/design/CLI_TOOL_WRAPPING.md``
+describe the wrapper categories that build on this module.
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ __all__ = [
     "call_and_echo_table",
     "call_for_payload",
     "call_tool",
-    "echo_payload",
     "parse_key_value",
     "read_local_script",
     "require_success",
     "tool_payload",
     "wrapper_error_codes",
+    "yes_option",
 ]
 
 import json
@@ -40,8 +40,8 @@ from deephaven_mcp.cli._commands._acquire import (
     acquire_daemon,
     registry_corrupt_message,
 )
+from deephaven_mcp.cli._echo import echo_payload
 from deephaven_mcp.cli._errors import CliError, ErrorCode, render_warning
-from deephaven_mcp.cli._format import format_output
 from deephaven_mcp.cli._mcp_client import (
     McpClient,
     McpClientError,
@@ -64,6 +64,28 @@ _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
     ErrorCode.MCP_REQUEST_TIMEOUT,
 )
 """Error codes the shared acquire + tool-call flow can raise."""
+
+
+def yes_option(f: Any) -> Any:
+    """Attach the shared ``--yes`` option to a destructive command.
+
+    Skips the confirmation that
+    :func:`~deephaven_mcp.cli._context.require_context_target` asks when
+    the target came from the sticky context and ``cli.json``'s
+    ``context.confirm_destructive`` is enabled. Shared so the six
+    destructive verbs cannot drift in wording.
+    """
+    return click.option(
+        "--yes",
+        "yes",
+        is_flag=True,
+        default=False,
+        help=(
+            "Skip the confirmation asked when the target comes from the "
+            "sticky context (only asked when cli.json's "
+            "context.confirm_destructive is true)."
+        ),
+    )(f)
 
 
 def wrapper_error_codes(
@@ -332,46 +354,6 @@ async def call_for_payload(
     handle = await acquire(runtime, retry_command=retry_command)
     result = await call_tool(handle, runtime, tool, arguments)
     return require_success(tool_payload(result), tool=tool)
-
-
-def echo_payload(
-    runtime: Runtime,
-    value: Any,
-    *,
-    empty_message: str = "(none)",
-    sort_keys: bool = True,
-    human_exclude: Collection[str] = (),
-) -> None:
-    """Render ``value`` in the runtime's output mode and print it.
-
-    Presentation is owned by :func:`~deephaven_mcp.cli._format.format_output`;
-    this is where most commands read ``runtime.config.cli.output``.
-
-    Args:
-        runtime (Runtime): The active CLI runtime, for the output mode.
-        value (Any): The value to render (a payload dict, a shaped list, etc.).
-        empty_message (str): Human-mode text for an empty list, forwarded to
-            :func:`~deephaven_mcp.cli._format.format_output`.
-        sort_keys (bool): Whether ``json``/``yaml`` modes sort object keys
-            alphabetically. Defaults to ``True``. Pass ``False`` for payloads
-            whose key order is meaningful, forwarded to
-            :func:`~deephaven_mcp.cli._format.format_output`.
-        human_exclude (Collection[str]): Keys dropped from a dict ``value`` in
-            ``human`` mode only, for fields that are noise to a terminal reader
-            but meaningful to machine consumers. Ignored in ``json``/``yaml``
-            and for non-dict values. Defaults to ``()`` (drop nothing).
-    """
-    output = runtime.config.cli.output.format
-    if human_exclude and output == "human" and isinstance(value, dict):
-        value = {k: v for k, v in value.items() if k not in human_exclude}
-    click.echo(
-        format_output(
-            value,
-            output=output,
-            empty_message=empty_message,
-            sort_keys=sort_keys,
-        )
-    )
 
 
 async def call_and_echo(

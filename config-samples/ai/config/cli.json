@@ -24,5 +24,9 @@
     "timeouts": {
       "request_seconds": 120
     }
+  },
+  "context": {
+    "enabled": true,
+    "confirm_destructive": false
   }
 }

@@ -54,6 +54,7 @@ def test_build_cli_overrides_no_change_returns_empty_dict() -> None:
         output=None,
         timeout=None,
         no_auto_start=False,
+        no_context=False,
     )
     assert out == {}
 
@@ -64,6 +65,7 @@ def test_build_cli_overrides_sets_output_and_timeout() -> None:
         output="json",
         timeout=5,
         no_auto_start=False,
+        no_context=False,
     )
     assert out == {
         "output": {"format": "json"},
@@ -78,8 +80,20 @@ def test_build_cli_overrides_no_auto_start_disables_field() -> None:
         output=None,
         timeout=None,
         no_auto_start=True,
+        no_context=False,
     )
     assert out == {"daemon": {"auto_start": False}}
+
+
+def test_build_cli_overrides_no_context_disables_field() -> None:
+    """``--no-context`` disables ``context.enabled`` and nothing else."""
+    out = _build_cli_overrides(
+        output=None,
+        timeout=None,
+        no_auto_start=False,
+        no_context=True,
+    )
+    assert out == {"context": {"enabled": False}}
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +425,7 @@ def test_help_lists_top_level_nouns() -> None:
         "pq",
         "docs",
         "config",
+        "context",
         "agents",
     ):
         assert noun in result.output
@@ -433,6 +448,7 @@ def test_main_registers_exactly_the_expected_groups() -> None:
         "pq",
         "docs",
         "config",
+        "context",
         "agents",
         "self",
     }

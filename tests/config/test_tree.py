@@ -31,6 +31,7 @@ from deephaven_mcp.auth.credentials import (
 from deephaven_mcp.config._data_root import DATA_DIR_ENV_VAR, _default_data_root
 from deephaven_mcp.config.tree import (
     ConfigTreeLoader,
+    no_systems_configured_message,
 )
 
 # ---------------------------------------------------------------------------
@@ -680,6 +681,134 @@ async def test_list_systems_lists_all(
     # Field access also works.
     assert systems[0].name == "community"
     assert systems[0].type is SystemType.COMMUNITY
+
+
+# ---------------------------------------------------------------------------
+# no_systems_configured_message
+# ---------------------------------------------------------------------------
+
+
+def test_no_systems_configured_message_names_dir_and_every_remedy(
+    tmp_path: Path,
+) -> None:
+    """The shared zero-system guidance names the directory and all three fixes.
+
+    Both enforcement points (systems-server startup, CLI daemon
+    acquisition) emit this one string, so it must stay actionable: the
+    offending directory plus each way to declare a system.
+    """
+    message = no_systems_configured_message(tmp_path)
+    assert str(tmp_path) in message
+    assert "community/sessions/" in message
+    assert "session_creation" in message
+    assert "enterprise/systems/" in message
+    assert "dhcli config init" in message
+
+
+# ---------------------------------------------------------------------------
+# community_sessions / enterprise_systems
+# ---------------------------------------------------------------------------
+
+
+def _write_community_session(config_dir: Path, name: str) -> None:
+    """Declare one anonymous static community session named ``name``."""
+    sessions_dir = _make_dir(config_dir / "community" / "sessions")
+    _write_json(
+        sessions_dir / f"{name}.json",
+        {
+            "session_name": name,
+            "auth": {"credentials": {"type": "anonymous"}},
+        },
+    )
+
+
+def _write_enterprise_system(config_dir: Path, name: str) -> None:
+    """Declare one password-auth enterprise system named ``name``."""
+    systems_dir = _make_dir(config_dir / "enterprise" / "systems")
+    _write_json(
+        systems_dir / f"{name}.json",
+        {
+            "system_name": name,
+            "connection_json_url": "https://x/connection.json",
+            "auth": {
+                "credentials": {
+                    "type": "password",
+                    "username": "u",
+                    "password": "p",
+                }
+            },
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_accessors_empty_when_no_sections(config_dir: Path) -> None:
+    """Both accessors read an absent section as no entries, not ``None``."""
+    cfg = (await _load(config_dir)).config
+    assert cfg.community is None
+    assert cfg.enterprise is None
+    assert cfg.community_sessions == {}
+    assert cfg.enterprise_systems == {}
+
+
+@pytest.mark.asyncio
+async def test_community_sessions_returns_declared_sessions(
+    config_dir: Path,
+) -> None:
+    """The community accessor keys declarations by session name."""
+    _write_community_session(config_dir, "local")
+    cfg = (await _load(config_dir)).config
+    sessions = cfg.community_sessions
+    assert set(sessions) == {"local"}
+    assert sessions["local"].name == "local"
+    # The enterprise counterpart stays empty for a community-only tree.
+    assert cfg.enterprise_systems == {}
+
+
+@pytest.mark.asyncio
+async def test_enterprise_systems_returns_declared_systems(
+    config_dir: Path,
+) -> None:
+    """The enterprise accessor keys declarations by system name."""
+    _write_enterprise_system(config_dir, "prod")
+    _write_enterprise_system(config_dir, "stage")
+    cfg = (await _load(config_dir)).config
+    systems = cfg.enterprise_systems
+    assert set(systems) == {"prod", "stage"}
+    assert systems["prod"].connection_json_url == "https://x/connection.json"
+    # The community counterpart stays empty for an enterprise-only tree.
+    assert cfg.community_sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_accessors_are_the_underlying_section_maps(config_dir: Path) -> None:
+    """Each accessor exposes its section's own map, not a copy of it."""
+    _write_community_session(config_dir, "local")
+    _write_enterprise_system(config_dir, "prod")
+    cfg = (await _load(config_dir)).config
+    assert cfg.community is not None
+    assert cfg.enterprise is not None
+    assert cfg.community_sessions is cfg.community.sessions
+    assert cfg.enterprise_systems is cfg.enterprise.systems
+
+
+@pytest.mark.asyncio
+async def test_settings_only_sections_yield_empty_accessors(
+    config_dir: Path,
+) -> None:
+    """A settings-only section is present yet declares nothing.
+
+    The empty result therefore does not imply an absent section, which is
+    why consumers needing that distinction (the registry builder pairing
+    each section with its client timeouts) read the section attribute.
+    """
+    _write_json(_make_dir(config_dir / "community") / "settings.json", {})
+    _write_json(_make_dir(config_dir / "enterprise") / "settings.json", {})
+    cfg = (await _load(config_dir)).config
+    assert cfg.community is not None
+    assert cfg.enterprise is not None
+    assert cfg.community_sessions == {}
+    assert cfg.enterprise_systems == {}
 
 
 @pytest.mark.asyncio

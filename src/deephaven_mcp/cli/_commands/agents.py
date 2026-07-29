@@ -9,17 +9,18 @@ for terminal-friendly output.
 Two complementary access paths render the same metadata:
 
 - The universal ``--agents`` flag (wired in
-  :mod:`deephaven_mcp.cli._help`) describes the command it is
+  :mod:`deephaven_mcp.cli._manifest`) describes the command it is
   appended to — the machine-readable twin of ``--help``.
 - This ``agents`` group exposes whole-system / cross-cutting
   views: ``tree`` (the summary tree, or the complete manifest with
   ``--full``), ``command`` (one command's self-contained node), and
   ``errors`` (the error-code registry).
 
-The manifest builders themselves (:func:`~deephaven_mcp.cli._help.build_manifest`
-and friends) live in :mod:`deephaven_mcp.cli._help`, next to
-``HelpfulCommand``, so the ``--agents`` flag can reach them without a
-circular import; this module only wires them into click commands.
+The manifest builders themselves
+(:func:`~deephaven_mcp.cli._manifest.build_manifest` and friends) live in
+:mod:`deephaven_mcp.cli._manifest`, so the ``--agents`` flag can reach
+them without a circular import; this module only wires them into click
+commands.
 """
 
 from __future__ import annotations
@@ -28,18 +29,20 @@ __all__ = ["agents"]
 
 import click
 
+from deephaven_mcp.cli._command import HelpfulGroup
+from deephaven_mcp.cli._echo import echo_payload_no_runtime
 from deephaven_mcp.cli._errors import ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     HelpEntry,
-    HelpfulGroup,
     HelpSpec,
     OutputField,
     OutputSpec,
+)
+from deephaven_mcp.cli._manifest import (
+    build_error_code_registry,
     build_manifest,
     build_summary_tree,
     describe_command,
-    emit_payload,
-    error_code_registry,
     resolve_command,
 )
 
@@ -160,7 +163,9 @@ _OUTPUT_TREE = OutputSpec(
 def agents_tree(ctx: click.Context, full: bool) -> None:
     """Emit the summary tree, or the complete manifest with ``--full``."""
     root = ctx.find_root().command
-    emit_payload(ctx, build_manifest(root) if full else build_summary_tree(root))
+    echo_payload_no_runtime(
+        ctx, build_manifest(root) if full else build_summary_tree(root)
+    )
 
 
 _OUTPUT_COMMAND = OutputSpec(
@@ -253,7 +258,7 @@ def agents_command(ctx: click.Context, path: tuple[str, ...], full: bool) -> Non
     group's subcommands into full nested nodes.
     """
     cmd = resolve_command(ctx.find_root().command, path)
-    emit_payload(ctx, describe_command(cmd, recurse=full))
+    echo_payload_no_runtime(ctx, describe_command(cmd, recurse=full))
 
 
 _OUTPUT_ERRORS = OutputSpec(
@@ -286,4 +291,4 @@ _OUTPUT_ERRORS = OutputSpec(
 @click.pass_context
 def agents_errors(ctx: click.Context) -> None:
     """Emit the stable error-code registry as a list of ``{code, help}``."""
-    emit_payload(ctx, error_code_registry())
+    echo_payload_no_runtime(ctx, build_error_code_registry())

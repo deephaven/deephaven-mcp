@@ -165,6 +165,7 @@ python_classes = ["Test"]  # Test class naming pattern
 python_functions = ["test_"]  # Test function naming pattern
 markers = [
     "integration: marks tests as integration tests (require Docker/pip, skipped by default). IMPORTANT: Run with -s flag to disable output capture",
+    "guardrail: marks project-wide convention-enforcement tests whose subject is broader than one source file. Run the family with -m guardrail; they also run in the default suite",
 ]
 asyncio_mode = "strict"
 filterwarnings = [

@@ -1,6 +1,6 @@
 """Contract tests for dhcli help content across the live command tree.
 
-Enforces the _cli-help-standards contract on every registered leaf
+Enforces the ref-cli-help-standards contract on every registered leaf
 command, parametrized over the live click tree so a newly-added
 command is covered automatically.
 """
@@ -10,7 +10,14 @@ from __future__ import annotations
 import click
 import pytest
 
+from deephaven_mcp.cli._command import HelpfulCommand, HelpfulGroup
+from deephaven_mcp.cli._errors import ErrorCode
 from deephaven_mcp.cli._main import cli
+from deephaven_mcp.cli._params import NonBlankPath
+
+# Project-wide convention enforcement over the live click tree, not a mirror
+# of one source file (``ref-python-coding-practices`` rule 5).
+pytestmark = pytest.mark.guardrail
 
 
 def _leaf_commands(
@@ -54,12 +61,54 @@ _LEAF_IDS = [path for path, _ in _LEAVES]
 _ALL = _all_commands(cli)
 _ALL_IDS = [path for path, _ in _ALL]
 
+
+def _see_also(cmd: click.Command) -> tuple[str, ...]:
+    """Return the ``See also`` entries a command's ``HelpSpec`` declares.
+
+    Narrows on the concrete command class for the same reason as
+    :func:`_declared_error_codes`: a plain ``click.Command`` in this tree
+    would be a bug worth surfacing.
+    """
+    if not isinstance(cmd, HelpfulCommand | HelpfulGroup):
+        return ()
+    spec = cmd.help_spec
+    return () if spec is None or spec.see_also is None else tuple(spec.see_also)
+
+
+def _declared_error_codes(cmd: click.Command) -> tuple[ErrorCode, ...]:
+    """Return the error codes a command's ``HelpSpec`` declares.
+
+    Narrows on the concrete command class rather than probing for the
+    attribute: every command in the tree is a ``HelpfulCommand`` or
+    ``HelpfulGroup``, and a plain ``click.Command`` appearing here would
+    be a bug worth surfacing rather than silently treating as
+    code-less.
+    """
+    if not isinstance(cmd, HelpfulCommand | HelpfulGroup):
+        return ()
+    spec = cmd.help_spec
+    # Both are legitimately absent: a group carries no spec, and a spec's
+    # error_codes is None when the command documents no Error codes section.
+    return () if spec is None or spec.error_codes is None else tuple(spec.error_codes)
+
+
+_CONTEXT_LEAVES = [
+    (path, cmd)
+    for path, cmd in _LEAVES
+    if ErrorCode.CONTEXT_NOT_SET in _declared_error_codes(cmd)
+]
+_CONTEXT_IDS = [path for path, _ in _CONTEXT_LEAVES]
+
 # Pure discovery commands have no command-specific failure mode (they
 # cannot raise a CliError), so they document no Error codes section.
 # Every operational command must. ``agents command`` is excluded
 # because it can raise COMMAND_NOT_FOUND for an unresolvable path.
 # ``self completion`` only prints a click-generated script; its sole
 # failure mode (bad SHELL) is a click argument-parse error.
+# ``context show`` takes no arguments and only reads a file: like every
+# other runtime verb it can surface CONFIG_INVALID from the shared
+# leaf-boundary load, but that code is universally emittable and so is
+# declared by no command (see ``config validate`` for the explicit one).
 _NO_ERROR_CODES = {
     "agents tree",
     "agents errors",
@@ -67,6 +116,7 @@ _NO_ERROR_CODES = {
     "config files",
     "config session list",
     "config system list",
+    "context show",
 }
 
 
@@ -119,3 +169,75 @@ def test_options_have_help(path: str, cmd: click.Command) -> None:
     for param in cmd.params:
         if isinstance(param, click.Option):
             assert param.help, f"{path}: option --{param.name} has no help"
+
+
+@pytest.mark.parametrize("path,cmd", _CONTEXT_LEAVES, ids=_CONTEXT_IDS)
+def test_context_defaultable_command_names_its_discovery_command(
+    path: str, cmd: click.Command
+) -> None:
+    """A command that can take its target from the context says how to see it.
+
+    The sticky context is the one input a command's own argv does not
+    reveal, so naming the concept without naming ``dhcli context show``
+    leaves a reader -- especially an agent, which cannot inspect the
+    terminal -- with a term it cannot act on.
+    """
+    help_text = cmd.help or ""
+    assert "dhcli context show" in help_text, (
+        f"{path}: help mentions the sticky context but never names "
+        "'dhcli context show'"
+    )
+    assert any(
+        entry.startswith("dhcli context") for entry in _see_also(cmd)
+    ), f"{path}: no 'dhcli context' entry in See also"
+
+
+@pytest.mark.parametrize("path,cmd", _ALL, ids=_ALL_IDS)
+def test_path_options_reject_a_blank_value(path: str, cmd: click.Command) -> None:
+    """Every path-valued parameter must use ``NonBlankPath``.
+
+    ``click.Path`` converts ``''`` to ``Path('.')``, so a blank silently
+    becomes the current directory: ``--config-dir ''`` read a different
+    configuration tree and reported success, and ``--runtime-dir ''``
+    pointed the daemon registry at a relative path so ``daemon status``
+    reported no daemon while one ran. The post-parse blank guard cannot
+    catch it, because ``Path('')`` and ``Path('.')`` are indistinguishable
+    and rejecting both would outlaw an explicit ``--config-dir .``.
+
+    ``click.Path`` is the only click type with this flaw -- every other
+    (``INT``, ``FLOAT``, ``Choice``, ``IntRange``, ``DateTime``, ``UUID``,
+    ``File``) rejects a blank outright, and a bare ``STRING`` keeps it
+    blank for ``cli._params.reject_blank_values`` to catch. If a
+    custom ``ParamType`` that converts a blank into a meaningful value is
+    ever added, extend this guard to cover it.
+    """
+    offenders = [
+        param.name
+        for param in cmd.params
+        if isinstance(param.type, click.Path)
+        and not isinstance(param.type, NonBlankPath)
+    ]
+    assert not offenders, (
+        f"{path}: {offenders} use a bare click.Path, which turns a blank "
+        f"into Path('.') silently; use NonBlankPath from cli._params instead"
+    )
+
+
+@pytest.mark.parametrize("path,cmd", _CONTEXT_LEAVES, ids=_CONTEXT_IDS)
+def test_confirmable_command_declares_operation_canceled(
+    path: str, cmd: click.Command
+) -> None:
+    """``--yes`` and ``operation_canceled`` travel together.
+
+    A verb that can decline to act must document the code it exits with,
+    and a verb documenting that code must offer the flag that skips the
+    question.
+    """
+    has_yes = any(
+        isinstance(param, click.Option) and param.name == "yes" for param in cmd.params
+    )
+    declares = ErrorCode.OPERATION_CANCELED in _declared_error_codes(cmd)
+    assert has_yes == declares, (
+        f"{path}: --yes present={has_yes} but operation_canceled "
+        f"declared={declares}; they must agree"
+    )

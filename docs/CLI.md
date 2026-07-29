@@ -28,6 +28,7 @@ mechanism, not the tool's scope.
   - [`dhcli table`](#dhcli-table)
   - [`dhcli catalog`](#dhcli-catalog)
   - [`dhcli pq`](#dhcli-pq)
+  - [`dhcli context`](#dhcli-context)
   - [`dhcli docs`](#dhcli-docs)
   - [`dhcli config`](#dhcli-config)
   - [`dhcli agents`](#dhcli-agents)
@@ -210,7 +211,7 @@ available:
 
 ### `cli.json`
 
-The schema is organized into four top-level domain sections. Each section
+The schema is organized into five top-level domain sections. Each section
 is its own object (Pydantic model); sections that hold time-shaped knobs
 carry a `timeouts:` sub-section reserved from day one, so future timeouts
 slot in without a breaking schema change.
@@ -256,6 +257,18 @@ restarting while end users are still protected.
 | `docs.url`                     | string  | `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp` | Streamable-HTTP endpoint of the docs MCP server the `docs` commands query. Defaults to the Deephaven-hosted production docs server; point it at a self-hosted `dh-mcp-docs-server` to query that instead. Validated eagerly: must be `http://` or `https://` with a host and a well-formed port, and must not contain userinfo credentials (`user:password@`) — the URL is echoed in output and error messages. |
 | `docs.timeouts.request_seconds`| integer | `120`   | Per-request timeout for docs server calls. Higher than the daemon request default because docs queries are LLM-backed. Override with `--timeout`. |
 
+#### `context.*` — sticky context
+
+| Field              | Type | Default | Notes                                                                                   |
+|--------------------|------|---------|------------------------------------------------------------------------------------------|
+| `context.enabled`  | bool | `true`  | Whether commands that take a session, system, or PQ id fall back to the sticky context in `context.json` when the argument is omitted. `false` disables the fallback; an omitted argument then fails with `context_not_set`. `context.json` is still readable and writable — `context show` reports each stored value with provenance `disabled` — so only the automatic fallback is affected. Override per invocation with `--no-context`. |
+| `context.confirm_destructive` | bool | `false` | Whether a verb that executes, destroys, or disrupts (`session exec`/`delete`, `pq delete`/`stop`/`restart`/`modify`) asks for confirmation before acting on a target that came from `context.json` rather than the command line. An explicitly named target is never confirmed. Skip per invocation with `--yes`; declining exits `2` (`operation_canceled`). Skipped silently when prompting is unavailable (no TTY, or `--no-input`), so enabling it never breaks a non-interactive caller. |
+
+The sticky context's *values* (the session/system/PQ ids themselves) are
+never stored here — they are ephemeral per-user state in
+`<runtime_dir>/context.json`, managed with `dhcli context set` /
+`dhcli context unset`. See the `dhcli context` command-tree entry below.
+
 Example (JSON5; `//` comments are accepted):
 
 ```json5
@@ -285,6 +298,10 @@ Example (JSON5; `//` comments are accepted):
     "timeouts": {
       "request_seconds": 120
     }
+  },
+  "context": {
+    "enabled": true,
+    "confirm_destructive": false  // ask before acting on a context-supplied target
   }
 }
 ```
@@ -375,14 +392,14 @@ the right backend by the id's prefix; `create` chooses the backend from
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
 | `list`                        | Lists sessions (both types). Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. Wraps `sessions_list`. |
-| `show <id>`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
+| `show [ID]`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
 | `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
-| `delete <id>`                 | Deletes a session, routing by the id prefix. Wraps `session_community_delete` / `session_enterprise_delete`. |
-| `exec <id>`                   | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. Wraps `session_script_run`. |
-| `pip-list <id>`               | Lists the session's installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
-| `credentials <id>`            | Prints a Community session's browser-login credentials (`id`, `auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
-| `url <id>`                    | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly. |
-| `open <id>`                   | Opens the authenticated URL in the default browser; `--print` prints it instead (headless-safe). |
+| `delete [ID]`                 | Deletes a session, routing by the id prefix. Only a session `create` made (`origin: dynamic`) is eligible; others exit `3`. `--yes` skips the context confirmation. Wraps `session_community_delete` / `session_enterprise_delete`. |
+| `exec [ID]`                   | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. `--yes` skips the context confirmation. Wraps `session_script_run`. |
+| `pip-list [ID]`               | Lists the session's installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
+| `credentials [ID]`            | Prints a Community session's browser-login credentials (`id`, `auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
+| `url [ID]`                    | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly. |
+| `open [ID]`                   | Opens the authenticated URL in the default browser; `--print` prints it instead (headless-safe). |
 
 `create` options are split by type and mutually exclusive: Community
 takes `--launch-method`, `--auth-token`, `--docker-image`,
@@ -391,14 +408,19 @@ takes `--launch-method`, `--auth-token`, `--docker-image`,
 `--engine`, `--auto-delete-timeout`, `--admin-group`/`--viewer-group`
 (repeatable), `--session-arg KEY=VALUE` (repeatable, JSON values).
 Shared: `--language` (`Python`/`Groovy`), `--heap-size-gb`, `--jvm-arg`
-(repeatable), `--env KEY=VALUE` (repeatable). Supplying a wrong-type option
-exits `2` (`option_not_applicable`).
+(repeatable), `--env KEY=VALUE` (repeatable), and `--no-set-context`
+(client-side; suppresses the automatic sticky-context set on success).
+Supplying a wrong-type option exits `2` (`option_not_applicable`).
 
 For an Enterprise system, `create` is *create-and-connect*: it provisions
 a Persistent Query and connects immediately, and `delete` also deletes
-the underlying PQ (equivalent to `pq delete` with the same id). To define
-a durable PQ without connecting — scheduled, RunAndDone, or disabled —
-use `pq create` instead; see [`dhcli pq`](#dhcli-pq).
+that PQ. Because `delete` destroys the PQ, it accepts only a session
+`create` made; a session that already existed (`origin: static` or
+`discovered` in `session list`) is refused with exit `3` — use
+`pq delete` instead.
+
+To define a durable PQ without connecting — scheduled, RunAndDone, or
+disabled — use `pq create` instead; see [`dhcli pq`](#dhcli-pq).
 
 `exec` takes exactly one script source: `--script TEXT` (inline),
 `--script-path PATH` (a local file), or `--script-path -` (standard
@@ -440,8 +462,8 @@ plus every configured Enterprise (Core+) system.
 |--------------|-----------------------------------------------------------------------------------------------|
 | `list`       | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`. |
 | `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dhcli config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
-| `url <name>` | Prints an Enterprise system's web console URL — pipe-friendly. |
-| `open <name>`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
+| `url [NAME]` | Prints an Enterprise system's web console URL — pipe-friendly. |
+| `open [NAME]`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
 
 `url` and `open` are Enterprise-only and computed locally from
 configuration — they do **not** contact the daemon. The URL is the
@@ -466,11 +488,11 @@ dhcli system open prod --print
 ### `dhcli table`
 
 Inspects tables in a session. All verbs take a fully qualified
-`ID`.
+session id; `list` falls back to the sticky context when it is omitted.
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list <id>`                   | Lists the session's table names. Wraps `session_tables_list`. |
+| `list [ID]`                   | Lists the session's table names. Wraps `session_tables_list`. |
 | `schema <id> <table>`         | Column definitions for one table: name and type per column, plus `column_type` where meaningful. Wraps `session_table_schema`. |
 | `data <id> <table>`           | Row data: `--max-rows N`, `--head/--tail` (default head). Wraps `session_table_data`. |
 
@@ -487,8 +509,8 @@ dhcli table data community:community:dev trades --max-rows 50 --tail
 
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
-| `tables <id>`                         | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
-| `namespaces <id>`                     | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
+| `tables [ID]`                         | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
+| `namespaces [ID]`                     | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
 | `schema <id> <namespace> <table>`     | Column definitions for one catalog table: name and type per column, plus `column_type` where meaningful. Wraps `catalog_table_schema`. |
 | `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 
@@ -513,28 +535,31 @@ no PQ counterpart (local workers are ephemeral).
 
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
-| `list <system>`                       | Lists PQs configured on a system. Wraps `pq_list`. |
-| `details <id>`                        | Configuration + status for one PQ. Wraps `pq_details`. |
+| `list [SYSTEM]`                       | Lists PQs configured on a system. Wraps `pq_list`. |
+| `details [ID]`                        | Configuration + status for one PQ. Wraps `pq_details`. |
 | `name-to-id <system> <name>`          | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`. |
 | `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-body-path`/`--git-script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
-| `modify <id>`                         | Updates only the fields passed; everything else is left unchanged. `--restart` restarts the PQ after applying the change. Wraps `pq_modify`. |
-| `delete <id>...`                      | Deletes one or more PQs. `--max-concurrent N`. Wraps `pq_delete`. |
-| `start <id>...`                       | Starts one or more PQs. `--wait/--no-wait`, `--max-concurrent`. Wraps `pq_start`. |
-| `stop <id>...`                        | Stops one or more PQs. Same options as `start`. Wraps `pq_stop`. |
-| `restart <id>...`                     | Restarts one or more PQs. Same options as `start`. Wraps `pq_restart`. |
+| `modify [ID]`                         | Updates only the fields passed; everything else is left unchanged. `--restart` restarts the PQ after applying the change. `--yes` skips the context confirmation. Wraps `pq_modify`. |
+| `delete [ID...]`                      | Deletes one or more PQs. `--max-concurrent N`, `--yes`. Wraps `pq_delete`. |
+| `start [ID...]`                       | Starts one or more PQs. `--wait/--no-wait`, `--max-concurrent`. Wraps `pq_start`. |
+| `stop [ID...]`                        | Stops one or more PQs. Same options as `start`, plus `--yes`. Wraps `pq_stop`. |
+| `restart [ID...]`                     | Restarts one or more PQs. Same options as `stop`. Wraps `pq_restart`. |
 
 `create` and `modify` share a large optional config flag set; only the flags you
 pass take effect (on `modify`, everything else is left unchanged). `create`
 additionally requires `--system` and `--heap-size-gb` and accepts
-`--enabled/--disabled` (default enabled); `modify` takes `ID` and accepts
-`--pq-name`, `--heap-size-gb`, `--enabled/--disabled`, and `--restart`. The
-shared flags are: `--script-body`/`--script-body-path`/`--git-script-path`,
+`--enabled/--disabled` (default enabled); `modify` takes an optional `ID`
+(sticky context otherwise) and accepts `--pq-name`, `--heap-size-gb`,
+`--enabled/--disabled`, and `--restart`. The shared flags are:
+`--script-body`/`--script-body-path`/`--git-script-path`,
 `--language` (`Python`/`Groovy`), `--configuration-type` (`Script`/`RunAndDone`),
 `--schedule` (repeatable), `--server`, `--engine`, `--jvm-profile`, `--jvm-arg`
 (repeatable), `--class-path` (repeatable), `--python-venv`, `--env KEY=VALUE`
 (repeatable), `--init-timeout-nanos`, `--auto-delete-timeout`,
 `--admin-group`/`--viewer-group` (repeatable), `--restart-users`, and `--owner`.
-Run `dhcli pq create --help` (or `modify`) for the full per-flag detail.
+`create` also takes `--no-set-context` (client-side; suppresses the automatic
+sticky-context set on success). Run `dhcli pq create --help` (or `modify`) for
+the full per-flag detail.
 The three script sources and `--auto-delete-timeout`/`--schedule` are each
 mutually exclusive; combining them exits `2` with `mutually_exclusive_options`.
 
@@ -556,6 +581,109 @@ exit `0` means the batch ran, not that every id succeeded — check the
 dhcli pq create nightly --system prod --heap-size-gb 4 --script-body-path ./n.py
 dhcli pq create weekly --system prod --heap-size-gb 4 --git-script-path IrisQueries/py/weekly.py
 dhcli pq restart enterprise:prod:1234567890 --no-wait
+```
+
+### `dhcli context`
+
+Manages the **sticky context**: a persisted default `session` id,
+`system` name, and `pq` id in `<runtime_dir>/context.json`. The `session`,
+`system`, `table`, `catalog`, and `pq` verbs that take one of these ids
+fall back to it when the argument is omitted, resolved in order: the
+explicit argument, then `context.json`. `session create` and
+`pq create` set the relevant key(s) automatically on success (pass
+`--no-set-context` to skip this). A command that falls through every
+step with the id still unset exits `2` (`context_not_set`).
+
+| Verb                  | Purpose                                                                               |
+|-----------------------|----------------------------------------------------------------------------------------|
+| `show`                | Reports the stored value and provenance (`file`, `unset`, or `disabled`) for each of `session`, `system`, `pq`. Never contacts the daemon. |
+| `set KEY VALUE`       | Persists `VALUE` as the sticky default for `KEY`. `session`/`pq` are confirmed to exist via the daemon; `system` is checked against `'community'` and the configured Enterprise systems, with no daemon contact. |
+| `unset [KEY...] [--all]` | Clears one or more keys, or every key with `--all`. Pass one or the other, never both — combining them exits `2` (`mutually_exclusive_options`). Idempotent. |
+
+The `source` each key reports is one of:
+
+| `source`   | Meaning                                                                              |
+|------------|--------------------------------------------------------------------------------------|
+| `file`     | The key holds a value in `context.json`, and the fallback is on, so an omitted argument will use it. |
+| `unset`    | The key holds no value; a command that omits the argument exits `2` (`context_not_set`). |
+| `disabled` | The fallback is off (`--no-context`, or `cli.json`'s `context.enabled: false`), so no command will consult the context. `value` still shows what is stored. |
+
+`set` and `unset` write to `context.json` even when the fallback is off,
+printing a one-line warning on stderr.
+
+Set by hand, the three keys are independent: a PQ and its running session
+share an id, but setting one never changes another. The `create` and
+`delete` verbs write or clear several at once:
+
+| Verb                          | Keys written or cleared                        |
+|-------------------------------|-------------------------------------------------|
+| `session create` (Community)  | sets `session`                                  |
+| `session create` (Enterprise) | sets `session`, `system`, `pq` (the session id *is* its PQ id) |
+| `pq create`                   | sets `pq`, `system`                             |
+| `session delete` / `pq delete`| clears `session` and `pq` when either pointed at a deleted id |
+
+Disable the fallback for one invocation with `--no-context`, or
+permanently via `cli.json`'s `context.enabled` (see the `context.*`
+configuration table above).
+
+The two flags govern opposite directions and are easy to confuse:
+`--no-context` disables *reading* the context (an omitted id fails
+instead of falling back), while `--no-set-context` on `session create` /
+`pq create` disables *writing* it. `--no-context` alone still lets a
+successful `create` record the new id; pass both to leave `context.json`
+untouched in either direction.
+
+#### Safety: check the context before anything consequential
+
+The sticky target is the one input a command's own command line does not
+show. Acting on an unintended context **executes or destroys in the wrong
+worker or system** — `session exec` runs your script in whatever session
+the context names, and `pq delete` is irreversible. Run `dhcli context
+show` first whenever you intend to omit an id and are not certain what
+the context holds. Every consequential verb repeats this warning in its
+own `--help` and `--agents` output.
+
+By default dhcli acts silently on the context, matching `kubectl delete`
+and other mainstream CLIs, which do not prompt when using a configured
+default. Set `cli.json`'s `context.confirm_destructive` to `true` to be
+asked first:
+
+```text
+Run script in session 'community:community:dev' (from sticky context)? [y/N]
+```
+
+That prompt appears only when **both** conditions hold: the verb is one
+of the six that execute, destroy, or disrupt (`session exec`,
+`session delete`, `pq delete`, `pq stop`, `pq restart`, `pq modify`) and
+the id came from `context.json` rather than the command line. Naming the
+id explicitly is already a statement of intent and is never confirmed;
+read-only verbs never prompt. Pass `--yes` to skip a prompt; declining
+exits `2` with `operation_canceled`.
+
+When prompting is unavailable — stdin is not a TTY, or `--no-input` was
+given — the command proceeds without asking rather than failing. A
+setting that turns on a *question* has nothing to enforce where none can
+be asked, and refusing would make `--yes` mandatory boilerplate for every
+script and agent the moment an operator enabled it. This is also what
+separates the two audiences without extra configuration: an interactive
+human gets the prompt, a non-interactive agent does not.
+
+Five verbs keep a **required** leading positional despite the fallback:
+`table schema`, `table data`, `catalog schema`, `catalog sample` (each an
+`ID`), and `pq name-to-id` (a `SYSTEM`). Each takes a further required
+positional after it, and a leading optional argument followed by a
+required one is ambiguous to parse, so the first stays mandatory. The
+verb tables above mark this difference: bracketed (`[ID]`) means the
+sticky context can supply it, angled (`<id>`) means you must pass it.
+
+Examples:
+
+```bash
+dhcli context show
+dhcli context set system prod
+dhcli session create rpt --system prod    # auto-sets session, system, pq
+dhcli session exec                        # falls back to the sticky session
+dhcli context unset --all
 ```
 
 ### `dhcli docs`
@@ -773,6 +901,10 @@ argument parsing and exits `2`.
 
 ## Top-level flags
 
+Environment variables listed here are the ones bound to a flag.
+[`ENV.md`](ENV.md) is the canonical inventory of every environment
+variable the project reads, with the reasoning for each.
+
 | Flag                | Envvar               | Purpose                                                                              |
 |---------------------|----------------------|--------------------------------------------------------------------------------------|
 | `--config-dir PATH` |                      | Override the configuration directory. No per-subdir env var; use `DH_AI_DATA_DIR` to move both `config/` and `runtime/` together. |
@@ -784,6 +916,7 @@ argument parsing and exits `2`.
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
+| `--no-context`      |                      | Disable the sticky context for this invocation: when a session, system, or PQ id is omitted, the command fails with `context_not_set` instead of falling back to `context.json`. Overrides `cli.json`'s `context.enabled`. Governs only the read. See [`dhcli context`](#dhcli-context) below. |
 | `--no-input`        |                      | Never prompt interactively; a command missing a required value fails with a structured `missing_required_option` error naming the flag to supply. Prompting is already disabled when stdin is not a TTY. |
 | `--version`         |                      | Print the package version and exit.                                                  |
 
@@ -886,12 +1019,13 @@ registry programmatically via `dhcli agents errors` (or the
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
 | `command_not_found`           | `dhcli agents command PATH` referenced a command path that does not exist. |
-| `missing_argument`            | A required positional argument or option was not provided.         |
+| `missing_argument`            | A required positional argument or option was not provided, or one was supplied blank (an empty or whitespace-only string). |
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `file_read_failed`            | A local file passed on the command line could not be read.          |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
 | `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
 | `system_not_found`            | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
+| `context_not_set`             | A session/system/PQ id was omitted and no sticky context supplies one. Pass it explicitly, run `dhcli context set KEY VALUE`, or check `dhcli context show`. `--no-context` / `cli.json`'s `context.enabled=false` disables the `context.json` fallback step, making this code more likely, not less. |
 | `config_invalid`              | The configuration tree failed validation.                          |
 | `no_systems_configured`       | A system-dependent verb (`system`, `session`, `table`, `catalog`, `pq`, `tool`) ran against a valid tree that declares no system (no community session file, no `session_creation` block, no enterprise system file); the daemon serves systems, so acquiring one is refused. (The systems server likewise refuses to start on a zero-system tree.) The discovery verbs `system list` / `session list` are exempt — they return an empty list with this guidance on stderr instead of exiting non-zero. Add one (`dhcli config session add`, `dhcli config system add`, or `dhcli config init`), or check that `--config-dir` / `DH_AI_DATA_DIR` points at the intended directory. |
 | `config_path_invalid`         | A configuration path argument is malformed or does not name a known location. Run `dhcli config files` to list files and `dhcli config keys` to list settable paths. |

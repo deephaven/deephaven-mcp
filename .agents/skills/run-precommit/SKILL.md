@@ -1,6 +1,6 @@
 ---
 name: run-precommit
-description: Run precommit.sh — applies isort, black, ruff, mypy, codespell, and markdownlint in sequence; modifies files in place; run before committing
+description: Run precommit.sh before committing — invoke after any code or documentation edit, and before staging. It modifies files in place, so re-check the diff afterward. Applies isort, black, ruff, mypy, codespell, and markdownlint in sequence, stopping at the first failure
 ---
 
 ```bash
@@ -11,6 +11,6 @@ Runs in order: isort → black → ruff → mypy → codespell → markdownlint.
 
 It does not run tests. Use the `tests-run` skill for that.
 
-The script stops at the first failure (`set -euo pipefail`), so a failure in ruff means mypy, codespell, and markdownlint have not yet run. isort, black, and markdownlint are unlikely to fail since they auto-fix. Ruff may report unfixable lint errors; mypy reports type errors; codespell reports misspellings and British spellings — all require manual fixes before re-running. The spelling rule and its inline-ignore convention are owned by `_python-coding-practices` rule 8 (markdown delta: `_markdown-documentation-standards` Prose conventions).
+The script stops at the first failure (`set -euo pipefail`), so a failure in ruff means mypy, codespell, and markdownlint have not yet run. isort, black, and markdownlint are unlikely to fail since they auto-fix. Ruff may report unfixable lint errors; mypy reports type errors; codespell reports misspellings and British spellings — all require manual fixes before re-running. The spelling rule and its inline-ignore convention are owned by `ref-python-coding-practices` rule 8 (markdown delta: `ref-markdown-documentation-standards` Prose conventions).
 
-Ruff/mypy failures need code edits — apply the `review-python-file` skill (which loads `_python-coding-practices`, `_logging-standards`, and `_mcp-module-organization`) before fixing, so the fix matches project standards rather than only silencing the linter.
+Ruff/mypy failures need code edits — apply the `review-python-file` skill (which loads `ref-python-coding-practices`, `ref-logging-standards`, and `ref-mcp-module-organization`) before fixing, so the fix matches project standards rather than only silencing the linter.

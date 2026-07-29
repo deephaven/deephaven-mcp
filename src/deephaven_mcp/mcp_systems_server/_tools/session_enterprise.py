@@ -499,17 +499,22 @@ async def session_enterprise_create(
         dict: Structured response with session creation details.
 
         The ``id`` in the response has the format
-        ``"enterprise:{system_name}:{session_name}"``, where ``{system_name}`` is this
-        server's configured system name.  This format ensures globally unique IDs when
-        multiple enterprise MCP servers run simultaneously (one per system), and allows
-        each server to validate that an incoming ``id`` belongs to its own system.
+        ``"enterprise:{system_name}:{serial}"``, where ``{system_name}`` is this
+        server's configured system name and ``{serial}`` is the controller-assigned
+        PQ serial for the new worker -- *not* the ``session_name``, which is carried
+        separately in the ``session_name`` field. This format ensures globally unique
+        IDs when multiple enterprise MCP servers run simultaneously (one per system),
+        and allows each server to validate that an incoming ``id`` belongs to its own
+        system. Because the id is serial-based it is also a valid persistent-query id:
+        the same string works verbatim with the ``pq_*`` tools, which require an
+        integer serial.
         Pass the returned ``id`` verbatim to all subsequent tools
         (``session_details``, ``script_run``, ``table_*``, ``catalog_*``, ``session_enterprise_delete``).
 
         Success response:
         {
             "success": True,
-            "id": "enterprise:prod-system:analytics-session-001",
+            "id": "enterprise:prod-system:12345",
             "system_name": "prod-system",
             "session_name": "analytics-session-001",
             "configuration": {
@@ -872,7 +877,9 @@ async def session_enterprise_delete(
     session registry. The session becomes inaccessible for future operations.
 
     Session ID Format:
-        Session IDs have the format ``"enterprise:{system_name}:{session_name}"``.
+        Session IDs have the format ``"enterprise:{system_name}:{serial}"``, where
+        ``{serial}`` is the controller-assigned PQ serial -- *not* the session's
+        name, which is carried separately in the ``session_name`` field.
         The ``{system_name}`` component is the server's configured system name, embedded
         in the ID when the session was created.  Each enterprise MCP server instance
         manages exactly one system, identified by its ``system_name``.  This server
@@ -898,13 +905,24 @@ async def session_enterprise_delete(
     - Check 'success' field to verify deletion completed
     - This operation is irreversible - deleted sessions cannot be recovered
     - Session will no longer be accessible via other MCP tools after deletion
+    - Only sessions created by ``session_enterprise_create`` (``origin="dynamic"``)
+      can be deleted. A persistent query that merely appears in ``sessions_list``
+      because it already existed on the controller (``origin="discovered"``) is
+      refused; use ``pq_delete`` if you genuinely intend to remove that PQ.
 
     Args:
         context (Context): The MCP context object.
         id (str): Fully qualified id in the form
-            ``"enterprise:{system_name}:{session_name}"``.  Must be an existing session
+            ``"enterprise:{system_name}:{serial}"``.  Must be an existing session
             created on this server's configured system.  Passing an ID from a different
             enterprise server returns a validation error.
+
+    Session Origin Restriction:
+        Only dynamically created sessions (``origin="dynamic"``) can be deleted,
+        matching ``session_community_delete``. Deleting a session also deletes the
+        persistent query backing it, which is irreversible -- so a ``discovered``
+        session, whose PQ pre-existed MCP and outlives it, is rejected before the
+        controller is touched. ``pq_delete`` remains the way to remove such a PQ.
 
     Returns:
         dict: Structured response with deletion details.
@@ -912,7 +930,7 @@ async def session_enterprise_delete(
         Success response:
         {
             "success": True,
-            "id": "enterprise:prod-system:analytics-session-001",
+            "id": "enterprise:prod-system:12345",
             "system_name": "prod-system",
             "session_name": "analytics-session-001"
         }
@@ -932,9 +950,11 @@ async def session_enterprise_delete(
         }
 
     Validation and Safety:
-        - Validates id format (must be "enterprise:{system_name}:{session_name}")
+        - Validates id format (must be "enterprise:{system_name}:{serial}")
         - Validates that the system_name component matches this server's configured system
         - Checks that the specified session exists in registry
+        - Checks that the session is dynamically created (origin='dynamic'),
+          refusing a pre-existing 'discovered' PQ before any destructive call
         - Deletes the underlying persistent query on the controller (the
           authoritative removal from the enterprise system)
         - Closes the session client connection
@@ -947,6 +967,7 @@ async def session_enterprise_delete(
         - Wrong server: "Session 'enterprise:dev:s1' belongs to system 'dev', but this server manages 'prod'"
         - Session not found: "Session 'enterprise:sys:session' not found"
         - Already deleted: "Session 'enterprise:sys:session' not found"
+        - Not a dynamic session: "Session '{id}' is not a dynamically created session (origin: 'discovered'). Only dynamically created sessions can be deleted. To remove a persistent query that MCP did not create, use pq_delete."
         - Persistent-query deletion failure: "Failed to delete persistent query for session ..."
         - Registry error: "Failed to remove session from registry"
 
@@ -955,6 +976,8 @@ async def session_enterprise_delete(
         - Any running queries or tables in the session will be lost
         - Other connections to the same session will lose access
         - Use with caution in production environments
+        - Deleting a session deletes its backing persistent query; this is why
+          only MCP-created ('dynamic') sessions are eligible
     """
     result: dict[str, object] = {"success": False}
     # Display name is unknown until we look up the manager; the id
@@ -1017,6 +1040,24 @@ async def session_enterprise_delete(
         # Verify it's an EnterpriseSessionManager (safety check)
         if not isinstance(session_manager, EnterpriseSessionManager):
             error_msg = f"Session '{id}' is not an enterprise session"
+            _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
+            result["error"] = error_msg
+            result["isError"] = True
+            return result
+
+        # Only sessions MCP itself created are deletable, mirroring
+        # ``session_community_delete``. A ``DISCOVERED`` session is a
+        # pre-existing persistent query read from the DHE controller that
+        # outlives MCP, and the deletion below is irreversible -- refuse
+        # before touching the controller. Removing such a PQ is
+        # ``pq_delete``'s job, where the caller is naming the PQ itself.
+        if session_manager.origin is not SessionOrigin.DYNAMIC:
+            error_msg = (
+                f"Session '{id}' is not a dynamically created session "
+                f"(origin: '{session_manager.origin.value}'). Only dynamically "
+                f"created sessions can be deleted. To remove a persistent query "
+                f"that MCP did not create, use pq_delete."
+            )
             _LOGGER.error(f"[mcp_systems_server:session_enterprise_delete] {error_msg}")
             result["error"] = error_msg
             result["isError"] = True
