@@ -594,7 +594,10 @@ async def config_show(runtime: Runtime, path: str | None) -> None:
             "config check in CI pipelines."
         ),
         output=_OUTPUT_VALIDATE,
-        examples=("$ dhcli config validate",),
+        examples=(
+            "$ dhcli config validate",
+            "$ dhcli config validate | jq -r .valid",
+        ),
         see_also=("dhcli config show",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.CONFIG_INVALID,),
@@ -869,6 +872,7 @@ _OUTPUT_SET = OutputSpec(
             "$ dhcli config set cli.output.format=human",
             "$ dhcli config set community.settings.session_creation.max_concurrent_sessions=3",
             "$ dhcli config set enterprise.systems.prod.session_creation.defaults.heap_size_gb=8",
+            "$ dhcli config set cli.output.format=human | jq -r '.files[]'",
         ),
         see_also=(
             "dhcli config keys",
@@ -970,7 +974,11 @@ _OUTPUT_UNSET = OutputSpec(
             ),
         ),
         output=_OUTPUT_UNSET,
-        examples=("$ dhcli config unset cli.request.timeouts.default_seconds",),
+        examples=(
+            "$ dhcli config unset cli.request.timeouts.default_seconds",
+            "$ dhcli config unset cli.request.timeouts.default_seconds "
+            "| jq -r '.paths[]'",
+        ),
         see_also=(
             "dhcli config keys",
             "dhcli config get",
@@ -1267,6 +1275,7 @@ def _open_editor(text: str) -> str | None:
         examples=(
             "$ dhcli config edit cli",
             "$ dhcli config edit community.sessions.local_dev",
+            "$ dhcli config edit cli | jq -r .changed",
         ),
         see_also=(
             "dhcli config files",
@@ -1483,7 +1492,10 @@ _OUTPUT_INIT = OutputSpec(
             "setup."
         ),
         output=_OUTPUT_INIT,
-        examples=("$ dhcli config init",),
+        examples=(
+            "$ dhcli config init",
+            "$ dhcli config init | jq -r .community_session",
+        ),
         see_also=(
             "dhcli config session add",
             "dhcli config system add",
@@ -2003,6 +2015,7 @@ async def config_session_add(
         examples=(
             "$ dhcli config session remove local_dev",
             "$ dhcli config session remove local_dev --yes",
+            "$ dhcli config session remove local_dev --yes | jq -r .file",
         ),
         see_also=(
             "dhcli config session add NAME",
@@ -2341,6 +2354,9 @@ async def _add_system_entity(
             "--auth password --username alice --password '${env:DH_PROD_PASSWORD}'",
             "$ dhcli config system add staging --url https://stg/iris/connection.json "
             "--auth private_key --key '${file:/etc/deephaven/staging-key.pem}'",
+            "$ dhcli config system add staging --url https://stg/iris/connection.json "
+            "--auth password --username alice "
+            "--password '${env:DH_STAGING_PASSWORD}' | jq -r .file",
         ),
         see_also=(
             "dhcli config system list",
@@ -2487,6 +2503,7 @@ async def config_system_add(
         examples=(
             "$ dhcli config system remove staging",
             "$ dhcli config system remove staging --yes",
+            "$ dhcli config system remove staging --yes | jq -r .file",
         ),
         see_also=(
             "dhcli config system add NAME",

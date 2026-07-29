@@ -31,6 +31,8 @@ from deephaven_mcp.cli._context import (
     CONTEXT_HINT,
     CONTEXT_RISK_DESTRUCTIVE,
     CONTEXT_RISK_STATEFUL,
+    TARGET_SELECTION_GUIDANCE,
+    TARGET_SELECTION_HINT,
     ContextKey,
     clear_matching,
     require_context_target,
@@ -46,9 +48,73 @@ from deephaven_mcp.cli._help import (
 )
 from deephaven_mcp.cli._runtime import Runtime
 
-_OUTPUT_OBJECT = OutputSpec(
-    "object", (), note="The tool's result envelope (PQ fields / batch results)."
+_PQ_IDENTITY_FIELDS: tuple[OutputField, ...] = (
+    OutputField("id", "string", "Fully qualified id 'enterprise:system:serial'."),
+    OutputField("serial", "integer", "PQ serial number — the id's last component."),
+    OutputField("name", "string", "Human-readable PQ name."),
 )
+"""Identity keys every single-PQ tool echoes back."""
+
+_STATE_CATEGORY_VALUES = (
+    "'ACTIVE' (serving), 'TRANSITIONAL' (still coming up or going down), "
+    "'TERMINAL', or 'INVALID'"
+)
+"""The status_category vocabulary, worded once for the verbs that emit it."""
+
+_BATCH_NOTE = (
+    "Best-effort batch: exit 0 means the batch ran, not that every id "
+    "succeeded. Branch on each results[] entry's own 'success' field, never "
+    "on the exit code alone."
+)
+"""Shared warning for the four batch verbs, whose exit code hides per-id failure."""
+
+_MAX_CONCURRENT_HELP = (
+    "Cap on how many ids are operated on in parallel; must be greater than "
+    "0. Omitted: the operator-configured default — pq_tools.default_max_concurrent "
+    "in enterprise/settings.json, itself 20 unless set."
+)
+"""Shared help for the batch verbs' concurrency cap, whose default is server-side."""
+
+_SUMMARY_FIELD = OutputField(
+    "summary", "object", "Counts across the batch: total, succeeded, failed."
+)
+_MESSAGE_FIELD = OutputField(
+    "message",
+    "string",
+    "One-line summary of the batch, e.g. 'Stopped 1 of 2 PQ(s), 1 failed'.",
+)
+
+
+def _batch_output(item_fields: str) -> OutputSpec:
+    """Return the output spec for one batch lifecycle verb.
+
+    The four batch verbs share an envelope but not their per-item value
+    fields (only ``start``/``restart`` report ``state_category``, and
+    ``delete`` reports no state at all), so the envelope is described
+    once here and each verb supplies the rest.
+
+    Args:
+        item_fields (str): The verb's own per-item value keys, as a
+            comma-joined phrase appended to the common ones.
+
+    Returns:
+        OutputSpec: The spec to hand to the verb's ``HelpSpec``.
+    """
+    return OutputSpec(
+        "object",
+        (
+            OutputField(
+                "results",
+                "array",
+                "One entry per requested id, in request order: id, serial, "
+                f"success, error (null on success), {item_fields}. On a failed "
+                "entry the value keys are null and 'error' carries the reason.",
+            ),
+            _SUMMARY_FIELD,
+            _MESSAGE_FIELD,
+        ),
+        note=_BATCH_NOTE,
+    )
 
 
 @click.group(cls=HelpfulGroup)
@@ -98,8 +164,11 @@ _OUTPUT_LIST = OutputSpec(
     help_spec=HelpSpec(
         summary="List Persistent Queries on a system.",
         description=(
-            "Enterprise (Core+) only. Lists the PQs configured on SYSTEM. Use "
-            "a returned id verbatim with the other pq and session verbs."
+            "Enterprise (Core+) only. Lists every PQ configured on SYSTEM — "
+            "every user's, production included — without connecting to any of "
+            "them. A returned id works verbatim with the other pq verbs, and "
+            "with the session, table, and catalog verbs while that PQ is "
+            "running. " + TARGET_SELECTION_GUIDANCE
         ),
         arguments=(
             HelpEntry(
@@ -111,11 +180,12 @@ _OUTPUT_LIST = OutputSpec(
         output=_OUTPUT_LIST,
         examples=(
             "$ dhcli pq list prod",
-            "$ dhcli pq list prod | jq '.[].id'",
+            "$ dhcli pq list prod | jq '.[] | select(.status_category==\"ACTIVE\") | .id'",
         ),
         see_also=(
             "dhcli pq details ID",
             "dhcli pq name-to-id SYSTEM NAME",
+            "dhcli pq create PQ_NAME",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -138,12 +208,61 @@ async def pq_list(runtime: Runtime, system: str | None) -> None:
     )
 
 
+_OUTPUT_DETAILS = OutputSpec(
+    "object",
+    (
+        *_PQ_IDENTITY_FIELDS,
+        OutputField(
+            "state",
+            "string",
+            "Current PQ state, e.g. 'RUNNING', 'STOPPED', 'FAILED'.",
+        ),
+        OutputField(
+            "config",
+            "object",
+            "The stored definition: heap_size_gb, script_code / script_path, "
+            "script_language, configuration_type, scheduling, server_name, "
+            "worker_kind, admin_groups, viewer_groups, restart_users, owner, "
+            "enabled, and more.",
+        ),
+        OutputField(
+            "state_details",
+            "object",
+            "Live state: status, num_failures, initialization timestamps, "
+            "dispatcher_host, and connection_details — null unless the PQ is "
+            "running, otherwise carrying processor_host and protocols[].port.",
+        ),
+        OutputField(
+            "replicas",
+            "array",
+            "Per-replica state for a load-balanced PQ; empty when unreplicated.",
+        ),
+        OutputField(
+            "spares",
+            "array",
+            "Per-spare state for standby instances; empty when none.",
+        ),
+    ),
+    note=(
+        "This is the authority on what a PQ is really doing — read it after a "
+        "lifecycle verb reports success, and read config.scheduling from it "
+        "before passing --schedule to 'pq modify'."
+    ),
+)
+
+
 @pq.command(
     "details",
     wraps_tool="pq_details",
     help_spec=HelpSpec(
         summary="Show details for one Persistent Query.",
-        description="Enterprise (Core+) only. Reports configuration and status for ID.",
+        description=(
+            "Enterprise (Core+) only. Reports the full stored definition "
+            "(config) and the live state (state_details) of ID, including the "
+            "running worker's connection details. This is how to confirm what "
+            "a PQ is actually doing: 'pq start' / 'pq restart' report that the "
+            "request was accepted, not that the worker is serving."
+        ),
         arguments=(
             HelpEntry(
                 "ID",
@@ -152,8 +271,12 @@ async def pq_list(runtime: Runtime, system: str | None) -> None:
                 f"context pq if omitted. {CONTEXT_HINT}",
             ),
         ),
-        output=_OUTPUT_OBJECT,
-        examples=("$ dhcli pq details enterprise:prod:1234567890",),
+        output=_OUTPUT_DETAILS,
+        examples=(
+            "$ dhcli pq details enterprise:prod:1234567890",
+            "$ dhcli pq details enterprise:prod:1234567890 | jq .state",
+            "$ dhcli pq details enterprise:prod:1234567890 | jq '.config.scheduling'",
+        ),
         see_also=("dhcli pq list SYSTEM", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
@@ -173,19 +296,48 @@ async def pq_details(runtime: Runtime, id: str | None) -> None:
     )
 
 
+_OUTPUT_NAME_TO_ID = OutputSpec(
+    "object",
+    (
+        *_PQ_IDENTITY_FIELDS,
+        OutputField("system", "string", "The Enterprise system that was searched."),
+    ),
+    note=(
+        "Feed 'id' straight into the other pq verbs, and into the session, "
+        "table, and catalog verbs while the PQ is running."
+    ),
+)
+
+
 @pq.command(
     "name-to-id",
     wraps_tool="pq_name_to_id",
     help_spec=HelpSpec(
         summary="Resolve a Persistent Query name to its fully qualified id.",
-        description="Enterprise (Core+) only. Looks up PQ_NAME within SYSTEM.",
-        arguments=(
-            HelpEntry("SYSTEM", "Enterprise system name."),
-            HelpEntry("PQ_NAME", "Human-readable PQ name."),
+        description=(
+            "Enterprise (Core+) only. Looks up PQ_NAME within SYSTEM and "
+            "returns the id the other verbs take. Use it when you were given "
+            "a PQ by name rather than by id; a name that matches nothing "
+            "exits 3."
         ),
-        output=_OUTPUT_OBJECT,
-        examples=("$ dhcli pq name-to-id prod nightly-report",),
-        see_also=("dhcli pq list SYSTEM",),
+        arguments=(
+            HelpEntry(
+                "SYSTEM",
+                "Enterprise system name. Run 'system list'. Required here — "
+                "with PQ_NAME following it, it cannot fall back to the "
+                f"sticky context. {CONTEXT_HINT}",
+            ),
+            HelpEntry(
+                "PQ_NAME",
+                "Human-readable PQ name, as shown in the 'name' field of " "'pq list'.",
+            ),
+        ),
+        output=_OUTPUT_NAME_TO_ID,
+        examples=(
+            "$ dhcli pq name-to-id prod nightly-report",
+            "$ dhcli pq name-to-id prod nightly-report | jq -r .id",
+        ),
+        see_also=("dhcli pq list SYSTEM", "dhcli pq details ID"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -277,22 +429,39 @@ def _check_mutually_exclusive(params: dict[str, Any]) -> None:
             )
 
 
+_RESTART_USERS_CHOICES = ("RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_DOWN")
+"""The controller's restart-permission vocabulary, as a validated closed set."""
+
+
 def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
-    """Apply the options shared by ``pq create`` and ``pq modify``."""
+    """Apply the options shared by ``pq create`` and ``pq modify``.
+
+    The help of a shared option must read correctly for both verbs, so
+    list-replacement (a ``modify``-only consequence, since a ``create``
+    has no prior list to replace) is stated in ``pq modify``'s
+    description rather than on each repeatable option.
+    """
     options = (
         click.option(
             "--script-body",
             "script_body",
             default=None,
-            help="Inline PQ script source, stored in the PQ definition.",
+            help=(
+                "Inline PQ script source, stored verbatim in the PQ "
+                "definition. One of --script-body / --script-body-path / "
+                "--git-script-path at most."
+            ),
         ),
         click.option(
             "--script-body-path",
             "script_body_path",
             default=None,
             help=(
-                "Local script file read by the CLI and stored as the PQ's "
-                "inline body, or '-' to read stdin."
+                "Path to a local script file, read by the CLI (so a relative "
+                "path resolves against your working directory, and '~' is "
+                "expanded) and stored as the PQ's inline body; '-' reads "
+                "stdin. Not kept as a reference — later edits to the file do "
+                "not reach the PQ."
             ),
         ),
         click.option(
@@ -301,7 +470,9 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             default=None,
             help=(
                 "Path to a script in the Enterprise controller's Git-backed "
-                "script repository, resolved on the server; not a local file."
+                "script repository, e.g. IrisQueries/py/nightly.py. Resolved "
+                "on the server, not on this machine, and stored as a "
+                "reference rather than a copy."
             ),
         ),
         click.option(
@@ -309,96 +480,181 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "programming_language",
             type=click.Choice(["Python", "Groovy"], case_sensitive=False),
             default=None,
-            help="Script language.",
+            help="Language the script is written in.",
         ),
         click.option(
             "--configuration-type",
             "configuration_type",
             type=click.Choice(["Script", "RunAndDone"]),
             default=None,
-            help="PQ configuration type.",
+            help=(
+                "'Script' for a long-running interactive worker that stays up "
+                "and can be connected to, or 'RunAndDone' for a batch job "
+                "that exits when the script finishes."
+            ),
         ),
         click.option(
             "--schedule",
             "schedule",
             multiple=True,
+            metavar="KEY=VALUE",
             help=(
-                "Schedule entry (repeatable). Omitting it leaves the schedule "
-                "unchanged; clearing a schedule is not supported via the CLI."
+                "Scheduler entry as KEY=VALUE (repeatable), e.g. "
+                "SchedulerType=..., StartTime=08:00:00, TimeZone=America/New_York. "
+                "A non-empty --schedule REPLACES the PQ's whole scheduling "
+                "block, so restate every entry you want to keep — read the "
+                "current list from 'dhcli pq details' (config.scheduling) "
+                "first. Omitting it leaves scheduling unchanged; clearing a "
+                "schedule is not supported via the CLI. Mutually exclusive "
+                "with --auto-delete-timeout."
             ),
         ),
-        click.option("--server", "server", default=None, help="Server pool name."),
-        click.option("--engine", "engine", default=None, help="Worker engine."),
         click.option(
-            "--jvm-profile", "jvm_profile", default=None, help="JVM profile name."
+            "--server",
+            "server",
+            default=None,
+            help=(
+                "Name of the Enterprise server pool to run the worker on "
+                "(deployment-specific; an existing PQ's value shows under "
+                "config.server_name in 'dhcli pq details'). Omitted: the "
+                "controller chooses."
+            ),
+        ),
+        click.option(
+            "--engine",
+            "engine",
+            default=None,
+            help=(
+                "Worker engine name (deployment-specific; e.g. "
+                "DeephavenCommunity, DeephavenEnterprise). Omitted: the "
+                "controller's default, typically DeephavenCommunity."
+            ),
+        ),
+        click.option(
+            "--jvm-profile",
+            "jvm_profile",
+            default=None,
+            help=(
+                "Name of a JVM profile configured on the Enterprise "
+                "controller. Omitted: the controller's default JVM settings."
+            ),
         ),
         click.option(
             "--jvm-arg",
             "extra_jvm_args",
             multiple=True,
-            help="Extra JVM arg (repeatable).",
+            help="One extra JVM argument, e.g. -Xmx4g (repeatable).",
         ),
         click.option(
             "--class-path",
             "extra_class_path",
             multiple=True,
-            help="Extra class-path entry on the Enterprise server (repeatable).",
+            help=(
+                "One extra class-path entry, resolved on the Enterprise "
+                "server rather than on this machine (repeatable)."
+            ),
         ),
         click.option(
             "--python-venv",
             "python_virtual_environment",
             default=None,
-            help="Name of a Python virtualenv configured on the Enterprise server.",
+            help=(
+                "Name of a Python virtualenv configured on the Enterprise "
+                "server — a name, not a path on this machine."
+            ),
         ),
         click.option(
             "--env",
             "extra_environment_vars",
             multiple=True,
             metavar="KEY=VALUE",
-            help="Worker environment variable as KEY=VALUE (repeatable).",
+            help=(
+                "Worker environment variable as KEY=VALUE (repeatable). The "
+                "value is sent verbatim, never JSON-decoded."
+            ),
         ),
         click.option(
             "--init-timeout-nanos",
             "init_timeout_nanos",
             type=int,
             default=None,
-            help="Init timeout (ns).",
+            help=(
+                "Worker initialization timeout in NANOseconds (one second is "
+                "1000000000). Omitted: the controller's default."
+            ),
         ),
         click.option(
             "--auto-delete-timeout",
             "auto_delete_timeout",
             type=int,
             default=None,
-            help="Idle seconds before auto-delete.",
+            help=(
+                "Seconds of idleness after which the controller deletes the "
+                "PQ; 0 installs the continuous scheduler and makes it "
+                "permanent. Omitted: scheduling and auto-delete are left "
+                "untouched. Mutually exclusive with --schedule."
+            ),
         ),
         click.option(
             "--admin-group",
             "admin_groups",
             multiple=True,
-            help="Admin group (repeatable).",
+            help="One group granted admin access to the PQ (repeatable).",
         ),
         click.option(
             "--viewer-group",
             "viewer_groups",
             multiple=True,
-            help="Viewer group (repeatable).",
+            help="One group granted viewer access to the PQ (repeatable).",
         ),
         click.option(
             "--restart-users",
             "restart_users",
+            type=click.Choice(_RESTART_USERS_CHOICES),
             default=None,
-            help="Who may restart the PQ.",
+            help=(
+                "Who may restart the PQ: RU_ADMIN (admins only), "
+                "RU_ADMIN_AND_VIEWERS, or RU_VIEWERS_WHEN_DOWN (viewers may "
+                "restart it only while it is down)."
+            ),
         ),
         click.option(
             "--owner",
             "owner",
             default=None,
-            help="PQ owner (defaults to the authenticated user).",
+            help=(
+                "Username to own the PQ. Omitted: the authenticated user. "
+                "Reassigning ownership may require server-side permission."
+            ),
         ),
     )
     for option in reversed(options):
         f = option(f)
     return f
+
+
+_OUTPUT_CREATE = OutputSpec(
+    "object",
+    (
+        *_PQ_IDENTITY_FIELDS,
+        OutputField(
+            "state",
+            "string",
+            "Always the placeholder 'UNINITIALIZED' — the state at the instant "
+            "the controller accepted the definition, NOT the live state. A "
+            "permanent PQ usually starts acquiring a worker immediately, so "
+            "run 'dhcli pq details' to see what it is actually doing.",
+        ),
+        OutputField("message", "string", "Human-readable confirmation."),
+        OutputField(
+            "context",
+            "object",
+            "Present when the sticky context was updated: the keys set and "
+            "their new values.",
+        ),
+    ),
+    note="Use 'id' as the target for the pq, session, table, and catalog verbs.",
+)
 
 
 @pq.command(
@@ -414,26 +670,27 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "and stored as the inline body), or from the controller's Git script "
             "repository with --git-script-path (at most one source). "
             "--auto-delete-timeout and --schedule are mutually exclusive. Unset "
-            "options use the controller's defaults. " + CONTEXT_RISK_STATEFUL
+            "options use the controller's defaults. This is the right way to get "
+            "a PQ to work with: create your own rather than acting on one from "
+            "'pq list'. Creating a PQ does not wait for it to come up — the "
+            "returned 'state' is a fixed placeholder, so poll 'pq details' for "
+            "the live state. " + CONTEXT_RISK_STATEFUL
         ),
-        arguments=(HelpEntry("PQ_NAME", "Name for the new PQ."),),
-        output=OutputSpec(
-            _OUTPUT_OBJECT.mode,
-            (
-                OutputField(
-                    "context",
-                    "object",
-                    "Present when the sticky context was updated: the keys "
-                    "set and their new values.",
-                ),
+        arguments=(
+            HelpEntry(
+                "PQ_NAME",
+                "Name for the new PQ. Must not collide with an existing PQ on "
+                "the target system; 'pq list' shows the names in use.",
             ),
-            note=_OUTPUT_OBJECT.note,
         ),
+        output=_OUTPUT_CREATE,
         examples=(
             "$ dhcli pq create nightly --system prod --heap-size-gb 4 "
             "--script-body-path ./nightly.py",
             "$ dhcli pq create nightly --system prod --heap-size-gb 4 "
             "--git-script-path IrisQueries/py/nightly.py",
+            "$ dhcli pq create nightly --system prod --heap-size-gb 4 "
+            "--script-body 'print(1)' | jq -r .id",
         ),
         see_also=(
             "dhcli pq modify ID",
@@ -477,10 +734,17 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
     "heap_size_gb",
     type=float,
     required=True,
-    help="JVM heap size (GB).",
+    help="JVM heap size in GB, e.g. 4 or 8.5. Required.",
 )
 @click.option(
-    "--enabled/--disabled", "enabled", default=True, help="Whether the PQ is enabled."
+    "--enabled/--disabled",
+    "enabled",
+    default=True,
+    show_default=True,
+    help=(
+        "Whether the PQ may run. --disabled stores the definition without "
+        "letting the controller start it."
+    ),
 )
 @_create_modify_options
 @click.pass_context
@@ -519,6 +783,25 @@ async def pq_create(
     echo_payload(runtime, payload)
 
 
+_OUTPUT_MODIFY = OutputSpec(
+    "object",
+    (
+        *_PQ_IDENTITY_FIELDS,
+        OutputField("restarted", "boolean", "Whether --restart was applied to the PQ."),
+        OutputField("message", "string", "Human-readable confirmation."),
+        OutputField(
+            "warning",
+            "string",
+            "Present only when the PQ is running and a runtime setting — "
+            "script, heap, JVM args, class path, venv, language — changed "
+            "without --restart: the definition is stored but the live worker "
+            "still runs the old one. Check for this key and run 'dhcli pq "
+            "restart' to apply.",
+        ),
+    ),
+)
+
+
 @pq.command(
     "modify",
     wraps_tool="pq_modify",
@@ -527,10 +810,16 @@ async def pq_create(
         summary="Modify an existing Persistent Query.",
         description=(
             "Enterprise (Core+) only. Updates only the fields you pass on ID; "
-            "everything else is left unchanged. The script sources "
+            "everything else is left unchanged. A repeatable option REPLACES "
+            "the PQ's existing list wholesale rather than appending to it "
+            "(--jvm-arg, --class-path, --env, --admin-group, --viewer-group, "
+            "--schedule), so restate every entry you want to keep — read the "
+            "current values from 'dhcli pq details' first. The script sources "
             "--script-body/--script-body-path/--git-script-path (and separately "
-            "--auto-delete-timeout/--schedule) are mutually exclusive. Pass "
-            "--restart to restart the PQ after applying the change. "
+            "--auto-delete-timeout/--schedule) are mutually exclusive. Without "
+            "--restart a running worker keeps serving its previous "
+            "configuration: the response then carries a 'warning' field, and "
+            "the change takes effect only after 'pq restart'. "
             + CONTEXT_RISK_DESTRUCTIVE
         ),
         arguments=(
@@ -538,13 +827,16 @@ async def pq_create(
                 "ID",
                 "Fully qualified PQ id 'enterprise:system:serial'. "
                 "Run 'pq list' or 'pq name-to-id'. Defaults to the sticky "
-                f"context pq if omitted. {CONTEXT_HINT}",
+                f"context pq if omitted. {TARGET_SELECTION_HINT} "
+                f"{CONTEXT_HINT}",
             ),
         ),
-        output=_OUTPUT_OBJECT,
+        output=_OUTPUT_MODIFY,
         examples=(
             "$ dhcli pq modify enterprise:prod:1234567890 --heap-size-gb 8 --restart",
             "$ dhcli pq modify enterprise:prod:1234567890 --disabled",
+            "$ dhcli pq modify enterprise:prod:1234567890 --heap-size-gb 8 "
+            "| jq -r '.warning // \"applied\"'",
         ),
         see_also=(
             "dhcli pq details ID",
@@ -568,15 +860,27 @@ async def pq_create(
     "restart",
     is_flag=True,
     default=False,
-    help="Restart the PQ after modifying.",
+    help=(
+        "Restart the PQ once the change is stored, so runtime settings "
+        "(script, heap, JVM args) take effect immediately. Disrupts whoever "
+        "is using the worker. Without it the change is saved but the running "
+        "worker keeps its previous configuration."
+    ),
 )
-@click.option("--pq-name", "pq_name", default=None, help="New PQ name.")
+@click.option(
+    "--pq-name",
+    "pq_name",
+    default=None,
+    help="Rename the PQ. The serial and the id do not change.",
+)
 @click.option(
     "--heap-size-gb",
     "heap_size_gb",
     type=float,
     default=None,
-    help="New JVM heap size (GB).",
+    help=(
+        "New JVM heap size in GB, e.g. 8 or 16.5. Takes effect on the next " "restart."
+    ),
 )
 @click.option(
     "--enabled/--disabled",
@@ -708,26 +1012,32 @@ def _deleted_ids(payload: dict[str, Any]) -> frozenset[str]:
     help_spec=HelpSpec(
         summary="Delete one or more Persistent Queries.",
         description=(
-            "Enterprise (Core+) only. Deletes every ID given. --max-concurrent "
-            "caps how many deletions run in parallel. Best-effort: exit 0 means the "
-            "batch ran, not that every id succeeded — check the summary and per-item "
-            "results for failures. The sticky pq and session keys are cleared only "
-            "for ids actually reported deleted, so a failed delete leaves the "
-            "context pointing at the PQ that still exists. " + CONTEXT_RISK_DESTRUCTIVE
+            "Enterprise (Core+) only. Permanently deletes every ID given, "
+            "stopping any that are running first; this cannot be undone. "
+            "--max-concurrent caps how many deletions run in parallel. The "
+            "sticky pq and session keys are cleared only for ids actually "
+            "reported deleted, so a failed delete leaves the context pointing "
+            "at the PQ that still exists. " + CONTEXT_RISK_DESTRUCTIVE
         ),
         arguments=(
             HelpEntry(
                 "ID",
-                "One or more fully qualified PQ ids ('enterprise:system:serial'). "
-                "Defaults to the sticky context pq (as a single id) if omitted. "
-                + CONTEXT_HINT,
+                "One or more fully qualified PQ ids ('enterprise:system:serial'), "
+                "all from the same Enterprise system. Defaults to the sticky "
+                "context pq (as a single id) if omitted. "
+                f"{TARGET_SELECTION_HINT} {CONTEXT_HINT}",
             ),
         ),
-        output=_OUTPUT_OBJECT,
+        output=_batch_output("plus name (the deleted PQ's name)"),
         examples=(
             "$ dhcli pq delete enterprise:prod:1234567890 enterprise:prod:1234567891",
+            "$ dhcli pq delete enterprise:prod:1234567890 | jq '.summary'",
         ),
-        see_also=("dhcli pq list SYSTEM", "dhcli context show"),
+        see_also=(
+            "dhcli pq list SYSTEM",
+            "dhcli pq create PQ_NAME",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.CONTEXT_NOT_SET,
@@ -742,7 +1052,7 @@ def _deleted_ids(payload: dict[str, Any]) -> frozenset[str]:
     "max_concurrent",
     type=int,
     default=None,
-    help="Parallel-operation cap.",
+    help=_MAX_CONCURRENT_HELP,
 )
 @yes_option
 @click.pass_obj
@@ -766,7 +1076,43 @@ async def pq_delete(
     echo_payload(runtime, payload)
 
 
-def _lifecycle_command(name: str, summary: str, *, disruptive: bool) -> click.Command:
+_WAIT_HELP = (
+    "Wait for the state change before returning (default), for the "
+    "operator-configured duration — timeouts.client."
+    "pq_state_change_timeout_seconds in enterprise/settings.json, itself 120 "
+    "seconds unless set. --no-wait submits the request and returns "
+    "immediately, leaving the PQ mid-transition."
+)
+"""Shared help for the lifecycle wait flag, whose duration is server-side."""
+
+_TIMEOUT_SEMANTICS = (
+    "A --wait that runs out is reported as a per-item failure even though the "
+    "controller keeps going in the background, so treat a timeout as unknown "
+    "rather than failed: re-read 'dhcli pq details' instead of retrying "
+    "blindly."
+)
+"""Shared warning: a lifecycle timeout does not mean the operation stopped."""
+
+_READINESS_SEMANTICS = (
+    "Success is acceptance, not readiness: a per-item success means the "
+    "request was taken and the PQ was last seen in a non-failed state, not "
+    "that a worker is serving. Branch on results[].state_category — "
+    "'TRANSITIONAL' (state CONNECTING or INITIALIZING) is a normal outcome "
+    "with --no-wait or a short wait — and only once it is 'ACTIVE' does the "
+    "id work with the session, table, and catalog verbs. Confirm with 'dhcli "
+    "pq details'."
+)
+"""Shared warning for start/restart, whose success does not imply RUNNING."""
+
+
+def _lifecycle_command(
+    name: str,
+    summary: str,
+    *,
+    disruptive: bool,
+    result_fields: str,
+    semantics: str,
+) -> click.Command:
     """Build a start/stop/restart command (identical shape, distinct tool).
 
     Args:
@@ -779,6 +1125,11 @@ def _lifecycle_command(name: str, summary: str, *, disruptive: bool) -> click.Co
             context-supplied id (``--yes`` to skip); ``False`` for
             ``start``, which only leaves state behind and so warns
             without asking.
+        result_fields (str): The verb's per-item value keys, forwarded to
+            :func:`_batch_output`. The three verbs differ: only
+            ``start``/``restart`` report ``state_category``.
+        semantics (str): Verb-specific prose on what a success means and
+            what a timeout does, appended to the description.
     """
     tool = f"pq_{name}"
     risk = CONTEXT_RISK_DESTRUCTIVE if disruptive else CONTEXT_RISK_STATEFUL
@@ -790,23 +1141,29 @@ def _lifecycle_command(name: str, summary: str, *, disruptive: bool) -> click.Co
         help_spec=HelpSpec(
             summary=summary,
             description=(
-                f"Enterprise (Core+) only. {summary} --no-wait returns without "
-                "waiting for the state change; --max-concurrent caps parallelism "
-                "across multiple ids. Best-effort: exit 0 means the batch ran, not "
-                "that every id succeeded — check the per-item results for failures. "
-                + risk
+                f"Enterprise (Core+) only. {summary} Every id must belong to "
+                f"the same Enterprise system. {semantics} {risk}"
             ),
             arguments=(
                 HelpEntry(
                     "ID",
                     "One or more fully qualified PQ ids "
                     "('enterprise:system:serial'). Defaults to the sticky "
-                    f"context pq if omitted. {CONTEXT_HINT}",
+                    f"context pq if omitted. {TARGET_SELECTION_HINT} "
+                    f"{CONTEXT_HINT}",
                 ),
             ),
-            output=_OUTPUT_OBJECT,
-            examples=(f"$ dhcli pq {name} enterprise:prod:1234567890",),
-            see_also=("dhcli pq details ID", "dhcli context show"),
+            output=_batch_output(result_fields),
+            examples=(
+                f"$ dhcli pq {name} enterprise:prod:1234567890",
+                f"$ dhcli pq {name} enterprise:prod:1234567890 "
+                "| jq '.results[] | {id, success, error}'",
+            ),
+            see_also=(
+                "dhcli pq details ID",
+                "dhcli pq list SYSTEM",
+                "dhcli context show",
+            ),
             exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
             error_codes=(
                 ErrorCode.CONTEXT_NOT_SET,
@@ -816,15 +1173,13 @@ def _lifecycle_command(name: str, summary: str, *, disruptive: bool) -> click.Co
         ),
     )
     @click.argument("id", nargs=-1)
-    @click.option(
-        "--wait/--no-wait", "wait", default=True, help="Wait for the state change."
-    )
+    @click.option("--wait/--no-wait", "wait", default=True, help=_WAIT_HELP)
     @click.option(
         "--max-concurrent",
         "max_concurrent",
         type=int,
         default=None,
-        help="Parallel-operation cap.",
+        help=_MAX_CONCURRENT_HELP,
     )
     @click.pass_obj
     @run_async
@@ -856,16 +1211,44 @@ def _lifecycle_command(name: str, summary: str, *, disruptive: bool) -> click.Co
     return yes_option(_cmd) if disruptive else _cmd
 
 
+_STATE_FIELDS = "plus name and state (e.g. 'STOPPED')"
+"""Per-item value keys of ``pq stop``, which reports no state category."""
+
+_STATE_CATEGORY_FIELDS = (
+    "plus name, state (e.g. 'RUNNING', 'CONNECTING'), and state_category "
+    f"({_STATE_CATEGORY_VALUES})"
+)
+"""Per-item value keys of ``pq start`` / ``pq restart``, which categorize the state."""
+
 # Registration happens inside ``_lifecycle_command`` via the ``@pq.command``
 # decorator, so these names exist for symmetry with the other verbs in this
 # module rather than to be read. Assigning them also keeps the built command
 # reachable for tests.
 pq_start = _lifecycle_command(
-    "start", "Start one or more Persistent Queries.", disruptive=False
+    "start",
+    "Start one or more Persistent Queries.",
+    disruptive=False,
+    result_fields=_STATE_CATEGORY_FIELDS,
+    semantics=f"{_READINESS_SEMANTICS} {_TIMEOUT_SEMANTICS}",
 )
 pq_stop = _lifecycle_command(
-    "stop", "Stop one or more Persistent Queries.", disruptive=True
+    "stop",
+    "Stop one or more Persistent Queries.",
+    disruptive=True,
+    result_fields=_STATE_FIELDS,
+    semantics=(
+        "Stopping is graceful and preserves the PQ definition, so 'pq start' "
+        f"can run it again. {_TIMEOUT_SEMANTICS}"
+    ),
 )
 pq_restart = _lifecycle_command(
-    "restart", "Restart one or more Persistent Queries.", disruptive=True
+    "restart",
+    "Restart one or more Persistent Queries.",
+    disruptive=True,
+    result_fields=_STATE_CATEGORY_FIELDS,
+    semantics=(
+        "Reuses the stored definition and keeps the serial and id, so it is "
+        "the way to apply a 'pq modify' that reported a warning. "
+        f"{_READINESS_SEMANTICS} {_TIMEOUT_SEMANTICS}"
+    ),
 )

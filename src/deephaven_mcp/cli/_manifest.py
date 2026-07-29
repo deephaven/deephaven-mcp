@@ -16,6 +16,11 @@ these. Node keys are sparse: an absent key means false, empty, or the
 default. A command's structured output is described once as an
 ``OutputSpec`` inside its ``HelpSpec``.
 
+Every node also carries the two facts a reader cannot reconstruct from a
+node read in isolation: ``path``, the full invocation path (a node's
+``name`` alone is ``"stop"``, which is not runnable), and ``usage``, the
+argument order click itself would print.
+
 :func:`_meta_of` is the single boundary where this module crosses from
 click's loosely-typed containers (``Group.commands`` is
 ``dict[str, click.Command]``) to the project's own
@@ -31,6 +36,7 @@ command help.
 from __future__ import annotations
 
 __all__ = [
+    "AGENT_CONVENTIONS",
     "NodeStyle",
     "agents_option",
     "build_error_code_registry",
@@ -48,6 +54,7 @@ from typing import Any
 
 import click
 
+from deephaven_mcp.cli._context import TARGET_SELECTION_GUIDANCE
 from deephaven_mcp.cli._echo import echo_payload_no_runtime
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
@@ -108,6 +115,17 @@ class NodeStyle(Enum):
         return member
 
 
+def _parents_of(ctx: click.Context) -> tuple[str, ...]:
+    """Return the ancestor path tokens of ``ctx``'s command, program name first.
+
+    Read from click's own ``command_path`` (e.g. ``"dhcli pq stop"``) with
+    the command's own token dropped, so the node's ``path`` matches what
+    the user actually typed -- including a program renamed at the entry
+    point.
+    """
+    return tuple(ctx.command_path.split()[:-1])
+
+
 def _agents_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
     """Emit ``ctx.command``'s agents node, then exit.
 
@@ -132,7 +150,7 @@ def _agents_callback(ctx: click.Context, _param: click.Parameter, value: bool) -
     payload = (
         build_summary_tree(ctx.command)
         if ctx.command is ctx.find_root().command
-        else describe_command(ctx.command)
+        else describe_command(ctx.command, parents=_parents_of(ctx))
     )
     echo_payload_no_runtime(ctx, payload)
     ctx.exit()
@@ -241,6 +259,48 @@ def _summary_of(cmd: click.Command) -> str:
     falling back to the first paragraph of its raw help text.
     """
     return _summary_and_description(cmd)[0]
+
+
+def _invocation(cmd: click.Command, parents: tuple[str, ...]) -> str:
+    """Return the full invocation path of ``cmd`` under ``parents``.
+
+    Args:
+        cmd (click.Command): The command being described.
+        parents (tuple[str, ...]): Ancestor path tokens, program name
+            first; empty for a root or for a node described without a
+            known path.
+
+    Returns:
+        str: The space-joined path, e.g. ``"dhcli pq stop"``. Falls back
+            to the command's own name when ``parents`` is empty.
+    """
+    return " ".join((*parents, cmd.name or "")).strip()
+
+
+def _usage_of(cmd: click.Command, invocation: str) -> str:
+    """Return the one-line usage string for ``cmd``.
+
+    Built from click's own ``collect_usage_pieces`` -- the same source as
+    the ``Usage:`` line in ``--help`` -- so the manifest cannot describe a
+    different argument order than the parser accepts. Assembled here
+    rather than taken from ``get_usage`` because that wraps to the
+    terminal width and prefixes the label.
+
+    A throwaway :class:`click.Context` is required by
+    ``collect_usage_pieces`` (it renders each parameter's metavar); it is
+    never entered or invoked, so no callback runs and no configuration is
+    read.
+
+    Args:
+        cmd (click.Command): The command being described.
+        invocation (str): The full invocation path from
+            :func:`_invocation`, used as the usage line's prefix.
+
+    Returns:
+        str: e.g. ``"dhcli pq stop [OPTIONS] [ID]..."``.
+    """
+    ctx = click.Context(cmd, info_name=cmd.name)
+    return " ".join([invocation, *cmd.collect_usage_pieces(ctx)])
 
 
 def _describe_output(spec: OutputSpec) -> dict[str, Any]:
@@ -392,7 +452,7 @@ def _describe_wraps(cmd: click.Command) -> dict[str, Any] | None:
 
 
 def _describe_subcommands(
-    cmd: click.Group, *, style: NodeStyle, recurse: bool
+    cmd: click.Group, *, style: NodeStyle, recurse: bool, parents: tuple[str, ...] = ()
 ) -> dict[str, Any]:
     """Return the ``subcommands`` map for a group node.
 
@@ -407,13 +467,18 @@ def _describe_subcommands(
             from :func:`describe_command`; when ``False``, each entry
             is the subcommand's one-line summary string (the bounded
             view a standalone group node carries).
+        parents (tuple[str, ...]): Ancestor path tokens of ``cmd``, so a
+            nested node's ``path`` names the whole invocation rather than
+            just its own leaf name.
     """
     if recurse:
+        child_parents = (*parents, cmd.name or "")
         return {
             name: describe_command(
                 cmd.commands[name],
                 style=style,
                 recurse=True,
+                parents=child_parents,
             )
             for name in sorted(cmd.commands)
         }
@@ -466,6 +531,7 @@ def describe_command(
     *,
     style: NodeStyle = NodeStyle.STANDALONE,
     recurse: bool = False,
+    parents: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Describe one command as a JSON-safe, sparse node dict.
 
@@ -473,6 +539,11 @@ def describe_command(
     none of that content. Always present: ``name`` and ``summary``.
     Present when applicable:
 
+    - ``path`` (str), ``usage`` (str): The full invocation path and the
+      argument order, on a standalone node only — ``name`` alone
+      (``"stop"``) is not something a reader can run. Omitted under
+      :attr:`NodeStyle.EMBEDDED`, where the node's position in the
+      nested map gives the path and ``params`` gives the argument order.
     - ``description`` (str): What the command does and when to use it.
     - ``params`` (list[dict]): Options and positional arguments from
       :func:`_describe_param`; positional arguments carry the help of
@@ -505,6 +576,11 @@ def describe_command(
             and project defaults once at its root.
         recurse (bool): Forwarded to :func:`_describe_subcommands` for
             groups.
+        parents (tuple[str, ...]): Ancestor path tokens, program name
+            first (e.g. ``("dhcli", "pq")``), used to build ``path`` and
+            ``usage``. Empty falls back to the command's own name, which
+            is correct for a root and honest for a detached command.
+            Unused under :attr:`NodeStyle.EMBEDDED`.
 
     Returns:
         dict[str, Any]: The JSON-safe node.
@@ -512,7 +588,12 @@ def describe_command(
     meta = _meta_of(cmd)
     spec = meta.help_spec
     summary, description = _summary_and_description(cmd)
-    node: dict[str, Any] = {"name": cmd.name, "summary": summary}
+    node: dict[str, Any] = {"name": cmd.name}
+    if style is NodeStyle.STANDALONE:
+        invocation = _invocation(cmd, parents)
+        node["path"] = invocation
+        node["usage"] = _usage_of(cmd, invocation)
+    node["summary"] = summary
     if description:
         node["description"] = description
     argument_help = _argument_help_map(spec)
@@ -526,7 +607,9 @@ def describe_command(
     if wraps is not None:
         node["wraps"] = wraps
     if isinstance(cmd, click.Group):
-        node["subcommands"] = _describe_subcommands(cmd, style=style, recurse=recurse)
+        node["subcommands"] = _describe_subcommands(
+            cmd, style=style, recurse=recurse, parents=parents
+        )
     return node
 
 
@@ -576,6 +659,38 @@ _SUMMARY_TREE_HINT = (
 )
 """Drill-down pointer carried by the summary tree so it self-describes."""
 
+AGENT_CONVENTIONS: tuple[str, ...] = (
+    "Output is compact single-line json unless a command's output mode is "
+    "'text'. Pass -o json-pretty for indented json, -o yaml, or -o human; "
+    "DHCLI_OUTPUT sets it for the session. Exit codes: 0 success, 2 "
+    "user-facing failure, 3 the invoked MCP tool returned isError=true. A "
+    "failure prints {error, error_code, exit_code, command} in the "
+    "structured modes; branch on the stable error_code, not on the "
+    "message ('dhcli agents errors' lists them).",
+    "A session, system, or PQ id omitted from a verb falls back to the "
+    "sticky context in context.json, which the command line does not show "
+    "— an omitted id means 'whatever the context holds', not 'no target'. "
+    "Run 'dhcli context show' before any consequential verb whose id you "
+    "intend to omit, or pass the id explicitly.",
+    TARGET_SELECTION_GUIDANCE,
+)
+"""The three rules an agent needs before its first consequential command.
+
+Carried by the summary tree -- the surface ``dhcli agents tree`` and the
+root ``--agents`` flag emit, and so the first thing an agent reads.
+Deliberately short: the tree is the cheap orientation rung of the
+progressive-disclosure ladder, so only a rule that holds tree-wide *and*
+cannot be read off a single node belongs here. Per-command hazards
+(a truncating row cap, a confirmation prompt's non-interactive behavior)
+live on the command that has them, where they can be stated accurately;
+stated here they would have to be hedged into uselessness, since they
+hold for some verbs and not others.
+
+:data:`~deephaven_mcp.cli._context.TARGET_SELECTION_GUIDANCE` is shared
+verbatim with the two listing verbs whose output creates the hazard, so
+the rule has one wording wherever it appears.
+"""
+
 
 def _summary_commands(group: click.Group) -> dict[str, Any]:
     """Return the nested ``{name: {summary, commands?}}`` summary map.
@@ -604,6 +719,10 @@ def build_summary_tree(root: click.Command) -> dict[str, Any]:
     - ``version`` (str): Installed ``deephaven-mcp`` package version.
     - ``prog`` (str): Program invocation name (``"dhcli"``).
     - ``summary`` (str): The root command's one-line summary.
+    - ``description`` (str): The root command's description — what the
+      tool is and how to get started — when it declares one.
+    - ``conventions`` (list[str]): :data:`AGENT_CONVENTIONS`, the
+      project-wide rules that hold for every command.
     - ``hint`` (str): How to drill down to full nodes and the complete
       manifest.
     - ``commands`` (dict): Nested ``{name: {summary, commands?}}`` map
@@ -617,13 +736,24 @@ def build_summary_tree(root: click.Command) -> dict[str, Any]:
     Returns:
         dict[str, Any]: JSON / YAML serializable summary tree.
     """
-    return {
+    summary, description = _summary_and_description(root)
+    tree: dict[str, Any] = {
         "version": _package_version(),
         "prog": root.name or "dhcli",
-        "summary": _summary_of(root),
-        "hint": _SUMMARY_TREE_HINT,
-        "commands": (_summary_commands(root) if isinstance(root, click.Group) else {}),
+        "summary": summary,
     }
+    if description:
+        tree["description"] = description
+    tree.update(
+        {
+            "conventions": list(AGENT_CONVENTIONS),
+            "hint": _SUMMARY_TREE_HINT,
+            "commands": (
+                _summary_commands(root) if isinstance(root, click.Group) else {}
+            ),
+        }
+    )
+    return tree
 
 
 def build_manifest(root: click.Command) -> dict[str, Any]:

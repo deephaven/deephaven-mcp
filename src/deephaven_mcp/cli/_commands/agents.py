@@ -78,6 +78,14 @@ _OUTPUT_TREE = OutputSpec(
         OutputField("prog", "string", "Program name (dhcli)."),
         OutputField("summary", "string", "Root command one-line summary."),
         OutputField(
+            "conventions",
+            "array",
+            "Project-wide rules that hold for every command — output modes, "
+            "exit codes, the sticky context, target selection, stderr "
+            "warnings. Read these before the first consequential command "
+            "(default only).",
+        ),
+        OutputField(
             "hint", "string", "How to drill down to full command nodes (default only)."
         ),
         OutputField(
@@ -86,7 +94,9 @@ _OUTPUT_TREE = OutputSpec(
             "Nested {name: {summary, commands?}} map down to the leaves; "
             "full command nodes instead with --full.",
         ),
-        OutputField("description", "string", "Root command description (--full only)."),
+        OutputField(
+            "description", "string", "Root command description (both variants)."
+        ),
         OutputField("examples", "array", "Root command examples (--full only)."),
         OutputField(
             "global_options",
@@ -131,10 +141,13 @@ _OUTPUT_TREE = OutputSpec(
     help_spec=HelpSpec(
         summary="Print the command tree (summary by default, --full for all).",
         description=(
-            "The agent orientation surface. By default prints the compact "
-            "summary tree: every command path with its one-line summary, "
-            "plus a hint for drilling down — small enough to keep in "
-            "context (equivalent to 'dhcli --agents'). With --full, "
+            "The agent orientation surface, and the right first call. By "
+            "default prints the compact summary tree: every command path "
+            "with its one-line summary, the project-wide 'conventions' an "
+            "agent needs before acting (output modes, exit codes, the "
+            "sticky context, target selection), and a hint for drilling "
+            "down — small enough to keep in context (equivalent to 'dhcli "
+            "--agents'). With --full, "
             "prints the complete manifest instead: every command's full "
             "node (options, arguments, output schema, examples, error "
             "codes) plus the project-wide metadata (global_options, "
@@ -171,7 +184,19 @@ def agents_tree(ctx: click.Context, full: bool) -> None:
 _OUTPUT_COMMAND = OutputSpec(
     "object",
     (
-        OutputField("name", "string", "The command's invocation name."),
+        OutputField("name", "string", "The command's own name, e.g. 'stop'."),
+        OutputField(
+            "path",
+            "string",
+            "The full invocation path, e.g. 'dhcli pq stop' — what to "
+            "actually run, which 'name' alone does not give.",
+        ),
+        OutputField(
+            "usage",
+            "string",
+            "Usage line in click's own form, e.g. 'dhcli pq stop [OPTIONS] "
+            "[ID]...', giving the positional order.",
+        ),
         OutputField("summary", "string", "One-line summary."),
         OutputField(
             "description", "string", "What the command does and when to use it."
@@ -257,8 +282,12 @@ def agents_command(ctx: click.Context, path: tuple[str, ...], full: bool) -> Non
     PATH is required (at least one token). ``--full`` recurses a
     group's subcommands into full nested nodes.
     """
-    cmd = resolve_command(ctx.find_root().command, path)
-    echo_payload_no_runtime(ctx, describe_command(cmd, recurse=full))
+    root = ctx.find_root().command
+    cmd = resolve_command(root, path)
+    # The resolved ancestors, program name first, so the node's ``path``
+    # is the runnable invocation rather than the leaf name alone.
+    parents = (root.name or "dhcli", *path[:-1])
+    echo_payload_no_runtime(ctx, describe_command(cmd, recurse=full, parents=parents))
 
 
 _OUTPUT_ERRORS = OutputSpec(

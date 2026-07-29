@@ -17,7 +17,7 @@ from click.testing import CliRunner
 
 from deephaven_mcp.cli import _manifest
 from deephaven_mcp.cli._command import HelpfulCommand, HelpfulGroup
-from deephaven_mcp.cli._errors import CliError, ErrorCode
+from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
     COMMON_ENV_VARS,
     HelpEntry,
@@ -27,6 +27,8 @@ from deephaven_mcp.cli._help import (
 )
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._manifest import (
+    AGENT_CONVENTIONS,
+    NodeStyle,
     _describe_wraps,
     _split_help_text,
     build_manifest,
@@ -303,6 +305,39 @@ def test_summary_tree_shape() -> None:
     assert set(start) == {"summary"}
 
 
+def test_summary_tree_carries_the_root_description_and_conventions() -> None:
+    """The orientation surface states the rules, not just the command names.
+
+    ``dhcli agents tree`` and the root ``--agents`` are the first thing
+    an agent reads, and a bare ``{name: summary}`` map leaves the
+    tree-wide contracts (output mode, exit codes, the sticky context,
+    target selection) to be discovered by trial. Pinned because both
+    keys are pure data -- coverage alone would never catch their
+    removal.
+    """
+    tree = build_summary_tree(cli)
+    assert "Getting started" in tree["description"], (
+        "the root description reached the tree without its getting-started "
+        "workflow, which is the one thing a cold agent needs"
+    )
+    assert tree["conventions"] == list(AGENT_CONVENTIONS)
+
+
+def test_agent_conventions_stay_short_enough_to_read() -> None:
+    """The conventions block is the cheap rung of the ladder; keep it cheap.
+
+    A rule only earns a place here if it holds tree-wide *and* cannot be
+    read off a single node -- a per-command hazard belongs on that
+    command, where it can be stated accurately. The cap is a budget, not
+    a style rule: this text is prepended to every agent's context before
+    its first command. It reached 1,567 B / 7 entries once, at which
+    point two of the entries were also wrong for some verbs.
+    """
+    total = sum(len(rule) for rule in AGENT_CONVENTIONS)
+    assert len(AGENT_CONVENTIONS) <= 4, "too many conventions to read at once"
+    assert total <= 1200, f"conventions block is {total} B; budget is 1200 B"
+
+
 def test_summary_tree_covers_every_leaf() -> None:
     """Every leaf command in the click tree appears in the summary tree."""
 
@@ -512,6 +547,71 @@ def test_standalone_node_preserves_every_help_spec_fact(
             assert match["help"] == option.help
 
 
+@pytest.mark.parametrize(("path", "cmd"), _LEAVES, ids=_LEAF_IDS)
+def test_standalone_node_is_self_locating(path: str, cmd: click.Command) -> None:
+    """A standalone node states the command line that reaches it.
+
+    An agent that fetched one node -- ``--agents`` on some command, or
+    ``agents command PATH`` -- has no surrounding map to read the
+    invocation off of, and ``name`` alone (``"stop"``) is not runnable.
+    ``path`` is that command line and ``usage`` shows the argument
+    order, so the two must agree.
+    """
+    tokens = path.split()
+    node = describe_command(cmd, parents=("dhcli", *tokens[:-1]))
+    assert node["path"] == f"dhcli {path}"
+    assert node["usage"].startswith(node["path"]), (
+        f"{path}: usage {node['usage']!r} does not begin with the node's own "
+        "path, so the two disagree about how to invoke the command"
+    )
+
+
+@pytest.mark.parametrize(("path", "cmd"), _LEAVES, ids=_LEAF_IDS)
+def test_embedded_node_omits_the_derivable_location(
+    path: str, cmd: click.Command
+) -> None:
+    """Inside the whole-tree manifest, ``path`` and ``usage`` are dropped.
+
+    A node nested under ``commands.pq.subcommands.stop`` already
+    discloses its path by position, and ``params`` gives the argument
+    order -- so carrying both keys on all 76 nodes spent ~5.3 KB of an
+    agent's context restating what it can see. Same hoisting principle
+    as ``error_codes`` / ``exit_codes`` meanings.
+    """
+    node = describe_command(cmd, style=NodeStyle.EMBEDDED)
+    assert "path" not in node
+    assert "usage" not in node
+
+
+_CHOICE_PARAMS = [
+    (f"{path} {param.name}", param, cmd)
+    for path, cmd in _LEAVES
+    for param in cmd.params
+    if isinstance(param.type, click.Choice)
+]
+_CHOICE_IDS = [ident for ident, _, _ in _CHOICE_PARAMS]
+
+
+@pytest.mark.parametrize(("ident", "param", "cmd"), _CHOICE_PARAMS, ids=_CHOICE_IDS)
+def test_constrained_param_publishes_its_allowed_values(
+    ident: str, param: click.Parameter, cmd: click.Command
+) -> None:
+    """A parameter with a closed value set publishes that set.
+
+    Guessing a constrained value costs an agent a round trip and an exit
+    2. click prints the choices in ``--help`` on its own; the manifest
+    has to carry them too, or the agent surface is strictly weaker than
+    the human one.
+    """
+    node = describe_command(cmd)
+    described = next(p for p in node["params"] if p["name"] == param.name)
+    assert isinstance(param.type, click.Choice)
+    assert described["choices"] == list(param.type.choices), (
+        f"{ident}: manifest choices {described.get('choices')!r} do not match "
+        f"the click type's {list(param.type.choices)!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # _meta_of — the single narrowing boundary
 # ---------------------------------------------------------------------------
@@ -689,6 +789,10 @@ def test_agents_flag_on_leaf_matches_command_node(
     The runtime-load bypass inspects ``sys.argv``; ``CliRunner.invoke``
     does not set it, so the test patches it explicitly (mirroring the
     ``--help`` path) — otherwise CI without a default config dir fails.
+
+    ``parents`` mirrors what the real invocation supplies: the node's
+    ``path`` and ``usage`` come from the ancestors click walked through,
+    which a direct ``describe_command`` call cannot know.
     """
     argv = ["daemon", "start", "--agents"]
     monkeypatch.setattr("sys.argv", ["dhcli", *argv])
@@ -696,7 +800,9 @@ def test_agents_flag_on_leaf_matches_command_node(
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == describe_command(cli.commands["daemon"].commands["start"])
+    assert payload == describe_command(
+        cli.commands["daemon"].commands["start"], parents=("dhcli", "daemon")
+    )
 
 
 def test_agents_flag_on_group_matches_group_node(
@@ -708,7 +814,9 @@ def test_agents_flag_on_group_matches_group_node(
     runner = CliRunner()
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
-    assert json.loads(result.output) == describe_command(cli.commands["daemon"])
+    assert json.loads(result.output) == describe_command(
+        cli.commands["daemon"], parents=("dhcli",)
+    )
 
 
 def test_agents_flag_honors_output_mode(
@@ -721,7 +829,9 @@ def test_agents_flag_honors_output_mode(
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
-    assert payload == describe_command(cli.commands["daemon"].commands["start"])
+    assert payload == describe_command(
+        cli.commands["daemon"].commands["start"], parents=("dhcli", "daemon")
+    )
 
 
 def test_agents_flag_not_hoisted_to_root(

@@ -96,7 +96,7 @@ def test_agents_command_to_noun_matches_standalone_node() -> None:
     result = runner.invoke(cli, ["agents", "command", "daemon"], standalone_mode=False)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == describe_command(cli.commands["daemon"])
+    assert payload == describe_command(cli.commands["daemon"], parents=("dhcli",))
     # Bounded view: subcommand values are summary strings.
     assert all(isinstance(v, str) for v in payload["subcommands"].values())
 
@@ -111,7 +111,9 @@ def test_agents_command_to_verb_matches_standalone_node() -> None:
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == describe_command(cli.commands["daemon"].commands["start"])
+    assert payload == describe_command(
+        cli.commands["daemon"].commands["start"], parents=("dhcli", "daemon")
+    )
     # The node carries no top-level manifest keys.
     assert "version" not in payload
 
@@ -126,7 +128,9 @@ def test_agents_command_json_pretty_emits_indented_json() -> None:
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == describe_command(cli.commands["daemon"].commands["start"])
+    assert payload == describe_command(
+        cli.commands["daemon"].commands["start"], parents=("dhcli", "daemon")
+    )
     assert "\n" in result.output.strip()
 
 
@@ -138,7 +142,9 @@ def test_agents_command_full_expands_group() -> None:
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == describe_command(cli.commands["daemon"], recurse=True)
+    assert payload == describe_command(
+        cli.commands["daemon"], recurse=True, parents=("dhcli",)
+    )
     assert payload["subcommands"]["start"]["summary"]
 
 
@@ -163,7 +169,7 @@ def test_agents_command_honors_yaml_output_mode() -> None:
     result = runner.invoke(cli, ["-o", "yaml", "agents", "command", "daemon"])
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
-    assert payload == describe_command(cli.commands["daemon"])
+    assert payload == describe_command(cli.commands["daemon"], parents=("dhcli",))
 
 
 def test_agents_command_bypasses_config_load(tmp_path) -> None:

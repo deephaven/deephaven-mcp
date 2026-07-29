@@ -14,6 +14,8 @@ describe the wrapper categories that build on this module.
 from __future__ import annotations
 
 __all__ = [
+    "TABULAR_OUTPUT_FIELDS",
+    "TABULAR_OUTPUT_NOTE",
     "acquire",
     "call_and_echo",
     "call_and_echo_field",
@@ -42,6 +44,7 @@ from deephaven_mcp.cli._commands._acquire import (
 )
 from deephaven_mcp.cli._echo import echo_payload
 from deephaven_mcp.cli._errors import CliError, ErrorCode, render_warning
+from deephaven_mcp.cli._help import OutputField
 from deephaven_mcp.cli._mcp_client import (
     McpClient,
     McpClientError,
@@ -53,6 +56,49 @@ from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 
 _BOOKKEEPING_KEYS = frozenset({"success", "isError"})
 """Envelope keys stripped from a tool payload before it is rendered."""
+
+TABULAR_OUTPUT_FIELDS: tuple[OutputField, ...] = (
+    OutputField("id", "string", "The session id, echoed back."),
+    OutputField("table_name", "string", "The table read, echoed back."),
+    OutputField(
+        "format",
+        "string",
+        "Serialization of 'data'; always 'json-row', which these commands "
+        "request so 'data' is a JSON array of row objects.",
+    ),
+    OutputField(
+        "schema",
+        "array",
+        "One entry per column: name and type (PyArrow type name, e.g. "
+        "'int64', 'timestamp[ns]'). Read this before parsing 'data'.",
+    ),
+    OutputField("row_count", "integer", "Number of rows in 'data'."),
+    OutputField(
+        "is_complete",
+        "boolean",
+        "False when the row cap truncated the result — the table holds more "
+        "rows than were returned. Check this before concluding anything "
+        "about the table as a whole.",
+    ),
+    OutputField(
+        "data", "array", "The rows: one JSON object per row, keyed by column name."
+    ),
+)
+"""Output fields of the tabular tools, shared by ``table data`` and ``catalog sample``.
+
+Both commands render one envelope through :func:`call_and_echo_table`, so
+describing it once keeps the two help surfaces from drifting from each
+other and from the tools. ``catalog sample`` adds ``namespace``; see its
+own spec.
+"""
+
+TABULAR_OUTPUT_NOTE = (
+    "Keys are emitted in reading order (identity, format, schema, counts, "
+    "data) rather than sorted. In -o human the 'format' field is dropped as "
+    "noise and 'data' is redrawn as an aligned table; -o json / -o yaml keep "
+    "the full envelope."
+)
+"""Rendering note shared by the tabular verbs' output specs."""
 
 _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
     ErrorCode.NO_SYSTEMS_CONFIGURED,
@@ -74,6 +120,11 @@ def yes_option(f: Any) -> Any:
     the target came from the sticky context and ``cli.json``'s
     ``context.confirm_destructive`` is enabled. Shared so the six
     destructive verbs cannot drift in wording.
+
+    The help states that the confirmation is skipped for a
+    non-interactive caller, because a machine caller never sees the
+    prompt and so must not treat it as a guard: an agent reading only
+    "a confirmation is asked" would conclude a wrong target gets caught.
     """
     return click.option(
         "--yes",
@@ -83,7 +134,10 @@ def yes_option(f: Any) -> Any:
         help=(
             "Skip the confirmation asked when the target comes from the "
             "sticky context (only asked when cli.json's "
-            "context.confirm_destructive is true)."
+            "context.confirm_destructive is true). The confirmation is "
+            "skipped anyway when prompting is unavailable — stdin is not a "
+            "TTY, or --no-input was given — so a non-interactive caller is "
+            "never protected by it and must pass the target explicitly."
         ),
     )(f)
 
@@ -400,14 +454,22 @@ async def call_and_echo_table(
     The tools already emit their envelope keys in reading order (identity,
     summary, ``format``, schema, data); this echoes them with ``sort_keys=False``
     so ``json``/``yaml`` preserve that order instead of alphabetizing. In
-    ``human`` mode two fields are dropped (via ``human_exclude``) as noise to a
-    terminal reader: ``format``, which always reports ``json-row`` (the
-    serialization these commands request so the human renderer can re-draw
-    ``data`` as an aligned table); and ``columns``, the list tools' column
-    definitions, which merely restate the headers of the rendered ``data``
-    table. ``schema`` (the sample/data tools' typed definitions) uses a
-    different key and is left intact. ``json``/``yaml`` keep both fields for
-    machine consumers.
+    ``human`` mode two keys are dropped (via ``human_exclude``) as noise to a
+    terminal reader:
+
+    - ``format``, which always reports ``json-row`` (the serialization these
+      commands request so the human renderer can re-draw ``data`` as an
+      aligned table). Every current caller emits it.
+    - ``columns``, a bare column-name list that would merely restate the
+      headers of the rendered ``data`` table. Defensive: the two tools routed
+      through this helper today (``session_table_data``,
+      ``catalog_table_sample``) describe their columns under ``schema``, which
+      carries types and is left intact; the exclusion covers a tabular tool
+      that reports the thinner key instead.
+
+    ``json``/``yaml`` keep both keys for machine consumers. The commands
+    describe this envelope to users through :data:`TABULAR_OUTPUT_FIELDS` and
+    :data:`TABULAR_OUTPUT_NOTE`.
 
     Args:
         runtime (Runtime): The active CLI runtime.

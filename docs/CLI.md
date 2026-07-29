@@ -21,6 +21,7 @@ mechanism, not the tool's scope.
   - [`server.json` — `daemon` block](#serverjson--daemon-block)
 - [Runtime directory](#runtime-directory)
 - [Command tree](#command-tree)
+  - [Choosing a target](#choosing-a-target)
   - [`dhcli daemon`](#dhcli-daemon)
   - [`dhcli tool`](#dhcli-tool)
   - [`dhcli session`](#dhcli-session)
@@ -349,6 +350,37 @@ The CLI is organized noun-verb. Each noun is a `click` group; each
 verb honors the top-level `-o/--output` flag (except `self
 completion`, which prints raw shell source).
 
+### Choosing a target
+
+Most verbs act on a session, system, or PQ named by an id. Two rules
+decide which id is legitimate, and they matter most for AI agents:
+
+1. **Act on an id you were given, or one you created yourself** with
+   `session create` or `pq create`. Creating your own is the normal way
+   to get something to work in.
+2. **A listing is discovery, not a menu.** `session list` and `pq list`
+   span every user's resources on the configured systems, production
+   included. A returned id is a *candidate*, not a target: never run a
+   script in, stop, restart, or delete one you did not create and were
+   not pointed at. `session list --origin dynamic` narrows the listing
+   to tool-created sessions. (`system list` is different — it reports
+   the systems *your* configuration declares.)
+
+The [sticky context](#dhcli-context) interacts with both: a verb whose
+id is omitted acts on the persisted default, which is not visible on
+the command line. Run `dhcli context show` before any consequential
+verb you intend to invoke without an explicit id. The verbs that
+execute or destroy (`session exec`, `session delete`, `pq modify`,
+`pq delete`, `pq stop`, `pq restart`) confirm a context-supplied id on
+a terminal; `--yes` skips the question, and with no terminal they
+proceed unprompted.
+
+`session credentials`, `session url`, and `session open` are the quiet
+case: they destroy nothing, so nothing confirms them, but each returns a
+URL carrying a live auth token for whatever session was named. Aim one
+at a session you were not given and you have disclosed that session's
+credentials.
+
 ### `dhcli daemon`
 
 | Verb       | Purpose                                                                                       |
@@ -367,6 +399,14 @@ completion`, which prints raw shell source).
 | `list`             | Lists registered tools. Internal tools (`_`-prefixed) are hidden unless `--all` is supplied.            |
 | `show <name>`      | Prints one tool's name, description, and JSON input schema.                                             |
 | `call <name>`      | Invokes a tool. Pass arguments as `--arg key=value` (repeatable); JSON-decoded when possible.           |
+
+`tool` is the escape hatch, not the main road. It reaches every tool,
+including ones no verb fronts, but `tool call` is a raw passthrough:
+no sticky-context resolution, no confirmation before a destructive
+call, no `--yes`, no documented output schema, and the result is the
+unwrapped MCP envelope rather than a verb's shaped payload. Prefer the
+first-class verbs (`session`, `table`, `catalog`, `pq`, `docs`)
+wherever one exists.
 
 `dhcli tool call` returns:
 
@@ -391,7 +431,7 @@ the right backend by the id's prefix; `create` chooses the backend from
 
 | Verb                          | Purpose                                                                                       |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list`                        | Lists sessions (both types). Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. Wraps `sessions_list`. |
+| `list`                        | Lists sessions (both types) — every user's, not just yours; see [Choosing a target](#choosing-a-target). Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. The list can be incomplete while Enterprise discovery runs or a system is unreachable, in which case a warning naming the phase and failing systems goes to stderr. Wraps `sessions_list`. |
 | `show [ID]`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
 | `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
 | `delete [ID]`                 | Deletes a session, routing by the id prefix. Only a session `create` made (`origin: dynamic`) is eligible; others exit `3`. `--yes` skips the context confirmation. Wraps `session_community_delete` / `session_enterprise_delete`. |
@@ -494,12 +534,22 @@ session id; `list` falls back to the sticky context when it is omitted.
 |-------------------------------|-----------------------------------------------------------------------------------------------|
 | `list [ID]`                   | Lists the session's table names. Wraps `session_tables_list`. |
 | `schema <id> <table>`         | Column definitions for one table: name and type per column, plus `column_type` where meaningful. Wraps `session_table_schema`. |
-| `data <id> <table>`           | Row data: `--max-rows N`, `--head/--tail` (default head). Wraps `session_table_data`. |
+| `data <id> <table>`           | Row data as JSON objects keyed by column name: `--max-rows N` (default 1000), `--head/--tail` (default head). Wraps `session_table_data`. |
+
+`schema` and `data` require an explicit `ID`: a table name follows it,
+so a single argument would be ambiguous and they cannot fall back to
+the sticky context the way `list` does.
+
+`data` truncates silently on stdout when the table is larger than
+`--max-rows`: `is_complete` reports `false` and no warning is printed.
+Check that field before drawing a conclusion about the table as a
+whole.
 
 ```bash
 dhcli table list community:community:dev
 dhcli table schema community:community:dev trades
 dhcli table data community:community:dev trades --max-rows 50 --tail
+dhcli table data community:community:dev trades | jq '.row_count, .is_complete'
 ```
 
 ### `dhcli catalog`
@@ -512,7 +562,18 @@ dhcli table data community:community:dev trades --max-rows 50 --tail
 | `tables [ID]`                         | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
 | `namespaces [ID]`                     | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
 | `schema <id> <namespace> <table>`     | Column definitions for one catalog table: name and type per column, plus `column_type` where meaningful. Wraps `catalog_table_schema`. |
-| `sample <id> <namespace> <table>`    | Sample rows. `--max-rows`, `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
+| `sample <id> <namespace> <table>`    | Sample rows. `--max-rows` (default 100), `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
+
+As with `table`, `schema` and `sample` require an explicit `ID`
+(a namespace and table name follow it), while `tables` and
+`namespaces` fall back to the sticky context.
+
+`sample` is a preview, not a query. Partitioned tables would return
+nothing without a partition filter, so with no `--filter` the tool
+detects the table's partition columns and samples the most recent
+partition holding data; passing `--filter` replaces that with your own
+expressions. `catalog schema` marks partition columns with
+`column_type: Partitioning`.
 
 ```bash
 dhcli catalog tables enterprise:prod:42
@@ -535,11 +596,11 @@ no PQ counterpart (local workers are ephemeral).
 
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
-| `list [SYSTEM]`                       | Lists PQs configured on a system. Wraps `pq_list`. |
+| `list [SYSTEM]`                       | Lists PQs configured on a system — every user's, including production; see [Choosing a target](#choosing-a-target). Wraps `pq_list`. |
 | `details [ID]`                        | Configuration + status for one PQ. Wraps `pq_details`. |
 | `name-to-id <system> <name>`          | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`. |
 | `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-body-path`/`--git-script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
-| `modify [ID]`                         | Updates only the fields passed; everything else is left unchanged. `--restart` restarts the PQ after applying the change. `--yes` skips the context confirmation. Wraps `pq_modify`. |
+| `modify [ID]`                         | Updates only the fields passed; everything else is left unchanged. A repeatable option **replaces** the PQ's existing list rather than appending. `--restart` restarts the PQ after applying the change. `--yes` skips the context confirmation. Wraps `pq_modify`. |
 | `delete [ID...]`                      | Deletes one or more PQs. `--max-concurrent N`, `--yes`. Wraps `pq_delete`. |
 | `start [ID...]`                       | Starts one or more PQs. `--wait/--no-wait`, `--max-concurrent`. Wraps `pq_start`. |
 | `stop [ID...]`                        | Stops one or more PQs. Same options as `start`, plus `--yes`. Wraps `pq_stop`. |
@@ -575,7 +636,32 @@ machine.
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the
-`summary` and per-item `results` in the payload for failures.
+`summary` and per-item `results` in the payload for failures. All ids in
+one invocation must belong to the same Enterprise system.
+
+None of these verbs report a settled state:
+
+- `create` does not wait. Its `state` is always the placeholder
+  `UNINITIALIZED` — the state at the instant the controller accepted the
+  definition, not the live state. Poll `pq details` for what the PQ is
+  actually doing.
+- `start` / `restart` succeed on *acceptance*, not readiness. Branch on
+  each `results[].state_category`: `TRANSITIONAL` (state `CONNECTING` or
+  `INITIALIZING`) is a normal outcome with `--no-wait` or a short wait,
+  and only `ACTIVE` means the id is usable with the `session`, `table`,
+  and `catalog` verbs.
+- A `--wait` that runs out is reported as a per-item failure even though
+  the controller keeps going in the background. Treat a timeout as
+  *unknown* rather than failed: re-read `pq details` instead of retrying
+  blindly. The wait duration is
+  `timeouts.client.pq_state_change_timeout_seconds` in
+  `enterprise/settings.json` (120 seconds unless set), and
+  `--max-concurrent` defaults to `pq_tools.default_max_concurrent` there
+  (20 unless set).
+
+Modifying a running PQ without `--restart` stores the new definition
+while the live worker keeps serving the old one; the response then
+carries a `warning` field, and `pq restart` applies it.
 
 ```bash
 dhcli pq create nightly --system prod --heap-size-gb 4 --script-body-path ./n.py
@@ -784,9 +870,13 @@ validate` fails; that same bypass means they cannot read `cli.json`'s
 `output.format` (use `-o`/`DHCLI_OUTPUT` instead).
 
 The surfaces are sized as a **progressive-disclosure ladder**: orient
-with the summary tree (a few KB), drill into one group (~1 KB), then
-read a leaf's full node (~2 KB) — instead of ingesting one giant
-manifest.
+with the summary tree (~9 KB), drill into one group (~1 KB), then read a
+leaf's full node (~3.5 KB typical; ~1 KB for a simple verb, ~12 KB for
+an option-heavy one like `pq create`) — instead of ingesting the ~150 KB
+complete manifest. A node is consistently smaller than the `--help` it
+mirrors. On a verb that reaches the daemon, roughly a third of it is the
+self-contained `error_codes` block: the deliberate cost of decoding a
+failure, and recovering from it, without a second fetch.
 
 #### The `--agents` flag (twin of `--help`)
 
@@ -807,7 +897,7 @@ discloses them once under `universal_options`.
 
 | Verb                 | Output                                                                                  |
 |----------------------|-----------------------------------------------------------------------------------------|
-| `tree`               | The **summary tree** by default: `version`, `prog`, the root `summary`, a drill-down `hint`, and a nested `commands` map of `{name: {summary, commands?}}` down to the leaves. Identical to `dhcli --agents`. With `--full`, the complete manifest instead: root `summary`/`description`/`examples`, `global_options`, `universal_options` (the every-command flags `--help` and `--agents`), full command nodes under `commands`, `default_environment`, `default_exit_codes`, and the project-wide `error_codes` registry. |
+| `tree`               | The **summary tree** by default: `version`, `prog`, the root `summary` and `description`, the project-wide `conventions`, a drill-down `hint`, and a nested `commands` map of `{name: {summary, commands?}}` down to the leaves. Identical to `dhcli --agents`. With `--full`, the complete manifest instead: root `summary`/`description`/`examples`, `global_options`, `universal_options` (the every-command flags `--help` and `--agents`), full command nodes under `commands`, `default_environment`, `default_exit_codes`, and the project-wide `error_codes` registry. |
 | `command PATH...`    | One command's **self-contained node**, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--agents` to that command. A group's node lists its subcommands as one-line summaries; `--full` expands them into full nested nodes. A path that does not resolve exits `2` with `command_not_found`. |
 | `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree --full`. |
 
@@ -825,7 +915,9 @@ false, empty, or the default):
 
 | Key           | Content                                                                                     |
 |---------------|----------------------------------------------------------------------------------------------|
-| `name`        | Invocation name (always present).                                                            |
+| `name`        | The command's own name, e.g. `stop` (always present).                                        |
+| `path`        | The full invocation path, e.g. `dhcli pq stop` — what to actually run. **Standalone nodes only**: inside `tree --full` a node's position in the nested map already gives its path. |
+| `usage`       | Usage line in click's own form, e.g. `dhcli pq stop [OPTIONS] [ID]...`, giving the positional order. Standalone nodes only (`params` gives the order elsewhere). |
 | `summary`     | One-line summary (always present).                                                           |
 | `description` | What the command does and when to use it.                                                    |
 | `params`      | Options **and** positional arguments: `name`, `kind` (`option`/`argument`), `type`, `help`, plus (sparse) `required`, `nargs` (when not 1), `choices`, `opts`, `secondary_opts`, `is_flag`, `multiple`, `envvar`, `default`. |
@@ -842,17 +934,23 @@ A **standalone node** (`agents command PATH`, `<cmd> --agents`) is
 self-contained — it carries everything the command's `--help` renders,
 including code meanings and environment variables, so an agent needs no
 second fetch. `agents command PATH` and `<path> --agents` are
-byte-identical. Inside `tree --full`, per-node content that the root
-carries once (`error_codes` meanings, `default_exit_codes`,
-`default_environment`) is hoisted, so a leaf node there equals the
-standalone node minus those hoisted entries.
+byte-identical. Inside `tree --full`, content that a node need not
+restate is dropped: what the root carries once (`error_codes` meanings,
+`default_exit_codes`, `default_environment`) is hoisted, and what the
+node's own position already gives (`path`, `usage`) is omitted — so a
+leaf node there equals the standalone node minus those entries.
 
 The two whole-tree surfaces carry different top-level fields, and a
 single command's node never carries any of them:
 
 - **Summary tree** (`agents tree`, `dhcli --agents`): `version`,
-  `prog`, `summary`, `hint`, and a nested `{name: {summary,
-  commands?}}` map under `commands`.
+  `prog`, `summary`, `description`, `conventions`, `hint`, and a nested
+  `{name: {summary, commands?}}` map under `commands`. `conventions` is
+  the short list of rules that hold for *every* command — output mode
+  and exit codes, the sticky-context fallback, and target selection —
+  which an agent should read before its first consequential command. A
+  per-command hazard is not listed there; it lives on the command that
+  has it.
 - **Full manifest** (`agents tree --full`): `version`, `prog`,
   `summary` (plus the root's `description` / `examples`),
   `global_options`, `universal_options`, full command nodes under

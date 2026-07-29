@@ -168,6 +168,7 @@ _OUTPUT_CONTEXT = OutputSpec(
         examples=(
             "$ dhcli context show",
             "$ dhcli -o human context show",
+            "$ dhcli context show | jq -r '.session // \"unset\"'",
         ),
         see_also=("dhcli context set KEY VALUE", "dhcli context unset"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
@@ -230,6 +231,7 @@ def _validate_system(runtime: Runtime, value: str) -> None:
             "$ dhcli context set session community:community:dev",
             "$ dhcli context set system prod",
             "$ dhcli context set pq enterprise:prod:1234567890",
+            "$ dhcli context set system prod | jq -r .system",
         ),
         see_also=("dhcli context show", "dhcli context unset"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -298,6 +300,7 @@ async def context_set(runtime: Runtime, key: str, value: str) -> None:
             "$ dhcli context unset session",
             "$ dhcli context unset session pq",
             "$ dhcli context unset --all",
+            "$ dhcli context unset --all | jq 'keys'",
         ),
         see_also=("dhcli context show", "dhcli context set KEY VALUE"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
