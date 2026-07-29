@@ -9,6 +9,13 @@ per-user background daemon hosting the multiplexed Deephaven MCP
 systems server, which `dhcli` manages for you — that is the current
 mechanism, not the tool's scope.
 
+> **`dhcli` is under rapid development.** Command names, flags, and
+> output shapes can change without notice, so an upgrade may break
+> scripts written against them — pin a version if you need stability.
+> AI agents need no such care: `dhcli` describes itself at runtime
+> through [`dhcli agents tree`](#dhcli-agents) and `--agents`, so an
+> agent that reads that manifest adapts to the changes on its own.
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -47,12 +54,17 @@ mechanism, not the tool's scope.
 package wires the entry point automatically:
 
 ```bash
-pip install deephaven-mcp
-# or, in this repo:
-uv sync --all-extras
+uv tool install --python-preference managed "deephaven-mcp"
 ```
 
-After installation `dhcli` is on `$PATH`. Verify with:
+That is the recommended path, and it puts `dhcli` alongside
+`dh-mcp-systems-server` and `dh-mcp-docs-server` on your `$PATH` with no
+venv to manage. The venv-based and standalone-binary alternatives are in
+the project [`README.md`](../README.md#installation-methods). Working in a
+clone of this repository, `uv sync --all-extras` then `uv run dhcli ...`
+also works.
+
+Verify with:
 
 ```bash
 dhcli --help
@@ -80,26 +92,39 @@ See [`dhcli self`](#dhcli-self) for details.
 
 ## Quick start
 
+Starting from nothing, in the order a new user needs them:
+
 ```bash
-# Show subcommands.
+# 1. Show subcommands.
 dhcli --help
 
-# Start the daemon (idempotent; spawns one if absent).
-dhcli daemon start
+# 2. Create a configuration (guided; prompts for a session and/or system).
+dhcli config init
 
-# List the tools the daemon registers.
-dhcli tool list
+# 3. Confirm it is valid. Exit 0 means good; 2 prints the offending file.
+dhcli config validate
 
-# Inspect one tool's input schema.
-dhcli tool show sessions_list
+# 4. Create a session to work in. The daemon auto-starts on first use.
+dhcli session create dev
 
-# Invoke a tool. Arguments are key=value, JSON values are auto-decoded.
-dhcli tool call sessions_list
+# 5. Do something with it.
+dhcli table list
+dhcli session exec --script 'print(1)'
+```
 
-# Tail the daemon log file.
+Steps 4 and 5 omit the session id: `session create` records the new
+session as the sticky default, and later verbs fall back to it. See
+[`dhcli context`](#dhcli-context).
+
+Diagnostics and self-discovery:
+
+```bash
+# Which files hold the configuration, and is any of them broken?
+dhcli config files
+
+# Daemon lifecycle (auto-started, but manageable by hand).
+dhcli daemon status
 dhcli daemon logs -n 200
-
-# Stop the daemon.
 dhcli daemon stop
 
 # Discover the command tree as structured JSON (for AI agents).
@@ -204,8 +229,8 @@ available:
   so the error appears even though the verb itself never executes.)
 - **Fix it in place**: `dhcli config set` / `dhcli config unset`
   rewrite one field, `dhcli config edit <path>` opens the whole
-  file in `$EDITOR`, and `dhcli config get` reads raw on-disk
-  contents even from a partial or invalid tree.
+  file in your editor (`$VISUAL`, else `$EDITOR`), and `dhcli config
+  get` reads raw on-disk contents even from a partial or invalid tree.
 - **Stuck daemon**: read `daemon.json` directly under
   `<runtime_dir>/daemon/`, then `kill <pid>`. Optionally `rm`
   the registry file once the process is gone.
@@ -826,7 +851,7 @@ contain dots. File boundaries surface only in `config files`.
 | `set ASSIGNMENT...` | Sets one or more fields via `PATH=VALUE` tokens (VALUE parsed as JSON first, falling back to a plain string). Intermediate objects are created as needed; a `PATH` naming a whole file takes a JSON object that **replaces** the file's contents (assignment, not a merge). Assignments spanning multiple files are validated first, then each file is written atomically, with the already-written files rolled back if a later write fails (per-file atomic with batch rollback, not cross-file atomic: a concurrent reader may briefly see a partial multi-file update). Cannot create a new session/system (use `session/system add`); refuses to rewrite a file with JSON5-only syntax (`config_not_rewritable` — use `config edit` instead). |
 | `unset PATH...` | Removes one or more fields, reverting each to its schema default. Cannot unset a whole file (use `session/system remove`); same JSON5-rewrite refusal as `set`. |
 | `keys [PATH]` | Lists every settable logical path below `PATH` (or the whole tree), with type and description — the discovery companion to `get`/`set`. Not exhaustive by design: a discriminated union (e.g. `auth.credentials`) and an open/free-form object (e.g. `session_arguments`) each collapse to a single `object` entry, so their variant- or user-chosen children (such as `auth.credentials.token`) are not listed even though `config set` accepts them. A whole file (its logical path; run `config files`) is likewise omitted. |
-| `edit PATH` | Opens the whole file named by `PATH` in `$EDITOR`/`$VISUAL` and writes back exactly what was saved, comments and formatting included — the only authoring verb that can touch a JSON5-only file. Parses and schema-validates before writing; a failure leaves the file untouched. Interactive only (`no_tty` without a TTY or with `--no-input`). |
+| `edit PATH` | Opens the whole file named by `PATH` in the editor from `$VISUAL`, else `$EDITOR`, else a platform default ([`docs/ENV.md`](ENV.md#visual-and-editor)) and writes back exactly what was saved, comments and formatting included — the only authoring verb that can touch a JSON5-only file. Parses and schema-validates before writing; a failure leaves the file untouched. Interactive only (`no_tty` without a TTY or with `--no-input`). |
 | `session add NAME` | Declares a community session file (`community/sessions/<NAME>.json`). Flags: `--host`, `--port`, `--language`, `--auth anonymous\|psk\|password\|custom` plus the matching credential flags (`--token`; `--username`/`--password`/`--effective-user`; `--auth-type`/`--auth-token`). Missing values are prompted for on a terminal (stderr); non-interactive runs fail with `missing_required_option`. Refuses to overwrite (`already_exists`). |
 | `session remove NAME` | Deletes the session file. Confirms on a terminal; requires `--yes` otherwise.       |
 | `session list` | Lists declared session files with per-file validity. Contrast: `dhcli session list` shows *live* sessions. |

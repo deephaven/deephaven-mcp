@@ -6,13 +6,25 @@ fixed set of environment variables. This file is the canonical
 reference. Every other operator-tunable knob lives in the JSON
 configuration tree; see [`docs/CONFIGURATION.md`](CONFIGURATION.md).
 
+## Table of Contents
+
+- [Variables at a glance](#variables-at-a-glance)
+- [Minimum setup](#minimum-setup)
+- [All binaries](#all-binaries)
+- [Systems server and CLI](#systems-server-and-cli)
+- [CLI (`dhcli`)](#cli-dhcli)
+- [Docs server](#docs-server)
+- [Templating from environment variables](#templating-from-environment-variables)
+
 ## Variables at a glance
 
 | Variable | Consumed by | Purpose |
 |---|---|---|
 | `PYTHONLOGLEVEL` | all three binaries | Python log level. |
 | `DH_AI_DATA_DIR` | systems server, CLI | User-data root (`config/` + `runtime/`). |
+| `APPDATA` | systems server, CLI | Windows only: base for the default user-data root. |
 | `DHCLI_OUTPUT` | CLI | Default output mode (mirrors `-o/--output`). |
+| `VISUAL` / `EDITOR` | CLI | Editor launched by `dhcli config edit`. |
 | `INKEEP_API_KEY` | docs server | **Required.** Inkeep LLM API key. |
 | `MCP_DOCS_HOST` | docs server | HTTP bind host. |
 | `MCP_DOCS_PORT` | docs server | HTTP bind port. |
@@ -39,8 +51,9 @@ that actually require action:
   Optionally set `MCP_DOCS_HOST` / `MCP_DOCS_PORT` if you need
   something other than `127.0.0.1:8001`.
 
-Everything else (`PYTHONLOGLEVEL`, `DHCLI_OUTPUT`, the templating
-engine) is opt-in tuning.
+Everything else is opt-in tuning (`PYTHONLOGLEVEL`, `DHCLI_OUTPUT`,
+`VISUAL` / `EDITOR`, the templating engine) or set for you by the
+operating system (`APPDATA`).
 
 ## All binaries
 
@@ -77,6 +90,20 @@ container volume, chroot, test fixture).
 | Default (POSIX) | `~/.deephaven/ai/` |
 | Default (Windows) | `%APPDATA%/Deephaven/ai/` (standard Windows roaming-app-data location) |
 | Example | `/opt/deephaven/ai` |
+
+### `APPDATA`
+
+Standard Windows roaming-app-data path. Read **only on Windows**, and
+only when `DH_AI_DATA_DIR` is unset, to build the default user-data root
+`%APPDATA%/Deephaven/ai/`. Windows always sets it; if it is unset or
+empty, the resolver falls back to `~/.deephaven/ai/`. Not read on POSIX,
+and never set this yourself to relocate Deephaven data — use
+`DH_AI_DATA_DIR`, which is the supported knob.
+
+| | |
+|---|---|
+| Consumed by | systems server, CLI (Windows only) |
+| Set by | the operating system |
 
 **Propagating it to MCP-client subprocesses.** When an AI client
 (Claude Desktop, etc.) spawns `dh-mcp-systems-server`, the client
@@ -127,6 +154,38 @@ Precedence: **CLI flag** > **`DHCLI_OUTPUT`** > **`cli.json`'s `output.format`**
 | Values | `human`, `json`, `json-pretty`, `yaml` |
 | CLI flag | `-o`, `--output` |
 | `cli.json` field | `output.format` |
+
+### `VISUAL` and `EDITOR`
+
+The editor `dhcli config edit` opens a configuration file in. **Set
+either one; if you only ever set `EDITOR`, that is enough.**
+
+Deephaven MCP does not implement this lookup — `dhcli config edit` calls
+[`click`](https://click.palletsprojects.com/)'s `click.edit()`, which
+honors the long-standing Unix convention: `VISUAL`, then `EDITOR`, then a
+platform default (`notepad` on Windows; otherwise the first of
+`sensible-editor`, `vim`, `nano` found on `PATH`, falling back to `vi`).
+
+The two variables are a historical artifact. `EDITOR` named a
+*line-oriented* editor usable on a printing terminal (`ed`, `ex`), while
+`VISUAL` named a *full-screen* editor that required a cursor-addressable
+display (`vi`). That distinction stopped mattering decades ago, so on a
+modern system they are effectively redundant and most people set only
+one. Both are honored because that is what the convention — and `git`,
+`crontab`, and `systemctl` alongside it — leads users to expect;
+`VISUAL` wins when both are set.
+
+Neither has a `cli.json` field, deliberately: your editor is a property
+of your shell, not of this project's configuration. No other command
+reads them.
+
+`dhcli config edit` is interactive-only: with `--no-input`, or when stdin
+is not a TTY, it fails with `no_tty` rather than launching an editor.
+
+| | |
+|---|---|
+| Precedence | `VISUAL` > `EDITOR` > platform default |
+| Example | `export EDITOR=nvim` |
 
 ## Docs server
 
@@ -179,8 +238,10 @@ either of these placeholders:
   unset or empty, use `default`.
 
 The templating engine resolves the placeholder once at file-load
-time. See the *Templating* section of `docs/CONFIGURATION.md` for
-the full syntax including escapes and nested placeholders.
+time. Placeholders may appear anywhere inside a string value, but
+**nesting is not supported** and there is no escape syntax. See the
+*Templating* section of [`docs/CONFIGURATION.md`](CONFIGURATION.md) for
+the full syntax, including the `${file:PATH}` form.
 
 Example:
 

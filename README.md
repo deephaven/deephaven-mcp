@@ -4,6 +4,13 @@
 [![License](https://img.shields.io/github/license/deephaven/deephaven-mcp)](https://github.com/deephaven/deephaven-mcp/blob/main/LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/deephaven/deephaven-mcp/unit-tests.yml?branch=main)](https://github.com/deephaven/deephaven-mcp/actions/workflows/unit-tests.yml)
 
+> **The `dhcli` command-line tool is under rapid development.** Command
+> names, flags, and output shapes can change without notice, so an
+> upgrade may break scripts written against them — pin a version if you
+> need stability. AI agents need no such care: `dhcli` describes itself
+> at runtime through `dhcli agents tree` and `--agents`, so an agent that
+> reads that manifest adapts to the changes on its own.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -61,7 +68,7 @@ Deephaven MCP implements the [Model Context Protocol (MCP)](https://spec.modelco
 
 Deephaven MCP ships as a single package, and one `dh-mcp-systems-server` reads **one configuration directory tree**. That tree can hold a `community/` section, an `enterprise/` section, or **both at once** — the single server hosts everything it finds, simultaneously. Each section is optional; you are never locked into one deployment type.
 
-The fastest on-ramp is the [Community Core quickstart](#community-core-quick-start) below. Once that works, [add Enterprise](#enterprise-quick-start) by dropping one more file into the *same* config tree — no second install, no second server. (If you only need Enterprise, start there instead; the steps stand alone.)
+The fastest on-ramp is the [Community Core quickstart](#community-core-quick-start) below. Once that works, [add Enterprise](#enterprise-quick-start) with one more command against the *same* config tree — no second install, no second server. (If you only need Enterprise, start there instead; the steps stand alone.)
 
 Install once (below), then configure whichever sections you need.
 
@@ -73,7 +80,7 @@ Install with [`uv`](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisi
 uv tool install --python-preference managed "deephaven-mcp"
 ```
 
-This places `dh-mcp-systems-server` and `dh-mcp-docs-server` on your PATH with no venv to manage. For the venv-based alternative, see [Installation & Initial Setup](#installation--initial-setup).
+This places `dhcli`, `dh-mcp-systems-server`, and `dh-mcp-docs-server` on your PATH with no venv to manage. For the venv-based alternative, see [Installation & Initial Setup](#installation--initial-setup).
 
 > **About `--python-preference managed`**: tells `uv` to download and use its own managed Python (under `~/.local/share/uv/python/`) instead of any Python on your system. You do not need to install Python yourself.
 
@@ -89,50 +96,51 @@ uv tool install --python-preference managed mcp-proxy
 
 **Get up and running in 5 minutes!** This quickstart assumes you have [installed `deephaven-mcp`](#install-deephaven-mcp) and have a local Deephaven Community Core instance running on `localhost:10000`. If you don't have one, [download and start Deephaven Community Core](https://deephaven.io/core/docs/getting-started/quickstart/) first.
 
-#### 1. Create Configuration Directory
+#### 1. Create Your Configuration
 
-`dh-mcp-systems-server` reads a **directory tree** of small JSON files
-(default `~/.deephaven/ai/config/` on POSIX, `%APPDATA%/Deephaven/ai/config/`
-on Windows). A complete sample tree lives in
-[`config-samples/ai/config/`](config-samples/ai/config/). For a minimal Community-only
-setup, create a single per-session file:
+Use `dhcli config` — it writes the files, validates every field before
+saving, and sets the file permissions the server's startup audit
+requires. The guided wizard is the shortest path:
 
-```text
-~/.deephaven/ai/config/
-└── community/
-    └── sessions/
-        └── local.json   # filename stem == session name
+```bash
+dhcli config init
 ```
 
-```json5
-// ~/.deephaven/ai/config/community/sessions/local.json
-{
-  "session_name": "local",        // must match the filename stem
-  "host": "localhost",            // Server hostname or IP address
-  "port": 10000,                  // Deephaven gRPC port (default: 10000)
-  "auth": {
-    "credentials": {
-      "type": "psk",
-      "token": "${env:DH_LOCAL_PSK}"   // export DH_LOCAL_PSK=your-token
-    }
-  }
-}
+It prompts for one Community session and/or one Enterprise system, then
+writes them. To skip the prompts, declare the session directly:
+
+```bash
+dhcli config session add local --host localhost --port 10000 \
+  --auth psk --token '${env:DH_LOCAL_PSK}'
 ```
 
-For on-demand session creation, also add
-`~/.deephaven/ai/config/community/settings.json` with a
-`session_creation` block (see
-[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)).
+`${env:DH_LOCAL_PSK}` is stored verbatim and read from the environment
+when the configuration is loaded, so the secret never lands in a file.
+Use `--auth anonymous` instead if your Deephaven instance needs no token.
 
-> **Security Note**: Lock down the configuration directory — the
-> startup permission audit fails fast otherwise:
->
-> ```sh
-> chmod 700 ~/.deephaven/ai/config
-> chmod 600 ~/.deephaven/ai/config/community/sessions/local.json
-> ```
+Confirm the result:
 
-> **Dynamic Sessions**: The `session_creation` section enables on-demand [Community Core](https://deephaven.io/community/) session creation. Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for details.
+```bash
+export DH_LOCAL_PSK='your-token'    # any ${env:...} ref must resolve here
+dhcli config validate
+```
+
+Exit code `0` means the tree is good. `validate` resolves every
+`${env:...}` reference in the *current shell*, so it exits `2` with
+`config_invalid` if `DH_LOCAL_PSK` is unset — export it (or put it in
+your shell profile) before validating. Run `dhcli config files` to see
+where the files landed, or `dhcli config get` to print the tree.
+
+> **Where the files live**: `~/.deephaven/ai/config/` on POSIX,
+> `%APPDATA%/Deephaven/ai/config/` on Windows. `dhcli config` creates the
+> directory owner-only and each file owner-read/write, which is what the
+> server's permission audit requires. If you hand-edit instead, apply
+> `chmod 700` to the directory and `chmod 600` to every file yourself.
+> [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) documents the full
+> schema, and [`config-samples/ai/config/`](config-samples/ai/config/)
+> ships a complete sample tree.
+
+> **Dynamic Sessions**: A `session_creation` block enables on-demand [Community Core](https://deephaven.io/community/) session creation — add one with `dhcli config set community.settings.session_creation.max_concurrent_sessions=5` (`config set` takes `PATH=VALUE` tokens). Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for details.
 
 #### 2. Start the Systems Server and Configure Your AI Tool
 
@@ -202,13 +210,15 @@ Before wiring up an AI client, confirm your config is valid and the server works
 `mcp-proxy`:
 
 ```bash
-dhcli session list
+dhcli config validate    # is the configuration itself well-formed?
+dhcli session list       # can the server load it and see your session?
 ```
 
-This lists your **configured** sessions (it reads config; the Deephaven server need not be
-running). If you see your `local` session, the config tree and systems server are good — any
-remaining problem is in your AI-tool wiring, not the server. A malformed config fails fast
-here with a clear error. See [`docs/CLI.md`](docs/CLI.md) for the full CLI reference.
+`config validate` checks the files alone. `session list` goes further: it starts the daemon,
+loads the tree, and lists the sessions the server knows about — so if you see your `local`
+session, the config tree and systems server are both good and any remaining problem is in
+your AI-tool wiring. A malformed config fails fast with a structured error naming the file
+and field. See [`docs/CLI.md`](docs/CLI.md) for the full CLI reference.
 
 #### 4. Try It Out
 
@@ -230,14 +240,14 @@ Confirm the setup is working by asking:
 
 **Get up and running in 5 minutes!** This quickstart assumes you have [installed `deephaven-mcp`](#install-deephaven-mcp) and have a Deephaven Enterprise system accessible at a known URL. Contact your Deephaven administrator for the `connection.json` URL and your credentials.
 
-> **Adding to an existing setup?** This is additive, not a separate install or a separate server. If you already ran the [Community Core quickstart](#community-core-quick-start), you are dropping one file into the **same** config directory — the one running `dh-mcp-systems-server` then hosts your Community sessions **and** your Enterprise systems together. If you skipped Community, this section stands alone.
+> **Adding to an existing setup?** This is additive, not a separate install or a separate server. If you already ran the [Community Core quickstart](#community-core-quick-start), you are adding one entry to the **same** config directory — the one running `dh-mcp-systems-server` then hosts your Community sessions **and** your Enterprise systems together. If you skipped Community, this section stands alone.
 
-#### 1. Create Configuration Directory
+#### 1. Create Your Configuration
 
-Create a per-system file under your configuration directory
-(default `~/.deephaven/ai/config/`). Each enterprise system gets one
-file under `enterprise/systems/`; the filename stem must equal
-`system_name`. The systems server hosts every file it finds.
+Declare the system with `dhcli config` — it validates the fields, writes
+the file atomically, and applies the permissions the server's startup
+audit requires. Each enterprise system becomes one file under
+`enterprise/systems/`, and the systems server hosts every file it finds.
 
 > **Server-stored credentials.** The systems server holds the
 > credentials needed to talk to the Core+ controller, expressed as a
@@ -250,44 +260,36 @@ file under `enterprise/systems/`; the filename stem must equal
 
 **Password auth (with the secret read from an env var):**
 
-```json5
-// ~/.deephaven/ai/config/enterprise/systems/prod.json
-{
-  "system_name": "prod",                                          // must match the filename stem
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": {
-    "credentials": {
-      "type": "password",
-      "username": "iris",
-      "password": "${env:DH_PROD_PASSWORD}"   // export DH_PROD_PASSWORD=...
-    }
-  }
-}
+```bash
+dhcli config system add prod \
+  --url https://dhe.example.com/iris/connection.json \
+  --auth password --username iris --password '${env:DH_PROD_PASSWORD}'
 ```
 
-**Private-key auth:**
+**Private-key auth** — PEM text is multi-line, so reference the file:
 
-```json5
-// ~/.deephaven/ai/config/enterprise/systems/prod.json
-{
-  "system_name": "prod",
-  "connection_json_url": "https://dhe.example.com/iris/connection.json",
-  "auth": {
-    "credentials": {
-      "type": "private_key",
-      "key_text": "${file:/etc/deephaven/prod-key.pem}"
-    }
-  }
-}
+```bash
+dhcli config system add prod \
+  --url https://dhe.example.com/iris/connection.json \
+  --auth private_key --key '${file:/etc/deephaven/prod-key.pem}'
 ```
 
-> **Security Note**: Lock down the configuration directory — the
-> startup permission audit fails fast otherwise:
->
-> ```sh
-> chmod 700 ~/.deephaven/ai/config
-> chmod 600 ~/.deephaven/ai/config/enterprise/systems/prod.json
-> ```
+Omit any flag to be prompted for it on a terminal. Then verify:
+
+```bash
+export DH_PROD_PASSWORD='your-password'    # for the password-auth variant
+dhcli config validate
+```
+
+`validate` resolves `${env:...}` references in the current shell, so
+export the secret before running it. `system_name` is not a field you
+set — the filename stem is the system name, and `prod` above becomes
+`enterprise/systems/prod.json`. `community` is reserved and cannot be
+used as an Enterprise system name.
+
+> **Multiple systems**: run `dhcli config system add <name> ...` once per
+> system. List what you have declared with `dhcli config system list`,
+> and remove one with `dhcli config system remove <name>`.
 
 Community and Enterprise live side by side in the same tree — the one
 server hosts both:
@@ -322,10 +324,8 @@ To check logs: `tail -f dh-mcp-systems.log`
 
 To stop the server: `pkill -f dh-mcp-systems-server`
 
-> **Multiple DHE systems**: Drop one
-> `~/.deephaven/ai/config/enterprise/systems/<name>.json` per system
-> into the directory — the single `dh-mcp-systems-server` instance
-> hosts them all.
+> **Multiple DHE systems**: run `dhcli config system add` once per system
+> (Step 1) — the single `dh-mcp-systems-server` instance hosts them all.
 
 **For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add (stdio variant):
 
@@ -374,13 +374,16 @@ Before wiring up an AI client, confirm your config is valid using the `dhcli` CL
 auto-starts its own daemon, so nothing else needs to be running:
 
 ```bash
-dhcli system list
+dhcli config validate    # is the configuration itself well-formed?
+dhcli system list        # which systems does the server serve?
 ```
 
-This lists your **configured** Enterprise systems straight from the config tree (no live
-connection required). Seeing your system here confirms the config and systems server are
-good; a malformed config fails fast with a clear error. See [`docs/CLI.md`](docs/CLI.md) for
-the full CLI reference.
+`system list` returns every configured system as `{name, type}` pairs — the `community`
+umbrella alongside each Enterprise system — so your `prod` entry appearing there confirms
+the config and systems server are both good. A malformed config fails fast with a structured
+error naming the file and field. To check that the system is actually reachable, add
+`dhcli system status --system prod --connect`. See [`docs/CLI.md`](docs/CLI.md) for the full
+CLI reference.
 
 #### 4. Try It Out
 
@@ -436,27 +439,27 @@ rewrites your old file into the new tree — follow the
 
 ### Deephaven CLI (`dhcli`)
 
-The Deephaven command-line tool, designed for humans and especially
-AI agents: it inspects and operates Deephaven systems from the shell
-with friendly noun-verb commands — `session`, `system`, `table`,
-`catalog`, `pq`, and `docs` — with typed flags, shaped output, and
-`-o human|json|json-pretty|yaml` (e.g. `dhcli session list`,
-`dhcli session open <id>`), plus the raw `dhcli tool call` escape
-hatch. Today its runtime commands are backed by the systems server:
-`dhcli` auto-spawns a per-user background daemon on first use,
-discovers it via a `daemon.json` registry under the runtime
-directory, and dispatches MCP tool calls over loopback HTTP with a
-random PSK — no server lifecycle to manage yourself. Useful for
-shell scripting, tool exploration, local debugging, and agent
-workflows (`dhcli agents tree` emits the whole command surface as
-JSON). See [`docs/CLI.md`](docs/CLI.md) for the full reference.
+The Deephaven command-line tool, designed for humans and especially AI
+agents. It inspects and operates Deephaven systems from the shell with
+noun-verb commands, typed flags, and machine-first structured output.
+
+- **Configure**: `dhcli config init`, `config session add`, `config system add`, `config validate` — author and check the configuration tree without hand-editing JSON.
+- **Operate**: `session`, `system`, `table`, `catalog`, and `pq` verbs, e.g. `dhcli session list` or `dhcli session open <id>`.
+- **Ask the docs**: `dhcli docs ask` queries the Deephaven documentation assistant.
+- **Output modes**: `-o human|json|json-pretty|yaml`, defaulting to compact `json`.
+- **For agents**: `dhcli agents tree` emits the whole command surface as JSON — preferable to scraping `--help`.
+- **Escape hatch**: `dhcli tool call` invokes any MCP tool directly.
+
+It manages its own background server, so there is no lifecycle to run
+yourself. See [`docs/CLI.md`](docs/CLI.md) for the full reference.
 
 ### Systems Server (`dh-mcp-systems-server`)
 
 A single multiplexed binary that hosts every configured Community
 session **and** every Enterprise system in one process. Tools that
 operate on a specific Enterprise system take a `system` argument; PQ
-tools encode the system in the PQ id (form `<system>:<serial>`).
+tools encode the system in the PQ id (form
+`enterprise:<system>:<serial>`).
 
 **Key Capabilities (Community side):**
 
@@ -497,7 +500,7 @@ It speaks streamable-HTTP only; stdio-only clients (e.g. [Claude Desktop](https:
 All tools below are exposed by the single multiplexed
 `dh-mcp-systems-server`. Tools that operate on a specific Enterprise
 system take a required `system` argument; PQ tools encode the system
-in the PQ id (form `<system>:<serial>`).
+in the PQ id (form `enterprise:<system>:<serial>`).
 
 *System discovery:*
 
@@ -527,7 +530,7 @@ in the PQ id (form `<system>:<serial>`).
 - `pq_restart(ids)` - Restart PQs (parallel execution with configurable concurrency)
 - `pq_delete(ids)` - Delete PQs (parallel execution with configurable concurrency)
 
-**Parallel Batch Operations**: When operating on multiple PQs, `pq_start`, `pq_stop`, `pq_restart`, and `pq_delete` execute operations in parallel with a default concurrency limit of 20. This provides near-batch performance (~10x faster for large batches) while maintaining granular per-item error reporting for AI agents. The concurrency limit can be adjusted via the `max_concurrent` parameter to balance performance and server load.
+**Parallel Batch Operations**: `pq_start`, `pq_stop`, `pq_restart`, and `pq_delete` accept a list of ids and operate on them in parallel, reporting success or failure per item rather than failing the whole batch. The concurrency cap is operator-configurable via `pq_tools.default_max_concurrent` in `enterprise/settings.json` — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 
 *Catalog discovery:*
 
@@ -621,7 +624,7 @@ Or see the [uv installation guide](https://docs.astral.sh/uv/getting-started/ins
 uv tool install --python-preference managed "deephaven-mcp"
 ```
 
-After this command, `dh-mcp-systems-server` and `dh-mcp-docs-server` are available on your PATH. Both Community Core and Enterprise (Core+) support are always included.
+After this command, `dhcli`, `dh-mcp-systems-server`, and `dh-mcp-docs-server` are available on your PATH. Both Community Core and Enterprise (Core+) support are always included.
 
 > **About `--python-preference managed`**: this flag tells `uv` to download and use its own managed Python interpreter (stored under `~/.local/share/uv/python/`) rather than any Python already on your system. The tool environment is unaffected if your system Python is upgraded, moved, or removed; `uv` picks the latest Python version compatible with the package's `requires-python`. Recommended for everyone — you do not need to install Python yourself.
 
@@ -694,10 +697,17 @@ config_dir/
         └── <name>.json              # one file per enterprise system
 ```
 
-Filename stems must equal the `session_name` / `system_name` field
-inside each file. The startup permission audit requires the directory
-to be locked down (POSIX strict, Windows best-effort) — see
-[`docs/SECURITY.md`](docs/SECURITY.md).
+Each filename stem **is** the session or system name (`local.json`
+declares the session `local`). A file may also carry a matching
+`session_name` / `system_name` field for readability, but it is
+optional and must agree with the stem when present. Names allow ASCII
+letters, digits, `_`, and `-` — no dots, since a name becomes one
+segment of a dot-separated configuration path.
+
+The startup permission audit requires the directory to be locked down
+(POSIX strict, Windows best-effort) — see
+[`docs/SECURITY.md`](docs/SECURITY.md). The `dhcli config` authoring
+verbs apply those permissions for you.
 
 **Full reference**:
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) is the single source
@@ -705,6 +715,12 @@ of truth for the schema — every supported field, every authentication
 type, the `${env:VAR}` / `${file:/path}` templating syntax, the
 `session_creation` block for on-demand Community sessions, and the
 `server.json` transport / PSK options.
+
+**Authoring and inspection**: the `dhcli config` verbs read and write this
+tree for you — `init` (guided wizard), `session add` / `system add`,
+`set` / `unset` / `get` / `keys`, `edit`, `files`, `show`, and `validate`.
+Every change is schema-validated before an atomic write, so an invalid
+file never lands on disk. See [`docs/CLI.md`](docs/CLI.md).
 
 **Working examples**:
 [`config-samples/ai/config/`](config-samples/ai/config/) contains a complete,
@@ -897,14 +913,33 @@ Windsurf supports HTTP MCP servers natively. Go to **Windsurf Settings** > **Cas
 
 This section provides comprehensive guidance for diagnosing and resolving common issues with Deephaven MCP setup and operation. Issues are organized by category, starting with the most frequently encountered problems.
 
+### Start Here: Diagnose with `dhcli`
+
+The CLI answers most "is it my config or my AI tool?" questions without
+involving your AI client at all:
+
+```bash
+dhcli config validate    # is the configuration valid? exit 0 = yes
+dhcli config files       # which files exist, and which one is broken?
+dhcli daemon status      # is the background server running?
+dhcli daemon logs -n 50  # what did it say?
+```
+
+`config files` works even when the configuration is broken or empty, so it
+is the right first command when `validate` fails — it names the offending
+file and its first validation error. If `validate` passes but your AI tool
+still cannot connect, the problem is in the AI-tool wiring, not the
+configuration.
+
 ### Quick Fixes
 
 Before diving into detailed troubleshooting, try these common solutions:
 
 1. **Restart your IDE/AI assistant** after any configuration changes
-2. **Check that file paths are correct** in your JSON configurations (use absolute paths for venv-based installs)
-3. **Verify your virtual environment is activated** when running commands (venv-based installs only — not needed with `uv tool install`)
-4. **Validate JSON syntax** using [https://jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
+2. **Validate your Deephaven configuration** with `dhcli config validate` — it reports the exact file and field at fault
+3. **Check that file paths are correct** in your JSON configurations (use absolute paths for venv-based installs)
+4. **Verify your virtual environment is activated** when running commands (venv-based installs only — not needed with `uv tool install`)
+5. **Validate your AI tool's own JSON config** using [https://jsonlint.com](https://jsonlint.com/) or your IDE's JSON validator
 
 ### Common Error Messages
 
@@ -922,6 +957,12 @@ Before diving into detailed troubleshooting, try these common solutions:
 | `Enterprise system 'foo' is not configured` | MCP tool responses | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems. |
 | HTTP `401`/`403` from the server | HTTP transport | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK. |
 | HTTP server refuses to start with a loopback error | systems-server startup | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead. |
+| `config_invalid` | `dhcli` commands | A file under the configuration directory failed validation. Run `dhcli config files` to find which one; the message names the file and field. An unresolved `${env:VAR}` reference counts — export the variable in the shell you are running from. |
+
+> **For scripts and AI agents**: `dhcli` failures print a structured
+> `{error, error_code, exit_code, command}` object in the JSON output
+> modes. Branch on the stable `error_code`, not the message text; run
+> `dhcli agents errors` for the full registry of codes and their meanings.
 
 ### JSON Configuration Issues
 
@@ -966,7 +1007,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 - **`command not found` for [`uv`](docs/UV.md) (in LLM tool logs):**
   - Ensure [`uv`](docs/UV.md) is installed and its installation directory is in your system's `PATH` environment variable, accessible by the LLM tool.
-- **`command not found` for `dh-mcp-systems-server` or `dh-mcp-docs-server`:**
+- **`command not found` for `dhcli`, `dh-mcp-systems-server`, or `dh-mcp-docs-server`:**
   - **If you used `uv tool install` (recommended):** Reinstall (or upgrade) with `uv tool install --python-preference managed "deephaven-mcp"` (or `uv tool upgrade deephaven-mcp`). Then make sure the uv tool bin directory is on your `PATH` — run `uv tool update-shell` and open a new shell, or locate the binary with `which dh-mcp-systems-server` (macOS/Linux) or `where dh-mcp-systems-server` / `Get-Command dh-mcp-systems-server` (Windows).
   - **If you used a virtual environment (alternative install):** Ensure the package is installed in the venv with `uv pip install "deephaven-mcp"`, and either activate the venv or use the full path to the executable (e.g. `.venv/bin/dh-mcp-systems-server`).
 
@@ -1021,7 +1062,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Use the correct format: `{type}:{system}:{name}`
   - Community: `community:community:<session_name>` (the `SessionId` is the session name itself, e.g. `community:community:my_session`)
   - Enterprise: `enterprise:<system_name>:<pq_serial>` (the `SessionId` is the PQ serial as a decimal string, e.g. `enterprise:prod:42`); use `pq_name_to_id` to resolve a PQ name to its serial
-  - Avoid special characters or spaces in session names (the community session name must match `[A-Za-z0-9][A-Za-z0-9_.-]*` since it doubles as the `SessionId`)
+  - Avoid special characters or spaces in session names (the community session name must match `[A-Za-z0-9][A-Za-z0-9_-]*` since it doubles as the `SessionId`). Dots are not allowed — a name becomes one segment of a dot-separated configuration path, so rename using `-` or `_`
 
 - **Authentication Problems:**
   - **Community sessions:** Verify connection URLs and the `auth.credentials` block — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
@@ -1069,7 +1110,7 @@ If you've tried the above solutions and are still experiencing issues:
    - Steps to reproduce the issue
 
 2. **Check Documentation:**
-   - Review the [Developer Guide](docs/DEVELOPER_GUIDE.md) for advanced troubleshooting
+   - Review [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for the full configuration schema and [`docs/CLI.md`](docs/CLI.md) for CLI diagnostics
    - Check the [GitHub Issues](https://github.com/deephaven/deephaven-mcp/issues) for similar problems
 
 3. **Community Support:**

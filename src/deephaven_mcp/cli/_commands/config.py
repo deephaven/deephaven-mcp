@@ -1233,7 +1233,7 @@ _OUTPUT_EDIT = OutputSpec(
 
 
 def _open_editor(text: str) -> str | None:
-    """Open ``text`` in ``$EDITOR``/``$VISUAL`` and return the saved result.
+    """Open ``text`` in ``$VISUAL``/``$EDITOR`` and return the saved result.
 
     Args:
         text (str): The initial file contents shown to the operator.
@@ -1250,13 +1250,13 @@ def _open_editor(text: str) -> str | None:
     "edit",
     cls=HelpfulCommand,
     help_spec=HelpSpec(
-        summary="Edit one whole configuration file in $EDITOR.",
+        summary="Edit one whole configuration file in your editor.",
         description=(
-            "Opens the file named by PATH in $EDITOR (or $VISUAL, falling "
-            "back to a platform default) and writes back exactly what was "
-            "saved — comments and formatting included — so a file relying "
-            "on JSON5-only syntax that 'config set'/'unset' refuse to "
-            "touch can still be edited here. The saved text is parsed and "
+            "Opens the file named by PATH in the editor named by $VISUAL, "
+            "else $EDITOR, else a platform default, and writes back exactly "
+            "what was saved — comments and formatting included — so a file "
+            "relying on JSON5-only syntax that 'config set'/'unset' refuse "
+            "to touch can still be edited here. The saved text is parsed and "
             "schema-validated before anything is written; a failure "
             "leaves the file untouched and reports the parse or "
             "validation error. Interactive only: requires a TTY and is "
@@ -1297,7 +1297,7 @@ def _open_editor(text: str) -> str | None:
 @click.pass_context
 @run_async
 async def config_edit(ctx: click.Context, path: str) -> None:
-    """Edit one whole configuration file in $EDITOR."""
+    """Edit one whole configuration file in your editor."""
     spec = _authoring_spec(ctx)
     if not can_prompt(no_input=spec.no_input):
         raise CliError(

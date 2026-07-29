@@ -110,9 +110,9 @@ class CommunitySessionConfig(RedactableSchema):
 
         The community :class:`SessionId` is the session name itself, so
         the name must conform to the resource-name character class
-        (ASCII alphanumerics plus ``_``, ``.``, ``-``; starting
-        alphanumeric; non-empty). Catches bad filename stems at
-        config-load time before they reach the registry.
+        (ASCII alphanumerics plus ``_`` and ``-``; starting
+        alphanumeric; non-empty; no dots). Catches bad filename stems
+        at config-load time before they reach the registry.
         """
         validate_resource_name(value, field="name")
         return value

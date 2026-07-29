@@ -62,6 +62,19 @@ All files are JSON5 (so comments and trailing commas are allowed)
 and validated by Pydantic. Unknown fields are rejected with a
 clear error.
 
+You can hand-edit these files, or let the CLI write them: the
+`dhcli config` verbs (`init`, `session add`, `system add`, `set`,
+`unset`, `get`, `keys`, `edit`, `files`, `show`, `validate`) address the
+tree by dot-separated logical path, schema-validate every change before
+an atomic write, and apply the permissions the startup audit requires.
+`dhcli config validate` is the standalone check for a tree you edited by
+hand. See [`docs/CLI.md`](CLI.md).
+
+One caveat if you rely on JSON5 syntax: `config set` / `config unset`
+refuse to rewrite a file containing comments or trailing commas, since a
+programmatic rewrite would discard them. Use `dhcli config edit`, which
+preserves the file verbatim, or edit it directly.
+
 ## Templating
 
 Anywhere a string value appears in a JSON file the server expands
@@ -464,11 +477,20 @@ Enterprise `SessionManager` fetches its truststore via the
 Configuration is read **once at server startup**. There is no
 hot-reload path; restart the server to pick up changes.
 
+This applies to the `dhcli` daemon too: a running daemon keeps the tree
+it loaded, so a config change does not reach it until you run
+`dhcli daemon stop` (the next command starts a fresh one) or
+`dhcli daemon restart`. The `dhcli config` authoring verbs print a
+reminder when a daemon is running.
+
 ## See also
 
-- `docs/ENV.md` — the (small) set of environment variables the
+- [`docs/ENV.md`](ENV.md) — the (small) set of environment variables the
   server processes themselves consume.
-- `docs/DEVELOPER_GUIDE.md` — building and running the servers.
-- `docs/SECURITY.md` — secret-handling guarantees.
-- `config-samples/ai/config/` — copy-paste-ready example configuration
-  directory.
+- [`docs/CLI.md`](CLI.md) — the `dhcli config` verbs that author,
+  inspect, and validate this tree.
+- [`docs/DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) — building and running
+  the servers.
+- [`docs/SECURITY.md`](SECURITY.md) — secret-handling guarantees.
+- [`config-samples/ai/config/`](../config-samples/ai/config/) —
+  copy-paste-ready example configuration directory.
