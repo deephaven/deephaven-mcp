@@ -13,8 +13,9 @@ Two complementary access paths render the same metadata:
   appended to — the machine-readable twin of ``--help``.
 - This ``agents`` group exposes whole-system / cross-cutting
   views: ``tree`` (the summary tree, or the complete manifest with
-  ``--full``), ``command`` (one command's self-contained node), and
-  ``errors`` (the error-code registry).
+  ``--full``), ``command`` (one command's full node), and
+  ``errors`` (the error-code registry that decodes any node's
+  ``error_codes``).
 
 The manifest builders themselves
 (:func:`~deephaven_mcp.cli._manifest.build_manifest` and friends) live in
@@ -212,7 +213,8 @@ _OUTPUT_COMMAND = OutputSpec(
         OutputField(
             "error_codes",
             "array",
-            "Error codes the command can emit ({code, help} each).",
+            "Error codes the command can emit, as bare strings. Decode "
+            "them with 'dhcli agents errors'.",
         ),
         OutputField(
             "exit_codes", "array", "Exit codes the command can return ({code, help})."
@@ -240,8 +242,8 @@ _OUTPUT_COMMAND = OutputSpec(
         summary="Print one command's full node from the manifest.",
         description=(
             "Resolves PATH (one or more command-name tokens) against the "
-            "live command tree and emits that command's self-contained "
-            "node — identical to appending --agents to the command. A "
+            "live command tree and emits that command's full node — "
+            "identical to appending --agents to the command. A "
             "group's node lists its subcommands as one-line summaries; "
             "pass --full to expand them into full nested nodes. Use "
             "'agents tree --full' for the whole manifest with "
@@ -307,9 +309,11 @@ _OUTPUT_ERRORS = OutputSpec(
         summary="Print the stable error-code registry.",
         description=(
             "Every error_code string the CLI can return in a structured "
-            "error payload, with its meaning. Agents use this to map an "
-            "error_code field back to what went wrong. Also available as "
-            "the 'error_codes' key of 'agents tree --full'."
+            "error payload, with its meaning. This is the decoder for the "
+            "'error_codes' a command node names: nodes carry bare code "
+            "strings, so fetch this registry once and keep it rather than "
+            "re-reading it per command. Also available as the "
+            "'error_codes' key of 'agents tree --full'."
         ),
         output=_OUTPUT_ERRORS,
         examples=("$ dhcli agents errors | jq '.[].code'",),

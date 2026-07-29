@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
 from deephaven_mcp.cli._format import (
+    _MIN_TERMINAL_WIDTH,
     DEFAULT_OUTPUT_MODE,
     OUTPUT_ENV_VAR,
     OUTPUT_MODES,
@@ -455,10 +457,19 @@ def test_format_tool_list_aligns_names() -> None:
 
 
 def test_format_tool_list_truncates_long_descriptions() -> None:
+    """A long description is cut to fit the terminal, ellipsis included.
+
+    The bound is the width the formatter itself computes -- terminal
+    columns (80 when stdout is not a TTY, as under pytest) floored at
+    ``_MIN_TERMINAL_WIDTH`` -- not a constant chosen here. A slacker
+    number would let the truncation math regress by a wide margin and
+    still pass.
+    """
     long = "x" * 500
     out = _format_tool_list([_tool("t", long)])
+    budget = max(shutil.get_terminal_size().columns, _MIN_TERMINAL_WIDTH)
     assert "..." in out
-    assert len(out.splitlines()[0]) <= 100
+    assert len(out.splitlines()[0]) <= budget
 
 
 def test_format_tool_list_handles_missing_description() -> None:

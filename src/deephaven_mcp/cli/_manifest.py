@@ -9,7 +9,7 @@ two surfaces cannot drift.
   command path with its one-line summary.
 - :func:`build_manifest` walks the live click tree into the complete
   JSON-safe manifest.
-- :func:`describe_command` renders one self-contained node.
+- :func:`describe_command` renders one command's full node.
 
 The ``dhcli agents`` verbs and the universal ``--agents`` flag both emit
 these. Node keys are sparse: an absent key means false, empty, or the
@@ -69,35 +69,39 @@ class NodeStyle(Enum):
     """Whether a command node must stand on its own or leans on the manifest root.
 
     Selects how much a node repeats. The distinction only affects the
-    ``error_codes`` / ``exit_codes`` / ``environment`` keys, whose
-    meanings and project-wide defaults are either inlined per node or
-    carried once at the root.
+    ``exit_codes`` / ``environment`` keys, whose meanings and
+    project-wide defaults are either inlined per node or carried once at
+    the root. ``error_codes`` is style-independent -- always bare code
+    strings, because their meanings are large enough (~2.6 KB on a
+    daemon-reaching verb) to be worth one lookup via ``dhcli agents
+    errors`` rather than a copy on all 76 nodes.
     """
 
     STANDALONE = ("standalone", True)
-    """Self-contained, for a node emitted on its own.
+    """Near-self-contained, for a node emitted on its own.
 
-    Code entries carry their meanings as ``{code, help}`` and the
-    resolved defaults are inlined, so a reader with only this node can
-    decode every field. Used by ``--agents`` and ``dhcli agents
-    command``.
+    Exit-code entries carry their meanings as ``{code, help}`` and the
+    resolved default environment is inlined, so a reader with only this
+    node can decode every field but ``error_codes`` (see the class
+    docstring). Used by ``--agents`` and ``dhcli agents command``.
     """
 
     EMBEDDED = ("embedded", False)
     """Terse, for a node nested inside the whole-tree manifest.
 
-    Code entries are bare values and entries the spec leaves unset are
-    omitted, because the root's ``error_codes`` / ``default_exit_codes``
-    / ``default_environment`` keys carry them once for the whole tree.
+    Exit-code entries are bare values and entries the spec leaves unset
+    are omitted, because the root's ``default_exit_codes`` /
+    ``default_environment`` keys carry them once for the whole tree.
     Used by :func:`build_manifest`.
     """
 
     standalone: bool
     """Whether a node in this style must decode without the manifest root.
 
-    ``True`` inlines code meanings as ``{code, help}`` and the resolved
-    project-wide defaults; ``False`` emits bare code values and omits
-    entries the spec leaves unset, because the root states them once.
+    ``True`` inlines exit-code meanings as ``{code, help}`` and the
+    resolved project-wide defaults; ``False`` emits bare exit-code values
+    and omits entries the spec leaves unset, because the root states them
+    once. ``error_codes`` ignores this flag -- always bare.
     """
 
     def __new__(cls, value: str, standalone: bool) -> NodeStyle:
@@ -131,9 +135,8 @@ def _agents_callback(ctx: click.Context, _param: click.Parameter, value: bool) -
 
     The eager callback behind the universal ``--agents`` flag, the
     machine-readable twin of ``--help``: emits the summary tree when
-    invoked on the root group and a single self-contained command node
-    otherwise, in the root ``-o/--output`` mode (or ``DHCLI_OUTPUT``),
-    defaulting to
+    invoked on the root group and a single command node otherwise, in
+    the root ``-o/--output`` mode (or ``DHCLI_OUTPUT``), defaulting to
     :data:`~deephaven_mcp.cli._format.DEFAULT_OUTPUT_MODE` (``json``)
     like every command. Pass ``-o human`` for terminal-friendly output.
 
@@ -495,9 +498,11 @@ def _describe_spec_extras(spec: HelpSpec, *, style: NodeStyle) -> dict[str, Any]
 
     Args:
         spec (HelpSpec): The command's help spec.
-        style (NodeStyle): Whether to inline code meanings and resolved
-            defaults (:attr:`NodeStyle.STANDALONE`) or emit bare values
-            and omit spec-unset entries (:attr:`NodeStyle.EMBEDDED`).
+        style (NodeStyle): Whether to inline exit-code meanings and the
+            resolved default environment (:attr:`NodeStyle.STANDALONE`)
+            or emit bare values and omit spec-unset entries
+            (:attr:`NodeStyle.EMBEDDED`). ``error_codes`` is bare in
+            both styles.
 
     Returns:
         dict[str, Any]: The applicable keys, empty when the spec carries
@@ -510,10 +515,7 @@ def _describe_spec_extras(spec: HelpSpec, *, style: NodeStyle) -> dict[str, Any]
     if spec.see_also:
         extras["see_also"] = list(spec.see_also)
     if spec.error_codes:
-        extras["error_codes"] = [
-            ({"code": c.value, "help": c.help_text} if standalone else c.value)
-            for c in spec.error_codes
-        ]
+        extras["error_codes"] = [c.value for c in spec.error_codes]
     exit_codes = spec.exit_codes if spec.exit_codes is not None else tuple(ExitCode)
     if exit_codes and (standalone or spec.exit_codes is not None):
         extras["exit_codes"] = [
@@ -552,11 +554,11 @@ def describe_command(
       :func:`_describe_output`.
     - ``examples`` (list[str]): Shell snippets.
     - ``see_also`` (list[str]): Related commands.
-    - ``error_codes`` (list): The codes the command can emit —
-      ``{code, help}`` entries in a standalone node (decodable without
-      the root registry), bare code strings inside the whole-tree
-      manifest (the root ``error_codes`` registry carries the
-      meanings).
+    - ``error_codes`` (list[str]): The codes the command can emit, as
+      bare strings in every node style. Meanings come from the
+      ``dhcli agents errors`` registry (also the whole-tree manifest's
+      root ``error_codes`` key) rather than a per-node copy; a failure
+      itself carries a raise-site message alongside its ``error_code``.
     - ``exit_codes`` (list): The codes the command can return —
       ``{code, help}`` entries in a standalone node, bare integers
       inside the whole-tree manifest (see ``default_exit_codes``).
@@ -569,11 +571,11 @@ def describe_command(
 
     Args:
         cmd (click.Command): The command to describe.
-        style (NodeStyle): Whether the node must be self-contained
+        style (NodeStyle): Whether the node stands on its own
             (:attr:`NodeStyle.STANDALONE`, the default) or is nested
             inside the whole-tree manifest
-            (:attr:`NodeStyle.EMBEDDED`), which carries code meanings
-            and project defaults once at its root.
+            (:attr:`NodeStyle.EMBEDDED`), which carries exit-code
+            meanings and project defaults once at its root.
         recurse (bool): Forwarded to :func:`_describe_subcommands` for
             groups.
         parents (tuple[str, ...]): Ancestor path tokens, program name
@@ -666,7 +668,8 @@ AGENT_CONVENTIONS: tuple[str, ...] = (
     "user-facing failure, 3 the invoked MCP tool returned isError=true. A "
     "failure prints {error, error_code, exit_code, command} in the "
     "structured modes; branch on the stable error_code, not on the "
-    "message ('dhcli agents errors' lists them).",
+    "message. A command node names the codes it can emit; 'dhcli agents "
+    "errors' is where their meanings and recovery steps live.",
     "A session, system, or PQ id omitted from a verb falls back to the "
     "sticky context in context.json, which the command line does not show "
     "— an omitted id means 'whatever the context holds', not 'no target'. "

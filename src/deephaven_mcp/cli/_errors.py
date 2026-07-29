@@ -93,14 +93,14 @@ class ErrorCode(StrEnum):
         "daemon_client_error",
         "A client-side daemon-management failure (signal denied, etc.).",
     )
+    # Kept distinct from DAEMON_NOT_RUNNING deliberately: treating a corrupt
+    # registry as absent would emit the misleading 'no daemon running' instead
+    # of an actionable diagnostic. Do not merge the two.
     DAEMON_REGISTRY_CORRUPT = (
         "daemon_registry_corrupt",
         (
-            "The on-disk daemon.json exists but cannot be parsed. Distinct "
-            "from daemon_not_running so the operator gets an actionable "
-            "diagnostic rather than the misleading 'no daemon running' the CLI "
-            "would otherwise emit after silently treating a corrupt file as "
-            "absent. Recover with 'dhcli daemon repair'."
+            "The on-disk daemon.json exists but cannot be parsed. Recover "
+            "with 'dhcli daemon repair'."
         ),
     )
     DAEMON_REGISTRY_LIVE = (
@@ -210,10 +210,8 @@ class ErrorCode(StrEnum):
             "Every configuration file is individually valid, but no system "
             "is declared: there is no community session file, no "
             "session_creation block in community/settings.json, and no "
-            "enterprise system file. Distinct from config_invalid so a "
-            "half-finished configuration is distinguishable from a "
-            "malformed one. Add a system ('dhcli config session add', "
-            "'dhcli config system add', or 'dhcli config init'), or check "
+            "enterprise system file. Add a system ('dhcli config session "
+            "add', 'dhcli config system add', or 'dhcli config init'), or check "
             "that --config-dir / DH_AI_DATA_DIR points at the intended "
             "directory."
         ),
@@ -267,25 +265,23 @@ class ErrorCode(StrEnum):
             "with flags) instead."
         ),
     )
+    # The 'config' authoring verbs serialize on a per-directory advisory lock
+    # so concurrent writers cannot clobber each other.
     CONFIG_LOCKED = (
         "config_locked",
         (
             "Another process holds the configuration write lock, so this "
-            "authoring command could not acquire it before timing out. The "
-            "'config' authoring verbs (add/set/unset/remove/edit/init) "
-            "serialize on a per-directory advisory lock to prevent "
-            "concurrent writers from clobbering each other; retry once the "
-            "other invocation finishes."
+            "authoring command could not acquire it before timing out; retry "
+            "once the other invocation finishes."
         ),
     )
     OPERATION_CANCELED = (
         "operation_canceled",
         (
             "The operator answered no to an interactive confirmation "
-            "prompt, so a destructive action was not performed. A "
-            "deliberate decline, distinct from a Ctrl-C interruption "
-            "(which exits 130): scripts can rely on exit code 2 with "
-            "this code to tell refusal from signal-style cancellation."
+            "prompt, so a destructive action was not performed. A Ctrl-C "
+            "interruption exits 130 instead, so a script can tell a "
+            "deliberate refusal from a signal."
         ),
     )
     INTERNAL_ERROR = (

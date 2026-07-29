@@ -729,10 +729,8 @@ show` first whenever you intend to omit an id and are not certain what
 the context holds. Every consequential verb repeats this warning in its
 own `--help` and `--agents` output.
 
-By default dhcli acts silently on the context, matching `kubectl delete`
-and other mainstream CLIs, which do not prompt when using a configured
-default. Set `cli.json`'s `context.confirm_destructive` to `true` to be
-asked first:
+By default dhcli acts on the context without asking. Set `cli.json`'s
+`context.confirm_destructive` to `true` to be asked first:
 
 ```text
 Run script in session 'community:community:dev' (from sticky context)? [y/N]
@@ -747,12 +745,9 @@ read-only verbs never prompt. Pass `--yes` to skip a prompt; declining
 exits `2` with `operation_canceled`.
 
 When prompting is unavailable — stdin is not a TTY, or `--no-input` was
-given — the command proceeds without asking rather than failing. A
-setting that turns on a *question* has nothing to enforce where none can
-be asked, and refusing would make `--yes` mandatory boilerplate for every
-script and agent the moment an operator enabled it. This is also what
-separates the two audiences without extra configuration: an interactive
-human gets the prompt, a non-interactive agent does not.
+given — the command proceeds without asking rather than failing, so
+enabling the setting never breaks a script. In practice an interactive
+human gets the prompt and a non-interactive caller does not.
 
 Five verbs keep a **required** leading positional despite the fallback:
 `table schema`, `table data`, `catalog schema`, `catalog sample` (each an
@@ -869,14 +864,13 @@ without a valid configuration tree, so they work even when `config
 validate` fails; that same bypass means they cannot read `cli.json`'s
 `output.format` (use `-o`/`DHCLI_OUTPUT` instead).
 
-The surfaces are sized as a **progressive-disclosure ladder**: orient
-with the summary tree (~9 KB), drill into one group (~1 KB), then read a
-leaf's full node (~3.5 KB typical; ~1 KB for a simple verb, ~12 KB for
-an option-heavy one like `pq create`) — instead of ingesting the ~150 KB
-complete manifest. A node is consistently smaller than the `--help` it
-mirrors. On a verb that reaches the daemon, roughly a third of it is the
-self-contained `error_codes` block: the deliberate cost of decoding a
-failure, and recovering from it, without a second fetch.
+Which surface to use:
+
+- **Orienting** — `dhcli agents tree`.
+- **Running one command** — `<cmd> --agents`.
+- **Decoding a failure** — `dhcli agents errors`, fetched once.
+- **Everything at once** — `dhcli agents tree --full`; prefer the three
+  above unless you need the whole surface in one payload.
 
 #### The `--agents` flag (twin of `--help`)
 
@@ -897,9 +891,9 @@ discloses them once under `universal_options`.
 
 | Verb                 | Output                                                                                  |
 |----------------------|-----------------------------------------------------------------------------------------|
-| `tree`               | The **summary tree** by default: `version`, `prog`, the root `summary` and `description`, the project-wide `conventions`, a drill-down `hint`, and a nested `commands` map of `{name: {summary, commands?}}` down to the leaves. Identical to `dhcli --agents`. With `--full`, the complete manifest instead: root `summary`/`description`/`examples`, `global_options`, `universal_options` (the every-command flags `--help` and `--agents`), full command nodes under `commands`, `default_environment`, `default_exit_codes`, and the project-wide `error_codes` registry. |
-| `command PATH...`    | One command's **self-contained node**, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--agents` to that command. A group's node lists its subcommands as one-line summaries; `--full` expands them into full nested nodes. A path that does not resolve exits `2` with `command_not_found`. |
-| `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree --full`. |
+| `tree`               | The **summary tree** by default — every command path with its one-line summary, plus the project-wide `conventions`. Identical to `dhcli --agents`. With `--full`, the complete manifest instead: full nodes for every command plus the project-wide metadata. Both field lists are under [Node schema](#node-schema). |
+| `command PATH...`    | One command's **full node**, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--agents` to that command. A group's node lists its subcommands as one-line summaries; `--full` expands them into full nested nodes. A path that does not resolve exits `2` with `command_not_found`. |
+| `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree --full`. **The decoder for every node's `error_codes`**, which name codes without their meanings; fetch it once and cache it. |
 
 ```bash
 dhcli agents tree | jq '.commands | keys'
@@ -916,58 +910,50 @@ false, empty, or the default):
 | Key           | Content                                                                                     |
 |---------------|----------------------------------------------------------------------------------------------|
 | `name`        | The command's own name, e.g. `stop` (always present).                                        |
-| `path`        | The full invocation path, e.g. `dhcli pq stop` — what to actually run. **Standalone nodes only**: inside `tree --full` a node's position in the nested map already gives its path. |
-| `usage`       | Usage line in click's own form, e.g. `dhcli pq stop [OPTIONS] [ID]...`, giving the positional order. Standalone nodes only (`params` gives the order elsewhere). |
+| `path`        | The full invocation path, e.g. `dhcli pq stop` — what to actually run. Omitted inside `tree --full`, where a node's position in the nested map already gives its path. |
+| `usage`       | Usage line in click's own form, e.g. `dhcli pq stop [OPTIONS] [ID]...`, giving the positional order. Omitted inside `tree --full` (`params` gives the order). |
 | `summary`     | One-line summary (always present).                                                           |
 | `description` | What the command does and when to use it.                                                    |
 | `params`      | Options **and** positional arguments: `name`, `kind` (`option`/`argument`), `type`, `help`, plus (sparse) `required`, `nargs` (when not 1), `choices`, `opts`, `secondary_opts`, `is_flag`, `multiple`, `envvar`, `default`. |
 | `output`      | The structured output shape: `mode` (`object`/`list`/`text`), `fields` (`{name, type, help}`), `note`. |
 | `examples`    | Shell snippets.                                                                              |
 | `see_also`    | Related commands.                                                                            |
-| `error_codes` | The stable codes the command can emit — `{code, help}` in a standalone node; bare strings inside `tree --full` (meanings in the root registry). |
-| `exit_codes`  | The process codes the command can return — `{code, help}` in a standalone node; bare integers inside `tree --full` (see `default_exit_codes`). |
+| `error_codes` | The stable codes the command can emit, as bare strings. Decode them with `dhcli agents errors` (or the root `error_codes` key of `tree --full`); a failure also carries its own message next to the code. |
+| `exit_codes`  | The process codes the command can return — `{code, help}`, or bare integers inside `tree --full` (see `default_exit_codes`). |
 | `environment` | Environment variables honored (`{name, help}`); inside `tree --full`, omitted when the command leaves it unset (it then inherits `default_environment`). |
 | `wraps`       | The wrapped MCP tool binding (`tools`, `intentionally_unsupported`, `router_params`, `client_only_params`). |
 | `subcommands` | Groups only: `{name: summary}` one level down, or full nested nodes with `--full` / inside `tree --full`. |
 
-A **standalone node** (`agents command PATH`, `<cmd> --agents`) is
-self-contained — it carries everything the command's `--help` renders,
-including code meanings and environment variables, so an agent needs no
-second fetch. `agents command PATH` and `<path> --agents` are
-byte-identical. Inside `tree --full`, content that a node need not
-restate is dropped: what the root carries once (`error_codes` meanings,
-`default_exit_codes`, `default_environment`) is hoisted, and what the
-node's own position already gives (`path`, `usage`) is omitted — so a
-leaf node there equals the standalone node minus those entries.
+A node requested on its own (`agents command PATH`, `<cmd> --agents` —
+the two are byte-identical) carries what the command's `--help` renders,
+except error-code meanings: get those from `dhcli agents errors`. The
+same node nested inside `tree --full` drops `path` and `usage`, plus any
+`exit_codes` / `environment` the root already states once as
+`default_exit_codes` / `default_environment`.
 
 The two whole-tree surfaces carry different top-level fields, and a
 single command's node never carries any of them:
 
 - **Summary tree** (`agents tree`, `dhcli --agents`): `version`,
   `prog`, `summary`, `description`, `conventions`, `hint`, and a nested
-  `{name: {summary, commands?}}` map under `commands`. `conventions` is
-  the short list of rules that hold for *every* command — output mode
-  and exit codes, the sticky-context fallback, and target selection —
-  which an agent should read before its first consequential command. A
-  per-command hazard is not listed there; it lives on the command that
-  has it.
+  `{name: {summary, commands?}}` map under `commands`. `conventions`
+  states the rules that hold for *every* command — output mode and exit
+  codes, the sticky-context fallback, and target selection. Read it
+  before your first consequential command; a hazard specific to one
+  command is stated on that command instead.
 - **Full manifest** (`agents tree --full`): `version`, `prog`,
   `summary` (plus the root's `description` / `examples`),
   `global_options`, `universal_options`, full command nodes under
   `commands`, `default_environment`, `default_exit_codes`, and the
   `error_codes` registry.
 
-> **Migration:** this surface was previously named `dh-mcp introspect`
-> / `--introspect`, and `tree` previously emitted the full manifest
-> (with a rendered `help` string per node) by default. The rename has
-> no alias; use `agents` / `--agents`. For the old "everything"
-> behavior, use `dhcli agents tree --full` — the rendered `help` and
-> `short_help` node fields are replaced by the structured `summary`,
-> `description`, and section keys above. Separately, `-o json` now
-> emits compact single-line JSON on every command; use
-> `-o json-pretty` for the previous indented form (a short-lived
-> `--compact/--no-compact` flag on the `agents` verbs was removed in
-> favor of the mode).
+> **Migration:** this surface was previously `dh-mcp introspect` /
+> `--introspect`; use `agents` / `--agents`, which has no alias. `tree`
+> once emitted the full manifest by default — that is now `tree --full`,
+> and the rendered `help` / `short_help` node fields are replaced by the
+> structured `summary`, `description`, and section keys above. `-o json`
+> now emits compact single-line JSON; use `-o json-pretty` for the
+> previous indented form.
 
 ### `dhcli self`
 

@@ -7,6 +7,8 @@ command is covered automatically.
 
 from __future__ import annotations
 
+import re
+
 import click
 import pytest
 
@@ -394,3 +396,88 @@ def test_confirmable_command_declares_operation_canceled(
         f"{path}: --yes present={has_yes} but operation_canceled "
         f"declared={declares}; they must agree"
     )
+
+
+# ---------------------------------------------------------------------------
+# Help text points at commands that exist
+# ---------------------------------------------------------------------------
+
+
+def _command_tokens(reference: str) -> tuple[str, ...]:
+    """Reduce a ``dhcli ...`` reference to the command tokens it names.
+
+    Drops the program name, any flags, and any metavar or argument
+    placeholder. Metavars are uppercase by convention throughout the
+    help surface (``ID``, ``SYSTEM``, ``PQ_NAME``), which is what makes
+    them separable from verbs without a lookup.
+    """
+    tokens = reference.split()
+    start = 1 if tokens and tokens[0] == "dhcli" else 0
+    return tuple(
+        token
+        for token in tokens[start:]
+        if not token.startswith("-") and not token.isupper()
+    )
+
+
+def _resolved_depth(tokens: tuple[str, ...]) -> int:
+    """Return how many leading ``tokens`` resolve as a command path."""
+    node: click.Command = cli
+    depth = 0
+    for token in tokens:
+        if not isinstance(node, click.Group) or token not in node.commands:
+            return depth
+        node = node.commands[token]
+        depth += 1
+    return depth
+
+
+@pytest.mark.parametrize("path,cmd", _ALL, ids=_ALL_IDS)
+def test_see_also_entries_name_real_commands(path: str, cmd: click.Command) -> None:
+    """Every ``see_also`` target must resolve in the live tree.
+
+    ``see_also`` is a navigation surface: an agent follows it to find the
+    next command, so an entry left behind by a rename sends it to a
+    ``command_not_found``. Resolution is exact here rather than
+    best-effort -- accepting the longest prefix that happens to resolve
+    would pass a typo like 'session craete' by stopping at 'session'.
+    """
+    for entry in _see_also(cmd):
+        tokens = _command_tokens(entry)
+        if not tokens:
+            continue  # names the root itself, e.g. 'dhcli --agents'
+        assert _resolved_depth(tokens) == len(tokens), (
+            f"{path}: see_also entry {entry!r} does not resolve "
+            f"(stopped after {_resolved_depth(tokens)} of {len(tokens)} tokens)"
+        )
+
+
+@pytest.mark.parametrize("path,cmd", _ALL, ids=_ALL_IDS)
+def test_help_prose_names_real_commands(path: str, cmd: click.Command) -> None:
+    """A ``'dhcli ...'`` pointer in prose must name a real command.
+
+    Descriptions and option help route the reader to a discovery or
+    remedy command ("run 'dhcli session list'"), and that pointer is the
+    reader's next action -- a stale one strands an agent mid-task. Only
+    the leading noun and verb are required to resolve, because prose
+    legitimately shows an argument value too ('dhcli session create
+    dev'); that is still enough to catch a renamed or misspelled verb.
+    """
+    spec = getattr(cmd, "help_spec", None)
+    if spec is None:
+        return
+    haystack = [spec.summary or "", spec.description or ""]
+    haystack += [entry.help for entry in spec.arguments or ()]
+    haystack += [
+        str(param.help) for param in cmd.params if getattr(param, "help", None)
+    ]
+    for text in haystack:
+        for quoted in re.findall(r"'dhcli ([a-z][a-z0-9 _-]*)'", text):
+            tokens = _command_tokens(f"dhcli {quoted}")
+            if not tokens:
+                continue
+            required = min(2, len(tokens))
+            assert _resolved_depth(tokens) >= required, (
+                f"{path}: help text names 'dhcli {quoted}', which does not "
+                f"resolve past {_resolved_depth(tokens)} token(s)"
+            )
