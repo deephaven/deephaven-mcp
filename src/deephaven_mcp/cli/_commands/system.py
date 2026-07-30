@@ -368,6 +368,7 @@ _OUTPUT_OPEN = OutputSpec(
         examples=(
             "$ dhcli system open prod",
             "$ dhcli system open prod --print",
+            "$ dhcli system open prod --print | jq -r .opened",
         ),
         see_also=(
             "dhcli system url NAME",

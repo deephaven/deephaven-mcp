@@ -9,12 +9,19 @@ two surfaces cannot drift.
   command path with its one-line summary.
 - :func:`build_manifest` walks the live click tree into the complete
   JSON-safe manifest.
-- :func:`describe_command` renders one self-contained node.
+- :func:`describe_command` renders one command's full node.
 
 The ``dhcli agents`` verbs and the universal ``--agents`` flag both emit
 these. Node keys are sparse: an absent key means false, empty, or the
 default. A command's structured output is described once as an
 ``OutputSpec`` inside its ``HelpSpec``.
+
+A standalone node also carries the two facts a reader cannot reconstruct
+from a node read in isolation: ``path``, the full invocation path (a
+node's ``name`` alone is ``"stop"``, which is not runnable), and
+``usage``, the argument order click itself would print. Both are omitted
+under :attr:`NodeStyle.EMBEDDED`, where the node's position in the
+nested map supplies the path and ``params`` the argument order.
 
 :func:`_meta_of` is the single boundary where this module crosses from
 click's loosely-typed containers (``Group.commands`` is
@@ -31,6 +38,7 @@ command help.
 from __future__ import annotations
 
 __all__ = [
+    "AGENT_CONVENTIONS",
     "NodeStyle",
     "agents_option",
     "build_error_code_registry",
@@ -48,6 +56,7 @@ from typing import Any
 
 import click
 
+from deephaven_mcp.cli._context import TARGET_SELECTION_GUIDANCE
 from deephaven_mcp.cli._echo import echo_payload_no_runtime
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
@@ -62,35 +71,39 @@ class NodeStyle(Enum):
     """Whether a command node must stand on its own or leans on the manifest root.
 
     Selects how much a node repeats. The distinction only affects the
-    ``error_codes`` / ``exit_codes`` / ``environment`` keys, whose
-    meanings and project-wide defaults are either inlined per node or
-    carried once at the root.
+    ``exit_codes`` / ``environment`` keys, whose meanings and
+    project-wide defaults are either inlined per node or carried once at
+    the root. ``error_codes`` is style-independent -- always bare code
+    strings, because their meanings are large enough (~2.6 KB on a
+    daemon-reaching verb) to be worth one lookup via ``dhcli agents
+    errors`` rather than a copy on all 76 nodes.
     """
 
     STANDALONE = ("standalone", True)
-    """Self-contained, for a node emitted on its own.
+    """Near-self-contained, for a node emitted on its own.
 
-    Code entries carry their meanings as ``{code, help}`` and the
-    resolved defaults are inlined, so a reader with only this node can
-    decode every field. Used by ``--agents`` and ``dhcli agents
-    command``.
+    Exit-code entries carry their meanings as ``{code, help}`` and the
+    resolved default environment is inlined, so a reader with only this
+    node can decode every field but ``error_codes`` (see the class
+    docstring). Used by ``--agents`` and ``dhcli agents command``.
     """
 
     EMBEDDED = ("embedded", False)
     """Terse, for a node nested inside the whole-tree manifest.
 
-    Code entries are bare values and entries the spec leaves unset are
-    omitted, because the root's ``error_codes`` / ``default_exit_codes``
-    / ``default_environment`` keys carry them once for the whole tree.
+    Exit-code entries are bare values and entries the spec leaves unset
+    are omitted, because the root's ``default_exit_codes`` /
+    ``default_environment`` keys carry them once for the whole tree.
     Used by :func:`build_manifest`.
     """
 
     standalone: bool
     """Whether a node in this style must decode without the manifest root.
 
-    ``True`` inlines code meanings as ``{code, help}`` and the resolved
-    project-wide defaults; ``False`` emits bare code values and omits
-    entries the spec leaves unset, because the root states them once.
+    ``True`` inlines exit-code meanings as ``{code, help}`` and the
+    resolved project-wide defaults; ``False`` emits bare exit-code values
+    and omits entries the spec leaves unset, because the root states them
+    once. ``error_codes`` ignores this flag -- always bare.
     """
 
     def __new__(cls, value: str, standalone: bool) -> NodeStyle:
@@ -108,14 +121,24 @@ class NodeStyle(Enum):
         return member
 
 
+def _parents_of(ctx: click.Context) -> tuple[str, ...]:
+    """Return the ancestor path tokens of ``ctx``'s command, program name first.
+
+    Read from click's own ``command_path`` (e.g. ``"dhcli pq stop"``) with
+    the command's own token dropped, so the node's ``path`` matches what
+    the user actually typed -- including a program renamed at the entry
+    point.
+    """
+    return tuple(ctx.command_path.split()[:-1])
+
+
 def _agents_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
     """Emit ``ctx.command``'s agents node, then exit.
 
     The eager callback behind the universal ``--agents`` flag, the
     machine-readable twin of ``--help``: emits the summary tree when
-    invoked on the root group and a single self-contained command node
-    otherwise, in the root ``-o/--output`` mode (or ``DHCLI_OUTPUT``),
-    defaulting to
+    invoked on the root group and a single command node otherwise, in
+    the root ``-o/--output`` mode (or ``DHCLI_OUTPUT``), defaulting to
     :data:`~deephaven_mcp.cli._format.DEFAULT_OUTPUT_MODE` (``json``)
     like every command. Pass ``-o human`` for terminal-friendly output.
 
@@ -132,7 +155,7 @@ def _agents_callback(ctx: click.Context, _param: click.Parameter, value: bool) -
     payload = (
         build_summary_tree(ctx.command)
         if ctx.command is ctx.find_root().command
-        else describe_command(ctx.command)
+        else describe_command(ctx.command, parents=_parents_of(ctx))
     )
     echo_payload_no_runtime(ctx, payload)
     ctx.exit()
@@ -241,6 +264,48 @@ def _summary_of(cmd: click.Command) -> str:
     falling back to the first paragraph of its raw help text.
     """
     return _summary_and_description(cmd)[0]
+
+
+def _invocation(cmd: click.Command, parents: tuple[str, ...]) -> str:
+    """Return the full invocation path of ``cmd`` under ``parents``.
+
+    Args:
+        cmd (click.Command): The command being described.
+        parents (tuple[str, ...]): Ancestor path tokens, program name
+            first; empty for a root or for a node described without a
+            known path.
+
+    Returns:
+        str: The space-joined path, e.g. ``"dhcli pq stop"``. Falls back
+            to the command's own name when ``parents`` is empty.
+    """
+    return " ".join((*parents, cmd.name or "")).strip()
+
+
+def _usage_of(cmd: click.Command, invocation: str) -> str:
+    """Return the one-line usage string for ``cmd``.
+
+    Built from click's own ``collect_usage_pieces`` -- the same source as
+    the ``Usage:`` line in ``--help`` -- so the manifest cannot describe a
+    different argument order than the parser accepts. Assembled here
+    rather than taken from ``get_usage`` because that wraps to the
+    terminal width and prefixes the label.
+
+    A throwaway :class:`click.Context` is required by
+    ``collect_usage_pieces`` (it renders each parameter's metavar); it is
+    never entered or invoked, so no callback runs and no configuration is
+    read.
+
+    Args:
+        cmd (click.Command): The command being described.
+        invocation (str): The full invocation path from
+            :func:`_invocation`, used as the usage line's prefix.
+
+    Returns:
+        str: e.g. ``"dhcli pq stop [OPTIONS] [ID]..."``.
+    """
+    ctx = click.Context(cmd, info_name=cmd.name)
+    return " ".join([invocation, *cmd.collect_usage_pieces(ctx)])
 
 
 def _describe_output(spec: OutputSpec) -> dict[str, Any]:
@@ -392,7 +457,7 @@ def _describe_wraps(cmd: click.Command) -> dict[str, Any] | None:
 
 
 def _describe_subcommands(
-    cmd: click.Group, *, style: NodeStyle, recurse: bool
+    cmd: click.Group, *, style: NodeStyle, recurse: bool, parents: tuple[str, ...] = ()
 ) -> dict[str, Any]:
     """Return the ``subcommands`` map for a group node.
 
@@ -407,13 +472,18 @@ def _describe_subcommands(
             from :func:`describe_command`; when ``False``, each entry
             is the subcommand's one-line summary string (the bounded
             view a standalone group node carries).
+        parents (tuple[str, ...]): Ancestor path tokens of ``cmd``, so a
+            nested node's ``path`` names the whole invocation rather than
+            just its own leaf name.
     """
     if recurse:
+        child_parents = (*parents, cmd.name or "")
         return {
             name: describe_command(
                 cmd.commands[name],
                 style=style,
                 recurse=True,
+                parents=child_parents,
             )
             for name in sorted(cmd.commands)
         }
@@ -430,9 +500,11 @@ def _describe_spec_extras(spec: HelpSpec, *, style: NodeStyle) -> dict[str, Any]
 
     Args:
         spec (HelpSpec): The command's help spec.
-        style (NodeStyle): Whether to inline code meanings and resolved
-            defaults (:attr:`NodeStyle.STANDALONE`) or emit bare values
-            and omit spec-unset entries (:attr:`NodeStyle.EMBEDDED`).
+        style (NodeStyle): Whether to inline exit-code meanings and the
+            resolved default environment (:attr:`NodeStyle.STANDALONE`)
+            or emit bare values and omit spec-unset entries
+            (:attr:`NodeStyle.EMBEDDED`). ``error_codes`` is bare in
+            both styles.
 
     Returns:
         dict[str, Any]: The applicable keys, empty when the spec carries
@@ -445,10 +517,7 @@ def _describe_spec_extras(spec: HelpSpec, *, style: NodeStyle) -> dict[str, Any]
     if spec.see_also:
         extras["see_also"] = list(spec.see_also)
     if spec.error_codes:
-        extras["error_codes"] = [
-            ({"code": c.value, "help": c.help_text} if standalone else c.value)
-            for c in spec.error_codes
-        ]
+        extras["error_codes"] = [c.value for c in spec.error_codes]
     exit_codes = spec.exit_codes if spec.exit_codes is not None else tuple(ExitCode)
     if exit_codes and (standalone or spec.exit_codes is not None):
         extras["exit_codes"] = [
@@ -466,6 +535,7 @@ def describe_command(
     *,
     style: NodeStyle = NodeStyle.STANDALONE,
     recurse: bool = False,
+    parents: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Describe one command as a JSON-safe, sparse node dict.
 
@@ -473,6 +543,11 @@ def describe_command(
     none of that content. Always present: ``name`` and ``summary``.
     Present when applicable:
 
+    - ``path`` (str), ``usage`` (str): The full invocation path and the
+      argument order, on a standalone node only — ``name`` alone
+      (``"stop"``) is not something a reader can run. Omitted under
+      :attr:`NodeStyle.EMBEDDED`, where the node's position in the
+      nested map gives the path and ``params`` gives the argument order.
     - ``description`` (str): What the command does and when to use it.
     - ``params`` (list[dict]): Options and positional arguments from
       :func:`_describe_param`; positional arguments carry the help of
@@ -481,11 +556,11 @@ def describe_command(
       :func:`_describe_output`.
     - ``examples`` (list[str]): Shell snippets.
     - ``see_also`` (list[str]): Related commands.
-    - ``error_codes`` (list): The codes the command can emit —
-      ``{code, help}`` entries in a standalone node (decodable without
-      the root registry), bare code strings inside the whole-tree
-      manifest (the root ``error_codes`` registry carries the
-      meanings).
+    - ``error_codes`` (list[str]): The codes the command can emit, as
+      bare strings in every node style. Meanings come from the
+      ``dhcli agents errors`` registry (also the whole-tree manifest's
+      root ``error_codes`` key) rather than a per-node copy; a failure
+      itself carries a raise-site message alongside its ``error_code``.
     - ``exit_codes`` (list): The codes the command can return —
       ``{code, help}`` entries in a standalone node, bare integers
       inside the whole-tree manifest (see ``default_exit_codes``).
@@ -498,13 +573,18 @@ def describe_command(
 
     Args:
         cmd (click.Command): The command to describe.
-        style (NodeStyle): Whether the node must be self-contained
+        style (NodeStyle): Whether the node stands on its own
             (:attr:`NodeStyle.STANDALONE`, the default) or is nested
             inside the whole-tree manifest
-            (:attr:`NodeStyle.EMBEDDED`), which carries code meanings
-            and project defaults once at its root.
+            (:attr:`NodeStyle.EMBEDDED`), which carries exit-code
+            meanings and project defaults once at its root.
         recurse (bool): Forwarded to :func:`_describe_subcommands` for
             groups.
+        parents (tuple[str, ...]): Ancestor path tokens, program name
+            first (e.g. ``("dhcli", "pq")``), used to build ``path`` and
+            ``usage``. Empty falls back to the command's own name, which
+            is correct for a root and honest for a detached command.
+            Unused under :attr:`NodeStyle.EMBEDDED`.
 
     Returns:
         dict[str, Any]: The JSON-safe node.
@@ -512,7 +592,12 @@ def describe_command(
     meta = _meta_of(cmd)
     spec = meta.help_spec
     summary, description = _summary_and_description(cmd)
-    node: dict[str, Any] = {"name": cmd.name, "summary": summary}
+    node: dict[str, Any] = {"name": cmd.name}
+    if style is NodeStyle.STANDALONE:
+        invocation = _invocation(cmd, parents)
+        node["path"] = invocation
+        node["usage"] = _usage_of(cmd, invocation)
+    node["summary"] = summary
     if description:
         node["description"] = description
     argument_help = _argument_help_map(spec)
@@ -526,7 +611,9 @@ def describe_command(
     if wraps is not None:
         node["wraps"] = wraps
     if isinstance(cmd, click.Group):
-        node["subcommands"] = _describe_subcommands(cmd, style=style, recurse=recurse)
+        node["subcommands"] = _describe_subcommands(
+            cmd, style=style, recurse=recurse, parents=parents
+        )
     return node
 
 
@@ -576,6 +663,32 @@ _SUMMARY_TREE_HINT = (
 )
 """Drill-down pointer carried by the summary tree so it self-describes."""
 
+AGENT_CONVENTIONS: tuple[str, ...] = (
+    "Output is compact single-line json unless a command's output mode is "
+    "'text'. Pass -o json-pretty for indented json, -o yaml, or -o human; "
+    "DHCLI_OUTPUT sets it for the session. Exit codes: 0 success, 2 "
+    "user-facing failure, 3 the invoked MCP tool returned isError=true. A "
+    "failure prints {error, error_code, exit_code, command} in the "
+    "structured modes; branch on the stable error_code, not on the "
+    "message. A command node names the codes it can emit; 'dhcli agents "
+    "errors' is where their meanings and recovery steps live.",
+    "A session, system, or PQ id omitted from a verb falls back to the "
+    "sticky context in context.json, which the command line does not show "
+    "— an omitted id means 'whatever the context holds', not 'no target'. "
+    "Run 'dhcli context show' before any consequential verb whose id you "
+    "intend to omit, or pass the id explicitly.",
+    TARGET_SELECTION_GUIDANCE,
+)
+"""The three rules an agent needs before its first consequential command.
+
+In order: the output-mode and exit/error-code contract, the sticky-context
+fallback, and :data:`~deephaven_mcp.cli._context.TARGET_SELECTION_GUIDANCE`.
+Each holds for every command in the tree, so each is emitted once as the
+``conventions`` array of the summary tree (``dhcli agents tree`` and the
+root ``--agents`` flag) rather than repeated per node. A hazard specific
+to one command is not here -- it lives on that command.
+"""
+
 
 def _summary_commands(group: click.Group) -> dict[str, Any]:
     """Return the nested ``{name: {summary, commands?}}`` summary map.
@@ -604,6 +717,10 @@ def build_summary_tree(root: click.Command) -> dict[str, Any]:
     - ``version`` (str): Installed ``deephaven-mcp`` package version.
     - ``prog`` (str): Program invocation name (``"dhcli"``).
     - ``summary`` (str): The root command's one-line summary.
+    - ``description`` (str): The root command's description — what the
+      tool is and how to get started — when it declares one.
+    - ``conventions`` (list[str]): :data:`AGENT_CONVENTIONS`, the
+      project-wide rules that hold for every command.
     - ``hint`` (str): How to drill down to full nodes and the complete
       manifest.
     - ``commands`` (dict): Nested ``{name: {summary, commands?}}`` map
@@ -617,13 +734,24 @@ def build_summary_tree(root: click.Command) -> dict[str, Any]:
     Returns:
         dict[str, Any]: JSON / YAML serializable summary tree.
     """
-    return {
+    summary, description = _summary_and_description(root)
+    tree: dict[str, Any] = {
         "version": _package_version(),
         "prog": root.name or "dhcli",
-        "summary": _summary_of(root),
-        "hint": _SUMMARY_TREE_HINT,
-        "commands": (_summary_commands(root) if isinstance(root, click.Group) else {}),
+        "summary": summary,
     }
+    if description:
+        tree["description"] = description
+    tree.update(
+        {
+            "conventions": list(AGENT_CONVENTIONS),
+            "hint": _SUMMARY_TREE_HINT,
+            "commands": (
+                _summary_commands(root) if isinstance(root, click.Group) else {}
+            ),
+        }
+    )
+    return tree
 
 
 def build_manifest(root: click.Command) -> dict[str, Any]:

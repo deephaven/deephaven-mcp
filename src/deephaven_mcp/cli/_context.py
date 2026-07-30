@@ -53,6 +53,8 @@ __all__ = [
     "CONTEXT_HINT",
     "CONTEXT_RISK_DESTRUCTIVE",
     "CONTEXT_RISK_STATEFUL",
+    "TARGET_SELECTION_GUIDANCE",
+    "TARGET_SELECTION_HINT",
     "CliContext",
     "ContextKey",
     "ContextProvenance",
@@ -108,6 +110,42 @@ CONTEXT_RISK_STATEFUL = _CONTEXT_RISK_TEMPLATE.format(
     consequence="leaves state on the wrong system"
 )
 """Hazard warning for verbs that create or start resources on a shared system."""
+
+TARGET_SELECTION_HINT = (
+    "Act only on an id you were given or created, never an arbitrary one."
+)
+"""Terse target-selection rule for a consequential verb's argument help.
+
+Carried on the id argument of every verb that executes, destroys,
+disrupts, or discloses credentials. A single line, because the Arguments
+block renders pre-formatted and does not rewrap.
+:data:`TARGET_SELECTION_GUIDANCE` is the full statement of the same rule.
+"""
+
+TARGET_SELECTION_GUIDANCE = (
+    "Target selection: act on the id you were told to use, or on one you "
+    "created yourself with 'dhcli session create' / 'dhcli pq create'. A "
+    "listing spans every user's resources, including production, so a "
+    "returned id is a candidate, not a target — never pick an arbitrary "
+    "one."
+)
+"""Full target-selection rule, stated where the hazard originates.
+
+The hazard :data:`CONTEXT_RISK_DESTRUCTIVE` covers is acting on the
+*sticky* target unawares; this covers the other half -- enumerating with
+a list verb and acting on whatever came back, which is how an agent
+reaches an unrelated or production resource with an id it typed
+deliberately.
+
+Placed in exactly two surfaces, both of which precede the mistake:
+
+- ``session list`` / ``pq list``, the verbs whose output *is* the
+  candidate set. An agent reads the rule with the ids in hand.
+- :data:`~deephaven_mcp.cli._manifest.AGENT_CONVENTIONS`, so an agent
+  orienting with ``dhcli agents tree`` reads it before its first verb.
+
+The consequential verbs carry :data:`TARGET_SELECTION_HINT` instead.
+"""
 
 
 class ContextKey(StrEnum):

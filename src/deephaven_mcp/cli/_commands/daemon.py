@@ -316,7 +316,10 @@ _OUTPUT_STOP = OutputSpec(
             "running."
         ),
         output=_OUTPUT_STOP,
-        examples=("$ dhcli daemon stop",),
+        examples=(
+            "$ dhcli daemon stop",
+            "$ dhcli daemon stop | jq -r .stopped",
+        ),
         see_also=("dhcli daemon start", "dhcli daemon status"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(

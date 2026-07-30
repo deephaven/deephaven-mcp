@@ -51,10 +51,8 @@ from deephaven_mcp.cli._help import (
 )
 from deephaven_mcp.cli._prompt import (
     can_prompt,
-    confirm,
     prompt_optional,
     prompt_optional_int,
-    prompt_text,
     require_choice,
     require_confirmation,
     require_value,
@@ -235,10 +233,13 @@ def _warn_template_resolution(warnings: list[str]) -> None:
 
 
 def _warn_restart_hint() -> None:
-    """Remind the operator that a running daemon uses the old config."""
+    """Print the daemon-restart note to stderr."""
+    # Conditional wording, not a registry probe: the authoring verbs are
+    # needs_runtime=False, so determining whether a daemon is actually
+    # running would mean resolving a runtime they otherwise never need.
     click.echo(
-        "note: a running daemon keeps its loaded configuration; run "
-        "'dhcli daemon stop' so the next command picks up this change.",
+        "note: if a daemon is running, it keeps the configuration it loaded; "
+        "run 'dhcli daemon stop' so the next command picks up this change.",
         err=True,
     )
 
@@ -594,7 +595,10 @@ async def config_show(runtime: Runtime, path: str | None) -> None:
             "config check in CI pipelines."
         ),
         output=_OUTPUT_VALIDATE,
-        examples=("$ dhcli config validate",),
+        examples=(
+            "$ dhcli config validate",
+            "$ dhcli config validate | jq -r .valid",
+        ),
         see_also=("dhcli config show",),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(ErrorCode.CONFIG_INVALID,),
@@ -869,6 +873,7 @@ _OUTPUT_SET = OutputSpec(
             "$ dhcli config set cli.output.format=human",
             "$ dhcli config set community.settings.session_creation.max_concurrent_sessions=3",
             "$ dhcli config set enterprise.systems.prod.session_creation.defaults.heap_size_gb=8",
+            "$ dhcli config set cli.output.format=human | jq -r '.files[]'",
         ),
         see_also=(
             "dhcli config keys",
@@ -970,7 +975,11 @@ _OUTPUT_UNSET = OutputSpec(
             ),
         ),
         output=_OUTPUT_UNSET,
-        examples=("$ dhcli config unset cli.request.timeouts.default_seconds",),
+        examples=(
+            "$ dhcli config unset cli.request.timeouts.default_seconds",
+            "$ dhcli config unset cli.request.timeouts.default_seconds "
+            "| jq -r '.paths[]'",
+        ),
         see_also=(
             "dhcli config keys",
             "dhcli config get",
@@ -1225,7 +1234,7 @@ _OUTPUT_EDIT = OutputSpec(
 
 
 def _open_editor(text: str) -> str | None:
-    """Open ``text`` in ``$EDITOR``/``$VISUAL`` and return the saved result.
+    """Open ``text`` in ``$VISUAL``/``$EDITOR`` and return the saved result.
 
     Args:
         text (str): The initial file contents shown to the operator.
@@ -1242,13 +1251,13 @@ def _open_editor(text: str) -> str | None:
     "edit",
     cls=HelpfulCommand,
     help_spec=HelpSpec(
-        summary="Edit one whole configuration file in $EDITOR.",
+        summary="Edit one whole configuration file in your editor.",
         description=(
-            "Opens the file named by PATH in $EDITOR (or $VISUAL, falling "
-            "back to a platform default) and writes back exactly what was "
-            "saved — comments and formatting included — so a file relying "
-            "on JSON5-only syntax that 'config set'/'unset' refuse to "
-            "touch can still be edited here. The saved text is parsed and "
+            "Opens the file named by PATH in the editor named by $VISUAL, "
+            "else $EDITOR, else a platform default, and writes back exactly "
+            "what was saved — comments and formatting included — so a file "
+            "relying on JSON5-only syntax that 'config set'/'unset' refuse "
+            "to touch can still be edited here. The saved text is parsed and "
             "schema-validated before anything is written; a failure "
             "leaves the file untouched and reports the parse or "
             "validation error. Interactive only: requires a TTY and is "
@@ -1267,6 +1276,7 @@ def _open_editor(text: str) -> str | None:
         examples=(
             "$ dhcli config edit cli",
             "$ dhcli config edit community.sessions.local_dev",
+            "$ dhcli config edit cli | jq -r .changed",
         ),
         see_also=(
             "dhcli config files",
@@ -1288,7 +1298,7 @@ def _open_editor(text: str) -> str | None:
 @click.pass_context
 @run_async
 async def config_edit(ctx: click.Context, path: str) -> None:
-    """Edit one whole configuration file in $EDITOR."""
+    """Edit one whole configuration file in your editor."""
     spec = _authoring_spec(ctx)
     if not can_prompt(no_input=spec.no_input):
         raise CliError(
@@ -1438,29 +1448,41 @@ async def config_files(ctx: click.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
-# init: guided first-time setup wizard
+# init: write a minimal working configuration
 # ---------------------------------------------------------------------------
 
+
+_INIT_SETTINGS_PATH = "community.settings"
+"""Logical path of the single file ``config init`` writes."""
+
+# 'python' rather than the schema default 'docker', which needs a running
+# Docker daemon: it runs the worker from the deephaven-server package this
+# tool already depends on, so a fresh install can create a session with
+# nothing else present. Written explicitly rather than by changing the
+# schema default, which would repoint existing hand-written blocks.
+_INIT_LAUNCH_METHOD = "python"
+"""Launch method ``config init`` writes into the ``session_creation`` block."""
 
 _OUTPUT_INIT = OutputSpec(
     "object",
     (
         OutputField(
-            "community_session",
-            "object",
-            "Summary ('name', 'path', 'file') of the session created; "
-            "omitted when the operator declined.",
+            "path",
+            "string",
+            f"Logical path of the file written ('{_INIT_SETTINGS_PATH}').",
         ),
+        OutputField("file", "string", "Absolute path of the file written."),
         OutputField(
-            "enterprise_system",
+            "session_creation",
             "object",
-            "Summary ('name', 'path', 'file') of the system created; "
-            "omitted when the operator declined.",
+            "The 'session_creation' block as written, including the launch "
+            "method. Every field it omits takes its schema default.",
         ),
     ),
     note=(
-        "Both fields are omitted when the operator declines both prompts; "
-        "'dhcli config files' still lists the empty configuration."
+        "Writes exactly one file. Declare a connection to a server you "
+        "already run with 'config session add', or an Enterprise system "
+        "with 'config system add'."
     ),
 )
 
@@ -1469,32 +1491,39 @@ _OUTPUT_INIT = OutputSpec(
     "init",
     cls=HelpfulCommand,
     help_spec=HelpSpec(
-        summary="Guided wizard for a first-time configuration.",
+        summary="Write a minimal working configuration.",
         description=(
-            "Walks through creating one community session and/or one "
-            "enterprise system, prompting for each on stderr — the same "
-            "prompts as 'config session add'/'config system add' with no "
-            "flags supplied. Skips either section on request. Every field "
-            "it writes is schema-validated before an atomic write, so an "
-            "interrupted or invalid answer never leaves a broken file. "
-            "Interactive only: requires a TTY and is unavailable with "
-            "--no-input — there is nothing to automate here; use 'config "
-            "session add'/'config system add' with flags for scripted "
-            "setup."
+            "Creates community/settings.json with Community session "
+            "creation enabled, so 'dhcli session create' works right "
+            "away: the 'python' launch method runs the worker from the "
+            "deephaven-server package this tool already depends on, so "
+            "nothing else needs installing and Docker is not required. "
+            "Every other field takes its schema default. Takes no prompts "
+            "and contacts no server, so it runs unattended on a fresh "
+            "configuration directory — under --no-input, in CI, or from "
+            "an agent. It is not a re-runnable no-op: it refuses with "
+            "already_exists rather than overwriting an existing "
+            "community/settings.json, so run 'config files' first if you "
+            "do not know the directory's state. This writes the "
+            "baseline, not a whole configuration: to reach a Deephaven "
+            "server you already run, declare it with 'config session "
+            "add'; for an Enterprise system use 'config system add'."
         ),
         output=_OUTPUT_INIT,
-        examples=("$ dhcli config init",),
+        examples=(
+            "$ dhcli config init",
+            "$ dhcli config init | jq -r .file",
+        ),
         see_also=(
             "dhcli config session add",
             "dhcli config system add",
             "dhcli config files",
+            "dhcli config validate",
+            "dhcli session create",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=(
-            ErrorCode.NO_TTY,
-            ErrorCode.CONFIG_PATH_INVALID,
             ErrorCode.ALREADY_EXISTS,
-            ErrorCode.OPTION_NOT_APPLICABLE,
             ErrorCode.CONFIG_INVALID,
             ErrorCode.CONFIG_LOCKED,
         ),
@@ -1504,39 +1533,50 @@ _OUTPUT_INIT = OutputSpec(
 @click.pass_context
 @run_async
 async def config_init(ctx: click.Context) -> None:
-    """Guided wizard for a first-time configuration."""
+    """Write a minimal working configuration."""
     spec = _authoring_spec(ctx)
-    if not can_prompt(no_input=spec.no_input):
-        raise CliError(
-            "'config init' is interactive-only: it requires a TTY and is "
-            "unavailable with --no-input. Use 'config session add'/'config "
-            "system add' with flags for scripted setup.",
-            code=ErrorCode.NO_TTY,
-        )
-
+    store = _store_from_spec(spec)
     ctx.with_resource(_config_write_lock(ctx))
 
+    target = _resolve_field_target(_INIT_SETTINGS_PATH)
+    path = store.path_of(target)
+    # Refuse rather than no-op: this scaffolds a file the operator then
+    # owns, as 'uv init' and 'cargo init' do. Exiting 0 without writing
+    # would report success on a file that may not enable session creation
+    # at all, moving the eventual error far from its cause.
+    if path.exists():
+        raise CliError(
+            f"{path} already exists; 'config init' will not overwrite it. "
+            "Enable session creation on the existing file with 'dhcli "
+            "config set community.settings.session_creation.defaults"
+            f".launch_method={_INIT_LAUNCH_METHOD}'.",
+            code=ErrorCode.ALREADY_EXISTS,
+        )
+
+    session_creation: dict[str, Any] = {
+        "defaults": {"launch_method": _INIT_LAUNCH_METHOD}
+    }
+    try:
+        warnings = store.write(target, {"session_creation": session_creation})
+    except ConfigurationError as exc:
+        raise _map_config_error(exc) from exc
+    _warn_template_resolution(warnings)
+    _warn_restart_hint()
     click.echo(
-        "This wizard declares configuration files under the configuration "
-        "directory; it does not contact any server.",
+        "Community session creation is enabled: create a worker with "
+        "'dhcli session create <name>'. To reach a Deephaven server you "
+        "already run, declare it with 'dhcli config session add'; for an "
+        "Enterprise system, 'dhcli config system add'.",
         err=True,
     )
-
-    payload: dict[str, Any] = {}
-
-    if confirm(
-        "Configure a Community session now?", no_input=spec.no_input, default=True
-    ):
-        name = prompt_text("Session name", no_input=spec.no_input, default="local")
-        payload["community_session"] = await _add_session_entity(ctx, name)
-
-    if confirm(
-        "Configure an Enterprise system now?", no_input=spec.no_input, default=False
-    ):
-        name = prompt_text("System name", no_input=spec.no_input)
-        payload["enterprise_system"] = await _add_system_entity(ctx, name)
-
-    echo_payload_no_runtime(ctx, payload)
+    echo_payload_no_runtime(
+        ctx,
+        {
+            "path": str(target.logical_path),
+            "file": str(path),
+            "session_creation": session_creation,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2003,6 +2043,7 @@ async def config_session_add(
         examples=(
             "$ dhcli config session remove local_dev",
             "$ dhcli config session remove local_dev --yes",
+            "$ dhcli config session remove local_dev --yes | jq -r .file",
         ),
         see_also=(
             "dhcli config session add NAME",
@@ -2341,6 +2382,9 @@ async def _add_system_entity(
             "--auth password --username alice --password '${env:DH_PROD_PASSWORD}'",
             "$ dhcli config system add staging --url https://stg/iris/connection.json "
             "--auth private_key --key '${file:/etc/deephaven/staging-key.pem}'",
+            "$ dhcli config system add staging --url https://stg/iris/connection.json "
+            "--auth password --username alice "
+            "--password '${env:DH_STAGING_PASSWORD}' | jq -r .file",
         ),
         see_also=(
             "dhcli config system list",
@@ -2487,6 +2531,7 @@ async def config_system_add(
         examples=(
             "$ dhcli config system remove staging",
             "$ dhcli config system remove staging --yes",
+            "$ dhcli config system remove staging --yes | jq -r .file",
         ),
         see_also=(
             "dhcli config system add NAME",

@@ -79,7 +79,8 @@ def no_systems_configured_message(config_dir: Path) -> str:
         "community session file under community/sessions/, a "
         "community/settings.json with a session_creation block (enables "
         "dynamically created sessions), or an enterprise system file under "
-        "enterprise/systems/. Run 'dhcli config init' for guided setup."
+        "enterprise/systems/. Run 'dhcli config init' to write a working "
+        "baseline."
     )
 
 

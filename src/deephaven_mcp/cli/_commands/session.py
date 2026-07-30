@@ -37,6 +37,8 @@ from deephaven_mcp.cli._context import (
     CONTEXT_HINT,
     CONTEXT_RISK_DESTRUCTIVE,
     CONTEXT_RISK_STATEFUL,
+    TARGET_SELECTION_GUIDANCE,
+    TARGET_SELECTION_HINT,
     ContextKey,
     ContextProvenance,
     clear_matching,
@@ -148,6 +150,13 @@ def session() -> None:
     one; 'pip-list' reports its installed pip packages; 'credentials',
     'url', and 'open' surface a Community session's browser login. These
     commands auto-start the daemon unless --no-auto-start is set.
+
+    Which session to work in: the one you were told to use, or one you
+    make with 'session create' — 'session list' enumerates every user's
+    sessions, production included, so it is a discovery tool rather than
+    a menu to pick from. 'session create' records the new id as the
+    sticky default, so the verbs that follow can omit it; confirm with
+    'context show' before anything consequential.
     """
 
 
@@ -279,11 +288,30 @@ def _authenticated_url(payload: dict[str, Any]) -> str:
 _OUTPUT_LIST = OutputSpec(
     "list",
     (
-        OutputField("id", "string", "Fully qualified id 'type:system:name'."),
+        OutputField(
+            "id",
+            "string",
+            "Fully qualified id 'type:system:name' — pass this verbatim to "
+            "the other verbs.",
+        ),
         OutputField("type", "string", "'community' or 'enterprise'."),
         OutputField("system", "string", "Owning system name."),
+        OutputField("session_name", "string", "Session name within the system."),
+        OutputField(
+            "origin",
+            "string",
+            "How the session became known: 'static' (declared in config), "
+            "'dynamic' (created by an MCP tool, so possibly by you), or "
+            "'discovered' (already existed on an Enterprise system).",
+        ),
     ),
-    note="Array of sessions (extra per-session fields may be present).",
+    note=(
+        "Array of sessions. The list can be incomplete — Enterprise "
+        "discovery may still be running or a system may be unreachable — in "
+        "which case a warning naming the phase and the failing systems is "
+        "written to stderr while stdout stays parseable. An empty array is "
+        "not proof that no session exists."
+    ),
 )
 
 
@@ -294,16 +322,25 @@ _OUTPUT_LIST = OutputSpec(
         summary="List sessions with basic metadata.",
         description=(
             "Lightweight discovery across Community and Enterprise sessions; "
-            "does not connect. Filter with --type, --system, and --origin. Use "
-            "a returned id verbatim with the other session verbs."
+            "does not connect. Filter with --type, --system, and --origin. "
+            "The list spans every user's sessions, production included. "
+            + TARGET_SELECTION_GUIDANCE
+            + " Filtering with --origin dynamic narrows it to "
+            "tool-created sessions, which is the closest thing to 'sessions "
+            "like the ones I create'."
         ),
         output=_OUTPUT_LIST,
         examples=(
             "$ dhcli session list",
             "$ dhcli session list --type community",
             "$ dhcli -o json session list | jq '.[].id'",
+            "$ dhcli session list --origin dynamic | jq -r '.[].id'",
         ),
-        see_also=("dhcli session show ID", "dhcli system list"),
+        see_also=(
+            "dhcli session show ID",
+            "dhcli session create SESSION_NAME",
+            "dhcli system list",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR),
         error_codes=wrapper_error_codes(tool_error=False, no_systems=False),
     ),
@@ -369,8 +406,11 @@ _OUTPUT_SHOW = OutputSpec(
         OutputField("programming_language", "string", "Worker language, if known."),
         OutputField("liveness_status", "string", "ONLINE / OFFLINE / etc."),
     ),
-    note="The session detail object (additional fields may be present). An "
-    "enterprise session's id works verbatim with the 'pq' verbs.",
+    note=(
+        "The session detail object (additional fields may be present). An "
+        "enterprise session's id works verbatim with the 'pq' verbs. Without "
+        "--connect, liveness_status reflects cached state and may be stale."
+    ),
 )
 
 
@@ -396,6 +436,8 @@ _OUTPUT_SHOW = OutputSpec(
         examples=(
             "$ dhcli session show community:community:my-session",
             "$ dhcli session show community:community:my-session --connect",
+            "$ dhcli session show community:community:my-session "
+            "| jq -r .liveness_status",
         ),
         see_also=("dhcli session list", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -465,7 +507,9 @@ _OUTPUT_CREATE = OutputSpec(
             "(--server, --engine, --auto-delete-timeout, --admin-group, "
             "--viewer-group, --session-arg) are mutually exclusive; supplying "
             "one for the wrong --system exits 2 with option_not_applicable. A "
-            "backend that rejects the request exits 3. " + CONTEXT_RISK_STATEFUL
+            "backend that rejects the request exits 3. Prefer this over "
+            "reusing a session from 'session list': a session you created is "
+            "yours to run scripts in and to delete. " + CONTEXT_RISK_STATEFUL
         ),
         arguments=(
             HelpEntry("SESSION_NAME", "Session name (required for Community)."),
@@ -487,8 +531,11 @@ _OUTPUT_CREATE = OutputSpec(
             "$ dhcli session create dev --launch-method python",
             "$ dhcli session create rpt --system prod --engine DeephavenEnterprise",
             "$ dhcli session create dev --env LOG_LEVEL=DEBUG --jvm-arg -Xmx2g",
+            "$ dhcli session create dev --launch-method python | jq -r .id",
         ),
         see_also=(
+            "dhcli session list",
+            "dhcli session exec ID",
             "dhcli session delete ID",
             "dhcli system list",
             "dhcli context show",
@@ -520,24 +567,33 @@ _OUTPUT_CREATE = OutputSpec(
     "programming_language",
     type=click.Choice(["Python", "Groovy"], case_sensitive=False),
     default=None,
-    help="Worker language.",
+    help=(
+        "Language scripts in this worker are written in. Omitted: the "
+        "backend's default."
+    ),
 )
 @click.option(
     "--heap-size-gb",
     "heap_size_gb",
     type=float,
     default=None,
-    help="JVM heap size (GB).",
+    help="JVM heap size in GB, e.g. 4 or 8.5. Omitted: the backend's default.",
 )
 @click.option(
-    "--jvm-arg", "extra_jvm_args", multiple=True, help="Extra JVM arg (repeatable)."
+    "--jvm-arg",
+    "extra_jvm_args",
+    multiple=True,
+    help="One extra JVM argument, e.g. -Xmx2g (repeatable).",
 )
 @click.option(
     "--env",
     "environment_vars",
     multiple=True,
     metavar="KEY=VALUE",
-    help="Worker environment variable (repeatable).",
+    help=(
+        "Worker environment variable as KEY=VALUE (repeatable). The value is "
+        "sent verbatim, never JSON-decoded."
+    ),
 )
 # Community-only
 @click.option(
@@ -545,51 +601,82 @@ _OUTPUT_CREATE = OutputSpec(
     "launch_method",
     type=click.Choice(["docker", "python"], case_sensitive=False),
     default=None,
-    help="[Community] How to launch the worker.",
+    help=(
+        "[Community] How the local daemon launches the worker: 'docker' runs "
+        "a container, 'python' runs an in-process server from a virtualenv."
+    ),
 )
 @click.option(
-    "--auth-token", "auth_token", default=None, help="[Community] Bearer auth token."
+    "--auth-token",
+    "auth_token",
+    default=None,
+    help=(
+        "[Community] Auth token to configure on the new worker. Omitted: the "
+        "backend's default."
+    ),
 )
 @click.option(
-    "--docker-image", "docker_image", default=None, help="[Community] Docker image."
+    "--docker-image",
+    "docker_image",
+    default=None,
+    help=(
+        "[Community] Image reference the container runs, e.g. "
+        "ghcr.io/deephaven/server:latest (docker launch method). Omitted: the "
+        "configured default."
+    ),
 )
 @click.option(
     "--docker-memory-limit-gb",
     "docker_memory_limit_gb",
     type=float,
     default=None,
-    help="[Community] Docker memory limit (GB).",
+    help="[Community] Container memory limit in GB, e.g. 4.",
 )
 @click.option(
     "--docker-cpu-limit",
     "docker_cpu_limit",
     type=float,
     default=None,
-    help="[Community] Docker CPU limit (cores).",
+    help="[Community] Container CPU limit in cores, e.g. 2 or 1.5.",
 )
 @click.option(
     "--docker-volume",
     "docker_volumes",
     multiple=True,
-    help="[Community] Docker bind mount; host paths are on this machine (repeatable).",
+    metavar="HOST:CONTAINER[:MODE]",
+    help=(
+        "[Community] Bind mount as host:container[:mode], e.g. "
+        "./data:/data:ro (repeatable). The host half is a path on this "
+        "machine and '~' is expanded; the container half is forwarded "
+        "verbatim."
+    ),
 )
 @click.option(
     "--python-venv-path",
     "python_venv_path",
     default=None,
     help=(
-        "[Community] Virtualenv path on this machine for the python " "launch method."
+        "[Community] Path to a virtualenv on this machine for the python "
+        "launch method ('~' is expanded)."
     ),
 )
 # Enterprise-only
-@click.option("--server", "server", default=None, help="[Enterprise] Server pool name.")
+@click.option(
+    "--server",
+    "server",
+    default=None,
+    help=(
+        "[Enterprise] Name of the server pool to run the worker on "
+        "(deployment-specific). Omitted: the controller chooses."
+    ),
+)
 @click.option(
     "--engine",
     "engine",
     default=None,
     help=(
         "[Enterprise] Engine name (deployment-specific; e.g. DeephavenCommunity, "
-        "DeephavenEnterprise)."
+        "DeephavenEnterprise). Omitted: the controller's default."
     ),
 )
 @click.option(
@@ -597,26 +684,33 @@ _OUTPUT_CREATE = OutputSpec(
     "auto_delete_timeout",
     type=int,
     default=None,
-    help="[Enterprise] Idle seconds before auto-delete.",
+    help=(
+        "[Enterprise] Seconds of idleness after which the session is deleted "
+        "automatically. Omitted: the backend's default."
+    ),
 )
 @click.option(
     "--admin-group",
     "admin_groups",
     multiple=True,
-    help="[Enterprise] Admin group (repeatable).",
+    help="[Enterprise] One group granted admin access to the session (repeatable).",
 )
 @click.option(
     "--viewer-group",
     "viewer_groups",
     multiple=True,
-    help="[Enterprise] Viewer group (repeatable).",
+    help="[Enterprise] One group granted viewer access to the session (repeatable).",
 )
 @click.option(
     "--session-arg",
     "session_arguments",
     multiple=True,
     metavar="KEY=VALUE",
-    help="[Enterprise] Controller session argument (repeatable; JSON values).",
+    help=(
+        "[Enterprise] Extra controller session argument as KEY=VALUE "
+        "(repeatable). Each value is JSON-decoded when possible, so n=42 "
+        "sends the integer 42 and s=hi sends the string hi."
+    ),
 )
 @click.option(
     "--no-set-context",
@@ -761,11 +855,15 @@ _OUTPUT_DELETE = OutputSpec(
             HelpEntry(
                 "ID",
                 "Fully qualified id. Run 'session list'. Defaults to the "
-                f"sticky context session if omitted. {CONTEXT_HINT}",
+                f"sticky context session if omitted. {TARGET_SELECTION_HINT} "
+                f"{CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_DELETE,
-        examples=("$ dhcli session delete community:community:my-session",),
+        examples=(
+            "$ dhcli session delete community:community:my-session",
+            "$ dhcli session delete community:community:my-session | jq -r .id",
+        ),
         see_also=(
             "dhcli session create",
             "dhcli session list",
@@ -808,8 +906,14 @@ async def session_delete(runtime: Runtime, id: str | None, yes: bool) -> None:
 
 _OUTPUT_EXEC = OutputSpec(
     "object",
-    (OutputField("id", "string", "The session id, echoed back."),),
-    note="On failure the command exits 3 with the error.",
+    (OutputField("id", "string", "The session id the script ran in."),),
+    note=(
+        "Confirmation only: the echoed id is the whole payload on success — "
+        "no stdout, return value, or variable dump comes back. Read results "
+        "with 'dhcli table list' / 'dhcli table data' on tables the script "
+        "created, which persist in the session. A script that raises exits 3 "
+        "with the error message."
+    ),
 )
 
 
@@ -826,13 +930,16 @@ _OUTPUT_EXEC = OutputSpec(
             "The file is read by the CLI itself, so a relative path resolves "
             "against your working directory; an unreadable file exits 2. "
             "Supplying no source or several exits 2; a script error exits 3. "
-            + CONTEXT_RISK_DESTRUCTIVE
+            "The script runs with the session's full privileges and its "
+            "effects persist there, so run scripts in a session you created "
+            "or were pointed at. " + CONTEXT_RISK_DESTRUCTIVE
         ),
         arguments=(
             HelpEntry(
                 "ID",
                 "Fully qualified id. Run 'session list'. Defaults to the "
-                f"sticky context session if omitted. {CONTEXT_HINT}",
+                f"sticky context session if omitted. {TARGET_SELECTION_HINT} "
+                f"{CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_EXEC,
@@ -840,8 +947,14 @@ _OUTPUT_EXEC = OutputSpec(
             "$ dhcli session exec community:community:dev --script 'print(1+1)'",
             "$ dhcli session exec community:community:dev --script-path /tmp/job.py",
             "$ cat job.py | dhcli session exec community:community:dev --script-path -",
+            "$ dhcli session exec community:community:dev --script "
+            "'t = empty_table(5)' && dhcli table list community:community:dev | jq .",
         ),
-        see_also=("dhcli session pip-list ID", "dhcli context show"),
+        see_also=(
+            "dhcli table list ID",
+            "dhcli session pip-list ID",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(
             ErrorCode.CONTEXT_NOT_SET,
@@ -854,12 +967,24 @@ _OUTPUT_EXEC = OutputSpec(
     ),
 )
 @click.argument("id", required=False)
-@click.option("--script", "script", default=None, help="Inline script source.")
+@click.option(
+    "--script",
+    "script",
+    default=None,
+    help=(
+        "Script source inline, in the session's own language (run 'dhcli "
+        "session show' to see which). Mutually exclusive with --script-path."
+    ),
+)
 @click.option(
     "--script-path",
     "script_path",
     default=None,
-    help="Path to a local script file (read by the CLI), or '-' to read stdin.",
+    help=(
+        "Path to a local script file, read by the CLI (a relative path "
+        "resolves against your working directory, and '~' is expanded), or "
+        "'-' to read the script from stdin. Mutually exclusive with --script."
+    ),
 )
 @yes_option
 @click.pass_obj
@@ -994,11 +1119,16 @@ _CREDENTIALS_DESCRIPTION = (
             HelpEntry(
                 "ID",
                 "Community session id. Run 'session list'. Defaults to the "
-                f"sticky context session if omitted. {CONTEXT_HINT}",
+                f"sticky context session if omitted. {TARGET_SELECTION_HINT} "
+                f"{CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_CREDENTIALS,
-        examples=("$ dhcli session credentials community:community:my-session",),
+        examples=(
+            "$ dhcli session credentials community:community:my-session",
+            "$ dhcli session credentials community:community:my-session "
+            "| jq -r .connection_url_with_auth",
+        ),
         see_also=(
             "dhcli session url ID",
             "dhcli session open ID",
@@ -1044,7 +1174,8 @@ _OUTPUT_URL = OutputSpec("text", note="The authenticated browser URL, one line."
             HelpEntry(
                 "ID",
                 "Community session id. Run 'session list'. Defaults to the "
-                f"sticky context session if omitted. {CONTEXT_HINT}",
+                f"sticky context session if omitted. {TARGET_SELECTION_HINT} "
+                f"{CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_URL,
@@ -1102,13 +1233,15 @@ _OUTPUT_OPEN = OutputSpec(
             HelpEntry(
                 "ID",
                 "Community session id. Run 'session list'. Defaults to the "
-                f"sticky context session if omitted. {CONTEXT_HINT}",
+                f"sticky context session if omitted. {TARGET_SELECTION_HINT} "
+                f"{CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_OPEN,
         examples=(
             "$ dhcli session open community:community:my-session",
             "$ dhcli session open community:community:my-session --print",
+            "$ dhcli session open community:community:my-session --print | jq -r .opened",
         ),
         see_also=(
             "dhcli session url ID",

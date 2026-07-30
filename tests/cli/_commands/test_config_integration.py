@@ -3,8 +3,8 @@
 These tests drive the real ``dhcli`` binary as an OS subprocess and
 exercise the offline configuration-authoring verbs — ``config
 get/set/unset/keys/files/validate/show``, ``config session
-add/list/remove``, ``config system add/list/remove``, and the
-interactive-only refusal paths of ``config init``/``config edit`` — the
+add/list/remove``, ``config system add/list/remove``, ``config init``,
+and the interactive-only refusal path of ``config edit`` — the
 verbs the in-process ``CliRunner`` unit tests
 (``tests/cli/_commands/test_config.py``) cannot prove at the real
 argv / entry-point / filesystem level. No daemon, worker, or Java is
@@ -420,16 +420,37 @@ def test_system_entity_lifecycle(tmp_path: Path) -> None:
 @pytest.mark.timeout(300)
 @_requires_dhcli
 def test_interactive_only_verbs_refuse_without_tty(tmp_path: Path) -> None:
-    """``init``/``edit`` fail with ``no_tty``; prompting verbs name the flag.
+    """``edit`` fails with ``no_tty``; ``init`` needs no TTY; prompts name the flag.
 
     stdin is ``/dev/null`` in every subprocess here, so ``can_prompt``
     is deterministically ``False`` — the scripted (flags-only) contract
-    these verbs promise agents.
+    these verbs promise agents. ``init`` is covered here because it used
+    to refuse without a TTY and no longer does; its *second* run still
+    refuses, but for having something to overwrite rather than for the
+    missing TTY.
     """
-    # init: interactive-only, no scripted mode.
+    # init: prompts for nothing, so the absence of a TTY is irrelevant. It
+    # writes the baseline that makes 'session create' work, which is the
+    # whole reason an agent can run setup unattended.
+    result = _run_cli(["config", "init"], sandbox=tmp_path, root_flags=["-q"])
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert json.loads(result.stdout)["session_creation"] == {
+        "defaults": {"launch_method": "python"}
+    }
+
+    # A second init refuses rather than overwriting: init scaffolds a file
+    # the operator then owns, so re-running is an error to report, not a
+    # no-op to succeed at (the 'uv init' / 'cargo init' contract). The
+    # message must name the remedy, since exit 2 alone leaves an agent
+    # with nowhere to go.
+    settings = tmp_path / "cfg" / "community" / "settings.json"
+    before = settings.read_text()
     result = _run_cli(["config", "init"], sandbox=tmp_path, root_flags=["-q"])
     assert result.returncode == 2, (result.stdout, result.stderr)
-    assert _structured_error(result.stderr)["error_code"] == "no_tty"
+    error = _structured_error(result.stderr)
+    assert error["error_code"] == "already_exists"
+    assert "dhcli config set" in error["error"]
+    assert settings.read_text() == before
 
     # edit: interactive-only, even with $EDITOR set.
     result = _run_cli(
@@ -453,8 +474,10 @@ def test_interactive_only_verbs_refuse_without_tty(tmp_path: Path) -> None:
     assert error["error_code"] == "missing_required_option"
     assert "--auth" in error["error"]
 
-    # No refusal path may leave a partial file behind.
-    assert not (tmp_path / "cfg" / "community").exists()
+    # No refusal path may leave a partial file behind. Scoped to what the
+    # refusals above would have written -- 'community/' itself now
+    # exists, created by the successful 'init' at the top.
+    assert not (tmp_path / "cfg" / "community" / "sessions").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -1130,7 +1130,7 @@ uv run pytest tests/resource_manager/test__launcher_integration.py::TestInstance
 
 #### CLI Config-Authoring Integration Tests
 
-`tests/cli/_commands/test_config_integration.py` drives the real `dhcli` binary as an OS subprocess through the offline configuration-authoring verbs (`config get/set/unset/keys/files/validate/show`, `config session add/list/remove`, `config system add/list/remove`, and the interactive-only refusal paths of `config init`/`config edit`). No daemon, Deephaven worker, Docker, or Java is required.
+`tests/cli/_commands/test_config_integration.py` drives the real `dhcli` binary as an OS subprocess through the offline configuration-authoring verbs (`config get/set/unset/keys/files/validate/show`, `config session add/list/remove`, `config system add/list/remove`, `config init`, and the interactive-only refusal path of `config edit`). No daemon, Deephaven worker, Docker, or Java is required.
 
 ```sh
 uv run pytest -s -m integration tests/cli/_commands/test_config_integration.py

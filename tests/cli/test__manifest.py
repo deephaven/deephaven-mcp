@@ -7,7 +7,9 @@ every ``HelpSpec`` fact surfaces in a command's node.
 
 from __future__ import annotations
 
+import io
 import json
+import re
 from unittest.mock import patch
 
 import click
@@ -17,7 +19,9 @@ from click.testing import CliRunner
 
 from deephaven_mcp.cli import _manifest
 from deephaven_mcp.cli._command import HelpfulCommand, HelpfulGroup
-from deephaven_mcp.cli._errors import CliError, ErrorCode
+from deephaven_mcp.cli._context import TARGET_SELECTION_GUIDANCE
+from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode, render_error
+from deephaven_mcp.cli._format import DEFAULT_OUTPUT_MODE, OUTPUT_MODES
 from deephaven_mcp.cli._help import (
     COMMON_ENV_VARS,
     HelpEntry,
@@ -27,8 +31,11 @@ from deephaven_mcp.cli._help import (
 )
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._manifest import (
+    AGENT_CONVENTIONS,
+    NodeStyle,
     _describe_wraps,
     _split_help_text,
+    build_error_code_registry,
     build_manifest,
     build_summary_tree,
     describe_command,
@@ -303,6 +310,89 @@ def test_summary_tree_shape() -> None:
     assert set(start) == {"summary"}
 
 
+def test_summary_tree_carries_the_root_description_and_conventions() -> None:
+    """The orientation surface states the rules, not just the command names.
+
+    ``dhcli agents tree`` and the root ``--agents`` are the first thing
+    an agent reads, and a bare ``{name: summary}`` map leaves the
+    tree-wide contracts (output mode, exit codes, the sticky context,
+    target selection) to be discovered by trial. Pinned because both
+    keys are pure data -- coverage alone would never catch their
+    removal.
+    """
+    tree = build_summary_tree(cli)
+    assert "Getting started" in tree["description"], (
+        "the root description reached the tree without its getting-started "
+        "workflow, which is the one thing a cold agent needs"
+    )
+    assert tree["conventions"] == list(AGENT_CONVENTIONS)
+
+
+def _quoted_command_paths(*texts: str) -> set[tuple[str, ...]]:
+    """Extract the ``'dhcli <verb>...'`` paths named in surfaced guidance.
+
+    Guidance text points at commands in single quotes (``'dhcli context
+    show'``). Returns each as a path tuple with the program name
+    dropped, ready for :func:`resolve_command`.
+    """
+    found: set[tuple[str, ...]] = set()
+    for text in texts:
+        for quoted in re.findall(r"'dhcli ([a-z][a-z0-9 -]*)'", text):
+            found.add(tuple(quoted.split()))
+    return found
+
+
+def test_agent_conventions_name_only_commands_that_exist() -> None:
+    """Guidance an agent acts on must not point at a renamed command.
+
+    The conventions block is prepended to an agent's context before its
+    first command, so a stale command name here misdirects every agent
+    at its least-informed moment -- and nothing else would catch it,
+    since the text is a plain string. Covers
+    ``TARGET_SELECTION_GUIDANCE`` too: it names 'dhcli session create' /
+    'dhcli pq create' as the safe way to obtain a target, which is only
+    true while those verbs exist under those names.
+    """
+    paths = _quoted_command_paths(*AGENT_CONVENTIONS, TARGET_SELECTION_GUIDANCE)
+    assert paths, "no command references found -- did the quoting style change?"
+    for path in sorted(paths):
+        resolve_command(cli, path)  # raises CliError if the path is stale
+
+
+def test_agent_conventions_state_the_real_failure_contract() -> None:
+    """The block's tree-wide claims must match what the CLI actually does.
+
+    Every claim here is one an agent branches on without checking, so a
+    claim that drifts is worse than an absent one. This is the failure
+    the block has actually suffered: entries stating a rule that held
+    for only some verbs. Each assertion below re-derives the claim from
+    the code rather than trusting the prose.
+    """
+    text = " ".join(AGENT_CONVENTIONS)
+
+    # "Exit codes: 0 success, 2 user-facing failure, 3 ... isError=true"
+    for code in ExitCode:
+        assert str(code.value) in text, f"exit code {code.value} went unstated"
+
+    # "A failure prints {error, error_code, exit_code, command}"
+    stream = io.StringIO()
+    render_error(
+        CliError("boom", code=ErrorCode.INTERNAL_ERROR),
+        output="json",
+        command="dhcli demo",
+        stream=stream,
+    )
+    for key in json.loads(stream.getvalue()):
+        assert key in text, f"error payload key {key!r} went unstated"
+
+    # "Output is compact single-line json unless a command's output mode is 'text'"
+    assert (
+        DEFAULT_OUTPUT_MODE == "json"
+    ), "the conventions block promises json by default; the default moved"
+    for mode in OUTPUT_MODES:
+        assert mode in text, f"output mode {mode!r} went unstated"
+
+
 def test_summary_tree_covers_every_leaf() -> None:
     """Every leaf command in the click tree appears in the summary tree."""
 
@@ -336,22 +426,43 @@ def test_summary_tree_for_a_non_group_root_has_empty_commands() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_standalone_leaf_node_is_self_contained() -> None:
-    """A standalone node inlines env vars and code meanings.
+def test_standalone_leaf_node_inlines_the_small_registries_only() -> None:
+    """A standalone node inlines env vars and exit-code meanings.
 
-    The node is the agent's --help: everything the rendered help text
-    conveys must be present without fetching the root registry.
+    These two are small (~340 B together) and *no* verb exposes their
+    meanings -- ``default_environment`` / ``default_exit_codes`` exist
+    only inside ``tree --full`` -- so inlining buys real decodability
+    cheaply. Error-code meanings are the opposite trade (~2.6 KB on a
+    daemon verb, and ``dhcli agents errors`` serves them on demand), so
+    they are hoisted; the next test pins that.
     """
     node = describe_command(cli.commands["daemon"].commands["start"])
     env_names = {e["name"] for e in node["environment"]}
     assert {e.name for e in COMMON_ENV_VARS} <= env_names
     assert all(
-        isinstance(c, dict) and c["code"] and c["help"] for c in node["error_codes"]
-    )
-    assert all(
         isinstance(c, dict) and isinstance(c["code"], int) and c["help"]
         for c in node["exit_codes"]
     )
+
+
+def test_error_codes_are_bare_in_every_node_style() -> None:
+    """Error-code meanings are never copied onto a node.
+
+    Inlining them cost ~79 KB across the tree -- 42% of a
+    daemon-reaching verb's node -- to restate a registry that
+    ``dhcli agents errors`` serves in one fetch, and that a failure
+    largely restates anyway: the error payload carries a raise-site
+    message next to its ``error_code``. Both styles must stay bare, so
+    the standalone and embedded shapes cannot diverge again.
+    """
+    cmd = cli.commands["daemon"].commands["start"]
+    for style in NodeStyle:
+        codes = describe_command(cmd, style=style)["error_codes"]
+        assert codes, f"{style} node dropped its error codes entirely"
+        assert all(isinstance(c, str) for c in codes), (
+            f"{style} node inlined error-code meanings; they belong in "
+            "the 'dhcli agents errors' registry"
+        )
 
 
 def test_standalone_group_node_lists_subcommand_summaries() -> None:
@@ -458,6 +569,24 @@ _LEAF_IDS = [path for path, _ in _LEAVES]
 
 
 @pytest.mark.parametrize(("path", "cmd"), _LEAVES, ids=_LEAF_IDS)
+def test_every_code_a_node_names_is_decodable_from_the_registry(
+    path: str, cmd: click.Command
+) -> None:
+    """A node's bare codes must all resolve in ``dhcli agents errors``.
+
+    This is the safety net the hoisting depends on: the node no longer
+    carries meanings, so a code absent from the registry would leave an
+    agent holding a string it cannot decode -- and the failure would be
+    invisible, since both surfaces build without complaint.
+    """
+    registry = {entry["code"] for entry in build_error_code_registry()}
+    named = set(describe_command(cmd).get("error_codes", []))
+    assert (
+        named <= registry
+    ), f"{path} names undecodable error codes: {sorted(named - registry)}"
+
+
+@pytest.mark.parametrize(("path", "cmd"), _LEAVES, ids=_LEAF_IDS)
 def test_standalone_node_preserves_every_help_spec_fact(
     path: str, cmd: click.Command
 ) -> None:
@@ -465,7 +594,12 @@ def test_standalone_node_preserves_every_help_spec_fact(
 
     The content-preservation contract: an agent reading ``<cmd>
     --agents`` must lose nothing relative to a human reading ``<cmd>
-    --help``.
+    --help`` -- with one deliberate carve-out. Error-code *meanings* are
+    hoisted to the ``dhcli agents errors`` registry (the node still names
+    every code), because copying them onto every node cost ~79 KB
+    tree-wide to restate what one fetch serves and what a failure's own
+    message largely conveys. The set of codes is still pinned below, so
+    a *code* going missing is still a failure.
     """
     assert isinstance(cmd, HelpfulCommand), path
     spec = cmd.help_spec
@@ -491,9 +625,7 @@ def test_standalone_node_preserves_every_help_spec_fact(
     if spec.see_also:
         assert node["see_also"] == list(spec.see_also)
     if spec.error_codes:
-        assert node["error_codes"] == [
-            {"code": c.value, "help": c.help_text} for c in spec.error_codes
-        ]
+        assert node["error_codes"] == [c.value for c in spec.error_codes]
     expected_exits = spec.exit_codes if spec.exit_codes is not None else tuple(ExitCode)
     assert node["exit_codes"] == [
         {"code": c.value, "help": c.help_text} for c in expected_exits
@@ -510,6 +642,71 @@ def test_standalone_node_preserves_every_help_spec_fact(
         if isinstance(option, click.Option) and option.help:
             match = next(p for p in node["params"] if p["name"] == option.name)
             assert match["help"] == option.help
+
+
+@pytest.mark.parametrize(("path", "cmd"), _LEAVES, ids=_LEAF_IDS)
+def test_standalone_node_is_self_locating(path: str, cmd: click.Command) -> None:
+    """A standalone node states the command line that reaches it.
+
+    An agent that fetched one node -- ``--agents`` on some command, or
+    ``agents command PATH`` -- has no surrounding map to read the
+    invocation off of, and ``name`` alone (``"stop"``) is not runnable.
+    ``path`` is that command line and ``usage`` shows the argument
+    order, so the two must agree.
+    """
+    tokens = path.split()
+    node = describe_command(cmd, parents=("dhcli", *tokens[:-1]))
+    assert node["path"] == f"dhcli {path}"
+    assert node["usage"].startswith(node["path"]), (
+        f"{path}: usage {node['usage']!r} does not begin with the node's own "
+        "path, so the two disagree about how to invoke the command"
+    )
+
+
+@pytest.mark.parametrize(("path", "cmd"), _LEAVES, ids=_LEAF_IDS)
+def test_embedded_node_omits_the_derivable_location(
+    path: str, cmd: click.Command
+) -> None:
+    """Inside the whole-tree manifest, ``path`` and ``usage`` are dropped.
+
+    A node nested under ``commands.pq.subcommands.stop`` already
+    discloses its path by position, and ``params`` gives the argument
+    order -- so carrying both keys on all 76 nodes spent ~5.3 KB of an
+    agent's context restating what it can see. Same hoisting principle
+    as ``error_codes`` / ``exit_codes`` meanings.
+    """
+    node = describe_command(cmd, style=NodeStyle.EMBEDDED)
+    assert "path" not in node
+    assert "usage" not in node
+
+
+_CHOICE_PARAMS = [
+    (f"{path} {param.name}", param, cmd)
+    for path, cmd in _LEAVES
+    for param in cmd.params
+    if isinstance(param.type, click.Choice)
+]
+_CHOICE_IDS = [ident for ident, _, _ in _CHOICE_PARAMS]
+
+
+@pytest.mark.parametrize(("ident", "param", "cmd"), _CHOICE_PARAMS, ids=_CHOICE_IDS)
+def test_constrained_param_publishes_its_allowed_values(
+    ident: str, param: click.Parameter, cmd: click.Command
+) -> None:
+    """A parameter with a closed value set publishes that set.
+
+    Guessing a constrained value costs an agent a round trip and an exit
+    2. click prints the choices in ``--help`` on its own; the manifest
+    has to carry them too, or the agent surface is strictly weaker than
+    the human one.
+    """
+    node = describe_command(cmd)
+    described = next(p for p in node["params"] if p["name"] == param.name)
+    assert isinstance(param.type, click.Choice)
+    assert described["choices"] == list(param.type.choices), (
+        f"{ident}: manifest choices {described.get('choices')!r} do not match "
+        f"the click type's {list(param.type.choices)!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -689,6 +886,10 @@ def test_agents_flag_on_leaf_matches_command_node(
     The runtime-load bypass inspects ``sys.argv``; ``CliRunner.invoke``
     does not set it, so the test patches it explicitly (mirroring the
     ``--help`` path) — otherwise CI without a default config dir fails.
+
+    ``parents`` mirrors what the real invocation supplies: the node's
+    ``path`` and ``usage`` come from the ancestors click walked through,
+    which a direct ``describe_command`` call cannot know.
     """
     argv = ["daemon", "start", "--agents"]
     monkeypatch.setattr("sys.argv", ["dhcli", *argv])
@@ -696,7 +897,9 @@ def test_agents_flag_on_leaf_matches_command_node(
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload == describe_command(cli.commands["daemon"].commands["start"])
+    assert payload == describe_command(
+        cli.commands["daemon"].commands["start"], parents=("dhcli", "daemon")
+    )
 
 
 def test_agents_flag_on_group_matches_group_node(
@@ -708,7 +911,9 @@ def test_agents_flag_on_group_matches_group_node(
     runner = CliRunner()
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
-    assert json.loads(result.output) == describe_command(cli.commands["daemon"])
+    assert json.loads(result.output) == describe_command(
+        cli.commands["daemon"], parents=("dhcli",)
+    )
 
 
 def test_agents_flag_honors_output_mode(
@@ -721,7 +926,9 @@ def test_agents_flag_honors_output_mode(
     result = runner.invoke(cli, argv, standalone_mode=False)
     assert result.exit_code == 0
     payload = yaml.safe_load(result.output)
-    assert payload == describe_command(cli.commands["daemon"].commands["start"])
+    assert payload == describe_command(
+        cli.commands["daemon"].commands["start"], parents=("dhcli", "daemon")
+    )
 
 
 def test_agents_flag_not_hoisted_to_root(

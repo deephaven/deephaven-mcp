@@ -40,7 +40,7 @@ Apply the `ref-python-coding-practices` skill (rule 15 covers click + `@run_asyn
 
 7. **Update `docs/CLI.md`.** Add the new verb under the noun's section: synopsis, description, every flag, exit codes, error codes, output fields, at least one runnable example. The three surfaces must agree (`ref-cli-help-standards` *Three surfaces, two sources* consistency rule). If a new `ErrorCode` was introduced, add it to the `error_code` registry table in the same document. Docs have no automated check — this is the most commonly forgotten step.
 
-8. **Sanity-check the agents manifest.** `dhcli agents tree` walks the live click tree, so a newly-registered command appears there automatically (and `agents tree --full` carries its full node). `tests/cli/test__manifest.py` confirms the noun is wired and its content-preservation test asserts every `HelpSpec` fact surfaces in the node. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
+8. **Sanity-check the agents manifest.** `dhcli agents tree` walks the live click tree, so a newly-registered command appears there automatically (and `agents tree --full` carries its full node). `tests/cli/test__manifest.py` confirms the noun is wired and its content-preservation test asserts the `HelpSpec` facts surface in the node — see `ref-cli-help-standards` *What the agents manifest carries* for the one deliberate carve-out (error-code meanings live in `dhcli agents errors`, not on the node) and the rules governing what else the manifest may carry. (The current test does not snapshot the full sub-tree; tightening it is a known TODO, tracked outside this skill.)
 
 9. **Run checks.**
 

@@ -14,6 +14,8 @@ import click
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
+    TABULAR_OUTPUT_FIELDS,
+    TABULAR_OUTPUT_NOTE,
     call_and_echo,
     call_and_echo_field,
     call_and_echo_table,
@@ -40,7 +42,14 @@ def table() -> None:
 
     'list' enumerates table names; 'schema' returns column definitions;
     'data' returns row data. All take a fully qualified session id and
-    auto-start the daemon unless --no-auto-start is set.
+    auto-start the daemon unless --no-auto-start is set. The usual order
+    is 'list' to find a table, 'schema' to learn its columns and types,
+    then 'data' to read rows.
+
+    'list' falls back to the sticky context session when its id is
+    omitted; 'schema' and 'data' cannot, because a table name follows
+    the id and a single argument would be ambiguous — pass their id
+    explicitly (run 'context show' to see the current default).
     """
 
 
@@ -49,7 +58,14 @@ def table() -> None:
 # ---------------------------------------------------------------------------
 
 _OUTPUT_LIST = OutputSpec(
-    "list", (), note="Array of table-name strings in the session."
+    "list",
+    (),
+    note=(
+        "Array of table-name strings currently in the session's scope. Only "
+        "names — no columns, types, or row counts. An empty array means the "
+        "session holds no tables, which is normal for a session in which "
+        "nothing has run yet."
+    ),
 )
 
 
@@ -70,10 +86,14 @@ _OUTPUT_LIST = OutputSpec(
             ),
         ),
         output=_OUTPUT_LIST,
-        examples=("$ dhcli table list community:community:dev",),
+        examples=(
+            "$ dhcli table list community:community:dev",
+            "$ dhcli table list community:community:dev | jq -r '.[]'",
+        ),
         see_also=(
             "dhcli table schema ID TABLE",
             "dhcli table data ID TABLE",
+            "dhcli session exec ID",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -128,12 +148,28 @@ _OUTPUT_SCHEMA = OutputSpec(
             "Discover table names with 'table list' first."
         ),
         arguments=(
-            HelpEntry("ID", "Fully qualified id. Run 'session list'."),
-            HelpEntry("TABLE_NAME", "The table whose schema to show."),
+            HelpEntry(
+                "ID",
+                "Fully qualified session id. Run 'session list'. Required — "
+                "with TABLE_NAME following it, it cannot fall back to the "
+                f"sticky context. {CONTEXT_HINT}",
+            ),
+            HelpEntry(
+                "TABLE_NAME",
+                "The table whose schema to show, as named by 'table list'.",
+            ),
         ),
         output=_OUTPUT_SCHEMA,
-        examples=("$ dhcli table schema community:community:dev trades",),
-        see_also=("dhcli table list ID",),
+        examples=(
+            "$ dhcli table schema community:community:dev trades",
+            "$ dhcli table schema community:community:dev trades "
+            "| jq -r '.schema[] | \"\\(.name) \\(.type)\"'",
+        ),
+        see_also=(
+            "dhcli table list ID",
+            "dhcli table data ID TABLE",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -157,12 +193,7 @@ async def table_schema(runtime: Runtime, id: str, table_name: str) -> None:
 # data
 # ---------------------------------------------------------------------------
 
-_OUTPUT_DATA = OutputSpec(
-    "object",
-    (),
-    note="Tabular row data for the table (columns + rows envelope from the "
-    "tool, including the session id echoed back).",
-)
+_OUTPUT_DATA = OutputSpec("object", TABULAR_OUTPUT_FIELDS, note=TABULAR_OUTPUT_NOTE)
 
 
 @table.command(
@@ -172,18 +203,33 @@ _OUTPUT_DATA = OutputSpec(
         summary="Fetch row data from a table in a session.",
         description=(
             "Returns up to --max-rows rows from the head (default) or, with "
-            "--tail, the tail of the table."
+            "--tail, the tail of the table. The rows arrive as JSON objects "
+            "keyed by column name. A table larger than the cap is truncated "
+            "silently on stdout — is_complete reports false and no warning is "
+            "printed, so check that field before drawing any conclusion about "
+            "the table as a whole. Read 'table schema' first if you need "
+            "column types."
         ),
         arguments=(
-            HelpEntry("ID", "Fully qualified id. Run 'session list'."),
-            HelpEntry("TABLE_NAME", "The table to read."),
+            HelpEntry(
+                "ID",
+                "Fully qualified session id. Run 'session list'. Required — "
+                "with TABLE_NAME following it, it cannot fall back to the "
+                f"sticky context. {CONTEXT_HINT}",
+            ),
+            HelpEntry("TABLE_NAME", "The table to read, as named by 'table list'."),
         ),
         output=_OUTPUT_DATA,
         examples=(
             "$ dhcli table data community:community:dev trades",
             "$ dhcli table data community:community:dev trades --max-rows 50 --tail",
+            "$ dhcli table data community:community:dev trades | jq '.row_count, .is_complete'",
         ),
-        see_also=("dhcli table list ID", "dhcli table schema ID TABLE"),
+        see_also=(
+            "dhcli table list ID",
+            "dhcli table schema ID TABLE",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -195,13 +241,20 @@ _OUTPUT_DATA = OutputSpec(
     "max_rows",
     type=int,
     default=None,
-    help="Maximum rows to return (default: 1000).",
+    help=(
+        "Maximum number of rows to return. Omitted: 1000, the tool's own "
+        "cap. Raising it can produce a very large payload; the server "
+        "refuses a response over its size limit."
+    ),
 )
 @click.option(
     "--head/--tail",
     "head",
     default=True,
-    help="Take rows from the head (default) or the tail.",
+    help=(
+        "Take rows from the start of the table (default) or, with --tail, "
+        "from the end — the most recent rows for a time-series table."
+    ),
 )
 @click.pass_obj
 @run_async

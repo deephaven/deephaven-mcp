@@ -15,8 +15,9 @@ Report privately via GitHub Security Advisories:
 
 ### What to include
 
-- **Affected component** — community server, enterprise server, docs
-  server, or shared library code.
+- **Affected component** — the systems server
+  (`dh-mcp-systems-server`), the CLI (`dhcli`), the docs server
+  (`dh-mcp-docs-server`), or shared library code.
 - **Affected version** — release tag, or `main` commit hash if
   reporting against an unreleased change.
 - **Minimal reproduction** or proof-of-concept.
@@ -53,8 +54,9 @@ process. Please direct reports to the listed parties instead.
 - **Customer infrastructure misconfiguration** — open reverse proxies,
   weak network ACLs, exposed credentials in your own environment. Not a
   Deephaven MCP defect.
-- **Documented security opt-outs** — e.g. behavior under
-  `--allow-cleartext`. These are deliberate escape hatches with loud
-  warnings, not defects.
+- **Documented security opt-ins** — e.g. plaintext session tokens
+  returned when `security.credential_retrieval_mode` is set to anything
+  other than `none`. These are deliberate, documented, off-by-default
+  choices, not defects.
 - **Third-party MCP clients** — Claude Desktop, Cursor, VS Code Copilot,
   Windsurf, etc. Report those to the vendor.

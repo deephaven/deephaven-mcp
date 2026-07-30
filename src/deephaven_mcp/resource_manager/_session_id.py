@@ -30,8 +30,8 @@ interop trick.
 
 Validation uses the resource-name character class from
 :func:`~deephaven_mcp._names.validate_resource_name`: ASCII
-alphanumerics plus ``_``, ``.``, ``-``, starting with an alphanumeric,
-non-empty.
+alphanumerics plus ``_`` and ``-``, starting with an alphanumeric,
+non-empty, no dots.
 """
 
 from __future__ import annotations
@@ -53,7 +53,8 @@ class SessionId(str):
     equality with plain ``str``, and JSON serialization all behave
     exactly as for ``str``. The constructor validates that the value
     matches the resource-name character class (ASCII alphanumerics plus
-    ``_``, ``.``, ``-``; must start with an alphanumeric; non-empty).
+    ``_`` and ``-``; must start with an alphanumeric; non-empty; no
+    dots).
 
     The constructor is idempotent on :class:`SessionId` input.
 

@@ -13,8 +13,9 @@ Two complementary access paths render the same metadata:
   appended to — the machine-readable twin of ``--help``.
 - This ``agents`` group exposes whole-system / cross-cutting
   views: ``tree`` (the summary tree, or the complete manifest with
-  ``--full``), ``command`` (one command's self-contained node), and
-  ``errors`` (the error-code registry).
+  ``--full``), ``command`` (one command's full node), and
+  ``errors`` (the error-code registry that decodes any node's
+  ``error_codes``).
 
 The manifest builders themselves
 (:func:`~deephaven_mcp.cli._manifest.build_manifest` and friends) live in
@@ -78,6 +79,14 @@ _OUTPUT_TREE = OutputSpec(
         OutputField("prog", "string", "Program name (dhcli)."),
         OutputField("summary", "string", "Root command one-line summary."),
         OutputField(
+            "conventions",
+            "array",
+            "Project-wide rules that hold for every command — output modes, "
+            "exit and error-code contracts, the sticky context, and target "
+            "selection. Read these before the first consequential command "
+            "(default only).",
+        ),
+        OutputField(
             "hint", "string", "How to drill down to full command nodes (default only)."
         ),
         OutputField(
@@ -86,7 +95,9 @@ _OUTPUT_TREE = OutputSpec(
             "Nested {name: {summary, commands?}} map down to the leaves; "
             "full command nodes instead with --full.",
         ),
-        OutputField("description", "string", "Root command description (--full only)."),
+        OutputField(
+            "description", "string", "Root command description (both variants)."
+        ),
         OutputField("examples", "array", "Root command examples (--full only)."),
         OutputField(
             "global_options",
@@ -131,10 +142,13 @@ _OUTPUT_TREE = OutputSpec(
     help_spec=HelpSpec(
         summary="Print the command tree (summary by default, --full for all).",
         description=(
-            "The agent orientation surface. By default prints the compact "
-            "summary tree: every command path with its one-line summary, "
-            "plus a hint for drilling down — small enough to keep in "
-            "context (equivalent to 'dhcli --agents'). With --full, "
+            "The agent orientation surface, and the right first call. By "
+            "default prints the compact summary tree: every command path "
+            "with its one-line summary, the project-wide 'conventions' an "
+            "agent needs before acting (output modes, exit codes, the "
+            "sticky context, target selection), and a hint for drilling "
+            "down — small enough to keep in context (equivalent to 'dhcli "
+            "--agents'). With --full, "
             "prints the complete manifest instead: every command's full "
             "node (options, arguments, output schema, examples, error "
             "codes) plus the project-wide metadata (global_options, "
@@ -171,7 +185,19 @@ def agents_tree(ctx: click.Context, full: bool) -> None:
 _OUTPUT_COMMAND = OutputSpec(
     "object",
     (
-        OutputField("name", "string", "The command's invocation name."),
+        OutputField("name", "string", "The command's own name, e.g. 'stop'."),
+        OutputField(
+            "path",
+            "string",
+            "The full invocation path, e.g. 'dhcli pq stop' — what to "
+            "actually run, which 'name' alone does not give.",
+        ),
+        OutputField(
+            "usage",
+            "string",
+            "Usage line in click's own form, e.g. 'dhcli pq stop [OPTIONS] "
+            "[ID]...', giving the positional order.",
+        ),
         OutputField("summary", "string", "One-line summary."),
         OutputField(
             "description", "string", "What the command does and when to use it."
@@ -187,7 +213,8 @@ _OUTPUT_COMMAND = OutputSpec(
         OutputField(
             "error_codes",
             "array",
-            "Error codes the command can emit ({code, help} each).",
+            "Error codes the command can emit, as bare strings. Decode "
+            "them with 'dhcli agents errors'.",
         ),
         OutputField(
             "exit_codes", "array", "Exit codes the command can return ({code, help})."
@@ -215,8 +242,8 @@ _OUTPUT_COMMAND = OutputSpec(
         summary="Print one command's full node from the manifest.",
         description=(
             "Resolves PATH (one or more command-name tokens) against the "
-            "live command tree and emits that command's self-contained "
-            "node — identical to appending --agents to the command. A "
+            "live command tree and emits that command's full node — "
+            "identical to appending --agents to the command. A "
             "group's node lists its subcommands as one-line summaries; "
             "pass --full to expand them into full nested nodes. Use "
             "'agents tree --full' for the whole manifest with "
@@ -257,8 +284,12 @@ def agents_command(ctx: click.Context, path: tuple[str, ...], full: bool) -> Non
     PATH is required (at least one token). ``--full`` recurses a
     group's subcommands into full nested nodes.
     """
-    cmd = resolve_command(ctx.find_root().command, path)
-    echo_payload_no_runtime(ctx, describe_command(cmd, recurse=full))
+    root = ctx.find_root().command
+    cmd = resolve_command(root, path)
+    # The resolved ancestors, program name first, so the node's ``path``
+    # is the runnable invocation rather than the leaf name alone.
+    parents = (root.name or "dhcli", *path[:-1])
+    echo_payload_no_runtime(ctx, describe_command(cmd, recurse=full, parents=parents))
 
 
 _OUTPUT_ERRORS = OutputSpec(
@@ -278,9 +309,11 @@ _OUTPUT_ERRORS = OutputSpec(
         summary="Print the stable error-code registry.",
         description=(
             "Every error_code string the CLI can return in a structured "
-            "error payload, with its meaning. Agents use this to map an "
-            "error_code field back to what went wrong. Also available as "
-            "the 'error_codes' key of 'agents tree --full'."
+            "error payload, with its meaning. This is the decoder for the "
+            "'error_codes' a command node names: nodes carry bare code "
+            "strings, so fetch this registry once and keep it rather than "
+            "re-reading it per command. Also available as the "
+            "'error_codes' key of 'agents tree --full'."
         ),
         output=_OUTPUT_ERRORS,
         examples=("$ dhcli agents errors | jq '.[].code'",),

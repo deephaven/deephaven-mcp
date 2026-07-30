@@ -40,6 +40,13 @@ def tool() -> None:
     --no-auto-start is set) and speak MCP: 'list' enumerates the
     available tools, 'show' prints one tool's input schema, and
     'call' invokes a tool and prints its result.
+
+    This group is the escape hatch, not the main road: it reaches every
+    tool, including ones no verb fronts, but 'tool call' passes your
+    arguments straight through. Prefer the first-class verbs
+    ('session', 'table', 'catalog', 'pq', 'docs') wherever one exists —
+    they resolve the target, confirm a destructive action, and document
+    the output shape.
     """
 
 
@@ -203,10 +210,23 @@ _OUTPUT_CALL = OutputSpec(
             "Each --arg is a key=value pair; the value is JSON-decoded when "
             "possible (so --arg n=42 sends the integer 42, while --arg s=hi "
             "sends the string hi). Repeat --arg for multiple arguments. "
-            "Exit code 3 if the tool returns isError=True."
+            "Exit code 3 if the tool returns isError=True. "
+            "Use this for a tool no verb fronts, or to pass a parameter a "
+            "verb does not expose. It is a raw passthrough: none of the "
+            "safety and convenience a first-class verb adds applies — no "
+            "sticky-context resolution, no confirmation before a destructive "
+            "call, no --yes, no documented output schema, and the result is "
+            "the unwrapped MCP envelope rather than the verb's shaped "
+            "payload. Calling a delete or script tool this way acts "
+            "immediately on exactly the id you pass, so name the target "
+            "deliberately."
         ),
         arguments=(
-            HelpEntry("NAME", "Tool name. Run 'dhcli tool list' to discover names."),
+            HelpEntry(
+                "NAME",
+                "Tool name. Run 'dhcli tool list' to discover names and "
+                "'dhcli tool show NAME' for its input schema.",
+            ),
         ),
         output=_OUTPUT_CALL,
         examples=(
@@ -214,8 +234,13 @@ _OUTPUT_CALL = OutputSpec(
             "$ dhcli tool call sessions_list --arg type=community",
             "$ dhcli -o json tool call session_community_create "
             "--arg session_name=demo",
+            "$ dhcli tool call sessions_list | jq '.structuredContent.sessions'",
         ),
-        see_also=("dhcli tool list", "dhcli tool show NAME"),
+        see_also=(
+            "dhcli tool list",
+            "dhcli tool show NAME",
+            "dhcli agents tree",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.ARG_PARSE_ERROR, *wrapper_error_codes()),
     ),

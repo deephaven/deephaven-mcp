@@ -10,6 +10,7 @@ policy, see the root [`SECURITY.md`](../SECURITY.md).
 
 - [Am I in scope for this guide?](#am-i-in-scope-for-this-guide)
 - [Trust model](#trust-model)
+- [The `dhcli` daemon](#the-dhcli-daemon)
 - [Hardening checklist](#hardening-checklist)
 - [Threat model](#threat-model)
 - [Authentication](#authentication)
@@ -37,6 +38,10 @@ If instead you deploy `dh-mcp-docs-server` (the public
 documentation Q&A service), skip to [Docs server](#docs-server) —
 it has a deliberately different, unauthenticated posture.
 
+If you use the `dhcli` CLI, it starts a local server on your behalf.
+That is a loopback-only surface with its own secret on disk; see
+[The `dhcli` daemon](#the-dhcli-daemon).
+
 ## Trust model
 
 `dh-mcp-systems-server` is a **single-binary multiplexed MCP server**
@@ -56,6 +61,42 @@ Deephaven Community workers and Deephaven Enterprise controllers)
 are configured in the JSON tree under the resolved configuration
 directory (see [`docs/ENV.md`](ENV.md) for the resolution order)
 and resolved once at startup. Restart to rotate.
+
+## The `dhcli` daemon
+
+The `dhcli` CLI runs its commands against a **per-user background
+daemon** it starts automatically — `dh-mcp-systems-server --daemon`.
+This is the same HTTP transport described above, pinned to a safe
+shape you do not configure:
+
+- **Loopback only, ephemeral port.** The daemon binds `127.0.0.1` on a
+  kernel-chosen port. Combining `--daemon` with `--transport`,
+  `--host`, or `--port` is rejected.
+- **A fresh PSK per startup**, generated with
+  `secrets.token_urlsafe(32)`. `server.json`'s `psk` is *ignored* in
+  daemon mode, so the daemon never shares your HTTP-transport key.
+- **The PSK is stored in plaintext** in the registry file
+  `<runtime_dir>/daemon/daemon.json`, because the CLI must read it back
+  to authenticate. The file is written owner-only (`0o600`) via an
+  atomic replace, and the directory is created owner-only (`0o700`)
+  before the first write.
+
+What this means for you:
+
+- **Anyone who can read `daemon.json` can drive your daemon**, and
+  through it every Deephaven session and system your configuration
+  declares. Keep `<runtime_dir>` private; the defaults already are.
+- **Do not relocate the runtime directory to a shared path.** A
+  world-readable or group-readable `--runtime-dir` (or
+  `DH_AI_DATA_DIR`) discloses the PSK. Unlike the configuration
+  directory, the runtime directory has no startup permission audit.
+- **Stop the daemon when you are done** on a shared or long-lived host:
+  `dhcli daemon stop` terminates it and removes the registry file. It
+  also exits on its own after an idle window
+  (`server.json`'s `daemon.idle_shutdown_seconds`).
+- **`daemon.json` is safe to share only after redaction.** `dhcli
+  daemon status` prints the same entry with the PSK masked; prefer it
+  when pasting diagnostics into a bug report.
 
 ## Hardening checklist
 
@@ -87,6 +128,11 @@ anything beyond the local process group.
       `"none"`** unless AI agents specifically need to read community
       session tokens. Other modes return plaintext tokens to the
       caller of the `session_community_credentials` MCP tool.
+- [ ] **Keep the runtime directory private.** The `dhcli` daemon's
+      registry (`<runtime_dir>/daemon/daemon.json`) holds a live PSK in
+      plaintext. The defaults are owner-only; do not point
+      `--runtime-dir` / `DH_AI_DATA_DIR` at a shared location, and note
+      that no startup audit checks this directory.
 - [ ] **Rotate** any PSK or outbound credential that has appeared in
       a log file, shell history, or version-control commit. PSK
       rotation requires a server restart.
@@ -214,6 +260,15 @@ do **not** accept a `tls` block — the upstream Enterprise
   listing every offending path. POSIX-strict
   (`stat & 0o077 == 0`, owner-must-match-UID); Windows best-effort
   (configuration directory must be under the current user profile).
+  This audit covers the *configuration* directory only — the runtime
+  directory is created owner-only but is not re-audited on startup.
+- **Community session tokens.** `session_community_credentials`, and
+  the `dhcli session credentials` / `session url` / `session open`
+  verbs that wrap it, return a **plaintext auth token** and a URL
+  containing it. All are gated by
+  `security.credential_retrieval_mode` (default `none`, which refuses
+  them); every retrieval is logged. Treat the output like a password:
+  a session URL pasted into a chat log grants access to that session.
 
 ## Rotation
 
@@ -223,6 +278,9 @@ do **not** accept a `tls` block — the upstream Enterprise
 - **Outbound credential rotation:** update the `${env:NAME}` source
   or the `${file:PATH}` target and **restart the server**. In-memory
   credentials are not re-resolved at runtime.
+- **`dhcli` daemon PSK rotation:** automatic. Every daemon start
+  generates a fresh key, so `dhcli daemon restart` rotates it. Run it
+  if you believe `daemon.json` was exposed.
 
 ## Docs server
 

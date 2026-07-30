@@ -17,6 +17,8 @@ import click
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
+    TABULAR_OUTPUT_FIELDS,
+    TABULAR_OUTPUT_NOTE,
     call_and_echo,
     call_and_echo_field,
     call_and_echo_table,
@@ -44,17 +46,36 @@ def catalog() -> None:
     Enterprise (Core+) only. 'tables' and 'namespaces' enumerate the
     catalog; 'schema' returns column definitions; 'sample' returns a few
     rows of a catalog table. All take an enterprise session id and
-    auto-start the daemon unless --no-auto-start is set.
+    auto-start the daemon unless --no-auto-start is set. The catalog is
+    the system's stored data, shared by every user — these verbs read it
+    through a session but do not change it.
+
+    'tables' and 'namespaces' fall back to the sticky context session
+    when their id is omitted; 'schema' and 'sample' cannot, because a
+    namespace and table name follow the id — pass their id explicitly
+    (run 'context show' to see the current default).
     """
 
 
 def _filter_option(f: Any) -> Any:
-    """Attach the shared repeatable ``--filter`` option to a command."""
+    """Attach the shared repeatable ``--filter`` option to a command.
+
+    The listing verbs and ``sample`` give the option different meanings,
+    so the help states the part they share and each verb's description
+    covers its own: on ``tables`` / ``namespaces`` a filter narrows the
+    catalog listing, while on ``sample`` it filters the table's rows and
+    omitting it triggers the tool's partition auto-detection.
+    """
     return click.option(
         "--filter",
         "filters",
         multiple=True,
-        help="Deephaven filter expression (repeatable).",
+        metavar="EXPR",
+        help=(
+            "Deephaven filter expression, in the query language's "
+            "where-clause syntax (repeatable; expressions are ANDed). "
+            "Quote it for the shell."
+        ),
     )(f)
 
 
@@ -69,8 +90,11 @@ _OUTPUT_TABLES = OutputSpec(
         OutputField("table_name", "string", "The table name."),
     ),
     note=(
-        "Array of {namespace, table_name} entries, one per catalog table. When "
-        "the list is truncated by --max-rows, a warning is written to stderr."
+        "Array of {namespace, table_name} entries, one per catalog table. A "
+        "listing is a candidate set: an entry can still fail to load when "
+        "'catalog schema' or 'catalog sample' reaches for it. When the list is "
+        "truncated by --max-rows, a warning is written to stderr — stdout "
+        "alone cannot be told apart from a complete result."
     ),
 )
 
@@ -94,7 +118,11 @@ _OUTPUT_TABLES = OutputSpec(
             ),
         ),
         output=_OUTPUT_TABLES,
-        examples=("$ dhcli catalog tables enterprise:prod:rpt",),
+        examples=(
+            "$ dhcli catalog tables enterprise:prod:rpt",
+            "$ dhcli catalog tables enterprise:prod:rpt --max-rows 100",
+            "$ dhcli catalog tables enterprise:prod:rpt | jq -r '.[].table_name'",
+        ),
         see_also=(
             "dhcli catalog namespaces ID",
             "dhcli catalog schema ID NAMESPACE TABLE",
@@ -110,7 +138,11 @@ _OUTPUT_TABLES = OutputSpec(
     "max_rows",
     type=int,
     default=None,
-    help="Row cap (default: 10000).",
+    help=(
+        "Maximum number of catalog entries to return. Omitted: 10000, the "
+        "tool's own cap. A truncated result warns on stderr; the printed "
+        "array is the truncated one."
+    ),
 )
 @_filter_option
 @click.pass_obj
@@ -148,7 +180,8 @@ _OUTPUT_NAMESPACES = OutputSpec(
     (),
     note=(
         "Array of namespace-name strings in the catalog. When the list is "
-        "truncated by --max-rows, a warning is written to stderr."
+        "truncated by --max-rows, a warning is written to stderr — stdout "
+        "alone cannot be told apart from a complete result."
     ),
 )
 
@@ -171,7 +204,10 @@ _OUTPUT_NAMESPACES = OutputSpec(
             ),
         ),
         output=_OUTPUT_NAMESPACES,
-        examples=("$ dhcli catalog namespaces enterprise:prod:rpt",),
+        examples=(
+            "$ dhcli catalog namespaces enterprise:prod:rpt",
+            "$ dhcli catalog namespaces enterprise:prod:rpt | jq -r '.[]'",
+        ),
         see_also=("dhcli catalog tables ID", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
@@ -183,7 +219,11 @@ _OUTPUT_NAMESPACES = OutputSpec(
     "max_rows",
     type=int,
     default=None,
-    help="Namespace cap (default: 1000).",
+    help=(
+        "Maximum number of namespaces to return. Omitted: 1000, the tool's "
+        "own cap. A truncated result warns on stderr; the printed array is "
+        "the truncated one."
+    ),
 )
 @_filter_option
 @click.pass_obj
@@ -246,13 +286,34 @@ _OUTPUT_SCHEMA = OutputSpec(
             "with 'catalog tables' first."
         ),
         arguments=(
-            HelpEntry("ID", "Enterprise session id. Run 'session list'."),
-            HelpEntry("NAMESPACE", "The catalog namespace."),
-            HelpEntry("TABLE_NAME", "The catalog table whose schema to show."),
+            HelpEntry(
+                "ID",
+                "Enterprise session id. Run 'session list'. Required — with "
+                "NAMESPACE and TABLE_NAME following it, it cannot fall back "
+                f"to the sticky context. {CONTEXT_HINT}",
+            ),
+            HelpEntry(
+                "NAMESPACE",
+                "The catalog namespace, as named by 'catalog namespaces' or "
+                "the namespace field of 'catalog tables'.",
+            ),
+            HelpEntry(
+                "TABLE_NAME",
+                "The catalog table whose schema to show, as named by "
+                "'catalog tables'.",
+            ),
         ),
         output=_OUTPUT_SCHEMA,
-        examples=("$ dhcli catalog schema enterprise:prod:rpt Market Trades",),
-        see_also=("dhcli catalog tables ID",),
+        examples=(
+            "$ dhcli catalog schema enterprise:prod:rpt Market Trades",
+            "$ dhcli catalog schema enterprise:prod:rpt Market Trades "
+            "| jq -r '.schema[] | select(.column_type) | .name'",
+        ),
+        see_also=(
+            "dhcli catalog tables ID",
+            "dhcli catalog sample ID NAMESPACE TABLE",
+            "dhcli context show",
+        ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
@@ -288,12 +349,11 @@ async def catalog_schema(
 
 _OUTPUT_TABULAR = OutputSpec(
     "object",
-    (),
-    note=(
-        "Tabular result envelope from the tool (columns + rows, including the "
-        "session id echoed back). In -o human, the format and columns fields "
-        "are omitted as noise; -o json / -o yaml keep the full envelope."
+    (
+        *TABULAR_OUTPUT_FIELDS,
+        OutputField("namespace", "string", "The catalog namespace, echoed back."),
     ),
+    note=TABULAR_OUTPUT_NOTE,
 )
 
 
@@ -304,21 +364,40 @@ _OUTPUT_TABULAR = OutputSpec(
         summary="Sample rows from a catalog table.",
         description=(
             "Enterprise (Core+) only. Returns up to --max-rows rows from the "
-            "head (default) or, with --tail, the tail of NAMESPACE.TABLE_NAME."
+            "head (default) or, with --tail, the tail of NAMESPACE.TABLE_NAME. "
+            "A preview, not a query: the row cap is small and a truncated "
+            "result reports is_complete false. Partitioned tables (DbInternal, "
+            "System, and others) would return nothing without a partition "
+            "filter, so with no --filter the tool detects the table's "
+            "partition columns and samples the most recent partition holding "
+            "data; passing --filter replaces that with your own expressions. "
+            "'catalog schema' marks partition columns with column_type "
+            "'Partitioning'."
         ),
         arguments=(
-            HelpEntry("ID", "Enterprise session id. Run 'session list'."),
-            HelpEntry("NAMESPACE", "The catalog namespace."),
-            HelpEntry("TABLE_NAME", "The catalog table."),
+            HelpEntry(
+                "ID",
+                "Enterprise session id. Run 'session list'. Required — with "
+                "NAMESPACE and TABLE_NAME following it, it cannot fall back "
+                f"to the sticky context. {CONTEXT_HINT}",
+            ),
+            HelpEntry(
+                "NAMESPACE",
+                "The catalog namespace, as named by 'catalog namespaces'.",
+            ),
+            HelpEntry("TABLE_NAME", "The catalog table, as named by 'catalog tables'."),
         ),
         output=_OUTPUT_TABULAR,
         examples=(
             "$ dhcli catalog sample enterprise:prod:rpt Market Trades",
             "$ dhcli catalog sample enterprise:prod:rpt Market Trades --max-rows 20 --tail",
+            "$ dhcli catalog sample enterprise:prod:rpt Market Trades "
+            "| jq '.row_count, .is_complete'",
         ),
         see_also=(
             "dhcli catalog tables ID",
             "dhcli catalog schema ID NAMESPACE TABLE",
+            "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
@@ -332,10 +411,19 @@ _OUTPUT_TABULAR = OutputSpec(
     "max_rows",
     type=int,
     default=None,
-    help="Row cap (default: 100).",
+    help=(
+        "Maximum number of rows to sample. Omitted: 100, the tool's own cap. "
+        "The server refuses a response over its size limit."
+    ),
 )
 @click.option(
-    "--head/--tail", "head", default=True, help="Take rows from the head or the tail."
+    "--head/--tail",
+    "head",
+    default=True,
+    help=(
+        "Take rows from the start of the table (default) or, with --tail, "
+        "from the end — the most recent rows for a time-series table."
+    ),
 )
 @_filter_option
 @click.pass_obj
