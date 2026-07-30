@@ -42,14 +42,23 @@
 
 Most data tools force you to choose: **fast** or **real-time**. With Deephaven's revolutionary live dataframes, you get both. Process streaming data at millisecond speeds while your AI assistant helps you build, query, and analyze — all through natural language.
 
-**🚀 What makes this different:**
+**What makes this different:**
 
 - **Live Data, Live Results**: Query streaming Kafka, real-time feeds, and batch data as easily as static CSV files
 - **AI-Native Integration**: Your AI assistant understands your data pipeline and can help optimize, debug, and extend it
 - **Enterprise Ready**: Battle-tested on Wall Street for over a decade, now available for your team
 - **Zero Learning Curve**: Write queries as if working with static tables — real-time updates happen automatically
 
-Deephaven MCP implements the [Model Context Protocol (MCP)](https://spec.modelcontextprotocol.io/) standard using [FastMCP](https://github.com/modelcontextprotocol/python-sdk) to provide seamless integration between [Deephaven Community Core](https://deephaven.io/community/) and [Deephaven Enterprise](https://deephaven.io/enterprise/) systems and your AI development workflow. Perfect for data scientists, engineers, analysts, business users, and anyone who wants to harness real-time data—regardless of programming experience. Let AI generate the code while you focus on insights.
+Deephaven MCP implements the
+[Model Context Protocol (MCP)](https://spec.modelcontextprotocol.io/)
+standard using [FastMCP](https://github.com/modelcontextprotocol/python-sdk),
+connecting [Deephaven Community Core](https://deephaven.io/community/) and
+[Deephaven Enterprise](https://deephaven.io/enterprise/) to your AI
+development workflow.
+
+It is built for data scientists, engineers, analysts, and business users
+alike — whatever your programming experience. Let AI generate the code
+while you focus on insights.
 
 ---
 
@@ -94,74 +103,82 @@ uv tool install --python-preference managed mcp-proxy
 
 ### Community Core Quick Start
 
-**Get up and running in 5 minutes!** This quickstart assumes you have [installed `deephaven-mcp`](#install-deephaven-mcp) and have a local Deephaven Community Core instance running on `localhost:10000`. If you don't have one, [download and start Deephaven Community Core](https://deephaven.io/core/docs/getting-started/quickstart/) first.
+**Get up and running in 5 minutes!** All you need is
+[`deephaven-mcp` installed](#install-deephaven-mcp) — you do **not** need
+a running Deephaven server, because `dhcli` can start one for you.
+Already running
+[Deephaven Community Core](https://deephaven.io/core/docs/getting-started/quickstart/)?
+You can point at it instead.
 
 #### 1. Create Your Configuration
 
-Use `dhcli config` — it writes the files, validates every field before
-saving, and sets the file permissions the server's startup audit
-requires. The guided wizard is the shortest path:
+One command writes a working configuration:
 
 ```bash
 dhcli config init
 ```
 
-It prompts for one Community session and/or one Enterprise system, then
-writes them. To skip the prompts, declare the session directly:
+No prompts, nothing to edit by hand. You can now start a Deephaven worker
+whenever you want one — no Docker, nothing else to install:
+
+```bash
+dhcli session create dev
+```
+
+See [Deephaven CLI (`dhcli`)](#deephaven-cli-dhcli) for what else `dhcli`
+can do.
+
+**Optional** — to use a Deephaven server you already run, add it:
 
 ```bash
 dhcli config session add local --host localhost --port 10000 \
   --auth psk --token '${env:DH_LOCAL_PSK}'
 ```
 
-`${env:DH_LOCAL_PSK}` is stored verbatim and read from the environment
-when the configuration is loaded, so the secret never lands in a file.
-Use `--auth anonymous` instead if your Deephaven instance needs no token.
+The `${env:...}` form keeps your token out of the file, so set it in your
+shell: `export DH_LOCAL_PSK='your-token'`. Use `--auth anonymous` if your
+server needs no token.
 
-Confirm the result:
+To check your configuration at any time:
 
 ```bash
-export DH_LOCAL_PSK='your-token'    # any ${env:...} ref must resolve here
 dhcli config validate
 ```
 
-Exit code `0` means the tree is good. `validate` resolves every
-`${env:...}` reference in the *current shell*, so it exits `2` with
-`config_invalid` if `DH_LOCAL_PSK` is unset — export it (or put it in
-your shell profile) before validating. Run `dhcli config files` to see
-where the files landed, or `dhcli config get` to print the tree.
+Exit code `0` means you are good to go. `dhcli config files` shows where
+the files landed.
 
 > **Where the files live**: `~/.deephaven/ai/config/` on POSIX,
-> `%APPDATA%/Deephaven/ai/config/` on Windows. `dhcli config` creates the
-> directory owner-only and each file owner-read/write, which is what the
-> server's permission audit requires. If you hand-edit instead, apply
-> `chmod 700` to the directory and `chmod 600` to every file yourself.
-> [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) documents the full
-> schema, and [`config-samples/ai/config/`](config-samples/ai/config/)
-> ships a complete sample tree.
+> `%APPDATA%/Deephaven/ai/config/` on Windows. `dhcli config` sets the
+> file permissions the server requires; if you hand-edit instead, apply
+> `chmod 700` to the directory and `chmod 600` to every file. For every
+> setting you can change, see
+> [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and the sample tree in
+> [`config-samples/ai/config/`](config-samples/ai/config/).
 
-> **Dynamic Sessions**: A `session_creation` block enables on-demand [Community Core](https://deephaven.io/community/) session creation — add one with `dhcli config set community.settings.session_creation.max_concurrent_sessions=5` (`config set` takes `PATH=VALUE` tokens). Requirements: `deephaven-server` (installed in any Python venv) for the python method, or [Docker](https://www.docker.com/get-started/) for the docker method. See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for details.
+#### 2. Check That It Works
 
-#### 2. Start the Systems Server and Configure Your AI Tool
-
-For desktop AI clients (Claude Desktop, Cursor, ...) the simplest
-option is **stdio** — the client launches the server as a subprocess
-and no port or PSK is involved. No background process is needed.
-
-If you instead want to run the server as a long-lived HTTP service
-(useful when sharing one server across several clients on the same
-host), start it with `--transport http`:
+Confirm the configuration is good before involving an AI tool. `dhcli` starts
+its own background server, so there is nothing for you to launch:
 
 ```bash
-export DH_MCP_PSK='your-shared-secret'    # referenced from server.json
-dh-mcp-systems-server --transport http --port 8000 >dh-mcp-systems.log 2>&1 &
+dhcli config validate    # is the configuration itself well-formed?
+dhcli session list       # can the server load it and see your session?
 ```
 
-To check logs: `tail -f dh-mcp-systems.log`
+`config validate` checks the files alone. `session list` goes further: it
+loads the tree and lists the sessions the server knows about. If your session
+appears, both the configuration and the server are working, and anything that
+goes wrong from here is in your AI-tool wiring. A bad configuration fails
+immediately with an error naming the file and field.
 
-To stop the server: `pkill -f dh-mcp-systems-server`
+#### 3. Connect Your AI Tool
 
-**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add (stdio variant; no separate process to start):
+Your AI tool starts the systems server for you and shuts it down when it
+exits. There is no port to pick, no shared secret, and no background process
+to manage.
+
+**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
 ```json5
 {
@@ -178,51 +195,22 @@ To stop the server: `pkill -f dh-mcp-systems-server`
 }
 ```
 
+The second entry, `deephaven-docs`, connects to Deephaven's hosted
+documentation server so you can ask questions about Deephaven itself. Claude
+Desktop reaches it through `mcp-proxy`, which you installed in
+[Install Deephaven MCP](#install-deephaven-mcp).
+
 > The default config directory is `~/.deephaven/ai/config/` (created in
 > Step 1), so no `DH_AI_DATA_DIR` is needed. To use a different location,
 > add an `env` block setting `DH_AI_DATA_DIR` to a data root that contains
 > a `config/` subdirectory.
 
-For an HTTP setup, replace the `deephaven-systems` stanza with one
-that bridges through `mcp-proxy` and forwards the PSK header:
-
-```json5
-{
-  "deephaven-systems": {
-    "command": "mcp-proxy",
-    "args": [
-      "--transport=streamablehttp",
-      "--header", "X-Deephaven-PSK=${DH_MCP_PSK}",
-      "http://127.0.0.1:8000/mcp"
-    ]
-  }
-}
-```
-
-> If `mcp-proxy` is reported missing, see [Setup Instructions by Tool](#setup-instructions-by-tool).
-
-**For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
-
-#### 3. Verify Your Configuration (optional, AI-free)
-
-Before wiring up an AI client, confirm your config is valid and the server works using the
-`dhcli` CLI. It auto-starts its own background daemon — no server to launch, no PSK, no
-`mcp-proxy`:
-
-```bash
-dhcli config validate    # is the configuration itself well-formed?
-dhcli session list       # can the server load it and see your session?
-```
-
-`config validate` checks the files alone. `session list` goes further: it starts the daemon,
-loads the tree, and lists the sessions the server knows about — so if you see your `local`
-session, the config tree and systems server are both good and any remaining problem is in
-your AI-tool wiring. A malformed config fails fast with a structured error naming the file
-and field. See [`docs/CLI.md`](docs/CLI.md) for the full CLI reference.
+**Using something else?** See [Setup Instructions by Tool](#setup-instructions-by-tool)
+for Cursor, VS Code, and Windsurf.
 
 #### 4. Try It Out
 
-Restart your AI tool (or IDE) after starting the servers.
+Restart your AI tool (or IDE) so it picks up the new configuration.
 
 Confirm the setup is working by asking:
 
@@ -232,31 +220,28 @@ Confirm the setup is working by asking:
 
 > "Execute this Python code in my Deephaven session: `t = empty_table(100).update('x=i', 'y=i*2')`"
 
-**Need help?** Check the [Troubleshooting](#troubleshooting) section, ask the built-in docs server about Deephaven features, or join the [Deephaven Community Slack](https://deephaven.io/slack)!
+**Need help?** Check the [Troubleshooting](#troubleshooting) section, ask the hosted docs server about Deephaven features, or join the [Deephaven Community Slack](https://deephaven.io/slack)!
 
 ---
 
 ### Enterprise Quick Start
 
-**Get up and running in 5 minutes!** This quickstart assumes you have [installed `deephaven-mcp`](#install-deephaven-mcp) and have a Deephaven Enterprise system accessible at a known URL. Contact your Deephaven administrator for the `connection.json` URL and your credentials.
+**Get up and running in 5 minutes!** You need
+[`deephaven-mcp` installed](#install-deephaven-mcp) and a Deephaven
+Enterprise system you can reach. Ask your Deephaven administrator for the
+`connection.json` URL and your credentials.
 
-> **Adding to an existing setup?** This is additive, not a separate install or a separate server. If you already ran the [Community Core quickstart](#community-core-quick-start), you are adding one entry to the **same** config directory — the one running `dh-mcp-systems-server` then hosts your Community sessions **and** your Enterprise systems together. If you skipped Community, this section stands alone.
+> **Adding to an existing setup?** This is additive — not a separate
+> install or a separate server. If you already ran the
+> [Community Core quickstart](#community-core-quick-start), you are adding
+> to the **same** config directory, and one `dh-mcp-systems-server` hosts
+> your Community sessions and Enterprise systems together. If you skipped
+> Community, this section stands alone.
 
 #### 1. Create Your Configuration
 
-Declare the system with `dhcli config` — it validates the fields, writes
-the file atomically, and applies the permissions the server's startup
-audit requires. Each enterprise system becomes one file under
-`enterprise/systems/`, and the systems server hosts every file it finds.
-
-> **Server-stored credentials.** The systems server holds the
-> credentials needed to talk to the Core+ controller, expressed as a
-> discriminated `auth.credentials` block (`type: "password"` or
-> `type: "private_key"`). Secret material uses templating —
-> `${env:VAR}` reads from an environment variable, `${file:/path}`
-> reads from a file. MCP clients themselves do **not** send
-> per-request Deephaven credentials — HTTP-transport requests are
-> gated by a single PSK in `server.json`.
+One command declares your system. Each Enterprise system becomes one file
+under `enterprise/systems/`.
 
 **Password auth (with the secret read from an env var):**
 
@@ -281,11 +266,10 @@ export DH_PROD_PASSWORD='your-password'    # for the password-auth variant
 dhcli config validate
 ```
 
-`validate` resolves `${env:...}` references in the current shell, so
-export the secret before running it. `system_name` is not a field you
-set — the filename stem is the system name, and `prod` above becomes
-`enterprise/systems/prod.json`. `community` is reserved and cannot be
-used as an Enterprise system name.
+Export the secret before running `validate` — it resolves `${env:...}`
+references in your current shell. The name you pass becomes the filename,
+so `prod` above creates `enterprise/systems/prod.json`. `community` is
+reserved and cannot be used as a system name.
 
 > **Multiple systems**: run `dhcli config system add <name> ...` once per
 > system. List what you have declared with `dhcli config system list`,
@@ -309,25 +293,34 @@ A complete combined example ships in
 populated); the [Configuration](#configuration) section below and
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) cover the full tree.
 
-#### 2. Start the Systems Server and Configure Your AI Tool
+#### 2. Check That It Works
 
-For desktop AI clients, the systems server runs as a stdio subprocess
-launched by the client — no background process to start. For an
-HTTP deployment:
+Confirm the configuration is good before involving an AI tool. `dhcli` starts
+its own background server, so there is nothing for you to launch:
 
 ```bash
-export DH_MCP_PSK='your-shared-secret'
-dh-mcp-systems-server --transport http --port 8000 >dh-mcp-systems.log 2>&1 &
+dhcli config validate    # is the configuration itself well-formed?
+dhcli system list        # which systems does the server serve?
 ```
 
-To check logs: `tail -f dh-mcp-systems.log`
+`system list` returns every configured system as `{name, type}` pairs — the
+`community` umbrella alongside each Enterprise system. Your `prod` entry
+appearing there confirms both the configuration and the server are working.
+A bad configuration fails immediately with an error naming the file and field.
 
-To stop the server: `pkill -f dh-mcp-systems-server`
+To check that the system is actually reachable, not just configured:
 
-> **Multiple DHE systems**: run `dhcli config system add` once per system
-> (Step 1) — the single `dh-mcp-systems-server` instance hosts them all.
+```bash
+dhcli system status --system prod --connect
+```
 
-**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add (stdio variant):
+#### 3. Connect Your AI Tool
+
+Your AI tool starts the systems server for you and shuts it down when it
+exits. There is no port to pick, no shared secret, and no background process
+to manage.
+
+**For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
 ```json5
 {
@@ -344,50 +337,22 @@ To stop the server: `pkill -f dh-mcp-systems-server`
 }
 ```
 
+The second entry, `deephaven-docs`, connects to Deephaven's hosted
+documentation server so you can ask questions about Deephaven itself. Claude
+Desktop reaches it through `mcp-proxy`, which you installed in
+[Install Deephaven MCP](#install-deephaven-mcp).
+
 > The default config directory is `~/.deephaven/ai/config/` (created in
 > Step 1), so no `DH_AI_DATA_DIR` is needed. To use a different location,
 > add an `env` block setting `DH_AI_DATA_DIR` to a data root that contains
 > a `config/` subdirectory.
 
-Or, for an HTTP-bridged setup, use:
-
-```json5
-{
-  "deephaven-systems": {
-    "command": "mcp-proxy",
-    "args": [
-      "--transport=streamablehttp",
-      "--header", "X-Deephaven-PSK=${DH_MCP_PSK}",
-      "http://127.0.0.1:8000/mcp"
-    ]
-  }
-}
-```
-
-> If `mcp-proxy` is reported missing, see [Setup Instructions by Tool](#setup-instructions-by-tool).
-
-**For other tools**, see the [detailed setup instructions](#setup-instructions-by-tool) below.
-
-#### 3. Verify Your Configuration (optional, AI-free)
-
-Before wiring up an AI client, confirm your config is valid using the `dhcli` CLI — it
-auto-starts its own daemon, so nothing else needs to be running:
-
-```bash
-dhcli config validate    # is the configuration itself well-formed?
-dhcli system list        # which systems does the server serve?
-```
-
-`system list` returns every configured system as `{name, type}` pairs — the `community`
-umbrella alongside each Enterprise system — so your `prod` entry appearing there confirms
-the config and systems server are both good. A malformed config fails fast with a structured
-error naming the file and field. To check that the system is actually reachable, add
-`dhcli system status --system prod --connect`. See [`docs/CLI.md`](docs/CLI.md) for the full
-CLI reference.
+**Using something else?** See [Setup Instructions by Tool](#setup-instructions-by-tool)
+for Cursor, VS Code, and Windsurf.
 
 #### 4. Try It Out
 
-Restart your AI tool (or IDE) after starting the server.
+Restart your AI tool (or IDE) so it picks up the new configuration.
 
 Confirm the setup is working by asking:
 
@@ -397,7 +362,7 @@ Confirm the setup is working by asking:
 
 > "Show me the tables available in my enterprise session"
 
-**Need help?** Check the [Troubleshooting](#troubleshooting) section, ask the built-in docs server about Deephaven features, or join the [Deephaven Community Slack](https://deephaven.io/slack)!
+**Need help?** Check the [Troubleshooting](#troubleshooting) section, ask the hosted docs server about Deephaven features, or join the [Deephaven Community Slack](https://deephaven.io/slack)!
 
 ---
 
@@ -447,7 +412,7 @@ noun-verb commands, typed flags, and machine-first structured output.
 - **Operate**: `session`, `system`, `table`, `catalog`, and `pq` verbs, e.g. `dhcli session list` or `dhcli session open <id>`.
 - **Ask the docs**: `dhcli docs ask` queries the Deephaven documentation assistant.
 - **Output modes**: `-o human|json|json-pretty|yaml`, defaulting to compact `json`.
-- **For agents**: `dhcli agents tree` emits the whole command surface as JSON — preferable to scraping `--help`.
+- **For agents**: `dhcli agents tree` emits the command tree with one-line summaries as JSON, and `--full` the complete manifest with parameters, output schemas, and error codes — preferable to scraping `--help`.
 - **Escape hatch**: `dhcli tool call` invokes any MCP tool directly.
 
 It manages its own background server, so there is no lifecycle to run
@@ -559,7 +524,7 @@ in the PQ id (form `enterprise:<system>:<serial>`).
 
 ```mermaid
 graph TD
-    A["MCP Clients (Claude Desktop, Cursor, Copilot, ...)"] --"stdio or streamable-HTTP (MCP)"--> S("dh-mcp-systems-server")
+    A["MCP Clients (Claude Desktop, Cursor, Copilot, ...)"] --"stdio (default) or HTTP"--> S("dh-mcp-systems-server")
     S --> R{{"MultiSystemRegistry"}}
     R --> C("Community session registry")
     R --> E1("Enterprise system 'prod'")
@@ -588,7 +553,9 @@ graph TD
 
 ## Prerequisites
 
-- **[`uv`](https://docs.astral.sh/uv/) (Recommended)**: Used for `uv tool install`, which puts the server commands on your PATH with no venv to manage. Install it via `pip install uv` or the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/). After installing tools, you may need to run `uv tool update-shell` and open a new terminal so the uv tool bin directory is on your `PATH` (this directory — typically `~/.local/bin` on macOS/Linux or `%LOCALAPPDATA%\uv\bin\` on Windows — is not on the default shell `PATH` everywhere).
+- **[`uv`](https://docs.astral.sh/uv/) (Recommended)**: Used for `uv tool install`, which puts the server commands on your PATH with no venv to manage.
+  - Install it with `pip install uv`, or see the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+  - If the commands are not found afterwards, run `uv tool update-shell` and open a new terminal. The uv tool bin directory — typically `~/.local/bin` on macOS/Linux, `%LOCALAPPDATA%\uv\bin\` on Windows — is not on the default `PATH` everywhere.
 - **Python**: Version 3.12 or higher. uv downloads its own managed Python automatically via `--python-preference managed` — no separate Python installation required. ([Download Python](https://www.python.org/downloads/) only needed for non-uv workflows)
 - **Docker (Optional)**: Required for Docker-based community session creation. ([Download Docker](https://www.docker.com/get-started/))
 - **Access to Deephaven systems:** To use the MCP servers, you will need one or more of the following:
@@ -626,7 +593,11 @@ uv tool install --python-preference managed "deephaven-mcp"
 
 After this command, `dhcli`, `dh-mcp-systems-server`, and `dh-mcp-docs-server` are available on your PATH. Both Community Core and Enterprise (Core+) support are always included.
 
-> **About `--python-preference managed`**: this flag tells `uv` to download and use its own managed Python interpreter (stored under `~/.local/share/uv/python/`) rather than any Python already on your system. The tool environment is unaffected if your system Python is upgraded, moved, or removed; `uv` picks the latest Python version compatible with the package's `requires-python`. Recommended for everyone — you do not need to install Python yourself.
+> **About `--python-preference managed`**: `uv` downloads and uses its own
+> Python (under `~/.local/share/uv/python/`) instead of any Python on your
+> system, so upgrading or removing your system Python cannot break the
+> install. Recommended for everyone — you do not need to install Python
+> yourself.
 
 **Where tools are installed:**
 
@@ -670,7 +641,14 @@ When using a venv, use the full path to executables (e.g., `.venv/bin/dh-mcp-sys
 
 #### Alternative: Standalone binaries (no Python required)
 
-If you do not have Python (or `uv`), download a prebuilt **standalone binary** — a single self-contained executable that embeds its own Python interpreter and all dependencies and runs fully offline. Get the archive for your platform from the [GitHub Releases page](https://github.com/deephaven/deephaven-mcp/releases). See [`docs/STANDALONE_BINARIES.md`](docs/STANDALONE_BINARIES.md) for the full install steps.
+If you do not have Python (or `uv`), download a prebuilt **standalone
+binary** — a single executable that embeds its own Python interpreter and
+every dependency, and runs fully offline.
+
+Get the archive for your platform from the
+[GitHub Releases page](https://github.com/deephaven/deephaven-mcp/releases),
+then follow [`docs/STANDALONE_BINARIES.md`](docs/STANDALONE_BINARIES.md)
+for the install steps.
 
 ---
 
@@ -697,17 +675,9 @@ config_dir/
         └── <name>.json              # one file per enterprise system
 ```
 
-Each filename stem **is** the session or system name (`local.json`
-declares the session `local`). A file may also carry a matching
-`session_name` / `system_name` field for readability, but it is
-optional and must agree with the stem when present. Names allow ASCII
-letters, digits, `_`, and `-` — no dots, since a name becomes one
-segment of a dot-separated configuration path.
-
-The startup permission audit requires the directory to be locked down
-(POSIX strict, Windows best-effort) — see
-[`docs/SECURITY.md`](docs/SECURITY.md). The `dhcli config` authoring
-verbs apply those permissions for you.
+Each filename **is** the session or system name — `local.json` declares
+the session `local`. Names may use letters, digits, `_`, and `-`, but no
+dots.
 
 **Full reference**:
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) is the single source
@@ -717,7 +687,7 @@ type, the `${env:VAR}` / `${file:/path}` templating syntax, the
 `server.json` transport / PSK options.
 
 **Authoring and inspection**: the `dhcli config` verbs read and write this
-tree for you — `init` (guided wizard), `session add` / `system add`,
+tree for you — `init` (writes a working baseline), `session add` / `system add`,
 `set` / `unset` / `get` / `keys`, `edit`, `files`, `show`, and `validate`.
 Every change is schema-validated before an atomic write, so an invalid
 file never lands on disk. See [`docs/CLI.md`](docs/CLI.md).
@@ -726,53 +696,38 @@ file never lands on disk. See [`docs/CLI.md`](docs/CLI.md).
 [`config-samples/ai/config/`](config-samples/ai/config/) contains a complete,
 copy-pasteable sample tree for both Community and Enterprise.
 
-**Security**: [`docs/SECURITY.md`](docs/SECURITY.md) covers directory
-permissions, PSK handling, and credential templating in detail.
+**Security**: the server requires the configuration directory to be locked
+down, which the `dhcli config` verbs handle for you.
+[`docs/SECURITY.md`](docs/SECURITY.md) covers those permissions, PSK
+handling, and credential templating in detail.
 
 ---
 
 ## AI Tool Setup
 
-This section explains how to connect Deephaven to your AI assistant or IDE. The single multiplexed `dh-mcp-systems-server` supports **stdio** (default; the AI client launches the server as a subprocess) and **streamable-HTTP** (loopback-only, gated by a PSK).
+This section explains how to connect Deephaven to your AI assistant or IDE.
 
 ### How It Works
 
-1. Decide whether to run the server as a stdio subprocess of the AI client (simplest) or as a long-lived HTTP service shared across clients on the same host.
-2. Configure your AI tool's MCP block accordingly — stdio stanzas spawn the binary directly, HTTP stanzas point to `http://127.0.0.1:<port>/mcp` and inject the PSK via the `X-Deephaven-PSK` header.
-3. Restart your AI tool if needed to pick up configuration changes.
+You add two entries to your AI tool's MCP configuration:
 
-**Starting an HTTP server in the background:**
+- **`deephaven-systems`** — your own Deephaven sessions and systems. Your AI
+  tool runs `dh-mcp-systems-server` for you and stops it on exit, so you never
+  start, stop, or monitor it yourself.
+- **`deephaven-docs`** — Deephaven's hosted documentation server, for questions
+  about Deephaven itself. This one is remote, so tools that can speak HTTP
+  connect straight to it and tools that cannot (Claude Desktop) go through
+  `mcp-proxy`.
 
-Redirect logs to a named file so they don't get lost.
-
-```bash
-export DH_MCP_PSK='your-shared-secret'
-dh-mcp-systems-server --transport http --port 8000 >dh-mcp-systems.log 2>&1 &
-```
-
-**Stopping a background server:**
-
-```bash
-# By process name
-pkill -f dh-mcp-systems-server
-
-# Or stop a specific port (e.g., port 8000)
-kill $(lsof -ti tcp:8000)
-```
-
-**Following logs in real time:**
-
-```bash
-tail -f dh-mcp-systems.log
-```
+Then restart your AI tool so it reads the new configuration. Find your tool
+below for the exact file and format.
 
 ### Setup Instructions by Tool
 
 #### Claude Desktop
 
-Claude Desktop uses stdio transport. The simplest setup is to let it
-launch `dh-mcp-systems-server` directly via stdio — no `mcp-proxy`,
-no HTTP server, no PSK to manage.
+Claude Desktop launches `dh-mcp-systems-server` itself. It cannot speak HTTP,
+so it reaches the hosted docs server through `mcp-proxy`.
 
 Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
@@ -796,26 +751,6 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
 > only to point at a non-default data root (which must contain a `config/`
 > subdirectory).
 
-If you instead want to share a single HTTP-transport server across
-several clients, install `mcp-proxy` (see
-[Quick Start](#quick-start)) and bridge through it, forwarding the
-PSK header on every request:
-
-```json5
-{
-  "mcpServers": {
-    "deephaven-systems": {
-      "command": "mcp-proxy",
-      "args": [
-        "--transport=streamablehttp",
-        "--header", "X-Deephaven-PSK=${DH_MCP_PSK}",
-        "http://127.0.0.1:8000/mcp"
-      ]
-    }
-  }
-}
-```
-
 > If your AI tool reports that `mcp-proxy` or `dh-mcp-systems-server`
 > is not found, locate it with `which <name>` (macOS/Linux) or
 > `where <name>` / `Get-Command <name>` (Windows cmd.exe / PowerShell),
@@ -829,7 +764,7 @@ PSK header on every request:
 
 #### Cursor
 
-Cursor supports HTTP MCP servers. Create or edit an MCP configuration file:
+Create or edit an MCP configuration file:
 
 - **Project-specific**: `.cursor/mcp.json` in your project root
 - **Global**: `~/.cursor/mcp.json` for all projects
@@ -838,12 +773,11 @@ Cursor supports HTTP MCP servers. Create or edit an MCP configuration file:
 {
   "mcpServers": {
     "deephaven-systems": {
-      "type": "http",
-      "url": "http://127.0.0.1:8000/mcp",
-      "headers": { "X-Deephaven-PSK": "${DH_MCP_PSK}" }
+      "type": "stdio",
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
-      "type": "http",
       "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
     }
   }
@@ -852,11 +786,13 @@ Cursor supports HTTP MCP servers. Create or edit an MCP configuration file:
 
 **Additional Resources:**
 
-- [Cursor MCP documentation](https://docs.cursor.com/en/context/mcp)
+- [Cursor MCP documentation](https://cursor.com/docs/mcp)
 
 #### VS Code (GitHub Copilot)
 
-VS Code supports HTTP MCP servers natively. To add MCP servers to your workspace, run the **MCP: Add Server** command from the Command Palette (Cmd-Shift-P), then select **Workspace Settings** to create the `.vscode/mcp.json` file. Alternatively, create `.vscode/mcp.json` manually in your project root.
+Run the **MCP: Add Server** command from the Command Palette (Cmd-Shift-P) and
+select **Workspace Settings** to create `.vscode/mcp.json`, or create that file
+manually in your project root.
 
 Configure your servers:
 
@@ -864,9 +800,8 @@ Configure your servers:
 {
   "servers": {
     "deephaven-systems": {
-      "type": "http",
-      "url": "http://127.0.0.1:8000/mcp",
-      "headers": { "X-Deephaven-PSK": "${DH_MCP_PSK}" }
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
       "type": "http",
@@ -880,20 +815,20 @@ You will see the MCP servers listed in the Extensions sidebar under "MCP Servers
 
 **Additional Resources:**
 
-- [VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers)
-- [VS Code MCP Configuration format reference](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_configuration-format)
-- [VS Code MCP Troubleshooting guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_troubleshoot-and-debug-mcp-servers)
+- [VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)
+- [VS Code MCP configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)
+- [VS Code MCP Troubleshooting guide](https://code.visualstudio.com/docs/copilot/customization/mcp-servers#_troubleshoot-and-debug-mcp-servers)
 
 #### Windsurf
 
-Windsurf supports HTTP MCP servers natively. Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
+Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
 
 ```json5
 {
   "mcpServers": {
     "deephaven-systems": {
-      "serverUrl": "http://127.0.0.1:8000/mcp",
-      "headers": { "X-Deephaven-PSK": "${DH_MCP_PSK}" }
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
       "serverUrl": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
@@ -906,6 +841,52 @@ Windsurf supports HTTP MCP servers natively. Go to **Windsurf Settings** > **Cas
 
 - [Windsurf MCP documentation](https://docs.windsurf.com/windsurf/cascade/mcp)
 - [Windsurf MCP Troubleshooting guide](https://docs.windsurf.com/troubleshooting/windsurf-common-issues)
+
+### Advanced: Share One Server Over HTTP
+
+**Most people should skip this.** The setups above are simpler and are what we
+recommend. Use HTTP only when you want several AI tools on one machine to share
+a single server process.
+
+The HTTP transport requires a shared secret (a PSK) and accepts connections only
+from your own machine. The PSK has to come from `server.json`, so add that file,
+reading the value from an environment variable to keep the secret out of it:
+
+```json5
+// ~/.deephaven/ai/config/server.json
+{
+  "psk": "${env:DH_MCP_PSK}"
+}
+```
+
+Then export that variable and start the server:
+
+```bash
+export DH_MCP_PSK='your-shared-secret'
+dh-mcp-systems-server --transport http --port 8000
+```
+
+Point your AI tool at the running server, sending the PSK on every request.
+Cursor and Windsurf both resolve `${env:NAME}` inside `headers`:
+
+```json5
+{
+  "mcpServers": {
+    "deephaven-systems": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "X-Deephaven-PSK": "${env:DH_MCP_PSK}" }
+    }
+  }
+}
+```
+
+Because you started this server yourself, you manage its lifecycle yourself —
+unlike the stdio setups above, where your AI tool does it for you.
+
+> The `psk` value must match on both sides, and the server must be restarted
+> after you change it. The bind address is always loopback; see
+> [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for every `server.json`
+> field and [`docs/SECURITY.md`](docs/SECURITY.md) for the trust boundary.
 
 ---
 
@@ -931,6 +912,14 @@ file and its first validation error. If `validate` passes but your AI tool
 still cannot connect, the problem is in the AI-tool wiring, not the
 configuration.
 
+To test whether something is actually reachable rather than merely configured:
+
+```bash
+dhcli session list                 # can the server see your sessions?
+dhcli system status --connect      # are your Enterprise systems live?
+dhcli docs status                  # is the hosted docs server reachable?
+```
+
 ### Quick Fixes
 
 Before diving into detailed troubleshooting, try these common solutions:
@@ -955,8 +944,8 @@ Before diving into detailed troubleshooting, try these common solutions:
 | `Invalid id format` | MCP tool responses | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
 | `Invalid id` | MCP tool responses | PQ ids are `enterprise:<system>:<serial>` where `<serial>` is a non-negative integer. |
 | `Enterprise system 'foo' is not configured` | MCP tool responses | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems. |
-| HTTP `401`/`403` from the server | HTTP transport | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK. |
-| HTTP server refuses to start with a loopback error | systems-server startup | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead. |
+| HTTP `401`/`403` from the server | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK. |
+| HTTP server refuses to start with a loopback error | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead. |
 | `config_invalid` | `dhcli` commands | A file under the configuration directory failed validation. Run `dhcli config files` to find which one; the message names the file and field. An unresolved `${env:VAR}` reference counts — export the variable in the shell you are running from. |
 
 > **For scripts and AI agents**: `dhcli` failures print a structured
@@ -986,20 +975,25 @@ Before diving into detailed troubleshooting, try these common solutions:
 ### LLM Tool Connection Issues
 
 - **LLM Tool Can't Connect / Server Not Found:**
-  - Verify the MCP server is running and listening on the expected port (HTTP transport only)
-  - Verify the URL in your MCP client config matches the server's host and port
+  - Confirm `dh-mcp-systems-server` is on your `PATH` — your AI tool runs it by
+    name, so if `which dh-mcp-systems-server` finds nothing, the tool cannot
+    either. Use the full path as the `command` value.
+  - Check your AI tool's own MCP log for the failure; the server writes its
+    startup errors there.
   - Ensure `DH_AI_DATA_DIR` or `--config-dir` points to a valid configuration source (or unset both to use the platform default)
-  - For HTTP transport, ensure your client sends the `X-Deephaven-PSK` header with the value declared in `server.json`
   - Ensure any [Deephaven Community Core](https://deephaven.io/community/) sessions you intend to use are running and network-accessible
-  - Check for typos in server URLs or config paths
   - Set `PYTHONLOGLEVEL=DEBUG` to get more detailed logs from the MCP server
+- **Only if you set up the [Advanced HTTP path](#advanced-share-one-server-over-http):**
+  - Verify the server is running and listening on the expected port
+  - Verify the URL in your MCP client config matches the server's host and port
+  - Ensure your client sends the `X-Deephaven-PSK` header with the value declared in `server.json`
 
 ### Network and Firewall Issues
 
 - **Firewall or Network Issues:**
   - Ensure that there are no firewall rules (local or network) preventing:
     - The MCP server from connecting to your Deephaven instances on their specified hosts and ports.
-    - Your MCP client from reaching the systems server's HTTP endpoint (e.g., `http://127.0.0.1:8000/mcp`).
+    - Your MCP client from reaching the systems server's HTTP endpoint (e.g., `http://127.0.0.1:8000/mcp`) — only if you set up the [Advanced HTTP path](#advanced-share-one-server-over-http).
     - Your MCP client from reaching the Docs Server at `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io`.
   - Test basic network connectivity (e.g., using [`ping`](https://en.wikipedia.org/wiki/Ping_(networking_utility)) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
 
@@ -1008,7 +1002,10 @@ Before diving into detailed troubleshooting, try these common solutions:
 - **`command not found` for [`uv`](docs/UV.md) (in LLM tool logs):**
   - Ensure [`uv`](docs/UV.md) is installed and its installation directory is in your system's `PATH` environment variable, accessible by the LLM tool.
 - **`command not found` for `dhcli`, `dh-mcp-systems-server`, or `dh-mcp-docs-server`:**
-  - **If you used `uv tool install` (recommended):** Reinstall (or upgrade) with `uv tool install --python-preference managed "deephaven-mcp"` (or `uv tool upgrade deephaven-mcp`). Then make sure the uv tool bin directory is on your `PATH` — run `uv tool update-shell` and open a new shell, or locate the binary with `which dh-mcp-systems-server` (macOS/Linux) or `where dh-mcp-systems-server` / `Get-Command dh-mcp-systems-server` (Windows).
+  - **If you used `uv tool install` (recommended):**
+    - Reinstall or upgrade: `uv tool install --python-preference managed "deephaven-mcp"` (or `uv tool upgrade deephaven-mcp`).
+    - Put the uv tool bin directory on your `PATH`: run `uv tool update-shell`, then open a new shell.
+    - Still missing? Locate the binary with `which dh-mcp-systems-server` (macOS/Linux) or `where dh-mcp-systems-server` / `Get-Command dh-mcp-systems-server` (Windows).
   - **If you used a virtual environment (alternative install):** Ensure the package is installed in the venv with `uv pip install "deephaven-mcp"`, and either activate the venv or use the full path to the executable (e.g. `.venv/bin/dh-mcp-systems-server`).
 
 ### Installation and Dependency Issues
@@ -1079,6 +1076,7 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 **Log File Locations:**
 
+- **`dhcli` daemon:** run `dhcli daemon logs` to read it, or `dhcli daemon logs --path` to print its location.
 - **Claude Desktop:** macOS `~/Library/Logs/Claude/`, Windows `%APPDATA%\Claude\logs\` — `mcp.log` holds general MCP connection logging; `mcp-server-<name>.log` holds each server's stderr.
 - **VS Code/Copilot:** Check VS Code's Output panel and Developer Console
 - **Cursor IDE:** Check the IDE's log panel and developer tools
@@ -1093,11 +1091,17 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 **Enabling Debug Logging:**
 
-Set `PYTHONLOGLEVEL=DEBUG` in your shell before starting the server for detailed logging:
+Set `PYTHONLOGLEVEL=DEBUG` for detailed logging. For the `dhcli` daemon, set it
+in your shell and restart the daemon, then read the log:
 
 ```bash
-PYTHONLOGLEVEL=DEBUG dh-mcp-systems-server --transport http --port 8000
+export PYTHONLOGLEVEL=DEBUG
+dhcli daemon restart
+dhcli daemon logs -n 100
 ```
+
+When your AI tool launches the server, add the variable to the `env` block of
+your `deephaven-systems` stanza instead, then check your AI tool's MCP log.
 
 ### When to Seek Help
 
@@ -1148,7 +1152,7 @@ We warmly welcome contributions to Deephaven MCP! Whether it's bug reports, feat
 
 **Additional Resources:**
 
-- **Developer & Contributor Guide:** Detailed tool APIs, architecture, and development workflows — [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
+- **Developer & Contributor Guide:** Architecture, testing, and development workflows — [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
 - **`uv` crash course:** Quick orientation for developers new to `uv` — [docs/UV.md](docs/UV.md)
 - **Deephaven Documentation:** [deephaven.io/docs](https://deephaven.io/docs/) | [Community Core Python API](https://deephaven.io/core/pydoc/) | [Enterprise Python API](https://docs.deephaven.io/pycoreplus/latest/worker/)
 

@@ -116,15 +116,10 @@ TARGET_SELECTION_HINT = (
 )
 """Terse target-selection rule for a consequential verb's argument help.
 
-This is what a *verb* carries -- on the defaultable id argument of every
-verb that executes, destroys, disrupts, or discloses credentials. One
-line, because the Arguments block renders pre-formatted and does not
-rewrap.
-
-The reasoning behind the rule is stated in full by
-:data:`TARGET_SELECTION_GUIDANCE`, twice tree-wide rather than once per
-verb (see its docstring). Repeating the paragraph on each verb cost ~1.9
-KB of duplicated agent context for a rule the agent has already read.
+Carried on the id argument of every verb that executes, destroys,
+disrupts, or discloses credentials. A single line, because the Arguments
+block renders pre-formatted and does not rewrap.
+:data:`TARGET_SELECTION_GUIDANCE` is the full statement of the same rule.
 """
 
 TARGET_SELECTION_GUIDANCE = (

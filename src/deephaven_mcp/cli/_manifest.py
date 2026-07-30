@@ -16,10 +16,12 @@ these. Node keys are sparse: an absent key means false, empty, or the
 default. A command's structured output is described once as an
 ``OutputSpec`` inside its ``HelpSpec``.
 
-Every node also carries the two facts a reader cannot reconstruct from a
-node read in isolation: ``path``, the full invocation path (a node's
-``name`` alone is ``"stop"``, which is not runnable), and ``usage``, the
-argument order click itself would print.
+A standalone node also carries the two facts a reader cannot reconstruct
+from a node read in isolation: ``path``, the full invocation path (a
+node's ``name`` alone is ``"stop"``, which is not runnable), and
+``usage``, the argument order click itself would print. Both are omitted
+under :attr:`NodeStyle.EMBEDDED`, where the node's position in the
+nested map supplies the path and ``params`` the argument order.
 
 :func:`_meta_of` is the single boundary where this module crosses from
 click's loosely-typed containers (``Group.commands`` is
@@ -679,19 +681,12 @@ AGENT_CONVENTIONS: tuple[str, ...] = (
 )
 """The three rules an agent needs before its first consequential command.
 
-Carried by the summary tree -- the surface ``dhcli agents tree`` and the
-root ``--agents`` flag emit, and so the first thing an agent reads.
-Deliberately short: the tree is the cheap orientation rung of the
-progressive-disclosure ladder, so only a rule that holds tree-wide *and*
-cannot be read off a single node belongs here. Per-command hazards
-(a truncating row cap, a confirmation prompt's non-interactive behavior)
-live on the command that has them, where they can be stated accurately;
-stated here they would have to be hedged into uselessness, since they
-hold for some verbs and not others.
-
-:data:`~deephaven_mcp.cli._context.TARGET_SELECTION_GUIDANCE` is shared
-verbatim with the two listing verbs whose output creates the hazard, so
-the rule has one wording wherever it appears.
+In order: the output-mode and exit/error-code contract, the sticky-context
+fallback, and :data:`~deephaven_mcp.cli._context.TARGET_SELECTION_GUIDANCE`.
+Each holds for every command in the tree, so each is emitted once as the
+``conventions`` array of the summary tree (``dhcli agents tree`` and the
+root ``--agents`` flag) rather than repeated per node. A hazard specific
+to one command is not here -- it lives on that command.
 """
 
 

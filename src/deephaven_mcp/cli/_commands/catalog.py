@@ -140,8 +140,8 @@ _OUTPUT_TABLES = OutputSpec(
     default=None,
     help=(
         "Maximum number of catalog entries to return. Omitted: 10000, the "
-        "tool's own cap. A truncated result warns on stderr and reports "
-        "is_complete false."
+        "tool's own cap. A truncated result warns on stderr; the printed "
+        "array is the truncated one."
     ),
 )
 @_filter_option
@@ -221,8 +221,8 @@ _OUTPUT_NAMESPACES = OutputSpec(
     default=None,
     help=(
         "Maximum number of namespaces to return. Omitted: 1000, the tool's "
-        "own cap. A truncated result warns on stderr and reports is_complete "
-        "false."
+        "own cap. A truncated result warns on stderr; the printed array is "
+        "the truncated one."
     ),
 )
 @_filter_option

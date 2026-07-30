@@ -480,8 +480,9 @@ hot-reload path; restart the server to pick up changes.
 This applies to the `dhcli` daemon too: a running daemon keeps the tree
 it loaded, so a config change does not reach it until you run
 `dhcli daemon stop` (the next command starts a fresh one) or
-`dhcli daemon restart`. The `dhcli config` authoring verbs print a
-reminder when a daemon is running.
+`dhcli daemon restart`. The `dhcli config` authoring verbs print this
+reminder after every successful write, without checking whether a daemon
+is actually running.
 
 ## See also
 

@@ -1194,126 +1194,72 @@ def test_files_human_mode(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# init: guided first-time setup wizard
+# init: write a minimal working configuration
 # ---------------------------------------------------------------------------
 
 
-def _run_init(tmp_path: Path, *, input: str) -> Result:
+def _run_init(tmp_path: Path, *root_flags: str, standalone: bool = True) -> Result:
     return _invoke(
-        ["--config-dir", str(tmp_path), "-o", "json", "config", "init"],
-        input=input,
+        [*root_flags, "--config-dir", str(tmp_path), "-o", "json", "config", "init"],
+        standalone=standalone,
     )
 
 
-def _run_no_tty(tmp_path: Path) -> Result:
-    return _invoke(
-        [
-            "--no-input",
-            "--config-dir",
-            str(tmp_path),
-            "-o",
-            "json",
-            "config",
-            "init",
-        ]
-    )
+def test_init_write_failure_maps_to_config_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise ConfigurationError("disk exploded")
+
+    monkeypatch.setattr("deephaven_mcp.config._store.ConfigStore.write", _boom)
+    result = _run_init(tmp_path, standalone=False)
+    assert _error_code(result) == "config_invalid"
 
 
-@pytest.mark.usefixtures("_prompts")
-def test_init_no_tty_raises(tmp_path: Path) -> None:
-    result = _run_no_tty(tmp_path)
-    assert result.exit_code == 2
-    assert "no_tty" in result.output or result.exception is not None
+def test_init_writes_the_session_creation_baseline(tmp_path: Path) -> None:
+    """``init`` enables dynamic Community sessions and writes nothing else.
 
-
-@pytest.mark.usefixtures("_prompts")
-def test_init_declines_both_writes_nothing(tmp_path: Path) -> None:
-    result = _run_init(tmp_path, input="n\nn\n")
+    The launch method is written explicitly rather than left to the
+    schema, whose default is ``docker``: ``python`` is the only method
+    that works with no further setup, which is what makes the documented
+    first run ('config init' then 'session create') actually true.
+    """
+    result = _run_init(tmp_path)
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload == {}
-    assert not (tmp_path / "community").exists()
+    assert payload["path"] == "community.settings"
+    assert payload["session_creation"] == {"defaults": {"launch_method": "python"}}
+
+    written = tmp_path / "community" / "settings.json"
+    assert Path(payload["file"]) == written
+    assert json.loads(written.read_text()) == {
+        "session_creation": {"defaults": {"launch_method": "python"}}
+    }
+    # Exactly one file: declaring sessions and systems is the add verbs' job.
+    assert not (tmp_path / "community" / "sessions").exists()
     assert not (tmp_path / "enterprise").exists()
 
 
-@pytest.mark.usefixtures("_prompts")
-def test_init_creates_session_only(tmp_path: Path) -> None:
-    # y (session) / name / host (default) / port (default) / auth / n (system)
-    result = _run_init(tmp_path, input="y\ndev\n\n\nanonymous\nn\n")
+def test_init_needs_no_tty(tmp_path: Path) -> None:
+    """``init`` prompts for nothing, so ``--no-input`` is not a barrier.
+
+    This is what lets an agent or a CI job configure the tool unattended;
+    the verb previously refused with ``no_tty``.
+    """
+    result = _run_init(tmp_path, "--no-input")
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["community_session"]["name"] == "dev"
-    assert "enterprise_system" not in payload
-    data = json.loads((tmp_path / "community" / "sessions" / "dev.json").read_text())
-    assert data["host"] == "localhost"
-    assert data["port"] == 10000
-    assert data["auth"]["credentials"] == {"type": "anonymous"}
-    assert not (tmp_path / "enterprise").exists()
+    assert (tmp_path / "community" / "settings.json").is_file()
 
 
-@pytest.mark.usefixtures("_prompts")
-def test_init_creates_system_only(tmp_path: Path) -> None:
-    # n (session) / y (system) / name / url / auth / username / password
-    result = _run_init(
-        tmp_path,
-        input=(
-            "n\n"
-            "y\n"
-            "prod\n"
-            "https://dhe.example.com/iris/connection.json\n"
-            "password\n"
-            "alice\n"
-            "secret\n"
-        ),
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert "community_session" not in payload
-    assert payload["enterprise_system"]["name"] == "prod"
-    data = json.loads((tmp_path / "enterprise" / "systems" / "prod.json").read_text())
-    assert data["auth"]["credentials"]["username"] == "alice"
-    assert not (tmp_path / "community").exists()
+def test_init_refuses_to_overwrite_existing_settings(tmp_path: Path) -> None:
+    """A second ``init`` reports ``already_exists`` and changes nothing."""
+    settings = tmp_path / "community" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}")
 
-
-@pytest.mark.usefixtures("_prompts")
-def test_init_creates_both(tmp_path: Path) -> None:
-    result = _run_init(
-        tmp_path,
-        input=(
-            "y\ndev\n\n\nanonymous\n"
-            "y\nprod\nhttps://dhe.example.com/iris/connection.json\n"
-            "password\nalice\nsecret\n"
-        ),
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["community_session"]["name"] == "dev"
-    assert payload["enterprise_system"]["name"] == "prod"
-    assert (tmp_path / "community" / "sessions" / "dev.json").is_file()
-    assert (tmp_path / "enterprise" / "systems" / "prod.json").is_file()
-
-
-@pytest.mark.usefixtures("_prompts")
-def test_init_propagates_entity_creation_errors(tmp_path: Path) -> None:
-    """A name collision from a prior run surfaces the same structured error
-    as 'config session add' (already_exists), not a wizard-specific one."""
-    sessions = tmp_path / "community" / "sessions"
-    sessions.mkdir(parents=True)
-    (sessions / "dev.json").write_text(
-        json.dumps({"auth": {"credentials": {"type": "anonymous"}}})
-    )
-    result = _invoke(
-        [
-            "--config-dir",
-            str(tmp_path),
-            "-o",
-            "json",
-            "config",
-            "init",
-        ],
-        input="y\ndev\n",
-    )
-    assert result.exit_code == 2
+    result = _run_init(tmp_path, standalone=False)
+    assert _error_code(result) == "already_exists"
+    assert settings.read_text() == "{}"
 
 
 # ---------------------------------------------------------------------------

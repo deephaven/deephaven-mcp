@@ -436,9 +436,23 @@ _RESTART_USERS_CHOICES = ("RU_ADMIN", "RU_ADMIN_AND_VIEWERS", "RU_VIEWERS_WHEN_D
 def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
     """Apply the options shared by ``pq create`` and ``pq modify``.
 
-    The help of a shared option must read correctly for both verbs, so
-    list-replacement (a ``modify``-only consequence, since a ``create``
-    has no prior list to replace) is stated in ``pq modify``'s
+    Only options whose help reads correctly for *both* verbs belong here.
+    The test: does omitting it mean the same thing to each? Where it does
+    not -- the controller picks a default on ``create`` versus the stored
+    value is kept on ``modify`` -- the option is declared on each command
+    separately so each help string can say what actually happens. Read
+    the two commands for which options those currently are; a list here
+    would rot the moment one moved.
+
+    Splitting an option costs a second declaration that can drift in type
+    as well as wording, so
+    ``test_pq_create_and_modify_agree_on_option_machinery``
+    (``tests/cli/test_help_contract.py``) pins every same-named option on
+    the two verbs to one parsing behavior while leaving ``help`` and
+    ``required`` free to differ.
+
+    List-replacement is a ``modify``-only consequence (a ``create`` has
+    no prior list to replace), so it is stated in ``pq modify``'s
     description rather than on each repeatable option.
     """
     options = (
@@ -494,52 +508,6 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             ),
         ),
         click.option(
-            "--schedule",
-            "schedule",
-            multiple=True,
-            metavar="KEY=VALUE",
-            help=(
-                "Scheduler entry as KEY=VALUE (repeatable), e.g. "
-                "SchedulerType=..., StartTime=08:00:00, TimeZone=America/New_York. "
-                "A non-empty --schedule REPLACES the PQ's whole scheduling "
-                "block, so restate every entry you want to keep — read the "
-                "current list from 'dhcli pq details' (config.scheduling) "
-                "first. Omitting it leaves scheduling unchanged; clearing a "
-                "schedule is not supported via the CLI. Mutually exclusive "
-                "with --auto-delete-timeout."
-            ),
-        ),
-        click.option(
-            "--server",
-            "server",
-            default=None,
-            help=(
-                "Name of the Enterprise server pool to run the worker on "
-                "(deployment-specific; an existing PQ's value shows under "
-                "config.server_name in 'dhcli pq details'). Omitted: the "
-                "controller chooses."
-            ),
-        ),
-        click.option(
-            "--engine",
-            "engine",
-            default=None,
-            help=(
-                "Worker engine name (deployment-specific; e.g. "
-                "DeephavenCommunity, DeephavenEnterprise). Omitted: the "
-                "controller's default, typically DeephavenCommunity."
-            ),
-        ),
-        click.option(
-            "--jvm-profile",
-            "jvm_profile",
-            default=None,
-            help=(
-                "Name of a JVM profile configured on the Enterprise "
-                "controller. Omitted: the controller's default JVM settings."
-            ),
-        ),
-        click.option(
             "--jvm-arg",
             "extra_jvm_args",
             multiple=True,
@@ -574,28 +542,6 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             ),
         ),
         click.option(
-            "--init-timeout-nanos",
-            "init_timeout_nanos",
-            type=int,
-            default=None,
-            help=(
-                "Worker initialization timeout in NANOseconds (one second is "
-                "1000000000). Omitted: the controller's default."
-            ),
-        ),
-        click.option(
-            "--auto-delete-timeout",
-            "auto_delete_timeout",
-            type=int,
-            default=None,
-            help=(
-                "Seconds of idleness after which the controller deletes the "
-                "PQ; 0 installs the continuous scheduler and makes it "
-                "permanent. Omitted: scheduling and auto-delete are left "
-                "untouched. Mutually exclusive with --schedule."
-            ),
-        ),
-        click.option(
             "--admin-group",
             "admin_groups",
             multiple=True,
@@ -616,15 +562,6 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
                 "Who may restart the PQ: RU_ADMIN (admins only), "
                 "RU_ADMIN_AND_VIEWERS, or RU_VIEWERS_WHEN_DOWN (viewers may "
                 "restart it only while it is down)."
-            ),
-        ),
-        click.option(
-            "--owner",
-            "owner",
-            default=None,
-            help=(
-                "Username to own the PQ. Omitted: the authenticated user. "
-                "Reassigning ownership may require server-side permission."
             ),
         ),
     )
@@ -744,6 +681,77 @@ _OUTPUT_CREATE = OutputSpec(
     help=(
         "Whether the PQ may run. --disabled stores the definition without "
         "letting the controller start it."
+    ),
+)
+@click.option(
+    "--server",
+    "server",
+    default=None,
+    help=(
+        "Name of the Enterprise server pool to run the worker on "
+        "(deployment-specific). Omitted: the controller chooses."
+    ),
+)
+@click.option(
+    "--owner",
+    "owner",
+    default=None,
+    help=(
+        "Username to own the new PQ. Omitted: the authenticated user. "
+        "Naming another user may require server-side permission."
+    ),
+)
+@click.option(
+    "--engine",
+    "engine",
+    default=None,
+    help=(
+        "Worker engine name (deployment-specific; e.g. DeephavenCommunity, "
+        "DeephavenEnterprise). Omitted: the controller's default, typically "
+        "DeephavenCommunity."
+    ),
+)
+@click.option(
+    "--jvm-profile",
+    "jvm_profile",
+    default=None,
+    help=(
+        "Name of a JVM profile configured on the Enterprise controller. "
+        "Omitted: the controller's default JVM settings."
+    ),
+)
+@click.option(
+    "--init-timeout-nanos",
+    "init_timeout_nanos",
+    type=int,
+    default=None,
+    help=(
+        "Worker initialization timeout in NANOseconds (one second is "
+        "1000000000). Omitted: the controller's default."
+    ),
+)
+@click.option(
+    "--schedule",
+    "schedule",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help=(
+        "Scheduler entry as KEY=VALUE (repeatable), e.g. SchedulerType=..., "
+        "StartTime=08:00:00, TimeZone=America/New_York. Omitted: the "
+        "controller's default scheduling. Mutually exclusive with "
+        "--auto-delete-timeout."
+    ),
+)
+@click.option(
+    "--auto-delete-timeout",
+    "auto_delete_timeout",
+    type=int,
+    default=None,
+    help=(
+        "Seconds of idleness after which the controller deletes the PQ; 0 "
+        "installs the continuous scheduler and makes it permanent. Omitted: "
+        "the controller's default scheduling. Mutually exclusive with "
+        "--schedule."
     ),
 )
 @_create_modify_options
@@ -887,6 +895,80 @@ _OUTPUT_MODIFY = OutputSpec(
     "enabled",
     default=None,
     help="Enable or disable the PQ (unchanged if omitted).",
+)
+@click.option(
+    "--server",
+    "server",
+    default=None,
+    help=(
+        "Move the PQ to this Enterprise server pool (deployment-specific; "
+        "the current value shows under config.server_name in 'dhcli pq "
+        "details'). Omitted: unchanged."
+    ),
+)
+@click.option(
+    "--owner",
+    "owner",
+    default=None,
+    help=(
+        "Reassign the PQ to this owner. Omitted: unchanged. Reassigning "
+        "ownership may require server-side permission."
+    ),
+)
+@click.option(
+    "--engine",
+    "engine",
+    default=None,
+    help=(
+        "New worker engine name (deployment-specific; e.g. "
+        "DeephavenCommunity, DeephavenEnterprise). Omitted: unchanged."
+    ),
+)
+@click.option(
+    "--jvm-profile",
+    "jvm_profile",
+    default=None,
+    help=(
+        "Name of a JVM profile configured on the Enterprise controller. "
+        "Omitted: unchanged."
+    ),
+)
+@click.option(
+    "--init-timeout-nanos",
+    "init_timeout_nanos",
+    type=int,
+    default=None,
+    help=(
+        "New worker initialization timeout in NANOseconds (one second is "
+        "1000000000). Omitted: unchanged."
+    ),
+)
+@click.option(
+    "--schedule",
+    "schedule",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help=(
+        "Scheduler entry as KEY=VALUE (repeatable), e.g. SchedulerType=..., "
+        "StartTime=08:00:00, TimeZone=America/New_York. A non-empty "
+        "--schedule REPLACES the PQ's whole scheduling block, so restate "
+        "every entry you want to keep — read the current list from 'dhcli pq "
+        "details' (config.scheduling) first. Omitted: scheduling is "
+        "unchanged; clearing a schedule is not supported via the CLI. "
+        "Mutually exclusive with --auto-delete-timeout."
+    ),
+)
+@click.option(
+    "--auto-delete-timeout",
+    "auto_delete_timeout",
+    type=int,
+    default=None,
+    help=(
+        "Seconds of idleness after which the controller deletes the PQ; 0 "
+        "installs the continuous scheduler and makes it permanent. Omitted: "
+        "scheduling and auto-delete are left unchanged. Mutually exclusive "
+        "with --schedule."
+    ),
 )
 @_create_modify_options
 @yes_option

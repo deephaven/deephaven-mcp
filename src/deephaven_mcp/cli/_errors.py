@@ -235,9 +235,10 @@ class ErrorCode(StrEnum):
     ALREADY_EXISTS = (
         "already_exists",
         (
-            "The target configuration entity already exists and the command "
-            "refuses to overwrite it. Remove it first with 'dhcli config "
-            "session/system remove'."
+            "The target configuration file already exists and the command "
+            "refuses to overwrite it. Remove a session or system first with "
+            "'dhcli config session/system remove'; change an existing file "
+            "in place with 'dhcli config set' or 'dhcli config edit'."
         ),
     )
     NOT_FOUND = (
@@ -259,10 +260,10 @@ class ErrorCode(StrEnum):
     NO_TTY = (
         "no_tty",
         (
-            "The command is interactive-only (e.g. 'config edit', 'config "
-            "init') but stdin is not a TTY or --no-input was given. Use the "
-            "non-interactive equivalents ('config set', 'config session add' "
-            "with flags) instead."
+            "The command is interactive-only ('config edit') but stdin is not "
+            "a TTY or --no-input was given. Use the non-interactive "
+            "equivalents ('config set', 'config session add' with flags) "
+            "instead."
         ),
     )
     # The 'config' authoring verbs serialize on a per-directory advisory lock

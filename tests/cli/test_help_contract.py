@@ -272,6 +272,77 @@ def test_structured_command_has_an_agent_example(path: str, cmd: click.Command) 
     ), f"{path}: no agent example (pipe through jq, or show -o json)"
 
 
+_JQ_CALL = re.compile(
+    r"\|\s*jq\s+(?:-\w+\s+)*(?:'(?P<quoted>[^']*)'|(?P<bare>[^\s|]+))"
+)
+"""One ``| jq`` invocation in an example, filter either quoted or bare."""
+
+_JQ_LEADING_FIELD = re.compile(r"^\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+"""A jq filter that opens by selecting one named field off the payload root."""
+
+
+def _jq_selected_root_fields(example: str) -> list[str]:
+    """Return the root field names an example's ``jq`` filters select.
+
+    Each comma-separated term is examined, so the two-field form
+    (``jq '.row_count, .is_complete'``) is checked rather than waved
+    through. Within a term, only one that *opens* with a ``.field``
+    selection is reported -- covering ``.field``, ``.field.nested`` and
+    ``.field // "default"``.
+
+    Deliberately narrow elsewhere: a term that pipes into another filter
+    or starts with a builtin (``keys``, ``length``, ``.[]``) yields
+    nothing, because only the leading root field is checkable against an
+    ``OutputSpec``, and a check that reports false positives gets deleted
+    by whoever it blocks. Nested keys past the first are not verifiable
+    either way -- an ``OutputSpec`` describes a field's subfields in
+    prose, not structurally.
+    """
+    names: list[str] = []
+    for match in _JQ_CALL.finditer(example):
+        expr = match.group("quoted") or match.group("bare") or ""
+        for term in expr.split(","):
+            term = term.strip()
+            if "|" in term:
+                continue
+            if leading := _JQ_LEADING_FIELD.match(term):
+                names.append(leading.group("name"))
+    return names
+
+
+_OBJECT_LEAVES = [
+    (path, cmd)
+    for path, cmd in _LEAVES
+    if (spec := _output_spec(cmd)) is not None and spec.mode == "object"
+]
+_OBJECT_IDS = [path for path, _ in _OBJECT_LEAVES]
+
+
+@pytest.mark.parametrize("path,cmd", _OBJECT_LEAVES, ids=_OBJECT_IDS)
+def test_jq_examples_select_declared_output_fields(
+    path: str, cmd: click.Command
+) -> None:
+    """An example's ``jq`` filter names a field the command actually emits.
+
+    An example is the one part of the help a reader will paste verbatim,
+    so a filter naming a field the payload does not carry prints ``null``
+    and teaches the wrong schema. Pinning the examples to the same
+    ``OutputSpec`` the ``Output:`` section renders keeps the two from
+    drifting apart. ``list``- and ``text``-mode commands are excluded:
+    their payload root is not an object, so a root field name is not the
+    right thing to look for.
+    """
+    spec = _output_spec(cmd)
+    assert spec is not None  # guaranteed by _OBJECT_LEAVES
+    declared = {field.name for field in spec.fields}
+    for example in _examples(cmd):
+        for selected in _jq_selected_root_fields(example):
+            assert selected in declared, (
+                f"{path}: example selects .{selected}, which its OutputSpec "
+                f"does not declare (declared: {sorted(declared)})"
+            )
+
+
 @pytest.mark.parametrize("path,cmd", _STRUCTURED_LEAVES, ids=_STRUCTURED_IDS)
 def test_structured_output_names_its_fields(path: str, cmd: click.Command) -> None:
     """Structured output is described field by field, not just in prose.
@@ -310,6 +381,17 @@ destroyed) yet aiming one at another user's session hands out that
 session's credentials, so they belong to the target-sensitive set.
 """
 
+_STATE_LEAVING_PATHS = frozenset({"pq start"})
+"""Verbs that leave state on a shared system without confirming first.
+
+Also not structurally detectable: starting someone else's PQ disrupts a
+shared system, but nothing is destroyed, so there is no ``--yes`` to key
+off. Kept honest by
+:func:`test_every_hint_carrying_leaf_is_target_sensitive` rather than by
+an enumeration in prose -- add to this set when that test names a new
+verb.
+"""
+
 _TARGET_SENSITIVE_LEAVES = [
     (path, cmd)
     for path, cmd in _LEAVES
@@ -320,9 +402,33 @@ _TARGET_SENSITIVE_LEAVES = [
             for param in cmd.params
         )
         or path in _CREDENTIAL_DISCLOSING_PATHS
+        or path in _STATE_LEAVING_PATHS
     )
 ]
 _TARGET_SENSITIVE_IDS = [path for path, _ in _TARGET_SENSITIVE_LEAVES]
+
+
+@pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)
+def test_every_hint_carrying_leaf_is_target_sensitive(
+    path: str, cmd: click.Command
+) -> None:
+    """A verb warning about target choice is covered by the target checks.
+
+    Carrying ``TARGET_SELECTION_HINT`` is the author's own statement that
+    aiming this verb at the wrong resource matters. The target-sensitive
+    set is assembled from ``--yes`` plus two hand-maintained sets, so
+    without this check a verb that is neither destructive nor
+    credential-disclosing -- ``pq start`` was exactly that -- carries the
+    hint while escaping every test that verifies the hint is there.
+    """
+    if TARGET_SELECTION_HINT not in (cmd.help or ""):
+        return
+    assert path in _TARGET_SENSITIVE_IDS, (
+        f"{path} carries the target-selection hint but is not in the "
+        "target-sensitive set; add it to _STATE_LEAVING_PATHS (or "
+        "_CREDENTIAL_DISCLOSING_PATHS) so the hint is enforced"
+    )
+
 
 _LISTING_PATHS = ("session list", "pq list")
 """The verbs whose output is the candidate set the rule is about."""
@@ -481,3 +587,71 @@ def test_help_prose_names_real_commands(path: str, cmd: click.Command) -> None:
                 f"{path}: help text names 'dhcli {quoted}', which does not "
                 f"resolve past {_resolved_depth(tokens)} token(s)"
             )
+
+
+_LEAF_BY_PATH = dict(_LEAVES)
+
+
+def _options_by_name(cmd: click.Command) -> dict[str, click.Option]:
+    """Return the command's click options keyed by parameter name."""
+    return {
+        param.name: param
+        for param in cmd.params
+        if isinstance(param, click.Option) and param.name is not None
+    }
+
+
+def _option_machinery(option: click.Option) -> tuple[object, ...]:
+    """Return how an option parses a value, excluding per-verb semantics.
+
+    Included: everything that decides how a supplied value is parsed and
+    forwarded to the tool. Two verbs disagreeing on any of it means one
+    of them sends the wrong shape.
+
+    Excluded, as legitimately per-verb: ``help`` (the whole reason these
+    options are declared twice) and ``required``. ``--heap-size-gb`` is
+    required to create a PQ -- the controller needs a heap to size the
+    worker -- and optional to modify one, where omitting it keeps the
+    stored value. That is the same "omission means different things"
+    axis the help text expresses, not drift.
+    """
+    return (
+        option.type.name,
+        option.multiple,
+        option.metavar,
+        option.is_flag,
+        option.nargs,
+    )
+
+
+_PQ_SHARED_OPTIONS = sorted(
+    set(_options_by_name(_LEAF_BY_PATH["pq create"]))
+    & set(_options_by_name(_LEAF_BY_PATH["pq modify"]))
+)
+
+
+@pytest.mark.parametrize("name", _PQ_SHARED_OPTIONS)
+def test_pq_create_and_modify_agree_on_option_machinery(name: str) -> None:
+    """An option on both ``pq`` verbs parses identically on each.
+
+    Nine options are declared separately on ``pq create`` and ``pq
+    modify`` because omitting one means different things to each verb
+    (the controller picks a default versus the stored value is kept), so
+    one shared help string cannot be accurate for both. That duplication
+    buys accurate help at the cost of two declarations that can drift in
+    *type* as well as wording -- and a drop of ``type=int`` on one verb
+    would silently start forwarding a string.
+
+    ``tests/cli/test_tool_wrapper_drift.py`` cannot catch it: that guard
+    joins wrapper flags to tool parameters by name only and checks
+    neither type nor cardinality (see its module docstring). The set is
+    derived from the live tree rather than listed, so an option moved
+    into or out of ``_create_modify_options`` is covered automatically.
+    """
+    create = _options_by_name(_LEAF_BY_PATH["pq create"])[name]
+    modify = _options_by_name(_LEAF_BY_PATH["pq modify"])[name]
+    assert _option_machinery(create) == _option_machinery(modify), (
+        f"--{name.replace('_', '-')} parses differently on 'pq create' than on "
+        f"'pq modify' (create={_option_machinery(create)}, "
+        f"modify={_option_machinery(modify)}); only the help text may differ"
+    )

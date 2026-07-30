@@ -82,8 +82,8 @@ _OUTPUT_TREE = OutputSpec(
             "conventions",
             "array",
             "Project-wide rules that hold for every command — output modes, "
-            "exit codes, the sticky context, target selection, stderr "
-            "warnings. Read these before the first consequential command "
+            "exit and error-code contracts, the sticky context, and target "
+            "selection. Read these before the first consequential command "
             "(default only).",
         ),
         OutputField(

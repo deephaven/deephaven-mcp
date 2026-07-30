@@ -157,27 +157,18 @@ Precedence: **CLI flag** > **`DHCLI_OUTPUT`** > **`cli.json`'s `output.format`**
 
 ### `VISUAL` and `EDITOR`
 
-The editor `dhcli config edit` opens a configuration file in. **Set
-either one; if you only ever set `EDITOR`, that is enough.**
+Which editor `dhcli config edit` launches. **Set either one; if you only
+ever set `EDITOR`, that is enough.**
 
 Deephaven MCP does not implement this lookup — `dhcli config edit` calls
 [`click`](https://click.palletsprojects.com/)'s `click.edit()`, which
-honors the long-standing Unix convention: `VISUAL`, then `EDITOR`, then a
+honors the usual Unix convention: `VISUAL`, then `EDITOR`, then a
 platform default (`notepad` on Windows; otherwise the first of
 `sensible-editor`, `vim`, `nano` found on `PATH`, falling back to `vi`).
-
-The two variables are a historical artifact. `EDITOR` named a
-*line-oriented* editor usable on a printing terminal (`ed`, `ex`), while
-`VISUAL` named a *full-screen* editor that required a cursor-addressable
-display (`vi`). That distinction stopped mattering decades ago, so on a
-modern system they are effectively redundant and most people set only
-one. Both are honored because that is what the convention — and `git`,
-`crontab`, and `systemctl` alongside it — leads users to expect;
 `VISUAL` wins when both are set.
 
-Neither has a `cli.json` field, deliberately: your editor is a property
-of your shell, not of this project's configuration. No other command
-reads them.
+Neither has a `cli.json` field: your editor is a property of your shell,
+not of this project's configuration. No other command reads them.
 
 `dhcli config edit` is interactive-only: with `--no-input`, or when stdin
 is not a TTY, it fails with `no_tty` rather than launching an editor.
