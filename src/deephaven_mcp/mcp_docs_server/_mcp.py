@@ -908,8 +908,6 @@ async def docs_chat(
                 # These parameters tell Inkeep: "Give me the best response you can in ~30-60 seconds"
                 max_tokens=1500,  # Limit response length for faster generation
                 temperature=0.1,  # Lower temperature = faster, more deterministic responses
-                top_p=0.9,  # Nucleus sampling for balanced speed vs quality
-                presence_penalty=0.1,  # Slight penalty to encourage conciseness
             )
             _api_elapsed = time.monotonic() - _t_api_start
             _total_elapsed = time.monotonic() - _t_request_start
