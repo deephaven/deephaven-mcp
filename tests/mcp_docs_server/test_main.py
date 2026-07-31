@@ -1,14 +1,12 @@
-import importlib
 import logging
 import os
-import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
-def test_run_server_stdio():
+def test_run_server_streamable_http():
     with (
         patch(
             "deephaven_mcp._logging.setup_logging", MagicMock()
@@ -30,54 +28,15 @@ def test_run_server_stdio():
         class DummyServer:
             name = "dummy"
 
-            def run(self, transport=None, host=None):
-                called["run"] = transport, host
-
-        logs = []
-        with (
-            patch.object(mod, "mcp_server", DummyServer()),
-            patch.object(logging, "basicConfig", lambda **kwargs: logs.append(kwargs)),
-            patch.object(mod, "_LOGGER", logging.getLogger("dummy")),
-        ):
-            mod.run_server("stdio")
-            assert called["run"][0] == "stdio"
-        setup_logging_mock.assert_called_once()
-        setup_global_exception_logging_mock.assert_called_once()
-        monkeypatch_uvicorn_mock.assert_called_once()
-
-
-def test_run_server_sse():
-    with (
-        patch(
-            "deephaven_mcp._logging.setup_logging", MagicMock()
-        ) as setup_logging_mock,
-        patch(
-            "deephaven_mcp._logging.setup_global_exception_logging", MagicMock()
-        ) as setup_global_exception_logging_mock,
-        patch(
-            "deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling",
-            MagicMock(),
-        ) as monkeypatch_uvicorn_mock,
-        patch.dict(os.environ, {"INKEEP_API_KEY": "dummy-key"}),
-    ):
-        sys.modules.pop("deephaven_mcp.mcp_docs_server.main", None)
-        import deephaven_mcp.mcp_docs_server.main as mod
-
-        called = {}
-
-        class DummyServer:
-            name = "dummy"
-
-            def run(self, transport=None, *, host=None):
-                called["run"] = (transport, host)
+            def run(self, transport=None):
+                called["run"] = transport
 
         with (
             patch.object(mod, "mcp_server", DummyServer()),
-            patch.object(logging, "basicConfig", lambda **kwargs: None),
             patch.object(mod, "_LOGGER", logging.getLogger("dummy")),
         ):
-            mod.run_server("sse")
-            assert called["run"][0] == "sse"
+            mod.run_server()
+            assert called["run"] == "streamable-http"
         setup_logging_mock.assert_called_once()
         setup_global_exception_logging_mock.assert_called_once()
         monkeypatch_uvicorn_mock.assert_called_once()
@@ -101,60 +60,13 @@ def test_main_invokes_run_server():
         import deephaven_mcp.mcp_docs_server.main as mod
 
         called = {}
-        with (
-            patch.object(
-                mod,
-                "run_server",
-                lambda transport, host=None: called.setdefault(
-                    "args", (transport, host)
-                ),
-            ),
-            patch("sys.argv", ["prog", "-t", "sse"]),
+        with patch.object(
+            mod,
+            "run_server",
+            lambda: called.setdefault("called", True),
         ):
             mod.main()
-            assert called["args"] == ("sse", None)
-        setup_logging_mock.assert_called_once()
-        setup_global_exception_logging_mock.assert_called_once()
-        monkeypatch_uvicorn_mock.assert_called_once()
-
-
-def test_run_server_binds_to_default_host():
-    with (
-        patch(
-            "deephaven_mcp._logging.setup_logging", MagicMock()
-        ) as setup_logging_mock,
-        patch(
-            "deephaven_mcp._logging.setup_global_exception_logging", MagicMock()
-        ) as setup_global_exception_logging_mock,
-        patch(
-            "deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling",
-            MagicMock(),
-        ) as monkeypatch_uvicorn_mock,
-        patch.dict(os.environ, {"INKEEP_API_KEY": "dummy-key"}),
-    ):
-        sys.modules.pop("deephaven_mcp.mcp_docs_server.main", None)
-        import deephaven_mcp.mcp_docs_server.main as mod
-
-        called = {}
-
-        class DummyServer:
-            name = "dummy"
-
-            def __init__(self, host=None):
-                self.host = host
-
-            def run(self, transport=None):
-                called["transport"] = transport
-
-        dummy = DummyServer(host="0.0.0.0")
-        with (
-            patch.object(mod, "mcp_server", dummy),
-            patch.object(logging, "basicConfig", lambda **kwargs: None),
-            patch.object(mod, "_LOGGER", logging.getLogger("dummy")),
-        ):
-            mod.run_server("sse")
-            assert called["transport"] == "sse"
-            assert dummy.host == "0.0.0.0"
+            assert called.get("called") is True
         setup_logging_mock.assert_called_once()
         setup_global_exception_logging_mock.assert_called_once()
         monkeypatch_uvicorn_mock.assert_called_once()
@@ -191,7 +103,7 @@ def test_run_server_exception_logs_stopped():
             patch.object(mod._LOGGER, "info", mock_logger_info),
         ):
             with pytest.raises(RuntimeError):
-                mod.run_server("stdio")
+                mod.run_server()
         stopped_call_found = False
         for call_args in mock_logger_info.call_args_list:
             if "stopped" in str(call_args[0][0]).lower():
@@ -201,30 +113,6 @@ def test_run_server_exception_logs_stopped():
         setup_logging_mock.assert_called_once()
         setup_global_exception_logging_mock.assert_called_once()
         monkeypatch_uvicorn_mock.assert_called_once()
-
-
-def test_docs_module_main_invocation():
-    with (
-        patch(
-            "deephaven_mcp._logging.setup_logging", MagicMock()
-        ) as setup_logging_mock,
-        patch(
-            "deephaven_mcp._logging.setup_global_exception_logging", MagicMock()
-        ) as setup_global_exception_logging_mock,
-        patch(
-            "deephaven_mcp._monkeypatch.monkeypatch_uvicorn_exception_handling",
-            MagicMock(),
-        ) as monkeypatch_uvicorn_mock,
-        patch.dict(os.environ, {"INKEEP_API_KEY": "dummy-key"}),
-    ):
-        result = subprocess.run(
-            [sys.executable, "-m", "deephaven_mcp.mcp_docs_server.main", "-t", "stdio"],
-            env={**os.environ, "INKEEP_API_KEY": "dummy-key"},
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert "Starting MCP server" in result.stdout or result.stderr
 
 
 def test_main_invocation():
@@ -255,5 +143,5 @@ def test_main_invocation():
             # Directly call the main function, which is the entry point.
             main()
 
-            # Verify that it called run_server with the default transport.
-            mock_run_server.assert_called_once_with("streamable-http")
+            # Verify that run_server was called with no arguments.
+            mock_run_server.assert_called_once_with()

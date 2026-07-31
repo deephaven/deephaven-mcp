@@ -457,7 +457,7 @@ async def test_app_lifespan_cancelled_error_handling(monkeypatch):
     with patch("deephaven_mcp.mcp_docs_server._mcp._LOGGER") as mock_logger:
         with pytest.raises(BaseExceptionGroup) as exc_info:
             async with mcp_mod.app_lifespan(None) as context:
-                raise asyncio.CancelledError("Task cancelled")
+                raise asyncio.CancelledError("Task canceled")
 
         # Verify the BaseExceptionGroup contains a CancelledError
         assert any(
@@ -466,7 +466,7 @@ async def test_app_lifespan_cancelled_error_handling(monkeypatch):
 
         # Verify logged at WARNING (not error) by the except* asyncio.CancelledError handler
         calls = [str(c) for c in mock_logger.warning.call_args_list]
-        assert any("cancelled" in c.lower() for c in calls)
+        assert any("canceled" in c.lower() for c in calls)
 
 
 @pytest.mark.asyncio
@@ -626,7 +626,7 @@ async def test_docs_chat_cancelled_error(monkeypatch):
 
         # Verify logged at WARNING (not error/exception) with elapsed time
         calls = mock_logger.warning.call_args_list
-        cancel_calls = [c for c in calls if "cancelled" in c.args[0].lower()]
+        cancel_calls = [c for c in calls if "canceled" in c.args[0].lower()]
         assert len(cancel_calls) == 1
         assert "after" in cancel_calls[0].args[0]
         assert "client disconnected" in cancel_calls[0].args[0]

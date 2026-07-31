@@ -1,0 +1,424 @@
+"""Project-wide Pydantic base classes and helpers.
+
+This module owns the cross-cutting Pydantic plumbing every schema in
+the project sits on top of. It contains zero domain-specific logic
+(no concrete config, session, credential, or TLS schema lives here)
+and only depends on :mod:`pydantic` and the project's exception /
+redaction primitives.
+
+Contents:
+
+*Base classes*
+
+- :class:`StrictSchema` - :class:`pydantic.BaseModel` with
+  ``extra="forbid"`` and ``frozen=True``. Every schema in the
+  project inherits from this, directly or via :class:`RedactableSchema`.
+- :class:`RedactableSchema` - :class:`StrictSchema` plus a
+  ``model_serializer`` that handles :class:`pydantic.SecretStr`
+  fields under two opt-in ``model_dump`` contexts:
+  ``{"redact": True}`` (replace with :data:`REDACTED`) and
+  ``{"reveal": True}`` (emit the plain-text value). Schemas that
+  hold secrets inherit from this class.
+
+*Error adapters*
+
+- :func:`format_validation_error` - translate a Pydantic
+  :class:`~pydantic.ValidationError` into the project's
+  :class:`~deephaven_mcp._exceptions.ConfigurationError` message
+  style.
+- :func:`format_error_details` - the same formatting over an
+  explicit sequence of Pydantic error dicts, for callers that
+  format a subset of an exception's errors.
+- :func:`as_configuration_error` - build a
+  :class:`~deephaven_mcp._exceptions.ConfigurationError` from a
+  caught :class:`~pydantic.ValidationError`.
+
+*Model validators* (helpers for ``@model_validator(mode="before")``)
+
+- :func:`reconcile_filename_stem` - cross-check an optional
+  declared name field against the filename stem carried via
+  ``name``.
+
+*Logging*
+
+- :func:`dump_redacted` - dump a Pydantic model with secrets
+  replaced by :data:`~deephaven_mcp._redaction.REDACTED` (the
+  canonical way to obtain a JSON-safe view of any project schema
+  for logging, structured output, or diagnostics).
+- :func:`log_redacted` - log a Pydantic model at INFO with secrets
+  redacted (thin wrapper around :func:`dump_redacted` that adds an
+  INFO log line with a caller-supplied label).
+"""
+
+from __future__ import annotations
+
+__all__ = [
+    "as_configuration_error",
+    "dump_redacted",
+    "format_error_details",
+    "format_validation_error",
+    "log_redacted",
+    "reconcile_filename_stem",
+    "RedactableSchema",
+    "StrictSchema",
+]
+
+import logging
+import types
+from collections.abc import Mapping, Sequence
+from typing import Any, Union, get_args, get_origin
+
+import json5
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SecretStr,
+    ValidationError,
+    model_serializer,
+)
+from pydantic.fields import FieldInfo
+
+from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp._redaction import REDACTED
+
+_LOGGER = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Base classes
+# ---------------------------------------------------------------------------
+
+
+class StrictSchema(BaseModel):
+    """Common base for every Pydantic schema in the project.
+
+    Subclasses inherit strict validation (no unknown fields), frozen
+    instances after construction, and runtime-introspectable field
+    descriptions harvested from PEP 257 trailing docstrings. The
+    project's default pydantic coercion behavior is kept
+    (``strict=False``) so that JSON inputs decoded from disk parse
+    the same way as ``json5`` returns them.
+
+    See :attr:`model_config` for the specific settings.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, use_attribute_docstrings=True
+    )
+    """Project-wide Pydantic configuration shared by every schema:
+
+    - ``extra="forbid"`` — unknown JSON keys raise a validation
+      error rather than being silently ignored.
+    - ``frozen=True`` — instances are immutable after construction.
+    - ``use_attribute_docstrings=True`` — Pydantic harvests the
+      trailing PEP 257 string literal beneath each field declaration
+      into :attr:`pydantic.fields.FieldInfo.description`. That string
+      reaches runtime consumers (``model.model_fields[name].description``,
+      ``model.model_json_schema()``, MCP tool schemas,
+      FastAPI/OpenAPI generators) which a Sphinx-style ``Attributes:``
+      block does not.
+    """
+
+
+class RedactableSchema(StrictSchema):
+    """:class:`StrictSchema` plus context-aware SecretStr handling.
+
+    Subclasses gain two opt-in ``model_dump`` modes, both selected by
+    the ``context`` argument to :meth:`pydantic.BaseModel.model_dump`:
+
+    - ``context={"redact": True}`` — every field typed as
+      :class:`pydantic.SecretStr` (including ``SecretStr | None``
+      and ``Annotated[SecretStr, ...]``) is emitted as :data:`REDACTED`
+      instead of the default ``"**********"`` mask. This is the
+      project's canonical log-output mode.
+    - ``context={"reveal": True}`` — every :class:`SecretStr` field
+      is emitted as its plain-text value (the result of
+      :meth:`SecretStr.get_secret_value`). Internal-only: used at the
+      registry-to-manager handoff where downstream code needs the
+      actual secret to pass to the underlying client SDK.
+
+    Without either context flag the model serializes per pydantic's
+    defaults — masked secrets, unwrapped non-secret fields.
+    """
+
+    @model_serializer(mode="wrap")
+    def _redact_serializer(self, handler: Any, info: Any) -> dict[str, Any]:
+        """Apply context-driven secret handling on top of the default dump.
+
+        Args:
+            handler (Any): Pydantic-provided callable that runs the
+                default serialization.
+            info (Any): Pydantic-provided
+                :class:`pydantic.SerializationInfo` carrying the
+                caller's ``context`` mapping.
+
+        Returns:
+            dict[str, Any]: The default serialization with each
+                :class:`SecretStr` field replaced according to the
+                active mode (``redact`` → :data:`REDACTED`,
+                ``reveal`` → plain text), or unchanged when no
+                mode flag is set.
+        """
+        data: dict[str, Any] = handler(self)
+        if not info.context:
+            return data
+        redact = info.context.get("redact")
+        reveal = info.context.get("reveal")
+        if not (redact or reveal):
+            return data
+        for name, field in type(self).model_fields.items():
+            if not _is_secret_field(field):
+                continue
+            if redact:
+                if data.get(name) is not None:
+                    data[name] = REDACTED
+            else:  # reveal
+                value = getattr(self, name)
+                if isinstance(value, SecretStr):
+                    data[name] = value.get_secret_value()
+        return data
+
+
+def _is_secret_field(field: FieldInfo) -> bool:
+    """Return ``True`` if ``field``'s annotation contains :class:`SecretStr`.
+
+    Recognizes bare ``SecretStr``, ``SecretStr | None`` (and the
+    legacy ``Optional[SecretStr]`` / ``Union[SecretStr, None]``
+    forms), and ``Annotated[SecretStr, ...]``.
+
+    Args:
+        field (FieldInfo): The Pydantic-provided per-field metadata
+            object.
+
+    Returns:
+        bool: ``True`` when the annotation includes
+            :class:`pydantic.SecretStr`.
+    """
+    return _annotation_contains_secret(field.annotation)
+
+
+def _annotation_contains_secret(ann: Any) -> bool:
+    """Recursively check whether ``ann`` references :class:`SecretStr`."""
+    if ann is SecretStr:
+        return True
+    # Match both ``typing.Union[A, B]`` and PEP 604 ``A | B`` syntax;
+    # the latter has ``types.UnionType`` as its origin. Recurse into
+    # every arg so ``str | SecretStr``, ``None | SecretStr``, etc. are
+    # detected regardless of position.
+    if get_origin(ann) in (Union, types.UnionType):
+        return any(_annotation_contains_secret(a) for a in get_args(ann))
+    # Annotated[...] surfaces as a typing form whose first arg is the
+    # underlying type; pydantic also flattens this for us, but be
+    # defensive.
+    args = get_args(ann)
+    if args:
+        return _annotation_contains_secret(args[0])
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Error formatting
+# ---------------------------------------------------------------------------
+
+
+def format_validation_error(context: str, exc: ValidationError) -> str:
+    """Translate a Pydantic :class:`ValidationError` into the project's style.
+
+    Thin wrapper over :func:`format_error_details` for the common case
+    of formatting every error the exception reports.
+
+    Args:
+        context (str): Identifier of the surrounding config used as
+            the message prefix (e.g. ``"enterprise system 'prod'"``
+            or ``"server.json"``).
+        exc (ValidationError): The exception raised by
+            :meth:`pydantic.BaseModel.model_validate`.
+
+    Returns:
+        str: A human-readable error message ready for embedding in a
+            :class:`ConfigurationError`.
+    """
+    return format_error_details(context, exc.errors())
+
+
+def format_error_details(context: str, errors: Sequence[Mapping[str, Any]]) -> str:
+    """Format Pydantic error dicts into the project's one-line style.
+
+    Produces a one-line summary of every entry in ``errors``, each
+    prefixed by the JSON-pointer-style ``loc`` path (e.g.
+    ``"session_creation.defaults.heap_size_gb"``). Multiple entries
+    are joined with ``"; "`` so the result fits on a single log line.
+
+    Args:
+        context (str): Identifier of the surrounding config used as
+            the message prefix.
+        errors (Sequence[Mapping[str, Any]]): Error dicts in the shape
+            of :meth:`pydantic.ValidationError.errors` (``loc`` and
+            ``msg`` keys are read).
+
+    Returns:
+        str: A human-readable error message ready for embedding in a
+            :class:`ConfigurationError`.
+    """
+    parts: list[str] = []
+    for err in errors:
+        loc = ".".join(str(p) for p in err["loc"]) or "<root>"
+        parts.append(f"{loc}: {err['msg']}")
+    return f"{context}: " + "; ".join(parts)
+
+
+def dump_redacted(model: BaseModel, **kwargs: Any) -> dict[str, Any]:
+    """Dump a Pydantic model to a JSON-safe dict with secrets redacted.
+
+    Centralizes the project's redaction protocol: every secret-bearing
+    schema inherits from :class:`RedactableSchema`, which honors the
+    ``{"redact": True}`` context flag by replacing each
+    :class:`pydantic.SecretStr` field with the project's
+    :data:`~deephaven_mcp._redaction.REDACTED` sentinel. This helper
+    pins both required call-site invariants (``mode="json"`` and
+    ``context={"redact": True}``) so callers cannot forget either —
+    forgetting ``mode="json"`` leaks raw :class:`SecretStr` instances;
+    forgetting the redact context emits Pydantic's default
+    ``"**********"`` mask instead of the project sentinel.
+
+    Other :meth:`~pydantic.BaseModel.model_dump` keyword arguments
+    (``exclude_none``, ``exclude``, ``by_alias``, etc.) pass through
+    via ``**kwargs``. Passing ``mode`` or ``context`` explicitly is
+    rejected with :class:`TypeError` — those invariants are the entire
+    reason this wrapper exists.
+
+    Args:
+        model (BaseModel): The validated Pydantic model to dump.
+            Should inherit from :class:`RedactableSchema` so the
+            ``redact`` context flag is honored; plain
+            :class:`StrictSchema` subclasses dump their non-secret
+            fields verbatim.
+        **kwargs (Any): Additional keyword arguments forwarded to
+            :meth:`pydantic.BaseModel.model_dump`. ``mode`` and
+            ``context`` are reserved.
+
+    Returns:
+        dict[str, Any]: The redacted JSON-safe representation of
+            ``model``. Suitable for JSON serialization, logging, or
+            further structured-output formatting.
+
+    Raises:
+        TypeError: When the caller passes a reserved keyword
+            (``mode`` or ``context``).
+    """
+    for reserved in ("mode", "context"):
+        if reserved in kwargs:
+            raise TypeError(
+                f"dump_redacted: keyword {reserved!r} is reserved; "
+                "the helper pins it so the redaction protocol cannot "
+                "be accidentally bypassed."
+            )
+    return model.model_dump(mode="json", context={"redact": True}, **kwargs)
+
+
+def log_redacted(model: BaseModel, *, label: str, logger: logging.Logger) -> None:
+    """Log a Pydantic model at INFO with secrets redacted.
+
+    Thin wrapper around :func:`dump_redacted`: dumps the model with
+    the project's redaction protocol applied, formats the result as
+    pretty-printed JSON5, and emits two INFO log records (a header
+    line carrying ``label`` and the body). Falls back to
+    ``repr(model)`` and a WARNING when :func:`json5.dumps` raises
+    :class:`TypeError` or :class:`ValueError` on the dumped dict.
+
+    Args:
+        model (BaseModel): The validated Pydantic model to log. Should
+            inherit from :class:`RedactableSchema` so the ``redact``
+            context flag is honored; plain :class:`StrictSchema`
+            subclasses log their non-secret fields verbatim.
+        label (str): Log prefix label identifying the caller (e.g.
+            ``"_community:load_community/settings.json"``).
+        logger (logging.Logger): The caller's logger; the resulting
+            log records carry the caller's module name as their
+            ``name`` attribute.
+    """
+    logger.info(f"[{label}] Configuration summary:")
+    try:
+        redacted = dump_redacted(model)
+        formatted = json5.dumps(redacted, indent=2, sort_keys=True)
+        logger.info(f"[{label}] Loaded configuration:\n{formatted}")
+    except (TypeError, ValueError) as e:
+        logger.warning(f"[{label}] Failed to format config as JSON: {e}")
+        logger.info(f"[{label}] Loaded configuration: {model!r}")
+
+
+def as_configuration_error(context: str, exc: ValidationError) -> ConfigurationError:
+    """Build a :class:`ConfigurationError` from a Pydantic error.
+
+    Centralizes the ``ValidationError`` → :class:`ConfigurationError`
+    translation so loaders raise a consistent message style. The
+    returned exception is intended for the caller to re-raise (e.g.
+    ``raise as_configuration_error(ctx, exc) from exc``).
+
+    Args:
+        context (str): Identifier of the surrounding config used as
+            the message prefix.
+        exc (ValidationError): The exception raised by
+            :meth:`pydantic.BaseModel.model_validate`.
+
+    Returns:
+        ConfigurationError: The translated exception, ready to
+            ``raise ... from exc``.
+    """
+    msg = format_validation_error(context, exc)
+    _LOGGER.error(f"[deephaven_mcp._pydantic:as_configuration_error] {msg}")
+    return ConfigurationError(msg)
+
+
+def reconcile_filename_stem(
+    data: Any,
+    *,
+    declared_field: str,
+    model_label: str,
+) -> Any:
+    """Validate ``name`` and reconcile it with an optional declared-field shadow.
+
+    Both :class:`~deephaven_mcp.sessions.CommunitySessionConfig` and
+    :class:`~deephaven_mcp.sessions.EnterpriseSystemConfig` use the
+    loader-supplied ``name`` (typically the filename stem) as the
+    canonical identifier, but the on-disk file may *also* declare
+    ``session_name`` / ``system_name`` for human-friendly readability.
+    This helper enforces that, when both are present, they agree --
+    and rejects an empty or non-string ``name`` outright.
+
+    Args:
+        data (Any): The raw mapping passed to
+            :meth:`pydantic.BaseModel.model_validate`. Non-dict inputs
+            pass through unchanged.
+        declared_field (str): The JSON field name whose value (when
+            present) must equal ``name`` (e.g. ``"session_name"`` or
+            ``"system_name"``). Removed from the returned mapping when
+            present.
+        model_label (str): The model class name used in the error
+            message (e.g. ``"CommunitySessionConfig"``).
+
+    Returns:
+        Any: A copied mapping with ``declared_field`` removed, or the
+            original input unchanged when it is not a dict.
+
+    Raises:
+        ValueError: When ``name`` is absent, empty, or not a string,
+            or when ``declared_field`` is present and disagrees with
+            ``name``.
+    """
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    name = out.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError(
+            f"'name' is required when constructing a {model_label} "
+            "(typically the filename stem when loaded from disk)."
+        )
+    declared = out.pop(declared_field, None)
+    if declared is not None and declared != name:
+        raise ValueError(
+            f"{declared_field!r} field {declared!r} does not match the "
+            f"filename stem {name!r}."
+        )
+    return out

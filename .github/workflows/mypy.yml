@@ -2,9 +2,9 @@ name: mypy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "mcp2" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "mcp2" ]
 
 jobs:
   mypy:
@@ -22,7 +22,7 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: uv pip install ".[lint]" --system
+        run: uv sync --extra lint
 
       - name: Run mypy
         run: uv run mypy src --exclude _version.py --exclude .venv

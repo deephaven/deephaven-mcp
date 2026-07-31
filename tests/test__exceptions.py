@@ -2,18 +2,32 @@ import pytest
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
-    CommunitySessionConfigurationError,
+    CommunityNotConfiguredError,
     ConfigurationError,
+    ConfigurationFieldMissingError,
+    ConfigurationPathError,
+    DaemonAlreadyPublishedError,
+    DaemonClientError,
+    DaemonRegistryError,
+    DaemonReuseRefusedError,
+    DaemonStartupTimeoutError,
     DeephavenConnectionError,
-    EnterpriseSystemConfigurationError,
+    EnterpriseNotConfiguredError,
+    FileLockTimeoutError,
     InternalError,
+    McpClientError,
     McpError,
-    MissingEnterprisePackageError,
+    McpRequestTimeoutError,
+    NoSystemsConfiguredError,
     QueryError,
+    RegistryCorruptError,
     ResourceError,
     SessionCreationError,
     SessionError,
     SessionLaunchError,
+    SpawnError,
+    SystemNotConfiguredError,
+    TemplateResolutionError,
     UnsupportedOperationError,
 )
 
@@ -52,19 +66,6 @@ class TestBaseExceptions:
             raise InternalError(message)
         assert str(exc_info.value) == message
 
-    def test_missing_enterprise_package_error(self):
-        """Test that MissingEnterprisePackageError provides prominent error message."""
-        # Test with default message
-        with pytest.raises(MissingEnterprisePackageError) as exc_info:
-            raise MissingEnterprisePackageError()
-
-        error_message = str(exc_info.value)
-        assert "deephaven-coreplus-client" in error_message
-        assert "ERROR: Core+ features are not available" in error_message
-        assert "pip install" in error_message
-        assert isinstance(exc_info.value, InternalError)
-        assert isinstance(exc_info.value, McpError)
-
     def test_unsupported_operation_error(self):
         """Test that UnsupportedOperationError can be raised and caught properly."""
         message = "operation not supported"
@@ -88,6 +89,41 @@ class TestExceptionParameterized:
             (DeephavenConnectionError, [McpError], "connection error"),
             (ResourceError, [McpError], "resource error"),
             (ConfigurationError, [McpError], "configuration error"),
+            (
+                ConfigurationPathError,
+                [ConfigurationError, McpError],
+                "bad config path",
+            ),
+            (
+                ConfigurationFieldMissingError,
+                [ConfigurationPathError, ConfigurationError, McpError],
+                "field not set",
+            ),
+            (
+                TemplateResolutionError,
+                [ConfigurationError, McpError],
+                "env var not set",
+            ),
+            (
+                NoSystemsConfiguredError,
+                [ConfigurationError, McpError],
+                "no systems configured",
+            ),
+            (
+                SystemNotConfiguredError,
+                [ConfigurationError, McpError],
+                "system not configured",
+            ),
+            (
+                EnterpriseNotConfiguredError,
+                [SystemNotConfiguredError, ConfigurationError, McpError],
+                "no enterprise configured",
+            ),
+            (
+                CommunityNotConfiguredError,
+                [SystemNotConfiguredError, ConfigurationError, McpError],
+                "no community configured",
+            ),
             (UnsupportedOperationError, [McpError], "unsupported operation error"),
             # Specialized exceptions with additional inheritance
             (SessionCreationError, [SessionError, McpError], "session creation error"),
@@ -96,20 +132,32 @@ class TestExceptionParameterized:
                 [SessionCreationError, SessionError, McpError],
                 "session launch error",
             ),
+            # File-lock, daemon-registry, and CLI exceptions
+            (FileLockTimeoutError, [McpError], "lock timeout"),
+            (DaemonRegistryError, [McpError], "registry error"),
             (
-                CommunitySessionConfigurationError,
-                [ConfigurationError, McpError],
-                "community session configuration error",
+                DaemonAlreadyPublishedError,
+                [DaemonRegistryError, McpError],
+                "already published",
             ),
             (
-                EnterpriseSystemConfigurationError,
-                [ConfigurationError, McpError],
-                "enterprise system configuration error",
+                RegistryCorruptError,
+                [DaemonRegistryError, McpError],
+                "registry corrupt",
             ),
+            (DaemonClientError, [McpError], "client error"),
+            (DaemonReuseRefusedError, [McpError], "reuse refused"),
+            (SpawnError, [McpError], "spawn error"),
             (
-                MissingEnterprisePackageError,
-                [InternalError, McpError, RuntimeError],
-                "Core+ features are not available (deephaven-coreplus-client Python package not installed)",
+                DaemonStartupTimeoutError,
+                [SpawnError, McpError],
+                "startup timeout",
+            ),
+            (McpClientError, [McpError], "mcp client error"),
+            (
+                McpRequestTimeoutError,
+                [McpClientError, McpError],
+                "request timeout",
             ),
         ],
     )
@@ -119,9 +167,7 @@ class TestExceptionParameterized:
         with pytest.raises(exception_class) as exc_info:
             raise exception_class(message)
 
-        # MissingEnterprisePackageError has custom __str__ formatting, so skip the message check
-        if exception_class != MissingEnterprisePackageError:
-            assert str(exc_info.value) == message
+        assert str(exc_info.value) == message
 
         # Test inheritance
         for parent_class in parent_classes:
@@ -129,6 +175,25 @@ class TestExceptionParameterized:
 
         # All exceptions should inherit from Exception
         assert isinstance(exc_info.value, Exception)
+
+
+class TestDaemonReuseRefusedError:
+    """Tests for ``DaemonReuseRefusedError``'s ``differing`` attribute.
+
+    The only exception in the module carrying custom ``__init__`` state, so it
+    gets a focused test beyond the parameterized inheritance check.
+    """
+
+    def test_records_differing_fields(self):
+        """The ``differing`` keyword is stored verbatim on the instance."""
+        exc = DaemonReuseRefusedError("different build", differing=("version", "venv"))
+        assert str(exc) == "different build"
+        assert exc.differing == ("version", "venv")
+
+    def test_differing_defaults_to_empty_tuple(self):
+        """``differing`` defaults to an empty tuple when omitted."""
+        exc = DaemonReuseRefusedError("different build")
+        assert exc.differing == ()
 
 
 # Exception-specific tests can be added here if needed in the future
@@ -145,36 +210,26 @@ class TestExceptionModule:
     """Tests for module-level functionality of the exceptions module."""
 
     def test_all_exceptions_exported(self):
-        """Test that all exceptions are properly exported in __all__."""
+        """Test that __all__ lists exactly the McpError subclasses defined in the module.
+
+        The expected set is derived from the module's actual contents rather than
+        hardcoded, so a newly added exception that is omitted from __all__ fails
+        this test instead of silently passing.
+        """
+        import inspect
+
         from deephaven_mcp import _exceptions
 
         exported = set(_exceptions.__all__)
-        expected_exceptions = {
-            # Base exceptions
-            "McpError",
-            "InternalError",
-            "UnsupportedOperationError",
-            "MissingEnterprisePackageError",
-            # Session exceptions
-            "SessionError",
-            "SessionCreationError",
-            "SessionLaunchError",
-            "InvalidSessionNameError",
-            # Authentication exceptions
-            "AuthenticationError",
-            # Query exceptions
-            "QueryError",
-            # Connection exceptions
-            "DeephavenConnectionError",
-            # Resource exceptions
-            "ResourceError",
-            "RegistryItemNotFoundError",
-            # Configuration exceptions
-            "ConfigurationError",
-            "CommunitySessionConfigurationError",
-            "EnterpriseSystemConfigurationError",
+        defined = {
+            name
+            for name, obj in vars(_exceptions).items()
+            if inspect.isclass(obj)
+            and issubclass(obj, McpError)
+            and obj.__module__ == _exceptions.__name__
         }
-        # Check that the exported set exactly matches the expected exceptions
-        assert (
-            exported == expected_exceptions
-        ), f"Exported exceptions don't match expected. Missing: {expected_exceptions - exported}, Extra: {exported - expected_exceptions}"
+        assert exported == defined, (
+            "__all__ does not match the module's McpError subclasses. "
+            f"Missing from __all__: {defined - exported}, "
+            f"Extra in __all__: {exported - defined}"
+        )

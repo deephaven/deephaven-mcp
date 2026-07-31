@@ -31,8 +31,8 @@ Example:
         # Authenticate
         await factory.password("username", "password")
 
-        # Connect to a new worker
-        session = await factory.connect_to_new_worker()
+        # Connect to a new worker (heap_size_gb is required)
+        session = await factory.connect_to_new_worker(heap_size_gb=4)
 
         # Use the session
         table = await session.empty_table(10)
@@ -62,49 +62,40 @@ import io
 import logging
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 import pydeephaven
-
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.session_manager  # pragma: no cover
+from deephaven_enterprise.client.session_manager import SessionManager
 
 from deephaven_mcp._exceptions import (
     AuthenticationError,
     DeephavenConnectionError,
-    MissingEnterprisePackageError,
     QueryError,
     ResourceError,
     SessionCreationError,
     SessionError,
 )
-from deephaven_mcp.config import (
-    EnterpriseSystemConfigurationError,
-    validate_single_enterprise_system,
+from deephaven_mcp.auth.credentials import (
+    Credentials,
+    PasswordCredentials,
+    PrivateKeyCredentials,
 )
+from deephaven_mcp.sessions import EnterpriseSystemConfig
 
 from ._auth_client import CorePlusAuthClient
 
 # Local application imports
-from ._base import ClientObjectWrapper, is_enterprise_available
-from ._constants import (
-    AUTH_TIMEOUT_SECONDS,
-    PQ_CONNECTION_TIMEOUT_SECONDS,
-    QUICK_OPERATION_TIMEOUT_SECONDS,
-    SAML_AUTH_TIMEOUT_SECONDS,
-    SESSION_CONNECT_TIMEOUT_SECONDS,
-    WORKER_CREATION_TIMEOUT_SECONDS,
-)
+from ._base import ClientObjectWrapper, describe_exception_chain
 from ._controller_client import CorePlusControllerClient, CorePlusQuerySerial
+from ._pq_config import env_var_entries_to_wire
 from ._session import CorePlusSession
+from ._timeouts import EnterpriseClientTimeouts
 
 # Define the logger for this module
 _LOGGER = logging.getLogger(__name__)
 
 
-class CorePlusSessionFactory(
-    ClientObjectWrapper["deephaven_enterprise.client.session_manager.SessionManager"]
-):
+class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
     """Asynchronous wrapper for the Deephaven Core+ SessionManager providing non-blocking operations.
 
     This class wraps an existing Deephaven Core+ session manager instance, delegating all
@@ -147,96 +138,63 @@ class CorePlusSessionFactory(
 
     def __init__(
         self,
-        session_manager: "deephaven_enterprise.client.session_manager.SessionManager",  # noqa: F821
+        session_manager: SessionManager,
+        timeouts: EnterpriseClientTimeouts,
     ):
         """Initialize the CorePlusSessionFactory wrapper with an existing SessionManager.
 
-        This constructor creates a new CorePlusSessionFactory that wraps an existing SessionManager
-        object, providing an asynchronous interface to its methods while preserving all functionality.
-        This class serves as the primary entry point for interacting with Deephaven Enterprise servers,
-        handling authentication, worker management, and session establishment.
+        Automatically initializes both `controller_client` and `auth_client` by accessing
+        the corresponding properties from the wrapped session manager.
 
-        The constructor automatically initializes both the controller_client and auth_client properties
-        by accessing the corresponding properties from the wrapped session manager.
-
-        The CorePlusSessionFactory is designed to provide a convenient async/await interface around
-        the synchronous Enterprise SessionManager, running operations in separate threads to avoid
-        blocking the event loop. This makes it ideal for integration into async applications, web
-        servers, or any environment where non-blocking operations are important.
+        In most cases, prefer the class factory methods over direct instantiation:
+        - Use `from_url()` when you have a connection URL to the Deephaven server.
+        - Use `from_credentials()` when you have a configuration dictionary and credentials.
 
         Args:
-            session_manager (deephaven_enterprise.client.session_manager.SessionManager): The SessionManager instance to wrap. Must be an instance
-                           of deephaven_enterprise.client.session_manager.SessionManager.
-                           This should be a properly initialized session manager with valid
-                           connection information, though it does not need to be authenticated
-                           yet (authentication can be performed through this wrapper's methods).
-
-        Raises:
-            TypeError: If the provided session_manager is not an instance of the expected
-                       SessionManager class from deephaven_enterprise.client.session_manager.
-            ValueError: If the session_manager is not properly initialized or is missing
-                       required configuration.
-            SessionError: If there was an error initializing the controller_client property.
-            AuthenticationError: If there was an error initializing the auth_client property.
-
-        Note:
-            In most cases, you should use the class factory methods instead of this constructor:
-            - Use from_url() when you have a connection URL to the Deephaven server
-            - Use from_config() when you have a configuration dictionary
-
-            These factory methods handle initialization details, dependency management, and
-            error handling for you in a more convenient way than direct instantiation.
+            session_manager (deephaven_enterprise.client.session_manager.SessionManager):
+                The SessionManager instance to wrap. Does not need to be authenticated
+                yet; authentication can be performed through this wrapper's methods.
+            timeouts (EnterpriseClientTimeouts): Client-layer timeout configuration.
+                Read field-by-field at use sites and forwarded to the
+                :class:`CorePlusControllerClient` this factory constructs.
 
         Example:
             ```python
-            # Direct instantiation (not typically recommended)
             from deephaven_enterprise.client import session_manager
-            from deephaven_mcp.client import CorePlusSessionFactory
+            from deephaven_mcp.client import CorePlusSessionFactory, EnterpriseClientTimeouts
 
-            # Create the underlying session manager
-            sm = session_manager.SessionManager.from_url("https://example.com/iris/connection.json")
-
-            # Wrap it in the async factory
-            factory = CorePlusSessionFactory(sm)
+            sm = session_manager.SessionManager("https://example.com/iris/connection.json")
+            factory = CorePlusSessionFactory(sm, timeouts=EnterpriseClientTimeouts())
             ```
 
         """
-        super().__init__(session_manager, is_enterprise=True)
+        super().__init__(session_manager)
+        self._timeouts = timeouts
         _LOGGER.info(
             "[CorePlusSessionFactory:__init__] Successfully initialized CorePlusSessionFactory"
         )
 
         # Initialize controller client in constructor
-        try:
-            controller_client = self.wrapped.controller_client
-            self._controller_client = CorePlusControllerClient(controller_client)
-            _LOGGER.debug(
-                "[CorePlusSessionFactory:__init__] Successfully initialized controller client"
-            )
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusSessionFactory:__init__] Failed to initialize controller client: {e}"
-            )
-            raise SessionError(f"Failed to initialize controller client: {e}") from e
+        controller_client = self.wrapped.controller_client
+        self._controller_client = CorePlusControllerClient(
+            controller_client, timeouts=timeouts
+        )
+        _LOGGER.debug(
+            "[CorePlusSessionFactory:__init__] Successfully initialized controller client"
+        )
 
         # Initialize auth client in constructor
-        try:
-            auth_client = self.wrapped.auth_client
-            self._auth_client = CorePlusAuthClient(auth_client)
-            _LOGGER.debug(
-                "[CorePlusSessionFactory:__init__] Successfully initialized auth client"
-            )
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusSessionFactory:__init__] Failed to initialize auth client: {e}"
-            )
-            raise AuthenticationError(
-                f"Failed to initialize authentication client: {e}"
-            ) from e
+        auth_client = self.wrapped.auth_client
+        self._auth_client = CorePlusAuthClient(auth_client, self._timeouts)
+        _LOGGER.debug(
+            "[CorePlusSessionFactory:__init__] Successfully initialized auth client"
+        )
 
     @classmethod
     async def from_url(
-        cls, url: str, timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS
+        cls,
+        url: str,
+        timeouts: EnterpriseClientTimeouts,
     ) -> "CorePlusSessionFactory":
         """Create a CorePlusSessionFactory connected to a Deephaven server specified by URL.
 
@@ -258,17 +216,15 @@ class CorePlusSessionFactory(
             url (str): The URL to the Deephaven server's connection.json file. This is typically in
                 the format: https://your-server:port/iris/connection.json
                 For example: "https://deephaven.example.com:10000/iris/connection.json"
-            timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
+            timeouts (EnterpriseClientTimeouts): Client-layer timeout configuration. The connect
+                timeout is sourced from
+                ``timeouts.client.session_connect_timeout_seconds``.
 
         Returns:
             CorePlusSessionFactory: A new factory instance connected to the specified server,
                 ready for authentication. You can then authenticate and create sessions.
 
         Raises:
-            MissingEnterprisePackageError: If the deephaven-coreplus-client package is not
-                installed. This package is required for Enterprise functionality and must be
-                installed separately from the base deephaven-mcp package.
             DeephavenConnectionError: If unable to connect to the server at the specified URL.
                 Common causes include network issues, incorrect URL, server not running, or
                 firewall blocking the connection.
@@ -288,7 +244,7 @@ class CorePlusSessionFactory(
                 await factory.password("username", "password")
 
                 # Now you can create sessions, etc.
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
                 return session
             ```
 
@@ -297,235 +253,10 @@ class CorePlusSessionFactory(
             before calling this method, as it uses the system's default HTTP client
             configuration for the initial connection.json download.
         """
-        if not is_enterprise_available:
-            raise MissingEnterprisePackageError()
-        else:
-            from deephaven_enterprise.client.session_manager import SessionManager
-
-            _LOGGER.debug(
-                f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
-            )
-            start_time = time.monotonic()
-            try:
-                # Run the blocking SessionManager constructor in a background thread so
-                # that this method is cancellable and doesn't block the event loop.
-                manager = await asyncio.wait_for(
-                    asyncio.to_thread(SessionManager, url),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError:
-                _LOGGER.error(
-                    f"[CorePlusSessionFactory:from_url] Connection to {url} timed out after {timeout_seconds}s"
-                )
-                raise DeephavenConnectionError(
-                    f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
-                    f"The server may be unreachable."
-                ) from None
-            except Exception as e:
-                elapsed = time.monotonic() - start_time
-                _LOGGER.error(
-                    f"[CorePlusSessionFactory:from_url] Failed to create SessionManager with URL {url} after {elapsed:.2f}s: {e}"
-                )
-                raise DeephavenConnectionError(
-                    f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
-                ) from e
-
-            elapsed = time.monotonic() - start_time
-            _LOGGER.info(
-                f"[CorePlusSessionFactory:from_url] Successfully created SessionManager for URL {url} in {elapsed:.2f}s"
-            )
-            instance = cls(manager)
-
-            # Subscribe to controller client for persistent query operations
-            await instance._controller_client.subscribe(timeout_seconds=timeout_seconds)
-
-            return instance
-
-    @staticmethod
-    def _resolve_password(
-        worker_cfg: dict[str, Any],
-        log_prefix: str = "[CorePlusSessionFactory:from_config]",
-    ) -> str:
-        """Resolve password from config dictionary or environment variable.
-
-        This helper extracts the password for enterprise system authentication.
-        It supports two configuration approaches:
-
-        1. Direct password: Use 'password' key with the password value
-        2. Environment variable: Use 'password_env_var' key with the name of an
-           environment variable containing the password (recommended for security)
-
-        If 'password_env_var' is specified and 'password' is None, the environment
-        variable is used. Unlike auth tokens, passwords are required - an
-        AuthenticationError is raised if no password can be resolved.
-
-        Args:
-            worker_cfg: Configuration dictionary containing 'password' and/or
-                'password_env_var' keys.
-            log_prefix: Prefix for log messages (default: "[CorePlusSessionFactory:from_config]").
-
-        Returns:
-            The resolved password string.
-
-        Raises:
-            AuthenticationError: If the specified environment variable is not set,
-                or if no password is provided at all.
-        """
-        import os
-
-        password = worker_cfg.get("password")
-        password_env_var = worker_cfg.get("password_env_var")
-
-        if password is None and password_env_var is not None:
-            password = os.environ.get(password_env_var)
-            if password is None:
-                _LOGGER.error(
-                    f"{log_prefix} Environment variable '{password_env_var}' not set for password authentication."
-                )
-                raise AuthenticationError(
-                    f"Environment variable '{password_env_var}' not set for password authentication."
-                )
-        if password is None:
-            _LOGGER.error(
-                f"{log_prefix} No password provided for password authentication."
-            )
-            raise AuthenticationError(
-                "No password provided for password authentication."
-            )
-        return str(password)
-
-    @classmethod
-    async def from_config(
-        cls,
-        worker_cfg: dict[str, Any],
-        timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS,
-    ) -> "CorePlusSessionFactory":
-        """
-        Create and authenticate a CorePlusSessionFactory from a configuration dictionary.
-
-        This factory method provides a complete solution for creating and initializing a
-        CorePlusSessionFactory from a configuration dictionary. It handles the entire process:
-
-        1. Validates the configuration format and required fields
-        2. Creates a connection to the specified Deephaven server
-        3. Automatically authenticates using the provided credentials
-        4. Returns a fully ready-to-use factory instance
-
-        This is the recommended approach when working with configuration files, environment-based
-        setups, or any scenario where connection details and authentication information are stored
-        in a structured format rather than hardcoded in the application.
-
-        Configuration Format:
-        The configuration dictionary must follow the standard enterprise system format with these
-        required fields:
-
-        - 'connection_json_url': URL to the Deephaven server's connection.json file
-        - 'auth_type': Authentication method to use ('password', 'private_key', or 'saml')
-
-        Additional fields based on auth_type:
-
-        - For 'password' authentication:
-            * 'username': The username for authentication
-            * Either 'password': The actual password (not recommended for production)
-              or 'password_env_var': Name of environment variable containing the password
-            * Optional 'effective_user': User to operate as after authentication
-
-        - For 'private_key' authentication:
-            * 'private_key_path': The path to the Deephaven private keypair file (proprietary format,
-              typically named `priv-<keyname>.base64.txt`; provided by your IT/security team)
-
-        - For 'saml' authentication:
-            * No additional fields required, but SAML must be configured on server
-
-        Args:
-            worker_cfg (dict[str, Any]): Configuration dictionary for the enterprise system connection.
-                Must contain the required fields as described above.
-            timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
-
-        Returns:
-            CorePlusSessionFactory: A fully initialized and authenticated factory instance
-                ready for immediate use. You can directly call methods like connect_to_new_worker()
-                without needing to perform separate authentication steps.
-
-        Raises:
-            MissingEnterprisePackageError: If the required deephaven-coreplus-client
-                package is not installed.
-            DeephavenConnectionError: If unable to connect to the specified server URL,
-                such as network issues or invalid connection.json format.
-            AuthenticationError: If authentication fails due to missing or invalid credentials,
-                incorrect format, or server-side authentication issues.
-            EnterpriseSystemConfigurationError: If the configuration dictionary is invalid,
-                missing required fields, or contains incompatible settings.
-            EnvironmentError: If a password environment variable is specified but not found
-                in the environment.
-
-        Example - Password authentication with environment variable:
-            ```python
-            import asyncio
-            import os
-            from deephaven_mcp.client import CorePlusSessionFactory
-
-            # Set password in environment (in practice, this would be set externally)
-            os.environ["DH_PASSWORD"] = "my_secure_password"
-
-            async def create_from_config():
-                # Define configuration with environment variable for password
-                config = {
-                    "connection_json_url": "https://example.deephaven.io/iris/connection.json",
-                    "auth_type": "password",
-                    "username": "admin",
-                    "password_env_var": "DH_PASSWORD"
-                }
-
-                # Create and authenticate in one step
-                factory = await CorePlusSessionFactory.from_config(config)
-
-                # Use the factory directly - no authentication needed
-                session = await factory.connect_to_new_worker()
-                return session
-            ```
-
-        Example - Private key authentication:
-            ```python
-            async def create_with_key():
-                # Define configuration with private key path
-                config = {
-                    "connection_json_url": "https://example.deephaven.io/iris/connection.json",
-                    "auth_type": "private_key",
-                    "private_key_path": "/path/to/priv-mykeyname.base64.txt"
-                }
-
-                # Create and authenticate in one step
-                factory = await CorePlusSessionFactory.from_config(config)
-                return factory
-            ```
-
-        Note:
-            This method performs authentication as part of initialization. If authentication
-            fails, an exception will be raised and no factory will be returned. For security
-            best practices, avoid storing credentials directly in the configuration and instead
-            use environment variables or secure credential storage systems.
-        """
-        if not is_enterprise_available:
-            raise MissingEnterprisePackageError()
-
-        # Validate config
-        try:
-            validate_single_enterprise_system("from_config", worker_cfg)
-        except EnterpriseSystemConfigurationError as e:
-            _LOGGER.error(
-                f"[CorePlusSessionFactory:from_config] Invalid enterprise system config: {e}"
-            )
-            raise
-
-        url = worker_cfg["connection_json_url"]
-        auth_type = worker_cfg["auth_type"]
+        timeout_seconds = timeouts.session_connect_timeout_seconds
         _LOGGER.debug(
-            f"[CorePlusSessionFactory:from_config] Creating SessionManager from config: url={url}, auth_type={auth_type}"
+            f"[CorePlusSessionFactory:from_url] Creating SessionManager for URL: {url}"
         )
-        from deephaven_enterprise.client.session_manager import SessionManager
-
         start_time = time.monotonic()
         try:
             # Run the blocking SessionManager constructor in a background thread so
@@ -536,63 +267,175 @@ class CorePlusSessionFactory(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:from_config] Connection to {url} timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:from_url] Connection to {url} timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.session_connect_timeout_seconds."
             )
             raise DeephavenConnectionError(
                 f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
-                f"The server may be unreachable."
+                f"The server may be unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.session_connect_timeout_seconds "
+                f"in the operator config."
             ) from None
         except Exception as e:
             elapsed = time.monotonic() - start_time
             _LOGGER.error(
-                f"[CorePlusSessionFactory:from_config] Failed to create SessionManager with URL {url} after {elapsed:.2f}s: {e}"
+                "[CorePlusSessionFactory:from_url] Failed to create "
+                "SessionManager with URL %s after %.2fs: %r",
+                url,
+                elapsed,
+                e,
+                exc_info=True,
             )
             raise DeephavenConnectionError(
-                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {e}"
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {describe_exception_chain(e)}"
             ) from e
 
         elapsed = time.monotonic() - start_time
         _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Successfully created SessionManager from config (url={url}, auth_type={auth_type}) in {elapsed:.2f}s"
+            f"[CorePlusSessionFactory:from_url] Successfully created SessionManager for URL {url} in {elapsed:.2f}s"
+        )
+        instance = cls(manager, timeouts=timeouts)
+
+        # Subscribe to controller client for persistent query operations.
+        # Subscribe uses its own timeout from EnterpriseClientTimeouts.subscribe_timeout_seconds.
+        await instance._controller_client.subscribe()
+
+        return instance
+
+    @classmethod
+    async def from_credentials(
+        cls,
+        system_config: EnterpriseSystemConfig,
+        creds: Credentials,
+        timeouts: EnterpriseClientTimeouts,
+    ) -> "CorePlusSessionFactory":
+        """Create and authenticate a factory using mechanism-only credentials.
+
+        This is the per-request authentication path used by the enterprise
+        MCP server: the server's config supplies only the connection
+        target (``connection_json_url``) and operational defaults; the
+        actual credentials are supplied by the caller (typically derived
+        from the ``X-Deephaven-*`` HTTP headers by the caller's
+        credential-resolution layer).
+
+        Steps performed:
+
+        1. Build a ``SessionManager`` from ``system_config.connection_json_url``
+           in a worker thread, with the connect timeout from
+           ``timeouts.client.session_connect_timeout_seconds`` enforced.
+        2. Authenticate using ``creds`` (dispatching on its concrete
+           type).
+        3. Subscribe the wrapped controller client.
+
+        Args:
+            system_config (EnterpriseSystemConfig): Validated enterprise
+                system declaration. Only ``connection_json_url`` is read
+                by this method.
+            creds (Credentials): Mechanism-only credentials produced by
+                the caller's authentication layer. Only
+                :class:`PasswordCredentials` and
+                :class:`PrivateKeyCredentials` can authenticate a
+                Deephaven Enterprise session; any other concrete type
+                raises :class:`AuthenticationError`. The concrete type
+                selects the upstream auth call.
+            timeouts (EnterpriseClientTimeouts): Client-layer timeout configuration.
+                The connect timeout is sourced from
+                ``timeouts.client.session_connect_timeout_seconds``; downstream
+                methods read their own field as needed.
+
+        Returns:
+            CorePlusSessionFactory: A fully authenticated factory.
+
+        Raises:
+            DeephavenConnectionError: If the underlying ``SessionManager``
+                cannot be constructed within the operator-configured
+                ``timeouts.client.session_connect_timeout_seconds`` (or at all).
+            AuthenticationError: If ``creds`` is a type this factory
+                does not support (e.g. :class:`PSKCredentials`), or if
+                the upstream authentication call rejects it. Syntactic
+                validation of credential material (e.g. UTF-8 check for
+                private-key bytes) happens at credential-construction
+                time, not here.
+        """
+        timeout_seconds = timeouts.session_connect_timeout_seconds
+        url = system_config.connection_json_url
+        creds_type = type(creds).__name__
+        _LOGGER.debug(
+            f"[CorePlusSessionFactory:from_credentials] Creating SessionManager: "
+            f"url={url}, creds={creds_type}"
+        )
+        start_time = time.monotonic()
+        try:
+            manager = await asyncio.wait_for(
+                asyncio.to_thread(SessionManager, url),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError:
+            _LOGGER.error(
+                f"[CorePlusSessionFactory:from_credentials] Connection to {url} timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.session_connect_timeout_seconds."
+            )
+            raise DeephavenConnectionError(
+                f"Connection to Deephaven at {url} timed out after {timeout_seconds} seconds. "
+                f"The server may be unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.session_connect_timeout_seconds "
+                f"in the operator config."
+            ) from None
+        except Exception as e:
+            elapsed = time.monotonic() - start_time
+            _LOGGER.error(
+                "[CorePlusSessionFactory:from_credentials] Failed to create "
+                "SessionManager with URL %s after %.2fs: %r",
+                url,
+                elapsed,
+                e,
+                exc_info=True,
+            )
+            raise DeephavenConnectionError(
+                f"Failed to establish connection to Deephaven at {url} after {elapsed:.2f}s: {describe_exception_chain(e)}"
+            ) from e
+
+        elapsed = time.monotonic() - start_time
+        _LOGGER.info(
+            f"[CorePlusSessionFactory:from_credentials] Successfully created SessionManager "
+            f"(url={url}) in {elapsed:.2f}s"
         )
 
-        instance = cls(manager)
+        instance = cls(manager, timeouts=timeouts)
 
-        # Perform authentication if credentials are provided
-        if auth_type == "password":
-            username = worker_cfg.get("username")
-            password = cls._resolve_password(worker_cfg)
-            effective_user = worker_cfg.get("effective_user")
-            await instance.password(cast(str, username), password, effective_user)
-        elif auth_type == "private_key":
-            private_key_path = worker_cfg.get("private_key_path")
-            if private_key_path is None:
-                _LOGGER.error(
-                    "[CorePlusSessionFactory:from_config] No private_key_path provided for private_key authentication."
+        match creds:
+            case PasswordCredentials(
+                username=username, password=password, effective_user=effective_user
+            ):
+                await instance.password(
+                    username, password.get_secret_value(), effective_user
                 )
+            case PrivateKeyCredentials(key_text=key_text):
+                await instance.private_key(io.StringIO(key_text.get_secret_value()))
+            case _:
+                # The signature accepts the abstract Credentials base
+                # class; this arm rejects any concrete subclass that
+                # cannot authenticate against Deephaven Enterprise (e.g.
+                # PSKCredentials, or a future mechanism this factory
+                # does not understand).
                 raise AuthenticationError(
-                    "No private_key_path provided for private_key authentication."
+                    f"Unsupported credentials type {creds_type!r} for "
+                    f"enterprise authentication."
                 )
-            await instance.private_key(private_key_path)
-        else:
-            _LOGGER.warning(
-                f"[CorePlusSessionFactory:from_config] Auth type '{auth_type}' is not supported for automatic authentication. Returning unauthenticated manager."
-            )
 
-        # Subscribe to controller client for persistent query operations
         _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Subscribing to controller for persistent query state (auth_type={auth_type})"
+            f"[CorePlusSessionFactory:from_credentials] Subscribing to controller "
+            f"(creds={creds_type})"
         )
         subscribe_start = time.monotonic()
-        await instance._controller_client.subscribe(timeout_seconds=timeout_seconds)
+        # Subscribe uses its own timeout from EnterpriseClientTimeouts.subscribe_timeout_seconds.
+        await instance._controller_client.subscribe()
         subscribe_elapsed = time.monotonic() - subscribe_start
         _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Controller subscription completed in {subscribe_elapsed:.2f}s"
+            f"[CorePlusSessionFactory:from_credentials] Controller subscription "
+            f"completed in {subscribe_elapsed:.2f}s"
         )
 
-        _LOGGER.info(
-            f"[CorePlusSessionFactory:from_config] Successfully created and authenticated SessionManager from config (auth_type={auth_type})"
-        )
         return instance
 
     @property
@@ -712,8 +555,7 @@ class CorePlusSessionFactory(
         long-running cleanup operations don't impact the responsiveness of your async application.
 
         Returns:
-            None: This method doesn't return a value. Upon successful completion, the factory
-                 is considered closed and should no longer be used.
+            None
 
         Raises:
             SessionError: If terminating the connections fails for any reason, such as network
@@ -730,7 +572,7 @@ class CorePlusSessionFactory(
                 await factory.password("username", "password")
 
                 # Use the factory...
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
 
                 # When finished, properly close everything
                 await session.close()
@@ -740,13 +582,9 @@ class CorePlusSessionFactory(
         Note:
             - This method does NOT automatically close any sessions created by this factory
             - Each CorePlusSession must be closed separately before closing the factory
-            - After calling close(), the factory should be considered unusable
+            - After calling close(), the factory should be considered unusable and cannot be reused
             - For proper resource cleanup, always use this method in a try/finally block or
               with async context managers to ensure it's called even if exceptions occur
-
-        Note:
-            After closing the session manager, it cannot be reused. A new instance
-            must be created if further connections are needed.
         """
         try:
             _LOGGER.debug(
@@ -758,10 +596,12 @@ class CorePlusSessionFactory(
             )
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:close] Failed to close session manager: {e}"
+                "[CorePlusSessionFactory:close] Failed to close session manager: %r",
+                e,
+                exc_info=True,
             )
             raise SessionError(
-                f"Failed to close session manager connections: {e}"
+                f"Failed to close session manager connections: {describe_exception_chain(e)}"
             ) from e
 
     @staticmethod
@@ -778,20 +618,29 @@ class CorePlusSessionFactory(
             See https://deephaven.atlassian.net/browse/DH-19984 for tracking.
 
         Args:
-            session (pydeephaven.Session): The raw session object from the enterprise system
+            session (pydeephaven.Session): The raw session object from the enterprise system.
 
         Returns:
-            str: The programming language (e.g., "python", "groovy")
+            str: The programming language string (e.g., "python", "groovy"). Defaults to
+                "python" if the session's type attribute is None or empty.
         """
         # TODO: the private attribute _session_type is a temporary workaround: See https://deephaven.atlassian.net/browse/DH-19984
-        session_type = session._session_type
+        try:
+            session_type = session._session_type  # noqa: SLF001
+        except AttributeError:
+            _LOGGER.warning(
+                "[CorePlusSessionFactory:_get_programming_language] pydeephaven did not "
+                "expose _session_type on the session; defaulting to 'python'. "
+                "Tracked in DH-19984."
+            )
+            return "python"
         # Default to python
         return session_type if session_type else "python"
 
     async def connect_to_new_worker(
         self: "CorePlusSessionFactory",
+        heap_size_gb: float | int,
         name: str | None = None,
-        heap_size_gb: int | None = None,
         server: str | None = None,
         extra_jvm_args: list[str] | None = None,
         extra_environment_vars: list[str] | None = None,
@@ -799,7 +648,6 @@ class CorePlusSessionFactory(
         auto_delete_timeout: int | None = 600,
         admin_groups: list[str] | None = None,
         viewer_groups: list[str] | None = None,
-        timeout_seconds: float = WORKER_CREATION_TIMEOUT_SECONDS,
         configuration_transformer: Callable[..., Any] | None = None,
         session_arguments: dict[str, Any] | None = None,
     ) -> CorePlusSession:
@@ -815,20 +663,21 @@ class CorePlusSessionFactory(
         in a CorePlusSession for consistent behavior across the API.
 
         Args:
+            heap_size_gb (float | int): JVM heap size in gigabytes (e.g., 8 or 2.5 for -Xmx8g or -Xmx2560m). Determines the maximum amount of memory available
+                to the worker process. Larger values are necessary for processing larger datasets, but
+                require more system resources.
             name (str | None): Optional name for the worker process. If None (default), an auto-generated name based
                 on the current timestamp will be used. A descriptive name can make it easier to
                 identify your worker in monitoring tools and logs.
-            heap_size_gb (int | None): JVM heap size in gigabytes (e.g., 8 for -Xmx8g). Determines the maximum amount of memory available
-                to the worker process. Larger values are necessary for processing larger datasets, but
-                require more system resources. If None (default), the server's default heap size is used.
             server (str | None): Specific server to run the worker on. If None (default), the server will be chosen
                 automatically from available resources. Useful for targeting specific hardware configurations.
             extra_jvm_args (list[str] | None): Additional JVM arguments to configure the worker's Java Virtual Machine.
                 Examples include garbage collection settings ("-XX:+UseG1GC"), memory settings, or
                 custom Java properties. If None (default), only standard JVM arguments are used.
             extra_environment_vars (list[str] | None): Environment variables to set for the worker process.
-                Format as ["NAME=value", ...]. Useful for configuring system properties, paths,
-                or feature flags. If None (default), the standard environment is used.
+                Format as ["NAME=value", ...] (converted internally to the controller's
+                alternating key/value wire format). Useful for configuring system properties,
+                paths, or feature flags. If None (default), the standard environment is used.
             engine (str): Engine type that determines the worker's capabilities and behavior.
                 Defaults to "DeephavenCommunity". Other options may include enterprise engines
                 with additional features depending on your Deephaven installation.
@@ -836,19 +685,16 @@ class CorePlusSessionFactory(
                 terminated and cleaned up. Defaults to 600 (10 minutes). Set to None to prevent
                 auto-deletion (not recommended for production use as it can lead to resource leaks).
                 Set to 0 for immediate cleanup when the session disconnects.
-            timeout_seconds (float): Maximum time in seconds to wait for the worker to start before raising
-                an exception. Defaults to 60 seconds. Increase for slower environments or when
-                creating workers with complex initialization processes.
             admin_groups (list[str] | None): List of user groups that have administrative permissions for this worker.
                 Admins can modify, restart, or terminate the worker. If None (default), only the
                 creator has admin privileges.
             viewer_groups (list[str] | None): List of user groups that have read-only access to this worker.
                 Viewers can connect to the worker and view its data but cannot modify it.
                 If None (default), only the creator has viewing privileges.
-            configuration_transformer (Callable[..., Any] | None): Optional function that takes and returns a configuration dictionary.
-                This allows for advanced customization of the worker configuration beyond what the
-                standard parameters provide. The function signature should be:
-                `(config: dict) -> dict`. Use with caution as it may override other settings.
+            configuration_transformer (Callable[..., Any] | None): Optional callable applied to the
+                internal worker configuration dictionary before submission. Accepts and returns
+                the configuration dict, allowing advanced customization beyond what the standard
+                parameters provide. Use with caution as it can override other settings.
             session_arguments (dict[str, Any] | None): Additional keyword arguments to pass to the pydeephaven.Session constructor.
                 These parameters control session behavior rather than worker configuration.
                 Common options include `disable_open_table_listener` or `chunk_size`.
@@ -863,11 +709,12 @@ class CorePlusSessionFactory(
             ResourceError: If there are insufficient server resources (memory, CPU, etc.) to create
                 the worker, or if resource allocation limits have been reached.
             SessionCreationError: If an error occurs during worker creation or connection establishment,
-                such as invalid configuration parameters or initialization failures.
+                such as invalid configuration parameters, initialization failures, or authentication
+                problems. Authentication issues surface as ``SessionCreationError`` with the original
+                exception available via ``__cause__``.
             DeephavenConnectionError: If there is a network or communication problem with the Deephaven
-                server during worker creation or connection.
-            AuthenticationError: If the current authentication is invalid or has insufficient permissions.
-            TimeoutError: If worker creation exceeds the specified timeout_seconds.
+                server during worker creation or connection, or if worker creation exceeds the
+                operator-configured ``EnterpriseClientTimeouts.worker_creation_timeout_seconds``.
 
         Example - Basic usage:
             ```python
@@ -879,8 +726,8 @@ class CorePlusSessionFactory(
                 factory = await CorePlusSessionFactory.from_url("https://myserver.example.com/iris/connection.json")
                 await factory.password("username", "password")
 
-                # Create a default worker and get a session
-                session = await factory.connect_to_new_worker()
+                # Create a worker and get a session (heap_size_gb is required)
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
 
                 # Create and manipulate tables
                 table = session.table([1, 2, 3], columns=["Value"])
@@ -929,25 +776,38 @@ class CorePlusSessionFactory(
             - controller_client: Property for accessing a client to manage workers directly
             - CorePlusSession.close: Method to disconnect from a worker and release resources
         """
+        timeout_seconds = self._timeouts.worker_creation_timeout_seconds
+        # The vendor call places these directly into the protobuf's repeated
+        # extraEnvironmentVariables field, which the controller reads as a flat
+        # alternating key/value list — convert from the KEY=VALUE form here.
+        wire_environment_vars = (
+            env_var_entries_to_wire(extra_environment_vars)
+            if extra_environment_vars is not None
+            else None
+        )
         try:
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_new_worker] Creating new worker and connecting to it"
             )
-            # SDK handles timeout internally via timeout_seconds parameter
-            session = await asyncio.to_thread(
-                self.wrapped.connect_to_new_worker,
-                name=name,
-                heap_size_gb=heap_size_gb,
-                server=server,
-                extra_jvm_args=extra_jvm_args,
-                extra_environment_vars=extra_environment_vars,
-                engine=engine,
-                auto_delete_timeout=auto_delete_timeout,
-                admin_groups=admin_groups,
-                viewer_groups=viewer_groups,
-                timeout_seconds=timeout_seconds,
-                configuration_transformer=configuration_transformer,
-                session_arguments=session_arguments,
+            # Python-side timeout in addition to the SDK's own timeout_seconds
+            # argument (belt-and-suspenders).
+            session = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.wrapped.connect_to_new_worker,
+                    name=name,
+                    heap_size_gb=heap_size_gb,
+                    server=server,
+                    extra_jvm_args=extra_jvm_args,
+                    extra_environment_vars=wire_environment_vars,
+                    engine=engine,
+                    auto_delete_timeout=auto_delete_timeout,
+                    admin_groups=admin_groups,
+                    viewer_groups=viewer_groups,
+                    timeout_seconds=timeout_seconds,
+                    configuration_transformer=configuration_transformer,
+                    session_arguments=session_arguments,
+                ),
+                timeout=timeout_seconds,
             )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_new_worker] Successfully connected to new worker"
@@ -958,11 +818,14 @@ class CorePlusSessionFactory(
             return CorePlusSession(session, programming_language)
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:connect_to_new_worker] Timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:connect_to_new_worker] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.worker_creation_timeout_seconds."
             )
             raise DeephavenConnectionError(
                 f"Worker creation timed out after {timeout_seconds} seconds. "
-                f"The server may be overloaded or unreachable."
+                f"The server may be overloaded or unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.worker_creation_timeout_seconds "
+                f"in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -979,10 +842,13 @@ class CorePlusSessionFactory(
             raise
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:connect_to_new_worker] Failed to connect to new worker: {e}"
+                "[CorePlusSessionFactory:connect_to_new_worker] Failed to connect "
+                "to new worker: %r",
+                e,
+                exc_info=True,
             )
             raise SessionCreationError(
-                f"Failed to create and connect to new worker: {e}"
+                f"Failed to create and connect to new worker: {describe_exception_chain(e)}"
             ) from e
 
     async def connect_to_persistent_query(
@@ -990,7 +856,6 @@ class CorePlusSessionFactory(
         name: str | None = None,
         serial: CorePlusQuerySerial | None = None,
         session_arguments: dict[str, Any] | None = None,
-        timeout_seconds: float = PQ_CONNECTION_TIMEOUT_SECONDS,
     ) -> CorePlusSession:
         """Connect to an existing persistent query (worker) by name or serial number.
 
@@ -1022,8 +887,9 @@ class CorePlusSessionFactory(
                 pydeephaven.Session constructor. This allows customization of session behavior
                 such as setting chunk_size for data transfer or configuring query processing options.
                 Common options include `disable_open_table_listener` or `chunk_size`.
-            timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to PQ_CONNECTION_TIMEOUT_SECONDS.
+
+        The connect timeout is sourced from
+        ``EnterpriseClientTimeouts.pq_connection_timeout_seconds``.
 
         Returns:
             CorePlusSession: A fully initialized session object connected to the existing worker.
@@ -1038,11 +904,11 @@ class CorePlusSessionFactory(
             QueryError: If the persistent query cannot be found (doesn't exist, was terminated), is not
                 in a valid state to accept connections, or cannot be accessed due to permission issues.
             DeephavenConnectionError: If a network-related issue occurs while connecting to the worker,
-                such as connectivity problems or server unavailability.
+                such as connectivity problems, server unavailability, or connection timeout.
             SessionCreationError: If there's an error establishing the session connection for any other
-                reason, such as version incompatibility or resource constraints.
-            AuthenticationError: If the current authentication is invalid or has insufficient permissions
-                to connect to the specified worker.
+                reason, such as version incompatibility, resource constraints, or authentication
+                problems. Authentication issues surface as ``SessionCreationError`` with the original
+                exception available via ``__cause__``.
 
         Example - Connecting by name:
             ```python
@@ -1094,6 +960,7 @@ class CorePlusSessionFactory(
             - CorePlusSession.get_table: Method to access existing tables in the worker
             - CorePlusSession.close: Method to disconnect from a worker and release resources
         """
+        timeout_seconds = self._timeouts.pq_connection_timeout_seconds
         try:
             _LOGGER.debug(
                 f"[CorePlusSessionFactory:connect_to_persistent_query] Connecting to persistent query (name={name}, serial={serial})"
@@ -1116,11 +983,14 @@ class CorePlusSessionFactory(
             return CorePlusSession(session, programming_language)
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:connect_to_persistent_query] Timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:connect_to_persistent_query] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.pq_connection_timeout_seconds."
             )
             raise DeephavenConnectionError(
                 f"Connection to persistent query timed out after {timeout_seconds} seconds. "
-                f"The server may be overloaded or unreachable."
+                f"The server may be overloaded or unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.pq_connection_timeout_seconds "
+                f"in the operator config."
             ) from None
         except ValueError:
             # Re-raise input validation exceptions unchanged
@@ -1139,17 +1009,16 @@ class CorePlusSessionFactory(
             raise QueryError(f"Persistent query not found: {e}") from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:connect_to_persistent_query] Failed to connect to persistent query: {e}"
+                "[CorePlusSessionFactory:connect_to_persistent_query] Failed to "
+                "connect to persistent query: %r",
+                e,
+                exc_info=True,
             )
             raise SessionCreationError(
-                f"Failed to establish connection to persistent query: {e}"
+                f"Failed to establish connection to persistent query: {describe_exception_chain(e)}"
             ) from e
 
-    async def delete_key(
-        self,
-        public_key_text: str,
-        timeout_seconds: float = QUICK_OPERATION_TIMEOUT_SECONDS,
-    ) -> None:
+    async def delete_key(self, public_key_text: str) -> None:
         """Delete a previously uploaded public key from the Deephaven server's authentication system.
 
         This method is used for managing SSH key-based authentication in Deephaven Enterprise.
@@ -1172,17 +1041,17 @@ class CorePlusSessionFactory(
                 uploaded. This should include the full key string including any key type prefix
                 (e.g., "ssh-rsa AAAA...") and comment suffix if present. The key text must match
                 exactly what was registered in the system for successful deletion.
-            timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to QUICK_OPERATION_TIMEOUT_SECONDS.
+
+        The operation timeout is sourced from
+        ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``.
 
         Raises:
             ResourceError: If the key cannot be deleted due to issues such as the key not being
-                found in the system, insufficient permissions to delete the key, or other
-                server-side key storage problems.
+                found in the system, insufficient permissions, server-side key storage problems,
+                or authentication failures. Authentication issues surface as ``ResourceError``
+                with the original exception available via ``__cause__``.
             DeephavenConnectionError: If there is a problem connecting to the server during the
                 deletion operation, such as network issues, server unavailability, or timeout.
-            AuthenticationError: If the current authentication is invalid or has expired,
-                requiring re-authentication before key management operations can be performed.
 
         Example:
             ```python
@@ -1214,6 +1083,7 @@ class CorePlusSessionFactory(
             - This operation affects only future authentication attempts; existing
               authenticated sessions will not be terminated
         """
+        timeout_seconds = self._timeouts.quick_operation_timeout_seconds
         try:
             _LOGGER.debug("[CorePlusSessionFactory:delete_key] Deleting public key")
             await asyncio.wait_for(
@@ -1225,10 +1095,13 @@ class CorePlusSessionFactory(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:delete_key] Timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:delete_key] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.quick_operation_timeout_seconds."
             )
             raise DeephavenConnectionError(
-                f"Key deletion timed out after {timeout_seconds} seconds."
+                f"Key deletion timed out after {timeout_seconds} seconds. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.quick_operation_timeout_seconds in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -1239,16 +1112,19 @@ class CorePlusSessionFactory(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:delete_key] Failed to delete key: {e}"
+                "[CorePlusSessionFactory:delete_key] Failed to delete key: %r",
+                e,
+                exc_info=True,
             )
-            raise ResourceError(f"Failed to delete authentication key: {e}") from e
+            raise ResourceError(
+                f"Failed to delete authentication key: {describe_exception_chain(e)}"
+            ) from e
 
     async def password(
         self,
         user: str,
         password: str,
         effective_user: str | None = None,
-        timeout_seconds: float = AUTH_TIMEOUT_SECONDS,
     ) -> None:
         """Authenticate to the server using username and password credentials.
 
@@ -1274,8 +1150,9 @@ class CorePlusSessionFactory(
                 means the authenticated user will be used. This parameter enables authentication
                 as one user but performing operations as another (requires appropriate permissions,
                 typically admin or impersonation rights).
-            timeout_seconds (float): Maximum time in seconds to wait for authentication.
-                Defaults to AUTH_TIMEOUT_SECONDS.
+
+        The authentication timeout is sourced from
+        ``EnterpriseClientTimeouts.auth_timeout_seconds``.
 
         Raises:
             AuthenticationError: If authentication fails due to invalid credentials, expired
@@ -1313,6 +1190,7 @@ class CorePlusSessionFactory(
             - private_key: Alternative authentication method using key-based authentication
             - saml: Alternative authentication method using SAML-based single sign-on
         """
+        timeout_seconds = self._timeouts.auth_timeout_seconds
         try:
             _LOGGER.debug(
                 f"[CorePlusSessionFactory:password] Authenticating as user: {user} (effective user: {effective_user or user})"
@@ -1328,11 +1206,14 @@ class CorePlusSessionFactory(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:password] Authentication timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:password] Authentication timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.auth_timeout_seconds."
             )
             raise DeephavenConnectionError(
                 f"Authentication timed out after {timeout_seconds} seconds. "
-                f"The server may be overloaded or unreachable."
+                f"The server may be overloaded or unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.auth_timeout_seconds "
+                f"in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -1343,13 +1224,15 @@ class CorePlusSessionFactory(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:password] Authentication failed: {e}"
+                "[CorePlusSessionFactory:password] Authentication failed: %r",
+                e,
+                exc_info=True,
             )
-            raise AuthenticationError(f"Failed to authenticate user {user}: {e}") from e
+            raise AuthenticationError(
+                f"Failed to authenticate user {user}: {describe_exception_chain(e)}"
+            ) from e
 
-    async def ping(
-        self, timeout_seconds: float = QUICK_OPERATION_TIMEOUT_SECONDS
-    ) -> bool:
+    async def ping(self) -> bool:
         """Send a connectivity check ping to verify the connection to Deephaven services.
 
         This method tests the connectivity to both the authentication server and the controller
@@ -1366,9 +1249,8 @@ class CorePlusSessionFactory(
         This method asynchronously delegates to the underlying session manager's ping method,
         running it in a separate thread to avoid blocking the event loop.
 
-        Args:
-            timeout_seconds (float): Maximum time in seconds to wait for the ping.
-                Defaults to QUICK_OPERATION_TIMEOUT_SECONDS.
+        The ping timeout is sourced from
+        ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``.
 
         Returns:
             bool: True if both the authentication server and controller successfully responded
@@ -1402,6 +1284,7 @@ class CorePlusSessionFactory(
             periodically as part of a connection monitoring strategy to detect server
             disconnections early.
         """
+        timeout_seconds = self._timeouts.quick_operation_timeout_seconds
         try:
             _LOGGER.debug(
                 "[CorePlusSessionFactory:ping] Sending ping to authentication server and controller"
@@ -1411,21 +1294,28 @@ class CorePlusSessionFactory(
                 timeout=timeout_seconds,
             )
             _LOGGER.debug(f"[CorePlusSessionFactory:ping] Ping result: {result}")
-            return cast(bool, result)
+            return bool(result)
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:ping] Timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:ping] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.quick_operation_timeout_seconds."
             )
             raise DeephavenConnectionError(
-                f"Ping timed out after {timeout_seconds} seconds."
+                f"Ping timed out after {timeout_seconds} seconds. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.quick_operation_timeout_seconds in the operator config."
             ) from None
         except Exception as e:
-            _LOGGER.error(f"[CorePlusSessionFactory:ping] Ping failed: {e}")
-            raise DeephavenConnectionError(f"Failed to ping server: {e}") from e
+            _LOGGER.error(
+                "[CorePlusSessionFactory:ping] Ping failed: %r",
+                e,
+                exc_info=True,
+            )
+            raise DeephavenConnectionError(
+                f"Failed to ping server: {describe_exception_chain(e)}"
+            ) from e
 
-    async def private_key(
-        self, file: str | io.StringIO, timeout_seconds: float = AUTH_TIMEOUT_SECONDS
-    ) -> None:
+    async def private_key(self, file: str | io.StringIO) -> None:
         r"""Authenticate to the server using a Deephaven format private key file.
 
         This method performs certificate-based authentication with the Deephaven server using
@@ -1441,8 +1331,9 @@ class CorePlusSessionFactory(
                 the Deephaven generate-iris-keys tool, or alternatively an io.StringIO instance
                 containing the key data directly. If an io.StringIO is provided, it may be closed
                 after this method is called as the contents are read fully before returning.
-            timeout_seconds (float): Maximum time in seconds to wait for authentication.
-                Defaults to AUTH_TIMEOUT_SECONDS.
+
+        The authentication timeout is sourced from
+        ``EnterpriseClientTimeouts.auth_timeout_seconds``.
 
         Raises:
             AuthenticationError: If authentication with the private key fails due to an invalid key,
@@ -1476,7 +1367,7 @@ class CorePlusSessionFactory(
                 await factory.private_key("/path/to/priv-mykeyname.base64.txt")
 
                 # Use the authenticated session factory
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
             ```
 
         Example with StringIO:
@@ -1502,6 +1393,7 @@ class CorePlusSessionFactory(
             For details on setting up private keys, see the Deephaven documentation:
             https://docs.deephaven.io/Core+/latest/how-to/connect/connect-from-java/#instructions-for-setting-up-private-keys
         """
+        timeout_seconds = self._timeouts.auth_timeout_seconds
         try:
             _LOGGER.debug(
                 "[CorePlusSessionFactory:private_key] Authenticating with private key"
@@ -1515,11 +1407,14 @@ class CorePlusSessionFactory(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:private_key] Authentication timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:private_key] Authentication timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.auth_timeout_seconds."
             )
             raise DeephavenConnectionError(
                 f"Authentication timed out after {timeout_seconds} seconds. "
-                f"The server may be overloaded or unreachable."
+                f"The server may be overloaded or unreachable. To allow more time, increase "
+                f"enterprise/settings.json: timeouts.client.auth_timeout_seconds "
+                f"in the operator config."
             ) from None
         except FileNotFoundError as e:
             _LOGGER.error(
@@ -1535,13 +1430,16 @@ class CorePlusSessionFactory(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:private_key] Private key authentication failed: {e}"
+                "[CorePlusSessionFactory:private_key] Private key authentication "
+                "failed: %r",
+                e,
+                exc_info=True,
             )
             raise AuthenticationError(
-                f"Failed to authenticate with private key: {e}"
+                f"Failed to authenticate with private key: {describe_exception_chain(e)}"
             ) from e
 
-    async def saml(self, timeout_seconds: float = SAML_AUTH_TIMEOUT_SECONDS) -> None:
+    async def saml(self) -> None:
         """Authenticate asynchronously using SAML-based Single Sign-On (SSO).
 
         This method initiates SAML-based single sign-on authentication with the Deephaven server,
@@ -1559,10 +1457,8 @@ class CorePlusSessionFactory(
         3. After successful authentication with the IdP, the user is redirected back to Deephaven
         4. Authentication tokens are established and stored for subsequent API calls
 
-        Args:
-            timeout_seconds (float): Maximum time in seconds to wait for SAML authentication.
-                Defaults to SAML_AUTH_TIMEOUT_SECONDS. SAML uses a longer timeout due to
-                potential browser interaction during SSO.
+        The SAML authentication timeout is sourced from
+        ``EnterpriseClientTimeouts.saml_auth_timeout_seconds``.
 
         Raises:
             AuthenticationError: If SAML authentication fails due to configuration issues, incorrect
@@ -1602,7 +1498,7 @@ class CorePlusSessionFactory(
                 await factory.saml()
 
                 # Now we can use the authenticated session factory
-                session = await factory.connect_to_new_worker()
+                session = await factory.connect_to_new_worker(heap_size_gb=4)
 
                 # Use the session to work with tables
                 table = await session.empty_table(10)
@@ -1612,6 +1508,7 @@ class CorePlusSessionFactory(
             - password: Alternative authentication using username/password credentials
             - private_key: Alternative authentication using private key cryptographic authentication
         """
+        timeout_seconds = self._timeouts.saml_auth_timeout_seconds
         try:
             _LOGGER.debug(
                 "[CorePlusSessionFactory:saml] Starting SAML authentication flow"
@@ -1625,11 +1522,14 @@ class CorePlusSessionFactory(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:saml] SAML authentication timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:saml] SAML authentication timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.saml_auth_timeout_seconds."
             )
             raise DeephavenConnectionError(
                 f"SAML authentication timed out after {timeout_seconds} seconds. "
-                f"The authentication flow may have been abandoned or the server is unreachable."
+                f"The authentication flow may have been abandoned or the server is unreachable. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.saml_auth_timeout_seconds in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -1645,15 +1545,15 @@ class CorePlusSessionFactory(
             raise AuthenticationError(f"SAML configuration error: {e}") from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:saml] SAML authentication failed: {e}"
+                "[CorePlusSessionFactory:saml] SAML authentication failed: %r",
+                e,
+                exc_info=True,
             )
-            raise AuthenticationError(f"Failed to authenticate via SAML: {e}") from e
+            raise AuthenticationError(
+                f"Failed to authenticate via SAML: {describe_exception_chain(e)}"
+            ) from e
 
-    async def upload_key(
-        self,
-        public_key_text: str,
-        timeout_seconds: float = QUICK_OPERATION_TIMEOUT_SECONDS,
-    ) -> None:
+    async def upload_key(self, public_key_text: str) -> None:
         """Upload a public key to the Deephaven server for certificate-based authentication.
 
         This method registers a public key with the Deephaven server, associating it with your
@@ -1677,16 +1577,17 @@ class CorePlusSessionFactory(
             public_key_text (str): The full text representation of the public key to upload. This should be
                 the complete PEM-encoded public key, including the header and footer lines
                 (e.g., "-----BEGIN PUBLIC KEY-----" and "-----END PUBLIC KEY-----").
-            timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to QUICK_OPERATION_TIMEOUT_SECONDS.
+
+        The operation timeout is sourced from
+        ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``.
 
         Raises:
             ResourceError: If uploading the key fails due to issues such as invalid key format,
-                malformed PEM data, server-side key storage problems, or permission issues.
+                malformed PEM data, server-side key storage problems, permission issues, or
+                authentication failures. Authentication issues surface as ``ResourceError`` with
+                the original exception available via ``__cause__``.
             DeephavenConnectionError: If there is a problem connecting to the authentication server
                 such as network issues, server unavailability, or timeout.
-            AuthenticationError: If the current session is not authenticated or lacks the necessary
-                permissions to upload keys.
 
         Note:
             - You must be authenticated before calling this method
@@ -1714,6 +1615,7 @@ class CorePlusSessionFactory(
                 print("Public key registered successfully")
             ```
         """
+        timeout_seconds = self._timeouts.quick_operation_timeout_seconds
         try:
             _LOGGER.debug("[CorePlusSessionFactory:upload_key] Uploading public key")
             await asyncio.wait_for(
@@ -1725,10 +1627,13 @@ class CorePlusSessionFactory(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:upload_key] Timed out after {timeout_seconds}s"
+                f"[CorePlusSessionFactory:upload_key] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.quick_operation_timeout_seconds."
             )
             raise DeephavenConnectionError(
-                f"Key upload timed out after {timeout_seconds} seconds."
+                f"Key upload timed out after {timeout_seconds} seconds. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.quick_operation_timeout_seconds in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -1739,6 +1644,10 @@ class CorePlusSessionFactory(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSessionFactory:upload_key] Failed to upload key: {e}"
+                "[CorePlusSessionFactory:upload_key] Failed to upload key: %r",
+                e,
+                exc_info=True,
             )
-            raise ResourceError(f"Failed to upload authentication key: {e}") from e
+            raise ResourceError(
+                f"Failed to upload authentication key: {describe_exception_chain(e)}"
+            ) from e

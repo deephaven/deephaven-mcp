@@ -1,288 +1,155 @@
-# Using `uv` in deephaven-mcp
+# Using `uv`
 
-[`uv`](https://github.com/astral-sh/uv) is a fast Python package manager and workflow tool. This project uses `uv` for installing dependencies, running scripts, and managing virtual environments in a reproducible way.
-
-> **Note:** Using [`uv`](https://github.com/astral-sh/uv) is recommended for consistency, but it is not strictly required. You could use `pip` and standard Python tools instead; however, only `uv`-based workflows are documented here.
-
----
+[`uv`](https://github.com/astral-sh/uv) is a fast Python package manager and workflow tool. This document is a generic crash course for developers new to `uv`. Project-specific commands for working in this repository live in [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md); end-user installation instructions live in the project [`README.md`](../README.md).
 
 ## Table of Contents
 
-- [Using `uv` in deephaven-mcp](#using-uv-in-deephaven-mcp)
-  - [Table of Contents](#table-of-contents)
-  - [Why use `uv`?](#why-use-uv)
-  - [Installing `uv`](#installing-uv)
-    - [Creating a Virtual Environment with `uv`](#creating-a-virtual-environment-with-uv)
-  - [Typical Workflows with `uv`](#typical-workflows-with-uv)
-    - [1. Installing Dependencies](#1-installing-dependencies)
-    - [2. Synchronizing Dependencies](#2-synchronizing-dependencies)
-    - [3. Running Servers and Scripts](#3-running-servers-and-scripts)
-  - [How uv Lock Files Work](#how-uv-lock-files-work)
-  - [Upgrading Dependencies](#upgrading-dependencies)
-  - [Environment Variables with uv](#environment-variables-with-uv)
-  - [.env Example](#env-example)
-  - [Code Quality \& Testing](#code-quality--testing)
-  - [CI/CD Usage](#cicd-usage)
-  - [Common Pitfalls \& FAQ](#common-pitfalls--faq)
-  - [Troubleshooting](#troubleshooting)
-  - [Tips \& Troubleshooting](#tips--troubleshooting)
-  - [Further Reading](#further-reading)
-
----
+- [Why use `uv`?](#why-use-uv)
+- [Installing `uv`](#installing-uv)
+- [Virtual environments](#virtual-environments)
+- [Installing dependencies](#installing-dependencies)
+- [Synchronizing dependencies](#synchronizing-dependencies)
+- [Running commands](#running-commands)
+- [Code quality and testing](#code-quality-and-testing)
+- [Lock files](#lock-files)
+- [Upgrading dependencies](#upgrading-dependencies)
+- [`uv tool install`](#uv-tool-install)
+- [`.env` files](#env-files)
+- [Common pitfalls](#common-pitfalls)
+- [Further reading](#further-reading)
 
 ## Why use `uv`?
 
-- **Speed:** Much faster than pip for installing and resolving dependencies.
-- **Reproducibility:** Ensures consistent environments across machines.
-- **Convenience:** Can run Python scripts and manage virtual environments easily.
-
----
+- **Speed.** Resolution and installs are dramatically faster than `pip`.
+- **Reproducibility.** A `uv.lock` file pins exact versions across machines.
+- **Convenience.** A single tool covers venv creation, dependency installs, lock-file management, and `python` / script execution.
 
 ## Installing `uv`
-
-To install `uv`, run:
 
 ```sh
 pip install uv
 ```
 
-Or see the [uv installation guide](https://github.com/astral-sh/uv#installation) for other options and the latest instructions.
+Other install methods (standalone installer, Homebrew, asdf, etc.) are listed in the [`uv` installation guide](https://github.com/astral-sh/uv#installation).
 
-### Creating a Virtual Environment with `uv`
+## Virtual environments
 
-Once [`uv`](https://github.com/astral-sh/uv) is installed, it's highly recommended to create and use a virtual environment for your project. This isolates dependencies and ensures consistency.
-
-1. **Create a virtual environment (e.g., named `.venv`) with a specific Python version:**
-
-    Use the `-p` option to specify your desired Python interpreter (e.g., Python 3.11, 3.12, 3.13, or a full path to an executable):
-
-    ```sh
-    uv venv .venv -p 3.11
-    ```
-
-    Replace `3.11` with your target Python version or path.
-
-2. **Activate the virtual environment (optional):**
-
-    [`uv`](https://github.com/astral-sh/uv) commands (like `uv pip install ...` or `uv run ...`) automatically detect and use the `.venv` directory without requiring activation. However, if you prefer to use commands directly without the `uv` prefix, you can activate the environment:
-
-    ```sh
-    source .venv/bin/activate  # On Unix/macOS
-    # or
-    .venv\Scripts\activate  # On Windows
-    ```
-
-    After activation, you can use `python`, `pip`, `pytest`, etc. directly.
-
----
-
-## Typical Workflows with `uv`
-
-### 1. Installing Dependencies
+Create an isolated environment with the Python version you want:
 
 ```sh
-uv pip install ".[dev]"
+uv venv .venv -p 3.12
 ```
 
-### 2. Synchronizing Dependencies
+`uv` commands automatically detect and use a `.venv` directory in the current project; activation is optional. To activate it manually:
+
+```sh
+source .venv/bin/activate          # Unix / macOS
+.venv\Scripts\activate             # Windows
+```
+
+After activation you can use `python`, `pip`, `pytest`, etc. directly without the `uv run` prefix.
+
+## Installing dependencies
+
+From a project that has a `pyproject.toml`:
+
+```sh
+uv pip install .                   # runtime deps
+uv pip install ".[dev]"            # an optional-dependency group named "dev"
+```
+
+`uv pip install` is a drop-in replacement for `pip install` and accepts the same arguments (`-r requirements.txt`, `--upgrade`, `-e`, etc.).
+
+## Synchronizing dependencies
 
 ```sh
 uv sync
 ```
 
-This will install all dependencies to exactly match your lock file(s) for reproducible environments.
+Installs every package listed in `uv.lock` at the exact pinned version, removing anything not in the lock file. Use this after pulling new commits or switching branches to bring your environment into sync.
 
-### 3. Running Servers and Scripts
+## Running commands
 
-**Systems Server (SSE):**
-
-```sh
-DH_MCP_CONFIG_FILE=deephaven_mcp.json uv run dh-mcp-systems --transport sse
-```
-
-**Docs Server (SSE):**
+`uv run` runs a command inside the project's environment without requiring activation:
 
 ```sh
-INKEEP_API_KEY=your-inkeep-api-key uv run dh-mcp-docs --transport sse
-```
-
-**Run a test server:**
-
-```sh
-uv run scripts/run_deephaven_test_server.py --table-group simple
-```
-
-**Run a test client:**
-
-```sh
-uv run scripts/mcp_community_test_client.py --transport sse --url http://localhost:8000/sse
-uv run scripts/mcp_docs_test_client.py --prompt "What is Deephaven?"
-```
-
-**Run a stress test:**
-
-```sh
-uv run scripts/mcp_docs_stress_sse.py --sse-url "http://localhost:8000/sse"
-```
-
----
-
-## How uv Lock Files Work
-
-- `uv` uses `pyproject.toml` for dependency specification and generates a `uv.lock` file for reproducible installs.
-- Use `uv sync` to ensure your environment matches the lock file exactly.
-- If you update dependencies, always regenerate the lock file (see below).
-
----
-
-## Upgrading Dependencies
-
-1. Update your `pyproject.toml` as needed.
-2. Run:
-
-    ```sh
-    uv pip install ".[dev]" --upgrade
-    uv pip freeze > requirements.txt  # Optional: update requirements.txt for reference
-    uv lock  # Regenerate lock file if needed (see uv docs)
-    ```
-
-3. Commit both `pyproject.toml` and `uv.lock` to version control.
-
----
-
-## Environment Variables with uv
-
-- `DH_MCP_CONFIG_FILE`: Path to worker config JSON file (required for Systems Server)
-- `INKEEP_API_KEY`: Required for Docs Server
-- `OPENAI_API_KEY`: Optional fallback for Docs Server
-- `PYTHONLOGLEVEL`: Set log verbosity (e.g., DEBUG, INFO)
-
-> You can also use a `.env` file with [python-dotenv](https://github.com/theskumar/python-dotenv) to manage environment variables.
-
----
-
-## .env Example
-
-Create a `.env` file in your project root for local development:
-
-```env
-# .env example
-DH_MCP_CONFIG_FILE=/absolute/path/to/deephaven_mcp.json
-INKEEP_API_KEY=your-inkeep-api-key
-OPENAI_API_KEY=your-optional-openai-key
-PYTHONLOGLEVEL=DEBUG
-```
-
----
-
-## Code Quality & Testing
-
-**Run all tests:**
-
-```sh
+uv run python script.py
 uv run pytest
+uv run <any-installed-cli>
 ```
 
-**Sort imports:**
+`uv` resolves and creates the environment on first run.
+
+## Code quality and testing
+
+`uv run` is the standard way to invoke any developer tool installed in your environment, so you don't need to activate the venv. Common patterns:
 
 ```sh
-uv run isort . --skip _version.py --skip .venv
+uv run pytest                              # run tests
+uv run pytest --cov                        # run tests with coverage
+uv run isort .                             # sort imports
+uv run black .                             # format code
+uv run ruff check src                      # lint
+uv run ruff check src --fix                # lint and apply autofixes
+uv run codespell                           # spelling (typos + American English)
+uv run mypy src/                           # type-check
 ```
 
-**Check import sorting only:**
+Any tool listed in your project's optional-dependency groups (e.g. a `[dev]` or `[lint]` extra) becomes invocable via `uv run <tool>` once the group is installed.
+
+## Lock files
+
+- `uv.lock` is generated from `pyproject.toml` and pins every transitive dependency.
+- Commit it alongside `pyproject.toml`.
+- After changing dependencies, regenerate it:
+
+  ```sh
+  uv lock
+  ```
+
+## Upgrading dependencies
 
 ```sh
-uv run isort . --check-only --diff --skip _version.py --skip .venv
+uv pip install ".[dev]" --upgrade
+uv lock                            # regenerate the lock file
 ```
 
-**Format code:**
+Commit both `pyproject.toml` and the updated `uv.lock`.
+
+## `uv tool install`
+
+`uv tool install <package>` installs a Python package's CLI entry points into an isolated environment and places them on your `PATH`. There is no venv to manage.
 
 ```sh
-uv run black . --exclude '(_version.py|.venv)'
+uv tool install --python-preference managed <package>
+uv tool list
+uv tool upgrade <package>
+uv tool dir                        # show where tools are installed
 ```
 
-**Lint code:**
+`--python-preference managed` tells `uv` to download and use its own Python interpreter, isolated from any system Python. Tool scripts land in `~/.local/bin/` (macOS / Linux) or `%LOCALAPPDATA%\uv\bin\` (Windows); ensure that directory is on your `PATH` (`uv tool update-shell` will add it for common shells).
+
+## `.env` files
+
+`uv run` does **not** auto-load `.env` files. To pass environment variables to a command, either export them in your shell first or use a tool such as [`python-dotenv`](https://github.com/theskumar/python-dotenv) inside your code:
 
 ```sh
-uv run ruff check src --fix --exclude _version.py --exclude .venv
+export FOO=bar
+uv run python script.py
 ```
 
-**Type checking:**
+## Common pitfalls
 
-```sh
-uv run mypy src/
-```
+| Symptom | Cause / fix |
+| --- | --- |
+| `command not found: uv` | `uv` is not on `PATH` after install — open a new shell or add the install directory to `PATH`. |
+| Environment doesn't match the lock file | Run `uv sync`. |
+| `uv pip install` succeeds but the new package is not visible | You ran the install in a different venv than the one your shell / IDE is using. Verify with `uv pip list`. |
+| Lock file is out of date after editing `pyproject.toml` | Run `uv lock`. |
+| Wrong Python version in the venv | Recreate with `uv venv .venv -p <version>`. |
 
-**Pre-commit Code quality checks:**
+## Further reading
 
-```sh
-bin/precommit.sh
-```
-
----
-
-## CI/CD Usage
-
-Example GitHub Actions step for using `uv`:
-
-```yaml
-- name: Set up Python
-  uses: actions/setup-python@v4
-  with:
-    python-version: '3.10'
-- name: Install uv
-  run: pip install uv
-- name: Install dependencies
-  run: uv pip install ".[dev]"
-- name: Run tests
-  run: uv run pytest
-```
-
----
-
-## Common Pitfalls & FAQ
-
-**Q: Do I have to use `uv`?**
-A: No, but only `uv` workflows are documented and tested. Using pip directly may break reproducibility.
-
-**Q: Why is my environment not matching the lock file?**
-A: Always use `uv sync` after changing dependencies or cloning the repo.
-
-**Q: How do I set environment variables for `uv run`?**
-A: Prefix your command or use a `.env` file.
-
-**Q: Can I use `uv` in CI/CD?**
-A: Yes! See the example above.
-
----
-
-## Troubleshooting
-
-| Problem                              | Solution                                                                 |
-|--------------------------------------|--------------------------------------------------------------------------|
-| Command not found: uv                | Run `pip install uv`                                                     |
-| Missing env var error                | Check your shell or `.env` file                                          |
-| Port already in use                  | Change with `--port` or set `PORT` env var                               |
-| API key errors                       | Verify `INKEEP_API_KEY` or `OPENAI_API_KEY` is set and valid             |
-| Dependency mismatch                  | Run `uv sync`                                                            |
-| Lock file out of date                | Run `uv lock` or `uv pip install ".[dev]" --upgrade`                     |
-| Permission denied for .env file      | Ensure correct file permissions                                          |
-
----
-
-## Tips & Troubleshooting
-
-- `uv` can be used as a drop-in replacement for most pip and python commands.
-- If you encounter issues with environment variables, check your `.env` file or shell configuration.
-- For port conflicts, change the server port using the `--port` argument or `PORT` environment variable.
-- For missing API keys, ensure they are set in your environment or `.env` file.
-- For more detailed logs, set `PYTHONLOGLEVEL=DEBUG`.
-
----
-
-## Further Reading
-
-- See the [Developer & Contributor Guide](DEVELOPER_GUIDE.md) for advanced workflows, integration, and troubleshooting.
-- For more on MCP Inspector and integration methods, see the Developer Guide.
-- [uv documentation](https://github.com/astral-sh/uv)
-- [python-dotenv](https://github.com/theskumar/python-dotenv)
+- [`uv` documentation](https://docs.astral.sh/uv/)
+- [`uv` GitHub repository](https://github.com/astral-sh/uv)
+- [`python-dotenv`](https://github.com/theskumar/python-dotenv)

@@ -17,7 +17,7 @@ Example (standard):
     ```python
     import asyncio
     import pyarrow as pa
-    from deephaven_mcp.sessions import CommunitySessionManager
+    from deephaven_mcp.resource_manager import CommunitySessionManager
 
     async def main():
         manager = CommunitySessionManager("localhost", 10000)
@@ -42,7 +42,7 @@ Example (enterprise):
     async def main():
         factory = await CorePlusSessionFactory.from_config({"url": "https://myserver.example.com/iris/connection.json"})
         await factory.password("username", "password")
-        session = await factory.connect_to_new_worker()
+        session = await factory.connect_to_new_worker(heap_size_gb=4)
         info = await session.pqinfo()
         print(f"Connected to query {info.id} with status {info.status}")
         hist = await session.historical_table("market_data", "daily_prices")
@@ -72,22 +72,13 @@ race conditions.
 
 import asyncio
 import logging
-import os
-import sys
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import Any, override
 
 import pyarrow as pa
+from deephaven_enterprise.client.session_manager import DndSession
 from pydeephaven import Session
 from pydeephaven.query import Query
 from pydeephaven.table import InputTable, Table
-
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.session_manager  # pragma: no cover
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
 
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
@@ -96,24 +87,27 @@ from deephaven_mcp._exceptions import (
     SessionCreationError,
     SessionError,
 )
-from deephaven_mcp.config import (
-    CommunitySessionConfigurationError,
-    redact_community_session_config,
-    validate_single_community_session_config,
+from deephaven_mcp._pydantic import dump_redacted
+from deephaven_mcp.auth.credentials import (
+    AnonymousCredentials,
+    Credentials,
+    CustomTokenCredentials,
+    PasswordCredentials,
+    PrivateKeyCredentials,
+    PSKCredentials,
 )
-from deephaven_mcp.io import load_bytes
+from deephaven_mcp.auth.tls import TlsConfig
+from deephaven_mcp.config import ConfigurationError
+from deephaven_mcp.sessions import CommunitySessionConfig
 
-from ._base import ClientObjectWrapper
-from ._constants import SESSION_CONNECT_TIMEOUT_SECONDS
+from ._base import ClientObjectWrapper, describe_exception_chain
 from ._protobuf import CorePlusQueryInfo
+from ._timeouts import CommunityClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
 
-T = TypeVar("T", bound=Session)
-
-
-class BaseSession(ClientObjectWrapper[T], Generic[T]):
+class BaseSession[T: Session](ClientObjectWrapper[T]):
     """
     Base class for asynchronous Deephaven session wrappers.
 
@@ -145,7 +139,7 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.sessions import CommunitySessionManager
+        from deephaven_mcp.resource_manager import CommunitySessionManager
 
         async def main():
             manager = CommunitySessionManager("localhost", 10000)
@@ -167,19 +161,18 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
         ```
     """
 
-    def __init__(self, session: T, is_enterprise: bool, programming_language: str):
+    def __init__(self, session: T, programming_language: str):
         """
         Initialize the async session wrapper with a pydeephaven Session instance.
 
         Args:
             session: An initialized pydeephaven Session object to wrap.
-            is_enterprise: Set True for enterprise (Core+) sessions, False for standard sessions.
             programming_language: The programming language associated with this session (e.g., "python", "groovy").
 
         Note:
             Do not instantiate this class directly; use a SessionManager to obtain session instances.
         """
-        super().__init__(session, is_enterprise=is_enterprise)
+        super().__init__(session)
         self._programming_language = programming_language
 
     # ===== Properties =====
@@ -257,9 +250,13 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CoreSession:empty_table] Failed to create empty table: {e}"
+                "[CoreSession:empty_table] Failed to create empty table: %r",
+                e,
+                exc_info=True,
             )
-            raise QueryError(f"Failed to create empty table: {e}") from e
+            raise QueryError(
+                f"Failed to create empty table: {describe_exception_chain(e)}"
+            ) from e
 
     async def time_table(
         self,
@@ -315,8 +312,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error creating time table: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:time_table] Failed to create time table: {e}")
-            raise QueryError(f"Failed to create time table: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:time_table] Failed to create time table: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to create time table: {describe_exception_chain(e)}"
+            ) from e
 
     async def import_table(self, data: pa.Table) -> Table:
         """
@@ -379,8 +382,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error importing table: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:import_table] Failed to import table: {e}")
-            raise QueryError(f"Failed to import table: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:import_table] Failed to import table: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to import table: {describe_exception_chain(e)}"
+            ) from e
 
     async def merge_tables(
         self, tables: list[Table], order_by: str | None = None
@@ -412,8 +421,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error merging tables: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:merge_tables] Failed to merge tables: {e}")
-            raise QueryError(f"Failed to merge tables: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:merge_tables] Failed to merge tables: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to merge tables: {describe_exception_chain(e)}"
+            ) from e
 
     async def query(self, table: Table) -> Query:
         """
@@ -524,8 +539,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error creating query: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:query] Failed to create query: {e}")
-            raise QueryError(f"Failed to create query: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:query] Failed to create query: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to create query: {describe_exception_chain(e)}"
+            ) from e
 
     async def input_table(
         self,
@@ -593,9 +614,13 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CoreSession:input_table] Failed to create input table: {e}"
+                "[CoreSession:input_table] Failed to create input table: %r",
+                e,
+                exc_info=True,
             )
-            raise QueryError(f"Failed to create input table: {e}") from e
+            raise QueryError(
+                f"Failed to create input table: {describe_exception_chain(e)}"
+            ) from e
 
     # ===== Table Management =====
 
@@ -633,8 +658,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
             _LOGGER.error(f"[CoreSession:open_table] Table not found: {e}")
             raise ResourceError(f"Table not found: {name}") from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:open_table] Failed to open table: {e}")
-            raise QueryError(f"Failed to open table: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:open_table] Failed to open table: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to open table: {describe_exception_chain(e)}"
+            ) from e
 
     async def bind_table(self, name: str, table: Table) -> None:
         """
@@ -706,8 +737,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error binding table: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:bind_table] Failed to bind table: {e}")
-            raise QueryError(f"Failed to bind table: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:bind_table] Failed to bind table: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to bind table: {describe_exception_chain(e)}"
+            ) from e
 
     # ===== Session Management =====
 
@@ -776,8 +813,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error closing session: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:close] Failed to close session: {e}")
-            raise SessionError(f"Failed to close session: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:close] Failed to close session: %r",
+                e,
+                exc_info=True,
+            )
+            raise SessionError(
+                f"Failed to close session: {describe_exception_chain(e)}"
+            ) from e
 
     async def run_script(self, script: str, systemic: bool | None = None) -> None:
         """
@@ -895,8 +938,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error running script: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:run_script] Failed to run script: {e}")
-            raise QueryError(f"Failed to run script: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:run_script] Failed to run script: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to run script: {describe_exception_chain(e)}"
+            ) from e
 
     # ===== Table and Session Status Methods =====
 
@@ -972,8 +1021,14 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error listing tables: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:tables] Failed to list tables: {e}")
-            raise QueryError(f"Failed to list tables: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:tables] Failed to list tables: %r",
+                e,
+                exc_info=True,
+            )
+            raise QueryError(
+                f"Failed to list tables: {describe_exception_chain(e)}"
+            ) from e
 
     async def is_alive(self) -> bool:
         """
@@ -1000,8 +1055,65 @@ class BaseSession(ClientObjectWrapper[T], Generic[T]):
                 f"Connection error checking session status: {e}"
             ) from e
         except Exception as e:
-            _LOGGER.error(f"[CoreSession:is_alive] Failed to check session status: {e}")
-            raise SessionError(f"Failed to check session status: {e}") from e
+            _LOGGER.error(
+                "[CoreSession:is_alive] Failed to check session status: %r",
+                e,
+                exc_info=True,
+            )
+            raise SessionError(
+                f"Failed to check session status: {describe_exception_chain(e)}"
+            ) from e
+
+
+def _credentials_to_pydeephaven_auth(
+    credentials: Credentials,
+) -> tuple[str, str]:
+    """Translate a :class:`Credentials` into pydeephaven auth args.
+
+    Returns the ``(auth_type, auth_token)`` pair that
+    :class:`pydeephaven.Session` accepts. Rejects credential kinds the
+    community backend does not support (private key) with a
+    :class:`ConfigurationError`.
+
+    Args:
+        credentials (Credentials): The resolved outbound credentials.
+
+    Returns:
+        tuple[str, str]: ``(auth_type, auth_token)`` for
+            :class:`pydeephaven.Session`.
+
+    Raises:
+        ConfigurationError: When ``credentials`` is an unsupported kind
+            for community workers.
+    """
+    if isinstance(credentials, AnonymousCredentials):
+        return "Anonymous", ""
+    if isinstance(credentials, PSKCredentials):
+        return (
+            "io.deephaven.authentication.psk.PskAuthenticationHandler",
+            credentials.token.get_secret_value(),
+        )
+    if isinstance(credentials, PasswordCredentials):
+        return (
+            "Basic",
+            f"{credentials.username}:{credentials.password.get_secret_value()}",
+        )
+    if isinstance(credentials, CustomTokenCredentials):
+        return credentials.auth_type, credentials.auth_token.get_secret_value()
+    if isinstance(credentials, PrivateKeyCredentials):
+        msg = (
+            "Private-key credentials are not supported for Deephaven "
+            "Community workers; use AnonymousCredentials, PSKCredentials, "
+            "PasswordCredentials, or CustomTokenCredentials."
+        )
+        _LOGGER.error(f"[CoreSession:_credentials_to_pydeephaven_auth] {msg}")
+        raise ConfigurationError(msg)
+    msg = (
+        f"Unsupported credential type for community workers: "
+        f"{type(credentials).__name__}."
+    )
+    _LOGGER.error(f"[CoreSession:_credentials_to_pydeephaven_auth] {msg}")
+    raise ConfigurationError(msg)
 
 
 class CoreSession(BaseSession[Session]):
@@ -1019,7 +1131,7 @@ class CoreSession(BaseSession[Session]):
     Example:
         ```python
         import asyncio
-        from deephaven_mcp.sessions import CommunitySessionManager
+        from deephaven_mcp.resource_manager import CommunitySessionManager
 
         async def main():
             manager = CommunitySessionManager("localhost", 10000)
@@ -1047,191 +1159,195 @@ class CoreSession(BaseSession[Session]):
             session: A pydeephaven Session instance that will be wrapped by this class.
             programming_language: The programming language associated with this session (e.g., "python", "groovy").
         """
-        super().__init__(
-            session, is_enterprise=False, programming_language=programming_language
-        )
-
-    @staticmethod
-    def _resolve_auth_token(
-        worker_cfg: dict[str, Any], log_prefix: str = "[CoreSession:from_config]"
-    ) -> str:
-        """Resolve auth token from config dictionary or environment variable.
-
-        This helper extracts the authentication token for community session connections.
-        It supports two configuration approaches:
-
-        1. Direct token: Use 'auth_token' key with the token value
-        2. Environment variable: Use 'auth_token_env_var' key with the name of an
-           environment variable containing the token (more secure for production)
-
-        If 'auth_token_env_var' is specified, it takes precedence over 'auth_token'.
-        If the environment variable is not set, an empty string is returned with a warning.
-
-        Args:
-            worker_cfg: Configuration dictionary containing 'auth_token' and/or
-                'auth_token_env_var' keys.
-            log_prefix: Prefix for log messages (default: "[CoreSession:from_config]").
-
-        Returns:
-            The resolved authentication token string. Returns empty string if no token
-            is configured or if the specified environment variable is not set.
-        """
-        auth_token = worker_cfg.get("auth_token")
-        auth_token_env_var = worker_cfg.get("auth_token_env_var")
-        if auth_token_env_var:
-            _LOGGER.info(
-                f"{log_prefix} Attempting to read auth token from environment variable: {auth_token_env_var}"
-            )
-            token_from_env = os.getenv(auth_token_env_var)
-            if token_from_env is not None:
-                _LOGGER.info(
-                    f"{log_prefix} Successfully read auth token from environment variable {auth_token_env_var}."
-                )
-                return token_from_env
-            _LOGGER.warning(
-                f"{log_prefix} Environment variable {auth_token_env_var} specified for auth_token but not found. Using empty token."
-            )
-            return ""
-        return auth_token if auth_token is not None else ""
+        super().__init__(session, programming_language=programming_language)
 
     @classmethod
-    async def from_config(
+    async def from_credentials(
         cls,
-        worker_cfg: dict[str, Any],
-        timeout_seconds: float = SESSION_CONNECT_TIMEOUT_SECONDS,
+        credentials: Credentials,
+        timeouts: CommunityClientTimeouts,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+        tls: TlsConfig | None = None,
+        programming_language: str = "Python",
+        never_timeout: bool = False,
     ) -> "CoreSession":
-        """
-        Asynchronously create a CoreSession from a community (core) session configuration dictionary.
+        """Create a :class:`CoreSession` from typed credentials and TLS config.
 
-        This method first validates the configuration using validate_single_community_session_config.
-        It then prepares all session parameters (including TLS and auth logic),
-        creates the underlying pydeephaven.Session, and returns a CoreSession instance.
-        Sensitive fields in the config are redacted before logging. If session creation fails,
-        a SessionCreationError is raised with details.
+        Branches on the concrete credential subclass to assemble the
+        ``auth_type`` and ``auth_token`` strings that
+        :class:`pydeephaven.Session` accepts:
+
+        - :class:`AnonymousCredentials` → ``auth_type="Anonymous"``.
+        - :class:`PSKCredentials` →
+          ``auth_type="io.deephaven.authentication.psk.PskAuthenticationHandler"``
+          with the token as ``auth_token``.
+        - :class:`PasswordCredentials` → ``auth_type="Basic"`` with
+          ``auth_token=f"{username}:{password}"`` (community Basic auth).
+        - :class:`CustomTokenCredentials` → ``auth_type`` and
+          ``auth_token`` passed through verbatim.
+        - :class:`PrivateKeyCredentials` is rejected: community workers
+          do not support private-key authentication.
+
+        TLS is governed entirely by ``tls``. When ``tls is None`` the
+        session uses plaintext gRPC. When ``tls`` is non-``None``, TLS
+        is enabled and:
+
+        - ``tls.root_certs`` (UTF-8 PEM text) is encoded and forwarded
+          as ``tls_root_certs`` (or ``None`` for system-default trust).
+        - ``tls.client_certificate`` (when set) is encoded and
+          forwarded as ``client_cert_chain`` / ``client_private_key``
+          for mTLS.
 
         Args:
-            worker_cfg (dict): The worker's community session configuration.
-            timeout_seconds (float): Maximum time in seconds to wait for connection.
-                Defaults to SESSION_CONNECT_TIMEOUT_SECONDS.
+            credentials (Credentials): Resolved outbound bearer
+                credentials.
+            host (str | None): Server host name.
+            port (int | None): Server port.
+            tls (TlsConfig | None): All transport-layer TLS material.
+                ``None`` (default) means plaintext gRPC; any
+                :class:`~deephaven_mcp.auth.tls.TlsConfig` instance
+                (even an empty one) enables TLS.
+            programming_language (str): Server-side scripting language
+                (canonical capitalized form: ``"Python"`` or
+                ``"Groovy"``; lowercased at the ``pydeephaven`` call
+                boundary). Also reported by :attr:`programming_language`.
+            never_timeout (bool): Pass-through flag for
+                :class:`pydeephaven.Session`.
 
         Returns:
-            CoreSession: A new CoreSession instance wrapping a pydeephaven Session.
+            CoreSession: A new wrapper around the connected
+                :class:`pydeephaven.Session`.
 
         Raises:
-            CommunitySessionConfigurationError: If the configuration is invalid.
-            DeephavenConnectionError: If connection times out.
-            SessionCreationError: If session creation fails for any reason.
+            ConfigurationError: When ``credentials`` is a kind the
+                community backend cannot consume (e.g.
+                :class:`PrivateKeyCredentials`).
+            DeephavenConnectionError: When the connection times out.
+            SessionCreationError: For any other failure during session
+                construction.
         """
-        try:
-            validate_single_community_session_config("from_config", worker_cfg)
-        except CommunitySessionConfigurationError as e:
-            _LOGGER.error(
-                f"[CoreSession:from_config] Invalid community session config: {e}"
-            )
-            raise
+        timeout_seconds = timeouts.session_connect_timeout_seconds
+        auth_type, auth_token = _credentials_to_pydeephaven_auth(credentials)
 
-        def redact(cfg: dict[str, Any]) -> dict[str, Any]:
-            return (
-                redact_community_session_config(cfg)
-                if "auth_token" in cfg or "client_private_key" in cfg
-                else cfg
-            )
+        use_tls = tls is not None
+        tls_root_certs_bytes: bytes | None = None
+        client_cert_chain_bytes: bytes | None = None
+        client_private_key_bytes: bytes | None = None
+        if tls is not None:
+            if tls.root_certs is not None:
+                tls_root_certs_bytes = tls.root_certs.encode("utf-8")
+            if tls.client_certificate is not None:
+                client_cert_chain_bytes = tls.client_certificate.cert_chain.encode(
+                    "utf-8"
+                )
+                client_private_key_bytes = (
+                    tls.client_certificate.private_key.get_secret_value().encode(
+                        "utf-8"
+                    )
+                )
+                _LOGGER.info(
+                    "[CoreSession:from_credentials] mTLS client certificate attached."
+                )
 
-        # Prepare session parameters
-        log_cfg = redact(worker_cfg)
-        _LOGGER.info(
-            f"[CoreSession:from_config] Community session configuration: {log_cfg}"
-        )
-        host = worker_cfg.get("host", None)
-        port = worker_cfg.get("port", None)
-        auth_type = worker_cfg.get("auth_type", "Anonymous")
-        auth_token = cls._resolve_auth_token(worker_cfg)
-        never_timeout = worker_cfg.get("never_timeout", False)
-        session_type = worker_cfg.get("session_type", "python")
-        programming_language = session_type
-        use_tls = worker_cfg.get("use_tls", False)
-        tls_root_certs = worker_cfg.get("tls_root_certs", None)
-        client_cert_chain = worker_cfg.get("client_cert_chain", None)
-        client_private_key = worker_cfg.get("client_private_key", None)
-        if tls_root_certs:
-            _LOGGER.info(
-                f"[CoreSession:from_config] Loading TLS root certs from: {worker_cfg.get('tls_root_certs')}"
-            )
-            tls_root_certs = await load_bytes(tls_root_certs)
-            _LOGGER.info(
-                "[CoreSession:from_config] Loaded TLS root certs successfully."
-            )
-        else:
-            _LOGGER.debug(
-                "[CoreSession:from_config] No TLS root certs provided for community session."
-            )
-        if client_cert_chain:
-            _LOGGER.info(
-                f"[CoreSession:from_config] Loading client cert chain from: {worker_cfg.get('client_cert_chain')}"
-            )
-            client_cert_chain = await load_bytes(client_cert_chain)
-            _LOGGER.info(
-                "[CoreSession:from_config] Loaded client cert chain successfully."
-            )
-        else:
-            _LOGGER.debug(
-                "[CoreSession:from_config] No client cert chain provided for community session."
-            )
-        if client_private_key:
-            _LOGGER.info(
-                f"[CoreSession:from_config] Loading client private key from: {worker_cfg.get('client_private_key')}"
-            )
-            client_private_key = await load_bytes(client_private_key)
-            _LOGGER.info(
-                "[CoreSession:from_config] Loaded client private key successfully."
-            )
-        else:
-            _LOGGER.debug(
-                "[CoreSession:from_config] No client private key provided for community session."
-            )
-        session_config = {
+        session_config: dict[str, Any] = {
             "host": host,
             "port": port,
             "auth_type": auth_type,
             "auth_token": auth_token,
             "never_timeout": never_timeout,
-            "session_type": session_type,
+            "session_type": programming_language.lower(),
             "use_tls": use_tls,
-            "tls_root_certs": tls_root_certs,
-            "client_cert_chain": client_cert_chain,
-            "client_private_key": client_private_key,
+            "tls_root_certs": tls_root_certs_bytes,
+            "client_cert_chain": client_cert_chain_bytes,
+            "client_private_key": client_private_key_bytes,
         }
-        log_cfg = redact(session_config)
+        creds_redacted = dump_redacted(credentials)
         _LOGGER.info(
-            f"[CoreSession:from_config] Prepared Deephaven Community (Core) Session config: {log_cfg}"
+            f"[CoreSession:from_credentials] Creating Community (Core) Session: "
+            f"host={host}, port={port}, tls={tls!r}, "
+            f"programming_language={programming_language}, credentials={creds_redacted}"
         )
         try:
-            _LOGGER.info(
-                f"[CoreSession:from_config] Creating new Deephaven Community (Core) Session with config: {log_cfg}"
-            )
             session = await asyncio.wait_for(
                 asyncio.to_thread(Session, **session_config),
                 timeout=timeout_seconds,
             )
             _LOGGER.info(
-                f"[CoreSession:from_config] Successfully created Deephaven Community (Core) Session: {session}"
+                f"[CoreSession:from_credentials] Successfully created Community "
+                f"(Core) Session: {session}"
             )
             return cls(session, programming_language=programming_language)
         except TimeoutError:
             _LOGGER.error(
-                f"[CoreSession:from_config] Connection timed out after {timeout_seconds}s"
+                f"[CoreSession:from_credentials] Connection timed out after "
+                f"{timeout_seconds}s. Increase community/settings.json: "
+                f"timeouts.client.session_connect_timeout_seconds to allow more time."
             )
             raise DeephavenConnectionError(
-                f"Connection to Deephaven Community server timed out after {timeout_seconds} seconds."
+                f"Connection to Deephaven Community server timed out after "
+                f"{timeout_seconds} seconds. To allow more time, increase "
+                f"community/settings.json: timeouts.client.session_connect_timeout_seconds "
+                f"in the operator config."
             ) from None
         except Exception as e:
             _LOGGER.warning(
-                f"[CoreSession:from_config] Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
+                "[CoreSession:from_credentials] Failed to create Community "
+                "(Core) Session (%s): %r",
+                creds_redacted,
+                e,
+                exc_info=True,
             )
             cls._log_session_creation_error_details(e)
             raise SessionCreationError(
-                f"Failed to create Deephaven Community (Core) Session with config: {log_cfg}: {e}"
+                f"Failed to create Deephaven Community (Core) Session "
+                f"({creds_redacted}): {describe_exception_chain(e)}"
             ) from e
+
+    @classmethod
+    async def from_session_config(
+        cls,
+        cfg: CommunitySessionConfig,
+        timeouts: CommunityClientTimeouts,
+    ) -> "CoreSession":
+        """Create a :class:`CoreSession` from a typed session declaration.
+
+        Unpacks ``cfg`` and delegates to :meth:`from_credentials`. The
+        ``cfg`` argument is the typed, pre-validated declaration
+        produced either by the configuration loader or by the
+        dynamic-session tool; no further validation happens here.
+
+        Args:
+            cfg (CommunitySessionConfig): Validated community session
+                declaration.
+            timeouts (CommunityClientTimeouts): Client-layer timeout configuration.
+                Forwarded to :meth:`from_credentials`. The
+                connect timeout is sourced from
+                ``timeouts.client.session_connect_timeout_seconds``.
+
+        Returns:
+            CoreSession: A new wrapper around the connected session.
+
+        Raises:
+            DeephavenConnectionError: If the connection times out.
+            SessionCreationError: For any other session-construction
+                failure.
+        """
+        log_cfg = dump_redacted(cfg)
+        _LOGGER.info(
+            f"[CoreSession:from_session_config] Community session configuration: {log_cfg}"
+        )
+
+        return await cls.from_credentials(
+            cfg.auth.credentials,
+            timeouts,
+            host=cfg.host,
+            port=cfg.port,
+            tls=cfg.tls,
+            programming_language=cfg.programming_language or "Python",
+            never_timeout=cfg.never_timeout or False,
+        )
 
     @classmethod
     def _log_session_creation_error_details(cls, exception: Exception) -> None:
@@ -1249,10 +1365,10 @@ class CoreSession(BaseSession[Session]):
         # Handle "failed to get the configuration constants" - documented connection issue
         if "failed to get the configuration constants" in error_msg:
             _LOGGER.error(
-                "[CoreSession:from_config] This error indicates a connection issue when trying to connect to the server."
+                "[CoreSession:_log_session_creation_error_details] This error indicates a connection issue when trying to connect to the server."
             )
             _LOGGER.error(
-                "[CoreSession:from_config] Verify that: 1) Server address and port are correct, 2) Deephaven server is running and accessible, 3) Network connectivity is available"
+                "[CoreSession:_log_session_creation_error_details] Verify that: 1) Server address and port are correct, 2) Deephaven server is running and accessible, 3) Network connectivity is available"
             )
 
         # Handle certificate/TLS related errors
@@ -1269,10 +1385,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                "[CoreSession:from_config] This error indicates a TLS/SSL certificate issue."
+                "[CoreSession:_log_session_creation_error_details] This error indicates a TLS/SSL certificate issue."
             )
             _LOGGER.error(
-                "[CoreSession:from_config] Verify that: 1) Server certificate is valid and not expired, 2) Certificate hostname matches connection URL, 3) CA certificate is trusted by the client"
+                "[CoreSession:_log_session_creation_error_details] Verify that: 1) Server certificate is valid and not expired, 2) Certificate hostname matches connection URL, 3) CA certificate is trusted by the client"
             )
 
         # Handle authentication errors
@@ -1288,10 +1404,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                "[CoreSession:from_config] This error indicates an authentication issue."
+                "[CoreSession:_log_session_creation_error_details] This error indicates an authentication issue."
             )
             _LOGGER.error(
-                "[CoreSession:from_config] Verify that: 1) Authentication credentials are correct, 2) Token is valid and not expired, 3) User has proper permissions, 4) Authentication service is running"
+                "[CoreSession:_log_session_creation_error_details] Verify that: 1) Authentication credentials are correct, 2) Token is valid and not expired, 3) User has proper permissions, 4) Authentication service is running"
             )
 
         # Handle connection timeout errors
@@ -1305,10 +1421,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                "[CoreSession:from_config] This error indicates a network connectivity issue."
+                "[CoreSession:_log_session_creation_error_details] This error indicates a network connectivity issue."
             )
             _LOGGER.error(
-                "[CoreSession:from_config] Verify that: 1) Server is running and accessible, 2) Network connectivity is available, 3) Firewall is not blocking the connection, 4) Port is correct and open"
+                "[CoreSession:_log_session_creation_error_details] Verify that: 1) Server is running and accessible, 2) Network connectivity is available, 3) Firewall is not blocking the connection, 4) Port is correct and open"
             )
 
         # Handle port/address binding errors
@@ -1321,10 +1437,10 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                "[CoreSession:from_config] This error indicates a port binding issue."
+                "[CoreSession:_log_session_creation_error_details] This error indicates a port binding issue."
             )
             _LOGGER.error(
-                "[CoreSession:from_config] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
+                "[CoreSession:_log_session_creation_error_details] Verify that: 1) Port is not already in use by another process, 2) You have permission to bind to the port, 3) Try a different port number"
             )
 
         # Handle DNS resolution errors
@@ -1337,16 +1453,14 @@ class CoreSession(BaseSession[Session]):
             ]
         ):
             _LOGGER.error(
-                "[CoreSession:from_config] This error indicates a DNS resolution issue."
+                "[CoreSession:_log_session_creation_error_details] This error indicates a DNS resolution issue."
             )
             _LOGGER.error(
-                "[CoreSession:from_config] Verify that: 1) Hostname is correct and resolvable, 2) DNS server is accessible, 3) Network connectivity is available, 4) Try using IP address instead of hostname"
+                "[CoreSession:_log_session_creation_error_details] Verify that: 1) Hostname is correct and resolvable, 2) DNS server is accessible, 3) Network connectivity is available, 4) Try using IP address instead of hostname"
             )
 
 
-class CorePlusSession(
-    BaseSession["deephaven_enterprise.client.session_manager.DndSession"]
-):
+class CorePlusSession(BaseSession[DndSession]):
     """A wrapper around the enterprise DndSession class.
 
     This class provides a standardized interface while delegating to the
@@ -1380,7 +1494,7 @@ class CorePlusSession(
             await factory.password("username", "password")
 
             # Connect to a worker to get a CorePlusSession
-            session = await factory.connect_to_new_worker()
+            session = await factory.connect_to_new_worker(heap_size_gb=4)
 
             # Get information about this persistent query
             query_info = await session.pqinfo()
@@ -1402,7 +1516,7 @@ class CorePlusSession(
     @override
     def __init__(
         self,
-        session: "deephaven_enterprise.client.session_manager.DndSession",  # noqa: F821
+        session: DndSession,
         programming_language: str,
     ):
         """
@@ -1431,9 +1545,7 @@ class CorePlusSession(
                      DndSession object with proper enterprise capabilities.
 
         Raises:
-            InternalError: If the provided session is not a DndSession instance or doesn't
-                         support the required enterprise functionality.
-            ValueError: If the session parameter is None or invalid.
+            ValueError: If the ``session`` argument is ``None``.
 
         Note:
             - This class is typically not instantiated directly by users but rather obtained
@@ -1443,17 +1555,13 @@ class CorePlusSession(
               resources like persistent queries and historical tables.
             - Closing a CorePlusSession does not necessarily terminate the underlying persistent query,
               which can continue running on the server.
-            - The session is automatically marked as an enterprise session (is_enterprise=True)
-              which enables specialized handling of enterprise-specific methods and objects.
 
         Thread Safety:
             As with CoreSession, methods of this class are not thread-safe and should only be called
             from a single thread. Each method should be awaited before calling another method on the
             same session.
         """
-        super().__init__(
-            session, is_enterprise=True, programming_language=programming_language
-        )
+        super().__init__(session, programming_language=programming_language)
 
     async def pqinfo(self) -> CorePlusQueryInfo:
         """
@@ -1526,10 +1634,12 @@ class CorePlusSession(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSession:pqinfo] Failed to retrieve persistent query information: {e}"
+                "[CorePlusSession:pqinfo] Failed to retrieve persistent query information: %r",
+                e,
+                exc_info=True,
             )
             raise QueryError(
-                f"Failed to retrieve persistent query information: {e}"
+                f"Failed to retrieve persistent query information: {describe_exception_chain(e)}"
             ) from e
 
     async def historical_table(self, namespace: str, table_name: str) -> Table:
@@ -1626,9 +1736,13 @@ class CorePlusSession(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSession:historical_table] Failed to fetch historical table: {e}"
+                "[CorePlusSession:historical_table] Failed to fetch historical table: %r",
+                e,
+                exc_info=True,
             )
-            raise QueryError(f"Failed to fetch historical table: {e}") from e
+            raise QueryError(
+                f"Failed to fetch historical table: {describe_exception_chain(e)}"
+            ) from e
 
     async def live_table(self, namespace: str, table_name: str) -> Table:
         """
@@ -1730,9 +1844,13 @@ class CorePlusSession(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSession:live_table] Failed to fetch live table: {e}"
+                "[CorePlusSession:live_table] Failed to fetch live table: %r",
+                e,
+                exc_info=True,
             )
-            raise QueryError(f"Failed to fetch live table: {e}") from e
+            raise QueryError(
+                f"Failed to fetch live table: {describe_exception_chain(e)}"
+            ) from e
 
     async def catalog_table(self) -> Table:
         """
@@ -1820,6 +1938,10 @@ class CorePlusSession(
             ) from e
         except Exception as e:
             _LOGGER.error(
-                f"[CorePlusSession:catalog_table] Failed to fetch catalog table: {e}"
+                "[CorePlusSession:catalog_table] Failed to fetch catalog table: %r",
+                e,
+                exc_info=True,
             )
-            raise QueryError(f"Failed to fetch catalog table: {e}") from e
+            raise QueryError(
+                f"Failed to fetch catalog table: {describe_exception_chain(e)}"
+            ) from e

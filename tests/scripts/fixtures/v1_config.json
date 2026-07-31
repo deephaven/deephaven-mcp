@@ -1,0 +1,107 @@
+{
+  // A near-maximal Deephaven MCP v1 config (JSON5: comments + trailing commas).
+  //
+  // This fixture exercises every file-INDEPENDENT v1->v2 conversion shape so the
+  // integration test round-trips them all through the real v2 loader
+  // (dhcli config validate). Secrets are covered in both the literal (regular)
+  // and ${env:} forms: PSK literal (local_dev) + env (psk_env); Basic->custom
+  // literal (basic) + env (basic_env); password literal (analytics) + env (prod).
+  // Also: anonymous auth; never_timeout and Groovy normalization; both the docker
+  // and python session-creation default blocks; and the full enterprise
+  // session-creation defaults set. The third secret form, ${file:}, is inherently
+  // file-dependent and covered separately (see below).
+  //
+  // File-DEPENDENT shapes (TLS root certs, client certificates, ${file:} private
+  // keys) are NOT here because they need real files on disk; they live in an inline
+  // tmp_path config in test_converted_tls_and_private_key_validate.
+  "security": { "community": { "credential_retrieval_mode": "all" } },
+  "community": {
+    "sessions": {
+      "local_dev": {
+        "host": "localhost",
+        "port": 10000,
+        "session_type": "python",
+        "never_timeout": true,
+        "auth_type": "PSK",
+        "auth_token": "Deephaven123",
+      },
+      "anon": {
+        "host": "anon.example.com",
+        "port": 10001,
+        "auth_type": "Anonymous",
+      },
+      "psk_env": {
+        "host": "groovy.example.com",
+        "port": 10002,
+        "session_type": "groovy",
+        "auth_type": "PSK",
+        "auth_token_env_var": "DH_COMMUNITY_PSK",
+      },
+      "basic": {
+        "host": "basic.example.com",
+        "port": 10003,
+        "auth_type": "Basic",
+        "auth_token": "user:pass",
+      },
+      "basic_env": {
+        "host": "basic-env.example.com",
+        "port": 10004,
+        "auth_type": "Basic",
+        "auth_token_env_var": "DH_BASIC_TOKEN",
+      },
+    },
+    "session_creation": {
+      "max_concurrent_sessions": 2,
+      "defaults": {
+        "launch_method": "docker",
+        "auth_type": "PSK",
+        "auth_token_env_var": "DH_DYNAMIC_PSK",
+        "programming_language": "python",
+        "docker_image": "ghcr.io/deephaven/server:custom",
+        "docker_memory_limit_gb": 8,
+        "docker_cpu_limit": 4,
+        "docker_volumes": ["/host/data:/data:ro"],
+        "python_venv_path": "/opt/venvs/dh",
+        "heap_size_gb": 4,
+        "extra_jvm_args": ["-Dfoo=bar"],
+        "environment_vars": { "LOG_LEVEL": "INFO" },
+        "startup_timeout_seconds": 120,
+        "startup_check_interval_seconds": 2,
+        "startup_retries": 3,
+      },
+    },
+  },
+  "enterprise": {
+    "systems": {
+      "prod": {
+        "connection_json_url": "https://prod.example.com:8123/iris/connection.json",
+        "auth_type": "password",
+        "username": "iris",
+        "password_env_var": "DH_PROD_PASSWORD",
+        "connection_timeout": 30,
+        "session_creation": {
+          "max_concurrent_sessions": 5,
+          "defaults": {
+            "heap_size_gb": 4,
+            "programming_language": "Python",
+            "engine": "DeephavenCommunity",
+            "server": "prod-server-01",
+            "auto_delete_timeout": 600,
+            "extra_jvm_args": ["-Xss2m"],
+            "extra_environment_vars": ["FOO=bar", "BAZ=qux"],
+            "admin_groups": ["admins"],
+            "viewer_groups": ["viewers", "analysts"],
+            "session_arguments": { "maxMessageSize": 104857600 },
+            "timeout_seconds": 99,
+          },
+        },
+      },
+      "analytics": {
+        "connection_json_url": "https://analytics.example.com:8123/iris/connection.json",
+        "auth_type": "password",
+        "username": "analyst",
+        "password": "AnalyticsPass123",
+      },
+    },
+  },
+}

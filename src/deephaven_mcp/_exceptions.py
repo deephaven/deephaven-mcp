@@ -9,13 +9,13 @@ system to signal recoverable or expected problems, allowing callers to implement
 recovery or reporting strategies.
 
 Exception Hierarchy:
-    - Base exceptions: McpError (base for all MCP exceptions), InternalError (extends McpError and RuntimeError), UnsupportedOperationError (extends McpError), MissingEnterprisePackageError (extends InternalError)
+    - Base exceptions: McpError (base for all MCP exceptions), InternalError (extends McpError and RuntimeError), UnsupportedOperationError (extends McpError)
     - Session exceptions: SessionError (extends McpError), SessionCreationError (extends SessionError), SessionLaunchError (extends SessionCreationError), InvalidSessionNameError (extends SessionError and ValueError)
     - Authentication exceptions: AuthenticationError (extends McpError)
     - Query exceptions: QueryError (extends McpError)
     - Connection exceptions: DeephavenConnectionError (extends McpError)
     - Resource exceptions: ResourceError (extends McpError), RegistryItemNotFoundError (extends ResourceError and KeyError)
-    - Configuration exceptions: ConfigurationError (extends McpError), CommunitySessionConfigurationError (extends ConfigurationError), EnterpriseSystemConfigurationError (extends ConfigurationError)
+    - Configuration exceptions: ConfigurationError (extends McpError), SystemNotConfiguredError (extends ConfigurationError), EnterpriseNotConfiguredError (extends SystemNotConfiguredError), CommunityNotConfiguredError (extends SystemNotConfiguredError)
 
 Usage Example:
     ```python
@@ -41,7 +41,6 @@ __all__ = [
     "McpError",
     "InternalError",
     "UnsupportedOperationError",
-    "MissingEnterprisePackageError",
     # Session exceptions
     "SessionCreationError",
     "SessionError",
@@ -58,8 +57,27 @@ __all__ = [
     "RegistryItemNotFoundError",
     # Configuration exceptions
     "ConfigurationError",
-    "CommunitySessionConfigurationError",
-    "EnterpriseSystemConfigurationError",
+    "ConfigurationPathError",
+    "ConfigurationFieldMissingError",
+    "TemplateResolutionError",
+    "NoSystemsConfiguredError",
+    "SystemNotConfiguredError",
+    "EnterpriseNotConfiguredError",
+    "CommunityNotConfiguredError",
+    # File-lock exceptions
+    "FileLockTimeoutError",
+    # Daemon registry exceptions
+    "DaemonRegistryError",
+    "DaemonAlreadyPublishedError",
+    "RegistryCorruptError",
+    # CLI daemon lifecycle exceptions
+    "DaemonClientError",
+    "DaemonReuseRefusedError",
+    "DaemonStartupTimeoutError",
+    "SpawnError",
+    # CLI MCP client exceptions
+    "McpClientError",
+    "McpRequestTimeoutError",
 ]
 
 
@@ -111,66 +129,6 @@ class InternalError(McpError, RuntimeError):
     """
 
     pass
-
-
-class MissingEnterprisePackageError(InternalError):
-    """Exception raised when deephaven-coreplus-client package is not installed.
-
-    This exception provides prominent error messaging to help users quickly identify
-    and resolve the missing package issue when attempting to use Deephaven Enterprise
-    (DHE) features.
-
-    The exception formats the error message to be highly visible and actionable,
-    with clear instructions on how to resolve the issue.
-
-    Examples:
-        ```python
-        if not is_enterprise_available:
-            raise MissingEnterprisePackageError()
-        ```
-    """
-
-    def __init__(self, message: str | None = None):
-        """Initialize the exception with an optional custom message.
-
-        Args:
-            message (str | None): Optional custom message. If not provided, uses a default
-                message about the missing deephaven-coreplus-client package.
-        """
-        if message is None:
-            message = "Core+ features are not available (deephaven-coreplus-client Python package not installed)"
-
-        self.package_message = message
-        super().__init__(message)
-
-    def __str__(self) -> str:
-        """Return a prominently formatted error message.
-
-        Returns:
-            str: A formatted error message with clear visual separation and
-                actionable instructions for resolving the issue.
-        """
-        separator = "=" * 80
-        return f"""
-{separator}
-ERROR: Core+ features are not available
-{separator}
-
-The Python package 'deephaven-coreplus-client' is not installed.
-
-This package is required to use Deephaven Enterprise (DHE) features.
-
-To resolve this issue:
-  1. Obtain the deephaven-coreplus-client wheel file from your 
-     Deephaven Enterprise administrator
-  2. Install it using pip:
-     
-     pip install /path/to/deephaven_coreplus_client-X.Y.Z-py3-none-any.whl
-
-For more information, see the installation documentation.
-
-{separator}
-"""
 
 
 # Session Exceptions
@@ -229,7 +187,7 @@ class SessionCreationError(SessionError):
     Usage:
         ```python
         try:
-            session = await session_manager.connect_to_new_worker()
+            session = await session_manager.connect_to_new_worker(heap_size_gb=4)
         except SessionCreationError as e:
             logger.error(f"Failed to create session: {e}")
             # Implement fallback or retry logic
@@ -296,7 +254,7 @@ class InvalidSessionNameError(SessionError, ValueError):
     Usage:
         ```python
         try:
-            system_type, source, name = BaseItemManager.parse_full_name(session_id)
+            qsid = QualifiedSessionId.from_str(session_id)
         except InvalidSessionNameError as e:
             logger.warning(f"Invalid session name format: {e}")
             # Handle malformed session name gracefully
@@ -411,9 +369,6 @@ class DeephavenConnectionError(McpError):
             # Implement connection retry or fallback logic
         ```
 
-    Note:
-        Always catch this exception before other more specific exceptions in try/except
-        chains, as connection failures typically prevent other operations from succeeding.
     """
 
     pass
@@ -511,10 +466,6 @@ class ConfigurationError(McpError):
         (files, environment variables) that can be corrected by the user. This is
         distinct from InternalError, which indicates bugs in the MCP code itself.
 
-    Use more specific subclasses when possible:
-        - CommunitySessionConfigurationError: For community session configuration issues
-        - EnterpriseSystemConfigurationError: For enterprise system configuration issues
-
     Common causes include:
         - Invalid JSON syntax in configuration files
         - Missing required configuration fields
@@ -536,69 +487,89 @@ class ConfigurationError(McpError):
     pass
 
 
-class CommunitySessionConfigurationError(ConfigurationError):
-    """Raised when community session configuration is invalid.
+class ConfigurationPathError(ConfigurationError):
+    """A logical configuration path is malformed or does not resolve.
 
-    This exception is raised during validation of community session configuration
-    data from the `deephaven_mcp.json` configuration file. It indicates that
-    session parameters are missing, invalid, or conflicting in the `community_sessions`
-    section of the configuration.
-
-    Community sessions are statically configured Deephaven Community (Core) instances
-    that the MCP server connects to. Configuration errors prevent these sessions from
-    being initialized and registered.
-
-    Common causes include:
-        - Invalid host or port values (wrong type, out of range)
-        - Missing required authentication parameters
-        - Conflicting authentication methods specified (e.g., both PSK and anonymous)
-        - Invalid session timeout or connection parameter values
-        - Malformed session configuration objects (wrong structure)
-        - Session names that conflict with reserved keywords
-
-    Usage:
-        ```python
-        try:
-            session_config = validate_community_session_config(config_data)
-        except CommunitySessionConfigurationError as e:
-            logger.error(f"Community session configuration error: {e}")
-            # Guide user to fix community session configuration in deephaven_mcp.json
-        ```
+    Raised by :mod:`deephaven_mcp.config._logical_paths` when a dot-separated
+    configuration path (e.g. ``community.sessions.local_dev.port``)
+    cannot be parsed (unbalanced quotes, empty segment) or does not
+    resolve to a known configuration file or field location.
     """
 
     pass
 
 
-class EnterpriseSystemConfigurationError(ConfigurationError):
-    """Raised when enterprise system configuration is invalid.
+class ConfigurationFieldMissingError(ConfigurationPathError):
+    """A structurally valid configuration path has no value set.
 
-    This exception is raised during validation of enterprise system (Deephaven Core+)
-    configuration data from the `deephaven_mcp.json` configuration file. It indicates
-    that connection parameters, authentication settings, or other enterprise-specific
-    configuration is missing, invalid, or conflicting in the `enterprise.systems` section.
-
-    Enterprise systems are Deephaven Core+ (CorePlus) deployments with controller
-    clients that the MCP server connects to. Configuration errors prevent these systems
-    from being initialized and their session factories from being registered.
-
-    Common causes include:
-        - Invalid or malformed connection_json_url
-        - Missing or invalid authentication credentials (username, password, private_key)
-        - Conflicting authentication methods (e.g., both password and private_key)
-        - Invalid TLS/SSL configuration
-        - Missing required enterprise system parameters (auth_type, connection_json_url)
-        - Invalid worker creation parameters (max_concurrent_workers)
-        - Malformed session creation configuration objects
-
-    Usage:
-        ```python
-        try:
-            enterprise_config = validate_enterprise_system_config(system_name, config_data)
-        except EnterpriseSystemConfigurationError as e:
-            logger.error(f"Enterprise system configuration error for {system_name}: {e}")
-            # Guide user to fix enterprise system configuration in deephaven_mcp.json
-        ```
+    Raised by :mod:`deephaven_mcp.config._fields` when a field path
+    resolves cleanly through the data but the addressed value is
+    absent. Distinct from the base :class:`ConfigurationPathError`
+    raised for path-shape errors (an intermediate segment holding a
+    non-object) so callers can report "not found" separately from
+    "malformed path".
     """
+
+    pass
+
+
+class TemplateResolutionError(ConfigurationError):
+    """A syntactically valid templating placeholder could not be resolved.
+
+    Raised by :mod:`deephaven_mcp.config._templating` when a
+    ``${env:VAR}`` names an unset variable or a ``${file:PATH}`` names a
+    file that is missing, unreadable, oversized, or not UTF-8. Distinct
+    from the plain :class:`ConfigurationError` raised for placeholder
+    *syntax* errors so callers that validate files written for a
+    different environment (e.g. the CLI config writer) can downgrade
+    resolution failures to warnings while still blocking on syntax
+    errors.
+    """
+
+    pass
+
+
+class NoSystemsConfiguredError(ConfigurationError):
+    """The configuration tree contains no servable system at all.
+
+    Raised at systems-server startup when a loaded tree is otherwise
+    valid but neither the community nor the enterprise section declares
+    a system (the server serves systems, so it refuses to start empty).
+    A zero-system tree is *valid* to load; the invariant belongs to
+    system consumers, not the generic loader (the CLI daemon-acquisition
+    path enforces the same rule via :class:`~deephaven_mcp.cli._errors.CliError`
+    with ``ErrorCode.NO_SYSTEMS_CONFIGURED``). Distinct from the plain
+    :class:`ConfigurationError` raised for malformed files, and from
+    :class:`SystemNotConfiguredError`, which reports one *section* absent
+    at tool-invocation time.
+    """
+
+    pass
+
+
+class SystemNotConfiguredError(ConfigurationError):
+    """Base class for "the deployment has not configured this system type" errors.
+
+    Raised when a tool that requires a configuration section is invoked on a
+    deployment that did not load that section. Every MCP tool is registered
+    unconditionally, so a tool may be called on a deployment that lacks its
+    section; the tool surfaces this as a user-correctable configuration error
+    (configure the missing section) rather than an internal error. Distinct
+    from :class:`InvalidSessionNameError`, which names a *specific* system that
+    is absent.
+    """
+
+    pass
+
+
+class EnterpriseNotConfiguredError(SystemNotConfiguredError):
+    """Raised when an Enterprise tool is invoked but no Enterprise system is configured."""
+
+    pass
+
+
+class CommunityNotConfiguredError(SystemNotConfiguredError):
+    """Raised when a Community tool is invoked but no Community sessions are configured."""
 
     pass
 
@@ -631,6 +602,189 @@ class UnsupportedOperationError(McpError):
         This is distinct from NotImplementedError, which indicates planned but unimplemented
         features. UnsupportedOperationError indicates operations that are fundamentally
         incompatible with the current context.
+    """
+
+    pass
+
+
+# File-Lock Exceptions
+
+
+class FileLockTimeoutError(McpError):
+    """An advisory file lock could not be acquired before the deadline.
+
+    Raised by :class:`deephaven_mcp._platform.fsutil.AdvisoryFileLock` when
+    its bounded-acquire loop exhausts the configured timeout without
+    obtaining the lock. Converts an indefinite block on a wedged or
+    crashed lock holder into an actionable, time-bounded failure
+    rather than a hang.
+    """
+
+    pass
+
+
+# Daemon Registry Exceptions
+
+
+class DaemonRegistryError(McpError):
+    """Base exception for failures in the on-disk daemon registry.
+
+    The daemon registry (``<runtime_dir>/daemon/daemon.json``) is the
+    wire contract between the ``dhcli`` CLI and the daemon process.
+    This base groups every named failure mode of that contract so
+    callers can catch the family with a single ``except`` while
+    distinguishing specific cases (e.g. corruption) by subclass.
+    """
+
+    pass
+
+
+class DaemonAlreadyPublishedError(DaemonRegistryError):
+    """A second daemon attempted to publish over a still-live registry entry.
+
+    Raised inside the daemon's publish path when the defensive
+    re-check (under the registry lock) finds an existing entry
+    whose recorded :class:`~deephaven_mcp._processes.ProcessIdentity`
+    is still alive. Refusing to overwrite stops a non-CLI-spawned
+    second daemon from displacing the running one and orphaning its
+    bound loopback port from the CLI's perspective.
+
+    The CLI's spawn path already serializes via the registry lock,
+    so this only fires when a daemon was started outside the CLI
+    (manual ``python -m deephaven_mcp.mcp_systems_server --daemon``,
+    a stale test harness, etc.).
+    """
+
+    pass
+
+
+class RegistryCorruptError(DaemonRegistryError):
+    """The on-disk ``daemon.json`` exists but cannot be parsed.
+
+    Raised by :meth:`deephaven_mcp.daemon_registry.DaemonDirectory.read_entry`
+    for every failure mode that is *not* "the file is genuinely
+    absent": invalid JSON, schema validation errors (missing /
+    extra / wrong-type fields), and OS read errors. The original
+    exception is chained via ``__cause__``.
+
+    Distinguishes a corrupt registry from a genuinely absent one
+    (``read_entry`` returns ``None`` only for ``FileNotFoundError``).
+    Conflating the two is dangerous: the CLI's auto-spawn path
+    treats ``None`` as "no daemon, spawn one", so silently mapping
+    a corrupt file to ``None`` would race a spawn against an actual
+    still-running daemon and surface the resulting bind failure
+    rather than the actionable diagnostic the operator needs.
+
+    Caller recovery policy is per-site:
+
+    - ``daemon status`` / ``daemon stop`` / ``daemon restart`` /
+      ``daemon start`` surface the error to the operator with a
+      hint pointing at ``dhcli daemon repair``.
+    - :func:`deephaven_mcp.cli._daemon.get_or_start_daemon` and
+      :func:`deephaven_mcp.cli._daemon._lifecycle._poll_for_registry` both
+      propagate: auto-recovery is the explicit operator verb
+      ``dhcli daemon repair``, not an implicit rename, because a
+      silent rename that runs alongside a still-live daemon
+      would orphan the loopback port from the CLI's perspective.
+    """
+
+    pass
+
+
+# CLI Daemon Lifecycle Exceptions
+
+
+class DaemonClientError(McpError):
+    """Raised for any client-side daemon-management failure.
+
+    Covers "no daemon running with ``--no-auto-start``", "caller
+    lacks permission to signal the registered PID", and similar
+    failures that prevent the CLI from acting on the daemon.
+    The CLI's ``main`` translates this exception to a non-zero
+    exit code and prints the message; subcommand handlers raise
+    it freely without needing to format errors themselves.
+    """
+
+    pass
+
+
+class DaemonReuseRefusedError(McpError):
+    """The running daemon is a different build than the CLI invoking it.
+
+    Raised by :func:`deephaven_mcp.cli._daemon.get_or_start_daemon` when a
+    live daemon's recorded :class:`~deephaven_mcp.daemon_registry.DaemonBuildIdentity`
+    differs from the CLI's own and the resolved per-field reuse policy
+    (:mod:`deephaven_mcp.cli._daemon._reuse`) is ``refuse``. Deliberately a
+    direct :class:`McpError` subclass (not a :class:`DaemonClientError`) so the
+    acquire path can map it to its own ``DAEMON_REUSE_REFUSED`` error code
+    rather than the generic client-error code.
+
+    The differing identity fields are recorded on :attr:`differing` for callers
+    and tests; the message names them with old/new values and points at
+    ``dhcli daemon restart``.
+    """
+
+    def __init__(self, message: str, *, differing: tuple[str, ...] = ()) -> None:
+        """Capture the message and the set of differing identity fields.
+
+        Args:
+            message (str): Operator-actionable description naming the
+                differing identity fields and the recovery command.
+            differing (tuple[str, ...]): The identity fields that
+                differed (``"version"``, ``"venv"``, ``"fingerprint"``).
+        """
+        super().__init__(message)
+        self.differing = differing
+
+
+class SpawnError(McpError):
+    """Raised for any subprocess-spawn failure during daemon start.
+
+    The CLI's ``main`` translates this exception to a non-zero
+    exit code and prints the message; subcommand handlers raise
+    it freely without needing to format errors themselves.
+    """
+
+    pass
+
+
+class DaemonStartupTimeoutError(SpawnError):
+    """The daemon did not publish a registry entry before the deadline.
+
+    Raised by :func:`deephaven_mcp.cli._daemon._lifecycle._poll_for_registry`
+    after waiting ``cli.daemon.timeouts.startup_deadline_seconds``
+    for the spawned process to write ``daemon.json``. The original
+    spawned process, if any, is *not* terminated by this code: the
+    CLI logs the path to ``daemon.log`` so the operator can
+    investigate.
+    """
+
+    pass
+
+
+# CLI MCP Client Exceptions
+
+
+class McpClientError(McpError):
+    """Raised when an MCP request fails or its response cannot be parsed.
+
+    Used by :class:`deephaven_mcp.cli._mcp_client.McpClient`.
+    Subcommand handlers translate this exception to a non-zero
+    exit code; the message is printed verbatim to stderr.
+    """
+
+    pass
+
+
+class McpRequestTimeoutError(McpClientError):
+    """Raised when an MCP request times out waiting for the daemon's response.
+
+    A distinct subtype of :class:`McpClientError` because the correct
+    reaction differs from other transport failures: the daemon may still
+    complete the operation server-side after the client stops waiting, so
+    callers should verify the resulting state before retrying. Subcommand
+    handlers map this to the ``mcp_request_timeout`` error code rather
+    than ``mcp_request_failed``.
     """
 
     pass

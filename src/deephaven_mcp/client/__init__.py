@@ -13,6 +13,8 @@ Features:
 
 Exported Classes and Attributes:
     ClientObjectWrapper           -- Base class for client wrappers
+    CommunityClientTimeouts       -- Client-layer timeouts (community outbound RPCs)
+    EnterpriseClientTimeouts      -- Client-layer timeouts (enterprise outbound RPCs)
     CoreSession                   -- Async wrapper for standard Deephaven sessions
     CorePlusSession               -- Async wrapper for enterprise Deephaven sessions
     CorePlusAuthClient            -- Async authentication client
@@ -24,18 +26,20 @@ Exported Classes and Attributes:
     CorePlusQueryStatus           -- Wrapper for persistent query status
     CorePlusToken                 -- Wrapper for authentication tokens
     ProtobufWrapper               -- Base wrapper for protobuf messages
+    PQ_STATES (dict[str, str])    -- Mapping of PQ state name to lifecycle category
     BaseSession                   -- Base async session wrapper
     CorePlusSessionFactory        -- Factory for creating enterprise sessions
-    is_enterprise_available (bool) -- True if enterprise features are available
 
 Note:
     All logging is performed in the respective submodules/classes; this file does not log directly.
 """
 
 from ._auth_client import CorePlusAuthClient
-from ._base import ClientObjectWrapper, is_enterprise_available
+from ._base import ClientObjectWrapper
 from ._controller_client import CorePlusControllerClient
+from ._pq_config import wire_to_env_var_entries
 from ._protobuf import (
+    PQ_STATES,
     CorePlusQueryConfig,
     CorePlusQueryInfo,
     CorePlusQuerySerial,
@@ -46,11 +50,13 @@ from ._protobuf import (
 )
 from ._session import BaseSession, CorePlusSession, CoreSession
 from ._session_factory import CorePlusSessionFactory
+from ._timeouts import CommunityClientTimeouts, EnterpriseClientTimeouts
 
 __all__ = [
+    "CommunityClientTimeouts",
+    "EnterpriseClientTimeouts",
     "CorePlusAuthClient",
     "ClientObjectWrapper",
-    "is_enterprise_available",
     "CorePlusControllerClient",
     "CorePlusQueryConfig",
     "CorePlusQueryInfo",
@@ -59,8 +65,10 @@ __all__ = [
     "CorePlusQueryStatus",
     "CorePlusToken",
     "ProtobufWrapper",
+    "PQ_STATES",
     "BaseSession",
     "CoreSession",
     "CorePlusSession",
     "CorePlusSessionFactory",
+    "wire_to_env_var_entries",
 ]

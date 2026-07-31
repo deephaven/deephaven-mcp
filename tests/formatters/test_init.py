@@ -1,9 +1,17 @@
 """Tests for formatters/__init__.py - format_table_data() and optimization strategies."""
 
+from typing import get_args
+
 import pyarrow as pa
 import pytest
 
-from deephaven_mcp.formatters import VALID_FORMATS, _resolve_format, format_table_data
+from deephaven_mcp.formatters import (
+    _FORMATTERS,
+    VALID_FORMATS,
+    TableFormat,
+    _resolve_format,
+    format_table_data,
+)
 
 
 # Helper to create test tables
@@ -16,6 +24,28 @@ def create_test_table(rows: int) -> pa.Table:
             "value": [i * 10 for i in range(1, rows + 1)],
         }
     )
+
+
+# === __all__ surface-contract tests ===
+
+
+def test_all_is_exact_expected_set():
+    """__all__ is exactly the intended public surface."""
+    import deephaven_mcp.formatters as formatters
+
+    assert set(formatters.__all__) == {
+        "format_table_data",
+        "TableFormat",
+        "VALID_FORMATS",
+    }
+
+
+def test_all_exports_resolve():
+    """Every name in __all__ resolves to an attribute on the package."""
+    import deephaven_mcp.formatters as formatters
+
+    for symbol in formatters.__all__:
+        assert hasattr(formatters, symbol)
 
 
 # === VALID_FORMATS constant tests ===
@@ -37,6 +67,22 @@ def test_valid_formats_contains_all_expected():
         "xml",
     }
     assert VALID_FORMATS == expected
+
+
+def test_valid_formats_derived_from_table_format():
+    """VALID_FORMATS is the runtime set of the TableFormat Literal members."""
+    assert VALID_FORMATS == set(get_args(TableFormat))
+
+
+def test_formatters_cover_all_non_strategy_formats():
+    """Every non-strategy member of VALID_FORMATS has a registered formatter."""
+    strategies = {
+        "optimize-rendering",
+        "optimize-accuracy",
+        "optimize-cost",
+        "optimize-speed",
+    }
+    assert set(_FORMATTERS) == VALID_FORMATS - strategies
 
 
 # === _resolve_format() unit tests ===
@@ -89,6 +135,16 @@ def test_resolve_format_explicit_markdown_kv():
     actual_format, reason = _resolve_format("markdown-kv")
     assert actual_format == "markdown-kv"
     assert reason == "explicit format: markdown-kv"
+
+
+def test_resolve_format_unreachable_value():
+    """_resolve_format raises AssertionError for a value outside TableFormat."""
+    with pytest.raises(AssertionError):
+        _resolve_format("bogus")  # type: ignore[arg-type]
+    # Suppression justified: deliberately constructing a value the
+    # ``Literal`` rejects so the runtime ``assert_never`` branch is
+    # covered. Bracketed ``arg-type`` names what is silenced; mypy
+    # still flags any *unintentional* misuse at real call sites.
 
 
 # === Optimization strategy tests ===

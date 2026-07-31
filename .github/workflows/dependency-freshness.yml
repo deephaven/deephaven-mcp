@@ -1,0 +1,121 @@
+name: Dependency Freshness
+
+# Runs the strict checks (mypy + unit tests) against a freshly-resolved
+# dependency tree. Because this repo intentionally does NOT commit `uv.lock`,
+# every regular CI run is already a freshness check, but quiet periods (no PRs)
+# can let an upstream breaking release sit undetected. This job runs on a
+# weekly schedule so we discover such breakage proactively, and opens a
+# tracking issue if anything fails.
+#
+# Trigger manually via the "Run workflow" button on the Actions tab when you
+# want an on-demand freshness sweep.
+#
+# Note: GitHub Actions only runs scheduled workflows from the default branch,
+# so changes to this file must be merged to `main` before the cron takes effect.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"  # Mondays 13:00 UTC
+  workflow_dispatch:
+
+# Prevent overlap between a scheduled run and a manual `workflow_dispatch`
+# trigger. We do not cancel-in-progress because freshness runs are short and
+# we want both to complete (and report) if they happen to be queued together.
+concurrency:
+  group: dependency-freshness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  freshness:
+    name: Fresh resolve + mypy + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies (force fresh resolve)
+        run: uv sync --extra dev --refresh
+
+      - name: Show resolved versions
+        run: uv pip list
+
+      - name: Run mypy
+        run: uv run mypy src --exclude _version.py --exclude .venv
+
+      - name: Run unit tests
+        run: uv run pytest -q --no-cov
+
+      - name: Open or update tracking issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          # If an open issue with the `dependencies` + `ci` labels already exists,
+          # we add a comment instead of creating a duplicate. This keeps the
+          # issue tracker quiet during a sustained upstream outage while still
+          # making each weekly failure visible on the existing thread.
+          script: |
+            const date = new Date().toISOString().slice(0, 10);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const reproBlock = [
+              '```bash',
+              'bash bin/check-deps-fresh.sh',
+              '```',
+            ].join('\n');
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'dependencies,ci',
+              per_page: 100,
+            });
+            const tracking = existing.find(i =>
+              i.title.startsWith('Dependency freshness check failed')
+            );
+
+            if (tracking) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: tracking.number,
+                body: [
+                  `Freshness check failed again on ${date}.`,
+                  '',
+                  `Run details: ${runUrl}`,
+                  '',
+                  'To reproduce locally:',
+                  '',
+                  reproBlock,
+                ].join('\n'),
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Dependency freshness check failed (${date})`,
+                body: [
+                  'The scheduled freshness check failed against a freshly-resolved dependency tree on `main`.',
+                  '',
+                  'This typically means an upstream release (most often `pydeephaven`, `deephaven-server`, or `deephaven-coreplus-client`) introduced a breaking change.',
+                  '',
+                  `Run details: ${runUrl}`,
+                  '',
+                  'To reproduce locally:',
+                  '',
+                  reproBlock,
+                ].join('\n'),
+                labels: ['dependencies', 'ci'],
+              });
+            }

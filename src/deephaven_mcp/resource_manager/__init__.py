@@ -1,5 +1,4 @@
-"""
-Deephaven MCP Resource Management Public API.
+"""Deephaven MCP Resource Management Public API.
 
 This module defines the public API for resource management in Deephaven MCP. It re-exports
 core resource manager types, registries, session launchers, and utility functions from
@@ -14,13 +13,14 @@ Overview:
        configuration and cached for reuse.
 
     2. **Dynamic Sessions** (on-demand): Launch new Deephaven servers on-demand using
-       DynamicCommunitySessionManager with Docker or python. Automatically allocates ports,
+       DynamicCommunitySessionManager with Docker or Python. Automatically allocates ports,
        manages lifecycle, and handles cleanup.
 
 Exports - Session Managers:
-    - CommunitySessionManager: Abstract base class for Deephaven Community session managers.
-      Provides common functionality for both static and dynamic sessions. Not typically
-      instantiated directly - use StaticCommunitySessionManager or DynamicCommunitySessionManager.
+    - CommunitySessionManager: Common-functionality base class for Deephaven Community
+      session managers, providing the shared logic used by both static and dynamic
+      sessions. Concrete (not abstract) but **by convention** not instantiated
+      directly; use StaticCommunitySessionManager or DynamicCommunitySessionManager instead.
 
     - StaticCommunitySessionManager: Manages lifecycle of statically configured Deephaven
       Community sessions. Connects to pre-existing servers specified in configuration files.
@@ -42,14 +42,15 @@ Exports - Session Managers:
       for item caching, liveness checking, and async-safe resource management.
 
 Exports - Registries:
+    - BaseRegistry: Abstract generic base class for all session registries. Provides coroutine-safe
+      management of named async-closable items with lifecycle tracking (initialize/get/get_all/close).
+
     - CommunitySessionRegistry: Registry for all configured CommunitySessionManager instances.
       Provides centralized access to all community sessions loaded from configuration.
 
-    - CorePlusSessionFactoryRegistry: Registry for all configured CorePlusSessionFactoryManager
-      instances. Provides centralized access to all enterprise factory configurations.
-
-    - CombinedSessionRegistry: Combined registry that provides unified access to both
-      community and enterprise sessions. Simplifies code that needs to work with either type.
+    - EnterpriseSessionRegistry: Purpose-built registry for the DHE MCP server. Manages exactly
+      one enterprise system (factory), discovers PQ sessions asynchronously, and supports
+      mutation methods for MCP-created sessions.
 
 Exports - Session Launchers:
     - LaunchedSession: Abstract base class for launched sessions. Defines interface for
@@ -79,10 +80,29 @@ Exports - Enums:
       UNAUTHORIZED, MISCONFIGURED, and UNKNOWN. Used by managers to track connection health
       and determine when to recreate resources.
 
+Exports - Registry State:
+    - InitializationPhase: Enum representing the initialization phase of a registry.
+      Values: NOT_STARTED, PARTIAL, LOADING, COMPLETED, FAILED. Simple registries
+      jump directly to COMPLETED; complex registries (e.g. EnterpriseSessionRegistry)
+      progress through NOT_STARTED → PARTIAL → LOADING → COMPLETED, or fall to
+      FAILED on critical errors.
+
+    - RegistrySnapshot: Dataclass capturing a point-in-time snapshot of a registry's
+      state, including sessions, initialization phase, and any initialization errors.
+
+Exports - Instance Tracking:
+    - InstanceTracker: Tracks resources created by this MCP server instance (for
+      example dynamically launched Docker containers) so they can be cleaned up
+      if the server is forcibly terminated.
+
+    - cleanup_orphaned_resources: Remove resources left behind by a previous,
+      abnormally-terminated server instance that matches this instance's tracking
+      label.
+
 Features:
     - Coroutine-safe item cache keyed by name, protected by asyncio.Lock
     - Automatic item reuse with liveness checking and stale resource cleanup
-    - Dynamic session launching via Docker containers or pip-installed processes
+    - Dynamic session launching via Docker containers or Python-based processes
     - Native async file I/O for secure certificate loading (TLS, client certs/keys)
     - Health checking for dynamically launched sessions with configurable timeouts
     - Utility functions for port allocation and cryptographic token generation
@@ -105,7 +125,9 @@ Dependencies:
     - aiofiles: For async file I/O (certificate and key file loading)
     - aiohttp: For session health checking (HTTP endpoint polling)
     - Docker (optional): Required for dynamic session launching via docker
-    - deephaven-server (optional): Required for dynamic session launching via python
+    - deephaven-server: Base dependency providing the ``deephaven`` executable used for
+      dynamic session launching via the python method (a custom venv target must have it
+      installed too)
 
 Usage Example - Static Sessions:
     >>> from deephaven_mcp.resource_manager import CommunitySessionRegistry
@@ -149,6 +171,8 @@ Usage Example - Dynamic Sessions:
     >>> await launched.stop()
 """
 
+from ._evictor import EvictionTimeouts, Evictor
+from ._instance_tracker import InstanceTracker, cleanup_orphaned_resources
 from ._launcher import (
     DockerLaunchedSession,
     LaunchedSession,
@@ -162,30 +186,40 @@ from ._manager import (
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
     ResourceLivenessStatus,
+    SessionManager,
+    SessionOrigin,
     StaticCommunitySessionManager,
     SystemType,
 )
 from ._registry import (
-    CommunitySessionRegistry,
-    CorePlusSessionFactoryRegistry,
+    BaseRegistry,
     InitializationPhase,
     RegistrySnapshot,
 )
-from ._registry_combined import CombinedSessionRegistry
+from ._registry_community import CommunitySessionRegistry
+from ._registry_enterprise import EnterpriseSessionRegistry
+from ._registry_multi import MultiSystemRegistry, least_advanced_phase
+from ._session_id import QualifiedSessionId, SessionId
 from ._utils import find_available_port, generate_auth_token
 
 __all__ = [
     "SystemType",
+    "SessionOrigin",
     "ResourceLivenessStatus",
     "BaseItemManager",
+    "SessionManager",
     "CommunitySessionManager",
     "StaticCommunitySessionManager",
     "DynamicCommunitySessionManager",
     "EnterpriseSessionManager",
     "CorePlusSessionFactoryManager",
+    "BaseRegistry",
     "CommunitySessionRegistry",
-    "CorePlusSessionFactoryRegistry",
-    "CombinedSessionRegistry",
+    "EnterpriseSessionRegistry",
+    "MultiSystemRegistry",
+    "least_advanced_phase",
+    "EvictionTimeouts",
+    "Evictor",
     "InitializationPhase",
     "RegistrySnapshot",
     "LaunchedSession",
@@ -194,4 +228,8 @@ __all__ = [
     "launch_session",
     "find_available_port",
     "generate_auth_token",
+    "InstanceTracker",
+    "cleanup_orphaned_resources",
+    "SessionId",
+    "QualifiedSessionId",
 ]

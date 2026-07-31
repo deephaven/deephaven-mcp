@@ -1,0 +1,451 @@
+"""Tests for :mod:`deephaven_mcp._pydantic`."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+import pytest
+from pydantic import SecretStr, ValidationError, model_validator
+
+from deephaven_mcp._exceptions import ConfigurationError
+from deephaven_mcp._pydantic import (
+    RedactableSchema,
+    StrictSchema,
+    as_configuration_error,
+    dump_redacted,
+    format_error_details,
+    format_validation_error,
+    log_redacted,
+    reconcile_filename_stem,
+)
+from deephaven_mcp._redaction import REDACTED
+
+# ---------------------------------------------------------------------------
+# StrictSchema
+# ---------------------------------------------------------------------------
+
+
+class _Strict(StrictSchema):
+    name: str
+
+
+def test_strict_model_rejects_unknown_field():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        _Strict.model_validate({"name": "x", "extra": 1})
+
+
+def test_strict_model_is_frozen():
+    obj = _Strict(name="x")
+    with pytest.raises(ValidationError):
+        obj.name = "y"  # type: ignore[misc]
+
+
+def test_strict_model_accepts_valid_input():
+    obj = _Strict.model_validate({"name": "x"})
+    assert obj.name == "x"
+
+
+# ---------------------------------------------------------------------------
+# RedactableSchema
+# ---------------------------------------------------------------------------
+
+
+class _WithSecret(RedactableSchema):
+    name: str
+    token: SecretStr
+    optional_token: SecretStr | None = None
+    legacy_optional: Optional[SecretStr] = None  # noqa: UP045 - testing Union form
+
+
+def test_redactable_dump_without_context_keeps_secret_wrapper():
+    obj = _WithSecret(name="x", token=SecretStr("shh"))
+    # Default pydantic SecretStr dump yields the mask string, not REDACTED.
+    dumped = obj.model_dump(mode="json")
+    assert dumped["token"] == "**********"
+    assert dumped["token"] != REDACTED
+
+
+def test_redactable_dump_with_redact_context_emits_REDACTED():
+    obj = _WithSecret(name="x", token=SecretStr("shh"))
+    dumped = obj.model_dump(mode="json", context={"redact": True})
+    assert dumped["token"] == REDACTED
+    assert dumped["name"] == "x"
+
+
+def test_redactable_redacts_optional_secret_when_set():
+    obj = _WithSecret(name="x", token=SecretStr("a"), optional_token=SecretStr("b"))
+    dumped = obj.model_dump(mode="json", context={"redact": True})
+    assert dumped["optional_token"] == REDACTED
+
+
+def test_redactable_passes_through_unset_optional_secret():
+    obj = _WithSecret(name="x", token=SecretStr("a"))
+    dumped = obj.model_dump(mode="json", context={"redact": True})
+    assert dumped["optional_token"] is None
+
+
+def test_redactable_handles_legacy_optional_union_form():
+    obj = _WithSecret(
+        name="x",
+        token=SecretStr("a"),
+        legacy_optional=SecretStr("b"),
+    )
+    dumped = obj.model_dump(mode="json", context={"redact": True})
+    assert dumped["legacy_optional"] == REDACTED
+
+
+def test_redactable_handles_pep604_union_secret_not_first_arg():
+    """PEP 604 ``None | SecretStr`` (SecretStr in 2nd position) must redact.
+
+    Regression for a latent secret-detection bug: the recursion fell
+    through ``args[0]`` only, so any non-first-position ``SecretStr``
+    in a ``|`` union was silently missed.
+    """
+
+    class _Reversed(RedactableSchema):
+        name: str
+        # SecretStr appears AFTER None — the bug missed this.
+        token: None | SecretStr = None
+
+    obj = _Reversed(name="x", token=SecretStr("shh"))
+    dumped = obj.model_dump(mode="json", context={"redact": True})
+    assert dumped["token"] == REDACTED
+
+
+def test_annotation_contains_secret_detects_pep604_unions():
+    """Direct unit test on ``_annotation_contains_secret``: all argument positions count."""
+    from deephaven_mcp._pydantic import _annotation_contains_secret
+
+    assert _annotation_contains_secret(SecretStr) is True
+    assert _annotation_contains_secret(SecretStr | None) is True
+    assert _annotation_contains_secret(None | SecretStr) is True
+    assert _annotation_contains_secret(str | SecretStr) is True
+    assert _annotation_contains_secret(SecretStr | str | None) is True
+    assert _annotation_contains_secret(str | int) is False
+    assert _annotation_contains_secret(str) is False
+
+
+def test_annotation_contains_secret_detects_secret_in_annotated_pep604_union():
+    """``Annotated[str | SecretStr, ...]`` must be detected as secret."""
+    from typing import Annotated
+
+    from pydantic import Field
+
+    from deephaven_mcp._pydantic import _annotation_contains_secret
+
+    ann = Annotated[str | SecretStr, Field(description="x")]
+    assert _annotation_contains_secret(ann) is True
+
+
+def test_redactable_context_false_keeps_default_dump():
+    obj = _WithSecret(name="x", token=SecretStr("shh"))
+    dumped = obj.model_dump(mode="json", context={"redact": False})
+    assert dumped["token"] == "**********"
+
+
+def test_redactable_dump_with_reveal_emits_plaintext():
+    obj = _WithSecret(name="x", token=SecretStr("shh"))
+    dumped = obj.model_dump(mode="json", context={"reveal": True})
+    assert dumped["token"] == "shh"
+    assert dumped["name"] == "x"
+
+
+def test_redactable_dump_with_reveal_handles_none():
+    obj = _WithSecret(name="x", token=SecretStr("shh"))
+    dumped = obj.model_dump(mode="json", context={"reveal": True})
+    assert dumped["optional_token"] is None
+
+
+def test_redactable_dump_with_reveal_propagates_to_nested():
+    class _Outer(RedactableSchema):
+        inner: _WithSecret
+
+    obj = _Outer(inner=_WithSecret(name="x", token=SecretStr("nested-secret")))
+    dumped = obj.model_dump(mode="json", context={"reveal": True})
+    assert dumped["inner"]["token"] == "nested-secret"
+
+
+def test_redactable_non_secret_fields_untouched():
+    class _Nested(RedactableSchema):
+        name: str
+        secret: SecretStr
+
+    obj = _Nested(name="alice", secret=SecretStr("pw"))
+    dumped = obj.model_dump(mode="json", context={"redact": True})
+    assert dumped["name"] == "alice"
+    assert dumped["secret"] == REDACTED
+
+
+# ---------------------------------------------------------------------------
+# format_validation_error
+# ---------------------------------------------------------------------------
+
+
+def test_format_validation_error_single():
+    with pytest.raises(ValidationError) as exc:
+        _Strict.model_validate({"name": 1})
+    msg = format_validation_error("test", exc.value)
+    assert msg.startswith("test: ")
+    assert "name" in msg
+
+
+def test_format_validation_error_multiple_errors_joined():
+    with pytest.raises(ValidationError) as exc:
+        _Strict.model_validate({})  # missing 'name'
+    msg = format_validation_error("ctx", exc.value)
+    assert "name" in msg
+
+
+def test_format_validation_error_nested_loc_is_dotted():
+    class _Nested(StrictSchema):
+        inner: _Strict
+
+    with pytest.raises(ValidationError) as exc:
+        _Nested.model_validate({"inner": {"name": 1}})
+    msg = format_validation_error("ctx", exc.value)
+    assert "inner.name" in msg
+
+
+def test_format_validation_error_uses_root_for_empty_loc():
+    # Trigger a model-level error so loc tuple is empty.
+    class _Custom(StrictSchema):
+        x: int = 1
+
+        @model_validator(mode="after")
+        def _check(self) -> "_Custom":
+            raise ValueError("nope")
+
+    with pytest.raises(ValidationError) as exc:
+        _Custom.model_validate({})
+    msg = format_validation_error("ctx", exc.value)
+    assert "ctx: " in msg
+    # model-level errors get loc=() per pydantic; the formatter labels them <root>.
+    assert "<root>" in msg or "nope" in msg
+
+
+# ---------------------------------------------------------------------------
+# format_error_details
+# ---------------------------------------------------------------------------
+
+
+def test_format_error_details_single():
+    msg = format_error_details("ctx", [{"loc": ("port",), "msg": "bad int"}])
+    assert msg == "ctx: port: bad int"
+
+
+def test_format_error_details_multiple_joined_with_semicolons():
+    msg = format_error_details(
+        "ctx",
+        [
+            {"loc": ("a",), "msg": "first"},
+            {"loc": ("b", "c"), "msg": "second"},
+        ],
+    )
+    assert msg == "ctx: a: first; b.c: second"
+
+
+def test_format_error_details_nested_loc_is_dotted_with_indices():
+    # Integer loc segments (list indices) render as bare numbers.
+    msg = format_error_details("ctx", [{"loc": ("items", 0, "x"), "msg": "bad"}])
+    assert msg == "ctx: items.0.x: bad"
+
+
+def test_format_error_details_empty_loc_labeled_root():
+    msg = format_error_details("ctx", [{"loc": (), "msg": "model-level"}])
+    assert msg == "ctx: <root>: model-level"
+
+
+def test_format_error_details_empty_errors_is_bare_context():
+    msg = format_error_details("ctx", [])
+    assert msg == "ctx: "
+
+
+def test_format_validation_error_delegates_to_format_error_details():
+    # The two formatters must render an exception's errors identically.
+    with pytest.raises(ValidationError) as exc:
+        _Strict.model_validate({"name": 1})
+    assert format_validation_error("ctx", exc.value) == format_error_details(
+        "ctx", exc.value.errors()
+    )
+
+
+# ---------------------------------------------------------------------------
+# as_configuration_error
+# ---------------------------------------------------------------------------
+
+
+def test_as_configuration_error_returns_configurationerror():
+    try:
+        _Strict.model_validate({"name": 1})
+    except ValidationError as exc:
+        cfg = as_configuration_error("ctx", exc)
+        assert isinstance(cfg, ConfigurationError)
+        assert "ctx" in str(cfg)
+
+
+# Note: ``resolve_secret_or_env`` and ``read_pem_text`` were removed as
+# part of the templating migration. Env-var and file indirection are now
+# expressed in the source JSON as ``${env:VAR}`` / ``${file:PATH}`` and
+# resolved by :mod:`deephaven_mcp.config._templating` at config-load time; the
+# direct test coverage for the templating engine lives in
+# ``tests/config/test__templating.py``.
+
+
+# ---------------------------------------------------------------------------
+# reconcile_filename_stem
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileFilenameStem:
+    """Tests for the shared filename-stem reconciliation helper."""
+
+    _KW = dict(declared_field="session_name", model_label="CommunitySessionConfig")
+
+    def test_non_dict_passes_through(self) -> None:
+        assert reconcile_filename_stem("not-a-dict", **self._KW) == "not-a-dict"
+        assert reconcile_filename_stem(None, **self._KW) is None
+        assert reconcile_filename_stem(42, **self._KW) == 42
+
+    def test_valid_name_no_declared_field(self) -> None:
+        out = reconcile_filename_stem({"name": "alpha"}, **self._KW)
+        assert out == {"name": "alpha"}
+
+    def test_valid_name_matching_declared_field_pops_it(self) -> None:
+        out = reconcile_filename_stem(
+            {"name": "alpha", "session_name": "alpha", "extra": 1}, **self._KW
+        )
+        assert out == {"name": "alpha", "extra": 1}
+
+    def test_mismatched_declared_field_rejected(self) -> None:
+        with pytest.raises(ValueError, match="does not match"):
+            reconcile_filename_stem(
+                {"name": "alpha", "session_name": "beta"}, **self._KW
+            )
+
+    def test_missing_name_rejected_with_new_wording(self) -> None:
+        with pytest.raises(ValueError, match="'name' is required"):
+            reconcile_filename_stem({}, **self._KW)
+
+    def test_missing_name_message_carries_model_label(self) -> None:
+        with pytest.raises(ValueError, match="CommunitySessionConfig"):
+            reconcile_filename_stem({}, **self._KW)
+
+    def test_empty_string_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="'name' is required"):
+            reconcile_filename_stem({"name": ""}, **self._KW)
+
+    def test_non_string_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="'name' is required"):
+            reconcile_filename_stem({"name": 42}, **self._KW)
+        with pytest.raises(ValueError, match="'name' is required"):
+            reconcile_filename_stem({"name": ["alpha"]}, **self._KW)
+
+    def test_returned_dict_is_a_copy(self) -> None:
+        data = {"name": "alpha", "session_name": "alpha"}
+        out = reconcile_filename_stem(data, **self._KW)
+        assert out is not data
+        # Mutating the result must not affect the input.
+        out["other"] = 1
+        assert "other" not in data
+
+    def test_works_for_enterprise_declared_field(self) -> None:
+        out = reconcile_filename_stem(
+            {"name": "prod", "system_name": "prod"},
+            declared_field="system_name",
+            model_label="EnterpriseSystemConfig",
+        )
+        assert out == {"name": "prod"}
+
+
+# ---------------------------------------------------------------------------
+# dump_redacted
+# ---------------------------------------------------------------------------
+
+
+class _SampleLogModel(RedactableSchema):
+    name: str
+    token: SecretStr
+
+
+def test_dump_redacted_replaces_secret_with_sentinel() -> None:
+    """``SecretStr`` fields are emitted as the project's ``REDACTED`` sentinel."""
+    model = _SampleLogModel(name="alice", token=SecretStr("shh"))
+    dumped = dump_redacted(model)
+    assert dumped == {"name": "alice", "token": REDACTED}
+
+
+def test_dump_redacted_emits_json_safe_values() -> None:
+    """``mode="json"`` is pinned so non-JSON Pydantic types round-trip cleanly.
+
+    Regression guard: callers that forget ``mode="json"`` would leak
+    raw ``SecretStr`` instances (or other Pydantic-native types) into
+    output destined for JSON serialization.
+    """
+    model = _SampleLogModel(name="alice", token=SecretStr("shh"))
+    dumped = dump_redacted(model)
+    # The ``token`` value is a plain ``str`` (the sentinel), not a SecretStr.
+    assert isinstance(dumped["token"], str)
+
+
+def test_dump_redacted_passes_through_extra_kwargs() -> None:
+    """``exclude``/``exclude_none``/etc. forward to ``model_dump`` verbatim."""
+    model = _SampleLogModel(name="alice", token=SecretStr("shh"))
+    dumped = dump_redacted(model, exclude={"token"})
+    assert dumped == {"name": "alice"}
+
+
+def test_dump_redacted_rejects_mode_override() -> None:
+    """Passing ``mode=`` defeats the redaction protocol; reject it loudly."""
+    model = _SampleLogModel(name="x", token=SecretStr("y"))
+    with pytest.raises(TypeError, match="'mode' is reserved"):
+        dump_redacted(model, mode="python")
+
+
+def test_dump_redacted_rejects_context_override() -> None:
+    """Passing ``context=`` defeats the redaction protocol; reject it loudly."""
+    model = _SampleLogModel(name="x", token=SecretStr("y"))
+    with pytest.raises(TypeError, match="'context' is reserved"):
+        dump_redacted(model, context={"redact": False})
+
+
+# ---------------------------------------------------------------------------
+# log_redacted
+# ---------------------------------------------------------------------------
+
+
+def test_log_redacted_redacts_secrets(caplog: pytest.LogCaptureFixture) -> None:
+    """``redact=True`` context turns ``SecretStr`` fields into the sentinel."""
+    model = _SampleLogModel(name="alice", token=SecretStr("shh"))
+    logger = logging.getLogger("deephaven_mcp.tests.log_redacted")
+
+    with caplog.at_level("INFO", logger=logger.name):
+        log_redacted(model, label="label", logger=logger)
+
+    messages = "\n".join(rec.message for rec in caplog.records)
+    assert "[label]" in messages
+    assert "[REDACTED]" in messages
+    assert "shh" not in messages
+    assert "alice" in messages
+
+
+def test_log_redacted_falls_back_when_json_dump_fails(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A serializer error triggers the warning + plain-repr fallback."""
+    model = _SampleLogModel(name="x", token=SecretStr("y"))
+    logger = logging.getLogger("deephaven_mcp.tests.log_redacted_fallback")
+
+    def _broken(*_args: object, **_kwargs: object) -> None:
+        raise TypeError("nope")
+
+    monkeypatch.setattr(model.__class__, "model_dump", _broken, raising=True)
+
+    with caplog.at_level("INFO", logger=logger.name):
+        log_redacted(model, label="fallback", logger=logger)
+
+    warnings = [rec.message for rec in caplog.records if rec.levelname == "WARNING"]
+    infos = [rec.message for rec in caplog.records if rec.levelname == "INFO"]
+    assert any("Failed to format config as JSON" in m for m in warnings)
+    assert any("Loaded configuration:" in m for m in infos)

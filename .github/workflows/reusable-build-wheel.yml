@@ -7,7 +7,7 @@
 #     build:
 #       uses: ./.github/workflows/reusable-build-wheel.yml
 #       with:
-#         python-version: "3.10"
+#         python-version: "3.12"
 #
 # This workflow does NOT publish to PyPI. Use a separate publish workflow for that purpose.
 

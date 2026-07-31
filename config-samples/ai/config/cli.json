@@ -1,0 +1,32 @@
+{
+  "output": {
+    "format": "json"
+  },
+  "daemon": {
+    "auto_start": true,
+    "reuse": {
+      "version": "refuse",
+      "venv": "refuse",
+      "fingerprint": "warn"
+    },
+    "timeouts": {
+      "startup_deadline_seconds": 30,
+      "kill_after_seconds": 10
+    }
+  },
+  "request": {
+    "timeouts": {
+      "default_seconds": 60
+    }
+  },
+  "docs": {
+    "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    "timeouts": {
+      "request_seconds": 120
+    }
+  },
+  "context": {
+    "enabled": true,
+    "confirm_destructive": false
+  }
+}

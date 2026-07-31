@@ -73,6 +73,7 @@ Thread Safety:
 """
 
 import logging
+from typing import Literal, assert_never, get_args
 
 import pyarrow as pa
 
@@ -83,6 +84,26 @@ from ._xml import format_xml
 from ._yaml import format_yaml
 
 _LOGGER = logging.getLogger(__name__)
+
+TableFormat = Literal[
+    "json-row",
+    "json-column",
+    "csv",
+    "markdown-table",
+    "markdown-kv",
+    "yaml",
+    "xml",
+    "optimize-rendering",
+    "optimize-accuracy",
+    "optimize-cost",
+    "optimize-speed",
+]
+"""Closed vocabulary of table-format names accepted by :func:`format_table_data`.
+
+Annotate MCP tool ``format`` parameters with this alias so the valid values
+surface in the tool's inputSchema. ``VALID_FORMATS`` is derived from this
+alias via ``typing.get_args``.
+"""
 
 # Format registry - maps format names to formatter functions
 _FORMATTERS = {
@@ -95,14 +116,10 @@ _FORMATTERS = {
     "xml": format_xml,
 }
 
-VALID_FORMATS: set[str] = set(_FORMATTERS.keys()) | {
-    "optimize-rendering",
-    "optimize-accuracy",
-    "optimize-cost",
-    "optimize-speed",
-}
+VALID_FORMATS: set[str] = set(get_args(TableFormat))
 """Valid format names for table data formatting.
 
+Runtime set of the names in ``TableFormat``, derived via ``typing.get_args``.
 This set contains all supported format types: 7 explicit formats and 4 optimization strategies.
 Total: 11 valid format names.
 
@@ -130,14 +147,14 @@ Example:
 
 def format_table_data(
     arrow_table: pa.Table,
-    format_type: str,
+    format_type: TableFormat,
 ) -> tuple[str, object]:
     """
     Convert Arrow table to specified format.
 
     Args:
         arrow_table (pa.Table): PyArrow Table to format
-        format_type (str): Format name or optimization strategy. Valid options:
+        format_type (TableFormat): Format name or optimization strategy. Valid options:
             - "optimize-rendering": Always use markdown-table (best for AI agent table display)
             - "optimize-accuracy": Always use markdown-kv (most accurate format)
             - "optimize-cost": Always use most token-efficient format (csv)
@@ -172,7 +189,7 @@ def format_table_data(
         >>> format, data = format_table_data(table, "csv")
         >>> # format = "csv"
     """
-    # Validate format
+    # Validate format (defense for untyped callers)
     if format_type not in VALID_FORMATS:
         valid_list = ", ".join(sorted(VALID_FORMATS))
         _LOGGER.error(
@@ -206,12 +223,12 @@ def format_table_data(
     return actual_format, data
 
 
-def _resolve_format(format_type: str) -> tuple[str, str]:
+def _resolve_format(format_type: TableFormat) -> tuple[str, str]:
     """
     Resolve optimization strategy to concrete format name.
 
     Args:
-        format_type (str): Format name or optimization strategy
+        format_type (TableFormat): Format name or optimization strategy.
 
     Returns:
         tuple[str, str]: (actual_format, reason)
@@ -219,24 +236,30 @@ def _resolve_format(format_type: str) -> tuple[str, str]:
             - reason (str): Human-readable explanation of why this format was chosen.
               Always non-empty. Examples: "optimize-cost strategy", "explicit format: csv"
 
-    Note:
-        This function assumes format_type has already been validated against VALID_FORMATS.
+    Raises:
+        AssertionError: If format_type is not a member of ``TableFormat``.
     """
-    if format_type == "optimize-rendering":
-        return "markdown-table", "optimize-rendering strategy"
+    match format_type:
+        case "optimize-rendering":
+            return "markdown-table", "optimize-rendering strategy"
+        case "optimize-accuracy":
+            return "markdown-kv", "optimize-accuracy strategy"
+        case "optimize-cost":
+            return "csv", "optimize-cost strategy"
+        case "optimize-speed":
+            return "json-column", "optimize-speed strategy"
+        case (
+            "json-row"
+            | "json-column"
+            | "csv"
+            | "markdown-table"
+            | "markdown-kv"
+            | "yaml"
+            | "xml"
+        ):
+            return format_type, f"explicit format: {format_type}"
+        case unexpected:
+            assert_never(unexpected)
 
-    elif format_type == "optimize-accuracy":
-        return "markdown-kv", "optimize-accuracy strategy"
 
-    elif format_type == "optimize-cost":
-        return "csv", "optimize-cost strategy"
-
-    elif format_type == "optimize-speed":
-        return "json-column", "optimize-speed strategy"
-
-    else:
-        # Explicit format specified
-        return format_type, f"explicit format: {format_type}"
-
-
-__all__ = ["format_table_data", "VALID_FORMATS"]
+__all__ = ["format_table_data", "TableFormat", "VALID_FORMATS"]

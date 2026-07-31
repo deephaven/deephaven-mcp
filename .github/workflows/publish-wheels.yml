@@ -9,7 +9,7 @@ jobs:
   build:
     uses: ./.github/workflows/reusable-build-wheel.yml
     with:
-      python-version: "3.11"
+      python-version: "3.12"
 
   publish:
     needs: build

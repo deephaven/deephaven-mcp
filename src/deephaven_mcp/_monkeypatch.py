@@ -30,6 +30,8 @@ from google.cloud import logging as gcp_logging
 from google.cloud.logging_v2.handlers import CloudLoggingHandler
 from uvicorn.protocols.http.httptools_impl import RequestResponseCycle
 
+from deephaven_mcp._exception_utils import walk_exceptions
+
 
 def _setup_gcp_logging() -> logging.Logger:
     """
@@ -85,10 +87,9 @@ def _get_gcp_logger() -> logging.Logger:
 def _is_client_disconnect_error(exc: BaseException) -> bool:
     """Check if exception indicates client disconnect rather than server error.
 
-    This function recursively examines exceptions to detect anyio.ClosedResourceError,
-    which typically indicates that a client has disconnected during request processing.
-    It handles direct exceptions, ExceptionGroups, and nested exceptions via __cause__
-    and __context__ attributes.
+    Detects :class:`anyio.ClosedResourceError` anywhere in the exception
+    tree — as the exception itself, inside an exception group, or behind
+    ``__cause__`` / ``__context__`` links.
 
     Args:
         exc: The exception to examine for client disconnect indicators.
@@ -100,24 +101,10 @@ def _is_client_disconnect_error(exc: BaseException) -> bool:
         Client disconnects are expected behavior and should be logged at DEBUG level
         rather than ERROR level to reduce noise in production logs.
     """
-    # Direct ClosedResourceError
-    if isinstance(exc, anyio.ClosedResourceError):
-        return True
-
-    # ExceptionGroup containing ClosedResourceError (compatible with Python 3.9+)
-    # Use hasattr to detect exception groups for broader Python version compatibility
-    if hasattr(exc, "exceptions"):
-        for sub_exc in exc.exceptions:
-            if _is_client_disconnect_error(sub_exc):
-                return True
-
-    # Check nested __cause__ and __context__
-    if exc.__cause__ and _is_client_disconnect_error(exc.__cause__):
-        return True
-    if exc.__context__ and _is_client_disconnect_error(exc.__context__):
-        return True
-
-    return False
+    return any(
+        isinstance(e, anyio.ClosedResourceError)
+        for e in walk_exceptions(exc, follow_context=True)
+    )
 
 
 def monkeypatch_uvicorn_exception_handling() -> None:

@@ -10,8 +10,9 @@ def test_imports_and_all():
         CommunitySessionManager,
         CommunitySessionRegistry,
         CorePlusSessionFactoryManager,
-        CorePlusSessionFactoryRegistry,
         EnterpriseSessionManager,
+        EnterpriseSessionRegistry,
+        SessionManager,
     )
 
     # __all__ should be defined and contain all the public symbols
@@ -19,16 +20,22 @@ def test_imports_and_all():
 
     expected_all = [
         "BaseItemManager",
-        "CombinedSessionRegistry",
+        "BaseRegistry",
+        "EnterpriseSessionRegistry",
+        "EvictionTimeouts",
+        "Evictor",
         "InitializationPhase",
+        "MultiSystemRegistry",
+        "least_advanced_phase",
         "RegistrySnapshot",
+        "SessionManager",
         "CommunitySessionManager",
         "StaticCommunitySessionManager",
         "DynamicCommunitySessionManager",
         "EnterpriseSessionManager",
         "CorePlusSessionFactoryManager",
         "CommunitySessionRegistry",
-        "CorePlusSessionFactoryRegistry",
+        "SessionOrigin",
         "ResourceLivenessStatus",
         "SystemType",
         "LaunchedSession",
@@ -37,16 +44,21 @@ def test_imports_and_all():
         "launch_session",
         "find_available_port",
         "generate_auth_token",
+        "InstanceTracker",
+        "cleanup_orphaned_resources",
+        "SessionId",
+        "QualifiedSessionId",
     ]
     assert sorted(mod.__all__) == sorted(expected_all)
 
     # each symbol should be the correct object from the submodules
     assert mod.BaseItemManager is BaseItemManager
+    assert mod.SessionManager is SessionManager
     assert mod.CommunitySessionManager is CommunitySessionManager
     assert mod.EnterpriseSessionManager is EnterpriseSessionManager
     assert mod.CorePlusSessionFactoryManager is CorePlusSessionFactoryManager
     assert mod.CommunitySessionRegistry is CommunitySessionRegistry
-    assert mod.CorePlusSessionFactoryRegistry is CorePlusSessionFactoryRegistry
+    assert mod.EnterpriseSessionRegistry is EnterpriseSessionRegistry
 
     # star import should bring in only expected symbols
     imported = {}

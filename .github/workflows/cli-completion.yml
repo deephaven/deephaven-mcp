@@ -1,0 +1,53 @@
+# Exercises dhcli shell tab completion in every supported shell.
+#
+# Sources the actual `dhcli self completion <shell>` output in real bash,
+# zsh, and fish processes and asserts a completion request answers
+# (scripts/test_shell_completion.sh). --require makes a missing or
+# too-old shell a hard failure, so an image change cannot silently
+# shrink coverage. The shell-independent protocol assertions live in
+# tests/cli/_commands/test_self_cmd.py and run with the unit suite;
+# this workflow covers the real-shell layer only, so it needs no Java
+# or worker (unlike cli-e2e-community.yml).
+
+name: CLI Shell Completion
+
+on:
+  push:
+    branches: ["main", "mcp2"]
+  pull_request:
+    branches: ["main", "mcp2"]
+  workflow_dispatch:
+
+jobs:
+  cli-completion:
+    name: dhcli self completion (bash, zsh, fish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install shells
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh fish
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Verify dhcli entry point
+        run: uv run dhcli --help
+
+      - name: Exercise completion in every supported shell
+        run: |
+          source .venv/bin/activate
+          scripts/test_shell_completion.sh --require bash,zsh,fish

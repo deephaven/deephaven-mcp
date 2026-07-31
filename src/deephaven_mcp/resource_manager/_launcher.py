@@ -73,11 +73,13 @@ import os
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal
+from typing import Literal, override
 
 import aiohttp
 
 from deephaven_mcp._exceptions import SessionLaunchError
+from deephaven_mcp._redaction import REDACTED
+from deephaven_mcp.sessions import VALID_LAUNCH_METHODS, LaunchMethod
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +96,7 @@ def _redact_auth_token_from_command(cmd: list[str], auth_token: str | None) -> s
     """
     cmd_str = " ".join(cmd)
     if auth_token:
-        cmd_str = cmd_str.replace(auth_token, "[REDACTED]")
+        cmd_str = cmd_str.replace(auth_token, REDACTED)
     return cmd_str
 
 
@@ -228,7 +230,7 @@ class LaunchedSession(ABC):
     method factory and stop() for cleanup.
 
     Attributes:
-        launch_method (Literal["docker", "python"]): How the session was launched.
+        launch_method (LaunchMethod): How the session was launched.
         host (str): The host the session is listening on (typically "localhost").
         port (int): The port the session is listening on.
         auth_type (Literal["anonymous", "psk"]): Authentication type.
@@ -237,7 +239,7 @@ class LaunchedSession(ABC):
 
     def __init__(
         self,
-        launch_method: Literal["docker", "python"],
+        launch_method: LaunchMethod,
         host: str,
         port: int,
         auth_type: Literal["anonymous", "psk"],
@@ -250,7 +252,7 @@ class LaunchedSession(ABC):
         are only checked statically by type checkers.
 
         Args:
-            launch_method (Literal["docker", "python"]): How the session was launched.
+            launch_method (LaunchMethod): How the session was launched.
                 Must be exactly "docker" or "python" (runtime validated).
             host (str): The host the session is listening on (typically "localhost").
             port (int): The port the session is listening on.
@@ -267,9 +269,10 @@ class LaunchedSession(ABC):
                 - auth_type="anonymous" but auth_token is provided
         """
         # Validate launch_method (runtime check, Literal is only static)
-        if launch_method not in ("docker", "python"):
+        if launch_method not in VALID_LAUNCH_METHODS:
+            valid_options = ", ".join(f"'{m}'" for m in sorted(VALID_LAUNCH_METHODS))
             raise ValueError(
-                f"launch_method must be 'docker' or 'python', got '{launch_method}'"
+                f"launch_method must be one of {valid_options}, got '{launch_method}'"
             )
 
         # Validate auth_type (runtime check, Literal is only static)
@@ -361,21 +364,18 @@ class LaunchedSession(ABC):
         pass  # pragma: no cover
 
     def _check_process_crashed(self) -> bool:
-        """Check if Python process has crashed (for PythonLaunchedSession only).
+        """Check whether the underlying process has crashed.
+
+        The base implementation always returns ``False`` because most
+        :class:`LaunchedSession` subclasses (notably
+        :class:`DockerLaunchedSession`) do not own a local process whose
+        exit can be inspected synchronously. Subclasses that do (e.g.
+        :class:`PythonLaunchedSession`) override this to return ``True``
+        once their process has exited.
 
         Returns:
-            bool: True if process has crashed, False if still running or not applicable.
-
-        Note:
-            asyncio.subprocess.Process automatically updates returncode when the
-            process exits, so we don't need to call poll() like subprocess.Popen.
+            bool: ``True`` if the process has exited, ``False`` otherwise.
         """
-        if hasattr(self, "process") and self.process.returncode is not None:
-            _LOGGER.error(
-                f"[_launcher:LaunchedSession] Process terminated during health check "
-                f"with exit code {self.process.returncode}"
-            )
-            return True
         return False
 
     async def wait_until_ready(
@@ -754,7 +754,7 @@ class DockerLaunchedSession(LaunchedSession):
                         f"  1. Install/start Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
                         f"     - Install: pip install deephaven-server\n"
-                        f'     - Configure: Set launch_method to "python" in deephaven_mcp.json\n'
+                        f'     - Configure: Set launch_method to "python" in community/settings.json in your configuration directory\n'
                         f"Original error: {error_msg}"
                     )
                 elif (
@@ -767,7 +767,7 @@ class DockerLaunchedSession(LaunchedSession):
                         f"  1. Install Docker: https://docker.com/get-started\n"
                         f"  2. Use Python launch method instead:\n"
                         f"     - Install: pip install deephaven-server\n"
-                        f'     - Configure: Set launch_method to "python" in deephaven_mcp.json\n'
+                        f'     - Configure: Set launch_method to "python" in community/settings.json in your configuration directory\n'
                         f"Original error: {error_msg}"
                     )
                 else:
@@ -834,7 +834,17 @@ class DockerLaunchedSession(LaunchedSession):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await kill_process.communicate()
+                kill_stdout, kill_stderr = await kill_process.communicate()
+                if kill_process.returncode != 0:
+                    kill_error_msg = (
+                        kill_stderr.decode() if kill_stderr else "Unknown error"
+                    )
+                    raise SessionLaunchError(
+                        f"Failed to stop Docker container {self.container_id[:12]}: "
+                        f"'docker stop' failed ({error_msg!r}) and 'docker kill' "
+                        f"failed with return code {kill_process.returncode}: "
+                        f"{kill_error_msg!r}"
+                    )
 
             _LOGGER.info(
                 f"[_launcher:DockerLaunchedSession] Successfully stopped container {self.container_id[:12]}"
@@ -863,6 +873,10 @@ class PythonLaunchedSession(LaunchedSession):
         auth_token (str | None): Authentication token for PSK auth (inherited from LaunchedSession).
         process (asyncio.subprocess.Process): The subprocess running the Deephaven server.
         _stopped (bool): Internal flag tracking whether stop() has been called (for idempotency).
+        _background_tasks (set[asyncio.Task[None]]): Strong references to drain
+            tasks reading stdout/stderr. Each task removes itself from the set
+            via ``add_done_callback(self._background_tasks.discard)``; holding
+            the strong reference keeps the task alive until completion.
     """
 
     def __init__(
@@ -894,6 +908,23 @@ class PythonLaunchedSession(LaunchedSession):
 
         self.process = process
         self._stopped = False  # Track if stop() has been called
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
+    @override
+    def _check_process_crashed(self) -> bool:
+        """Return ``True`` once the launched Python subprocess has exited.
+
+        ``asyncio.subprocess.Process`` updates ``returncode`` automatically
+        when the process exits, so a non-``None`` ``returncode`` is the
+        single source of truth here.
+        """
+        if self.process.returncode is not None:
+            _LOGGER.error(
+                f"[_launcher:PythonLaunchedSession] Process terminated during "
+                f"health check with exit code {self.process.returncode}"
+            )
+            return True
+        return False
 
     @classmethod
     async def launch(
@@ -1022,20 +1053,31 @@ class PythonLaunchedSession(LaunchedSession):
                         f"[PID {process.pid}] Stream {stream_name} closed: {e}"
                     )
 
-            # Create background tasks (fire and forget)
-            # stdout/stderr are guaranteed to be StreamReader because we set PIPE above
-            if process.stdout:
-                asyncio.create_task(drain_stream(process.stdout, "stdout"))
-            if process.stderr:
-                asyncio.create_task(drain_stream(process.stderr, "stderr"))
-
-            return cls(
+            session = cls(
                 host="localhost",
                 port=port,
                 auth_type="psk" if auth_token else "anonymous",
                 auth_token=auth_token,
                 process=process,
             )
+
+            # Retain strong references to drain tasks on the session so the
+            # event loop's weak-task set does not garbage-collect them mid-run.
+            # stdout/stderr are guaranteed to be StreamReader because we set PIPE above
+            if process.stdout:
+                stdout_task = asyncio.create_task(
+                    drain_stream(process.stdout, "stdout")
+                )
+                session._background_tasks.add(stdout_task)
+                stdout_task.add_done_callback(session._background_tasks.discard)
+            if process.stderr:
+                stderr_task = asyncio.create_task(
+                    drain_stream(process.stderr, "stderr")
+                )
+                session._background_tasks.add(stderr_task)
+                stderr_task.add_done_callback(session._background_tasks.discard)
+
+            return session
 
         except Exception as e:
             raise SessionLaunchError(f"Failed to launch python session: {e}") from e
@@ -1103,7 +1145,7 @@ class PythonLaunchedSession(LaunchedSession):
 
 
 async def launch_session(
-    launch_method: Literal["docker", "python"],
+    launch_method: LaunchMethod,
     session_name: str,
     port: int,
     auth_token: str | None,
@@ -1124,7 +1166,7 @@ async def launch_session(
     launch() method based on the launch_method parameter.
 
     Args:
-        launch_method (Literal["docker", "python"]): The launch method.
+        launch_method (LaunchMethod): The launch method.
         session_name (str): Name for the session.
         port (int): Port to bind the session to.
         auth_token (str | None): Authentication token (PSK) for the session, or None for anonymous.

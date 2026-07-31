@@ -1,0 +1,43 @@
+"""Tests for :mod:`deephaven_mcp.config._config_dir`."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from unittest.mock import patch
+
+from deephaven_mcp.config._config_dir import resolve_config_dir
+from deephaven_mcp.config._data_root import DATA_DIR_ENV_VAR, _default_data_root
+
+# ---------------------------------------------------------------------------
+# resolve_config_dir - precedence
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_explicit_argument_wins(tmp_path: Path) -> None:
+    """An explicit Path overrides the env-var-driven data root."""
+    explicit = tmp_path / "explicit"
+    with patch.dict(os.environ, {DATA_DIR_ENV_VAR: str(tmp_path / "env")}):
+        assert resolve_config_dir(explicit) == explicit
+
+
+def test_resolve_uses_data_root_env_var_when_explicit_none(tmp_path: Path) -> None:
+    """``$DH_AI_DATA_DIR/config`` is used when no explicit Path is given."""
+    root = str(tmp_path / "data_root")
+    with patch.dict(os.environ, {DATA_DIR_ENV_VAR: root}):
+        assert resolve_config_dir(None) == Path(root) / "config"
+
+
+def test_resolve_falls_back_to_default_when_env_unset() -> None:
+    """With no env var, the platform default data root + ``config``."""
+    env = {k: v for k, v in os.environ.items() if k != DATA_DIR_ENV_VAR}
+    with patch.dict(os.environ, env, clear=True):
+        assert resolve_config_dir(None) == _default_data_root() / "config"
+
+
+def test_resolve_expands_tilde_in_explicit_argument() -> None:
+    """A ``~``-prefixed explicit argument expands to the user's home."""
+    explicit = Path("~/.deephaven/ai/config")
+    resolved = resolve_config_dir(explicit)
+    assert resolved == Path.home() / ".deephaven" / "ai" / "config"
+    assert "~" not in str(resolved)

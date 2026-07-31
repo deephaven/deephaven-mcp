@@ -41,32 +41,47 @@ Type Definitions:
 
 Usage Note:
     These wrapper classes are designed to be used with the Deephaven Enterprise
-    protobuf definitions. The wrappers themselves do not depend on the Enterprise
-    package at import time (conditional imports are used), but they expect to
-    wrap specific protobuf message types at runtime.
+    protobuf definitions, wrapping specific protobuf message types at runtime.
 """
 
-import sys
-from typing import TYPE_CHECKING, Any, NewType, cast
+from typing import Any, NewType, cast, override
 
+from deephaven_enterprise.client.controller import ControllerClient
+from deephaven_enterprise.proto.auth_pb2 import Token
+from deephaven_enterprise.proto.persistent_query_pb2 import (
+    PersistentQueryConfigMessage,
+    PersistentQueryInfoMessage,
+    PersistentQueryStateMessage,
+    PersistentQueryStatusEnum,
+)
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.protobuf.message import Message
 
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.auth  # pragma: no cover
-    import deephaven_enterprise.client.controller  # pragma: no cover
-    from typing_extensions import override  # pragma: no cover
-elif sys.version_info >= (3, 12):
-    from typing import override  # pragma: no cover
-else:
-    from typing_extensions import override  # pragma: no cover
+PQ_STATES: dict[str, str] = {
+    "RUNNING": "ACTIVE",
+    "EXECUTING": "ACTIVE",
+    "UNINITIALIZED": "TRANSITIONAL",
+    "CONNECTING": "TRANSITIONAL",
+    "AUTHENTICATING": "TRANSITIONAL",
+    "ACQUIRING_WORKER": "TRANSITIONAL",
+    "INITIALIZING": "TRANSITIONAL",
+    "STOPPING": "TRANSITIONAL",
+    "DISCONNECTED": "TRANSITIONAL",
+    "STOPPED": "TERMINAL",
+    "FAILED": "TERMINAL",
+    "KILLED": "TERMINAL",
+    "COMPLETED": "TERMINAL",
+    "ERROR": "TERMINAL",
+    "UNSPECIFIED": "INVALID",
+}
+"""Maps each PQ state string to its lifecycle category.
 
-from ._base import is_enterprise_available
-
-if is_enterprise_available:
-    from deephaven_enterprise.client.controller import ControllerClient
-else:
-    ControllerClient = None  # pragma: no cover
+Categories:
+- ACTIVE: PQ is processing data; its id works with the session tools (RUNNING, EXECUTING)
+- TRANSITIONAL: PQ is between stable states; do not branch on a specific value
+- TERMINAL: state will not change without user action; STOPPED and FAILED can be restarted
+- INVALID: UNSPECIFIED is a protobuf zero-value sentinel; should not appear at runtime
+"""
 
 
 # Type definitions
@@ -82,7 +97,7 @@ within a Deephaven server instance and are the primary key for query identificat
 
 Example:
     >>> query_serial = CorePlusQuerySerial(12345)
-    >>> info = await controller_client.get_persistent_query(query_serial)
+    >>> info = await controller_client.get(query_serial)
 """
 
 
@@ -107,7 +122,7 @@ class ProtobufWrapper:
         this validation behavior.
 
         Args:
-            pb: The protobuf message object to wrap. Must not be None.
+            pb (Message): The protobuf message object to wrap. Must not be None.
 
         Raises:
             ValueError: If the provided protobuf message is None.
@@ -167,8 +182,9 @@ class CorePlusQueryStatus(ProtobufWrapper):
     Typical status transitions follow this pattern:
     UNINITIALIZED → INITIALIZING → RUNNING → [STOPPING] → STOPPED/COMPLETED/FAILED/KILLED
 
-    This class simplifies status checking with properties like is_running, is_completed,
-    is_terminal and is_uninitialized. It also supports flexible equality comparison with:
+    This class simplifies status checking with properties like is_running, is_initializing,
+    is_completed, is_terminal and is_uninitialized. It also supports flexible equality
+    comparison with:
     - Other CorePlusQueryStatus objects
     - String status names (e.g., "RUNNING")
     - Raw enum values
@@ -201,12 +217,13 @@ class CorePlusQueryStatus(ProtobufWrapper):
     @override
     def __init__(
         self,
-        status: "deephaven_enterprise.proto.controller.PersistentQueryStatusEnum",  # noqa: F821
+        status: PersistentQueryStatusEnum,
     ):
         """Initialize with a protobuf status enum value.
 
         Args:
-            status: The protobuf enum value for query status
+            status (PersistentQueryStatusEnum): The protobuf enum value for query
+                status. Must not be None.
         """
         super().__init__(status)
 
@@ -219,20 +236,25 @@ class CorePlusQueryStatus(ProtobufWrapper):
     def __eq__(self, other: object) -> bool:
         """Compare this status with another status or string."""
         if isinstance(other, CorePlusQueryStatus):
-            return cast(bool, self.pb == other.pb)
+            return bool(self.pb == other.pb)
         elif isinstance(other, str):
             return self.name == other
-        return cast(bool, self.pb == other)
+        return bool(self.pb == other)
 
     @property
     def name(self) -> str:
-        """Get the string name of the status.
+        """The string name of the status, with the protobuf ``PQS_`` prefix stripped.
+
+        The underlying library returns prefixed enum names (e.g., ``"PQS_RUNNING"``);
+        this property returns the short form (e.g., ``"RUNNING"``) for logging,
+        display, and string comparisons.
 
         Returns:
-            str: The name of the status enum value (e.g., "RUNNING", "COMPLETED", "FAILED").
-                This is useful for logging, display, and string-based comparisons.
+            str: The stripped enum name (e.g., ``"RUNNING"``, ``"COMPLETED"``,
+                ``"FAILED"``).
         """
-        return cast(str, ControllerClient.status_name(self.pb))
+        raw: str = ControllerClient.status_name(self.pb)
+        return raw[len("PQS_") :] if raw.startswith("PQS_") else raw
 
     @property
     def is_running(self) -> bool:
@@ -245,7 +267,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in a running state, False otherwise.
         """
-        return cast(bool, ControllerClient.is_running(self.pb))
+        return bool(ControllerClient.is_running(self.pb))
 
     @property
     def is_completed(self) -> bool:
@@ -258,7 +280,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query has completed successfully, False otherwise.
         """
-        return cast(bool, ControllerClient.is_completed(self.pb))
+        return bool(ControllerClient.is_completed(self.pb))
 
     @property
     def is_terminal(self) -> bool:
@@ -274,7 +296,7 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in a terminal state, False otherwise.
         """
-        return cast(bool, ControllerClient.is_terminal(self.pb))
+        return bool(ControllerClient.is_terminal(self.pb))
 
     @property
     def is_uninitialized(self) -> bool:
@@ -286,7 +308,19 @@ class CorePlusQueryStatus(ProtobufWrapper):
         Returns:
             bool: True if the query is in the uninitialized state, False otherwise.
         """
-        return cast(bool, ControllerClient.is_status_uninitialized(self.pb))
+        return bool(ControllerClient.is_status_uninitialized(self.pb))
+
+    @property
+    def is_initializing(self) -> bool:
+        """Check if the query status is initializing.
+
+        The initializing state is transient: entered after a worker has been
+        acquired and before the query reaches the running state.
+
+        Returns:
+            bool: True if the query is in the initializing state, False otherwise.
+        """
+        return self.name == "INITIALIZING"
 
 
 class CorePlusToken(ProtobufWrapper):
@@ -319,9 +353,6 @@ class CorePlusToken(ProtobufWrapper):
     4. Services validate the token before processing requests
     5. When the token expires, re-authentication is required
 
-    Args:
-        token: The protobuf Token message to wrap (type: deephaven_enterprise.proto.auth_pb2.Token)
-
     Example:
         >>> token = CorePlusToken(pb_token)
         >>> token_dict = token.to_dict()
@@ -340,13 +371,11 @@ class CorePlusToken(ProtobufWrapper):
     """
 
     @override
-    def __init__(
-        self, token: "deephaven_enterprise.proto.auth_pb2.Token"  # noqa: F821
-    ):
+    def __init__(self, token: Token):
         """Initialize with a protobuf Token message.
 
         Args:
-            token: The protobuf Token message to wrap
+            token (Token): The protobuf Token message to wrap. Must not be None.
         """
         super().__init__(token)
 
@@ -409,12 +438,13 @@ class CorePlusQueryConfig(ProtobufWrapper):
     @override
     def __init__(
         self,
-        config: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryConfigMessage",  # noqa: F821
+        config: PersistentQueryConfigMessage,
     ):
         """Initialize with a protobuf PersistentQueryConfigMessage.
 
         Args:
-            config: The protobuf configuration message to wrap
+            config (PersistentQueryConfigMessage): The protobuf configuration
+                message to wrap. Must not be None.
         """
         super().__init__(config)
 
@@ -455,18 +485,23 @@ class CorePlusQueryState(ProtobufWrapper):
     @override
     def __init__(
         self,
-        state: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryStateMessage",  # noqa: F821
+        state: PersistentQueryStateMessage,
     ):
         """Initialize with a protobuf PersistentQueryStateMessage.
 
         Args:
-            state: The protobuf state message to wrap
+            state (PersistentQueryStateMessage): The protobuf state message to
+                wrap. Must not be None.
         """
         super().__init__(state)
 
     @property
     def status(self) -> CorePlusQueryStatus:
-        """Returns the status of the query."""
+        """The query's current lifecycle status.
+
+        Returns:
+            CorePlusQueryStatus: Wrapper for the query's current status enum value.
+        """
         return CorePlusQueryStatus(self.pb.status)
 
 
@@ -515,12 +550,13 @@ class CorePlusQueryInfo(ProtobufWrapper):
     @override
     def __init__(
         self,
-        info: "deephaven_enterprise.proto.persistent_query_pb2.PersistentQueryInfoMessage",  # noqa: F821
+        info: PersistentQueryInfoMessage,
     ):
         """Initialize with a protobuf PersistentQueryInfoMessage.
 
         Args:
-            info: The protobuf query info message to wrap
+            info (PersistentQueryInfoMessage): The protobuf query info message to
+                wrap. Must not be None.
         """
         super().__init__(info)
         self._config: CorePlusQueryConfig = CorePlusQueryConfig(info.config)

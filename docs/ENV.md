@@ -1,203 +1,257 @@
 # Environment Variables Reference
 
-This document describes all environment variables recognized by Deephaven MCP.
-Variables are grouped by server component.
-
-> **Security note**: Never commit credentials to version control. Use
-> `*_env_var` fields in `deephaven_mcp.json` to reference environment variables
-> instead of embedding secrets directly in config files.
-
----
+Deephaven MCP ships three binaries — `dh-mcp-systems-server`,
+`dhcli` (the CLI), and `dh-mcp-docs-server` — and reads a small,
+fixed set of environment variables. This file is the canonical
+reference. Every other operator-tunable knob lives in the JSON
+configuration tree; see [`docs/CONFIGURATION.md`](CONFIGURATION.md).
 
 ## Table of Contents
 
-- [Systems Server](#systems-server)
-  - [Core](#core)
-  - [Credential variables (user-defined names)](#credential-variables-user-defined-names)
-  - [Timeout tuning](#timeout-tuning)
-- [Docs Server](#docs-server)
+- [Variables at a glance](#variables-at-a-glance)
+- [Minimum setup](#minimum-setup)
+- [All binaries](#all-binaries)
+- [Systems server and CLI](#systems-server-and-cli)
+- [CLI (`dhcli`)](#cli-dhcli)
+- [Docs server](#docs-server)
+- [Templating from environment variables](#templating-from-environment-variables)
 
----
+## Variables at a glance
 
-## Systems Server
-
-### Core
-
-#### `DH_MCP_CONFIG_FILE`
-
-**Required.** Path to your `deephaven_mcp.json` configuration file.
-
-| | |
-|---|---|
-| Required | Yes |
-| Default | *(none — server will not start without this)* |
-| Example | `/home/user/.config/deephaven_mcp.json` |
-
-Set this in your AI tool's MCP server `env` block:
-
-```json
-"env": {
-  "DH_MCP_CONFIG_FILE": "/full/path/to/your/deephaven_mcp.json"
-}
-```
-
-See [docs/DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the full configuration
-file format.
-
----
-
-#### `PYTHONLOGLEVEL`
-
-Controls the verbosity of log output from the MCP servers.
-
-| | |
-|---|---|
-| Required | No |
-| Default | `INFO` |
-| Values | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| Example | `DEBUG` |
-
-Set to `DEBUG` to get detailed per-request logs when troubleshooting connection
-or authentication problems. Set to `WARNING` or `ERROR` to reduce noise in
-production.
-
----
-
-### Credential variables (user-defined names)
-
-These are not fixed variable names — you choose the names and reference them
-from your `deephaven_mcp.json` configuration. Deephaven MCP reads the value of
-the named variable at runtime, keeping secrets out of your config file.
-
-#### Community session: `auth_token_env_var`
-
-Any variable name you choose. Holds the authentication token for a community
-session.
-
-```json5
-{
-  "community_sessions": {
-    "my_session": {
-      "auth_type": "password",
-      "auth_token_env_var": "MY_DH_TOKEN"  // set MY_DH_TOKEN=user:password
-    }
-  }
-}
-```
-
-#### Enterprise session: `password_env_var`
-
-Any variable name you choose. Holds the password for an enterprise session
-configured with `"auth_type": "password"`.
-
-```json5
-{
-  "enterprise_sessions": {
-    "prod": {
-      "connection_json_url": "https://your-server.example.com/iris/connection.json",
-      "auth_type": "password",
-      "username": "your-username",
-      "password_env_var": "PROD_DH_PASSWORD"  // set PROD_DH_PASSWORD=your-password
-    }
-  }
-}
-```
-
-#### Enterprise session: `api_key_env_var`
-
-Any variable name you choose. Holds the API key for an enterprise session
-configured with `"auth_type": "api_key"`.
-
-```json5
-{
-  "enterprise_sessions": {
-    "prod": {
-      "connection_json_url": "https://your-server.example.com/iris/connection.json",
-      "auth_type": "api_key",
-      "api_key_env_var": "PROD_DH_API_KEY"  // set PROD_DH_API_KEY=your-api-key
-    }
-  }
-}
-```
-
----
-
-### Timeout tuning
-
-These variables override the built-in timeout defaults. They are optional and
-rarely need to be changed. All values are in **seconds** and must be parseable
-as a float (or integer where noted). Invalid values raise an error at startup.
-
-| Variable | Default | Description |
+| Variable | Consumed by | Purpose |
 |---|---|---|
-| `DH_MCP_SESSION_CONNECT_TIMEOUT_SECONDS` | `60.0` | Timeout for establishing the initial connection to a Deephaven server. Increase on slow or high-latency networks. |
-| `DH_MCP_SUBSCRIBE_TIMEOUT_SECONDS` | `30.0` | Timeout for receiving the initial PQ state snapshot from the Enterprise controller. Increase if the controller manages a very large number of persistent queries. |
-| `DH_MCP_PQ_CONNECTION_TIMEOUT_SECONDS` | `60.0` | Timeout for opening a session to a running persistent query worker. Distinct from the initial server connection timeout. |
-| `DH_MCP_WORKER_CREATION_TIMEOUT_SECONDS` | `60.0` | Timeout for provisioning and connecting to a new on-demand worker. Increase on systems where worker JVM startup is slow. |
-| `DH_MCP_AUTH_TIMEOUT_SECONDS` | `60.0` | Timeout for standard authentication (password, private key). |
-| `DH_MCP_SAML_AUTH_TIMEOUT_SECONDS` | `120.0` | Timeout for SAML authentication. Longer than standard auth to accommodate the browser redirect roundtrip. |
-| `DH_MCP_PQ_MANAGEMENT_TIMEOUT_SECONDS` | `60.0` | Timeout for PQ management operations (add, delete, modify, stop). Does not cover waiting for a worker to reach a target state — see `DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS`. |
-| `DH_MCP_QUICK_OPERATION_TIMEOUT_SECONDS` | `5.0` | Timeout for lightweight network round-trips (ping, key management). A timeout here typically indicates a connectivity problem. |
-| `DH_MCP_PQ_STATE_CHANGE_TIMEOUT_SECONDS` | `120.0` | Timeout for waiting on a PQ to reach a target state after a start or restart. Increase for PQs with large heaps or slow initialization scripts. |
-| `DH_MCP_NO_WAIT_SECONDS` | `0.0` | Sentinel value passed to controller methods to mean "return immediately without waiting". Overriding this is rarely useful. |
-| `DH_MCP_TIMEOUT_WARNING_THRESHOLD` | `60` *(int)* | MCP tool operations exceeding this many seconds generate a warning, because MCP clients may time out before the operation completes. |
-| `DH_MCP_DEFAULT_PQ_TIMEOUT` | `30` *(int)* | Default timeout (seconds) used by PQ lifecycle MCP tools (start, stop, restart) when the caller does not supply an explicit value. |
-| `DH_MCP_DEFAULT_MAX_CONCURRENT` | `20` *(int)* | Default cap on the number of concurrent PQ operations within a single batch MCP tool call. |
+| `PYTHONLOGLEVEL` | all three binaries | Python log level. |
+| `DH_AI_DATA_DIR` | systems server, CLI | User-data root (`config/` + `runtime/`). |
+| `APPDATA` | systems server, CLI | Windows only: base for the default user-data root. |
+| `DHCLI_OUTPUT` | CLI | Default output mode (mirrors `-o/--output`). |
+| `VISUAL` / `EDITOR` | CLI | Editor launched by `dhcli config edit`. |
+| `INKEEP_API_KEY` | docs server | **Required.** Inkeep LLM API key. |
+| `MCP_DOCS_HOST` | docs server | HTTP bind host. |
+| `MCP_DOCS_PORT` | docs server | HTTP bind port. |
+| `PORT` | docs server | Cloud Run / PaaS fallback for `MCP_DOCS_PORT`. |
 
----
+To inject *individual* JSON values from the environment, use the
+configuration templating engine — see
+[Templating from environment variables](#templating-from-environment-variables)
+below.
 
-## Docs Server
+## Minimum setup
 
-The Docs Server (`dh-mcp-docs-server`) is an optional component that provides
-AI-powered Deephaven documentation search. It has its own set of environment
-variables.
+Most users do not need to set any of these variables. The cases
+that actually require action:
+
+- **Running the docs server (`dh-mcp-docs-server`).** Set
+  `INKEEP_API_KEY`. The server refuses to start without it.
+- **Keeping your config tree in a non-standard location** (a
+  shared install path, a container volume, a chroot, a test
+  fixture). Set `DH_AI_DATA_DIR` to that root. The platform
+  default (`~/.deephaven/ai/` on POSIX, `%APPDATA%/Deephaven/ai/`
+  on Windows) works for everyone else.
+- **Running the docs server outside Cloud Run / a managed PaaS.**
+  Optionally set `MCP_DOCS_HOST` / `MCP_DOCS_PORT` if you need
+  something other than `127.0.0.1:8001`.
+
+Everything else is opt-in tuning (`PYTHONLOGLEVEL`, `DHCLI_OUTPUT`,
+`VISUAL` / `EDITOR`, the templating engine) or set for you by the
+operating system (`APPDATA`).
+
+## All binaries
+
+### `PYTHONLOGLEVEL`
+
+Standard Python logging-level override, honored at startup by all
+three binaries.
+
+| | |
+|---|---|
+| Default | `INFO` |
+| Values | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+
+## Systems server and CLI
+
+### `DH_AI_DATA_DIR`
+
+Override for the **user-data root** shared by the systems server
+and the CLI. (The docs server does not consume this variable.) Two
+subdirectories live under this root:
+
+- `config/` — read-only configuration tree consumed by
+  `dh-mcp-systems-server` and (for `cli.json`) by `dhcli`. The
+  systems server reads a directory tree, not a single file.
+- `runtime/` — mutable per-user state owned by the running daemon
+  (registry, lock, log).
+
+Leave the env var unset to use the platform default; set it only
+when your config tree lives somewhere else (shared install path,
+container volume, chroot, test fixture).
+
+| | |
+|---|---|
+| Default (POSIX) | `~/.deephaven/ai/` |
+| Default (Windows) | `%APPDATA%/Deephaven/ai/` (standard Windows roaming-app-data location) |
+| Example | `/opt/deephaven/ai` |
+
+### `APPDATA`
+
+Standard Windows roaming-app-data path. Read **only on Windows**, and
+only when `DH_AI_DATA_DIR` is unset, to build the default user-data root
+`%APPDATA%/Deephaven/ai/`. Windows always sets it; if it is unset or
+empty, the resolver falls back to `~/.deephaven/ai/`. Not read on POSIX,
+and never set this yourself to relocate Deephaven data — use
+`DH_AI_DATA_DIR`, which is the supported knob.
+
+| | |
+|---|---|
+| Consumed by | systems server, CLI (Windows only) |
+| Set by | the operating system |
+
+**Propagating it to MCP-client subprocesses.** When an AI client
+(Claude Desktop, etc.) spawns `dh-mcp-systems-server`, the client
+must include `DH_AI_DATA_DIR` in its MCP server `env` block;
+otherwise the spawned server falls back to the platform default and
+won't see your override:
+
+```json5
+// Example: inside your MCP client config
+{
+  "env": {
+    "DH_AI_DATA_DIR": "/full/path/to/your/deephaven-ai-data"
+  }
+}
+```
+
+**No per-subdir env vars.** `DH_AI_CONFIG_DIR` and
+`DH_AI_RUNTIME_DIR` do not exist by design: a single knob moves
+both subdirectories, which matches the operator use cases that
+motivated it (containers, chroots, custom install paths). For
+targeted per-subdir overrides — e.g. a test pointing only the
+config tree elsewhere — use the CLI flags:
+
+```bash
+dhcli --config-dir /tmp/test-config --runtime-dir /tmp/test-runtime tool list
+```
+
+`dh-mcp-systems-server` exposes the same `--config-dir` and
+`--runtime-dir` flags, both honored in every transport (stdio,
+HTTP, and daemon); the `dhcli` CLI also passes them when spawning
+the daemon. These flags **bypass** `$DH_AI_DATA_DIR` for the
+subdirectory they target; the env var still applies to whichever
+subdirectory was not overridden.
+
+## CLI (`dhcli`)
+
+### `DHCLI_OUTPUT`
+
+Default output mode for `dhcli`, mirroring the `-o/--output` flag.
+(This is the only `dhcli` flag with an env-var binding — output
+format varies often enough across shells, pipelines, and AI tools
+to justify it.)
+
+Precedence: **CLI flag** > **`DHCLI_OUTPUT`** > **`cli.json`'s `output.format`** > **schema default**.
+
+| | |
+|---|---|
+| Values | `human`, `json`, `json-pretty`, `yaml` |
+| CLI flag | `-o`, `--output` |
+| `cli.json` field | `output.format` |
+
+### `VISUAL` and `EDITOR`
+
+Which editor `dhcli config edit` launches. **Set either one; if you only
+ever set `EDITOR`, that is enough.**
+
+Deephaven MCP does not implement this lookup — `dhcli config edit` calls
+[`click`](https://click.palletsprojects.com/)'s `click.edit()`, which
+honors the usual Unix convention: `VISUAL`, then `EDITOR`, then a
+platform default (`notepad` on Windows; otherwise the first of
+`sensible-editor`, `vim`, `nano` found on `PATH`, falling back to `vi`).
+`VISUAL` wins when both are set.
+
+Neither has a `cli.json` field: your editor is a property of your shell,
+not of this project's configuration. No other command reads them.
+
+`dhcli config edit` is interactive-only: with `--no-input`, or when stdin
+is not a TTY, it fails with `no_tty` rather than launching an editor.
+
+| | |
+|---|---|
+| Precedence | `VISUAL` > `EDITOR` > platform default |
+| Example | `export EDITOR=nvim` |
+
+## Docs server
+
+The docs server (`dh-mcp-docs-server`) has no JSON config; the
+variables below are its entire configuration surface.
 
 ### `INKEEP_API_KEY`
 
-**Required** for the Docs Server. API key for the Inkeep-powered documentation
-LLM backend.
+API key for the [Inkeep](https://inkeep.com)-powered documentation
+LLM backend. The docs server refuses to start without it.
 
 | | |
 |---|---|
-| Required | Yes (Docs Server only) |
-| Default | *(none — server will not start without this)* |
-| Obtained from | Your Inkeep account or Deephaven support |
-
----
+| Required | **Yes** — server will not start without it |
 
 ### `MCP_DOCS_HOST`
 
-Host interface the Docs Server HTTP server binds to.
+Host interface the docs server HTTP listener binds to.
 
 | | |
 |---|---|
-| Required | No |
-| Default | `127.0.0.1` (localhost only) |
-| Example | `0.0.0.0` (all interfaces, for Docker/remote access) |
+| Default | `127.0.0.1` (loopback only) |
+| Example | `0.0.0.0` (all interfaces, e.g. inside a container) |
 
----
+### `MCP_DOCS_PORT` (and `PORT` fallback)
 
-### `MCP_DOCS_PORT`
+Port the docs server HTTP listener binds to. Resolved first-match-wins:
 
-Port the Docs Server HTTP server listens on.
+1. `MCP_DOCS_PORT` — the Deephaven-specific knob.
+2. `PORT` — the standard Cloud Run / PaaS variable, set
+   automatically by managed platforms.
+3. `8001` — the built-in default.
 
-| | |
-|---|---|
-| Required | No |
-| Default | `8001` (falls back to `PORT` for Cloud Run compatibility) |
-| Example | `9000` |
-
-The server checks `MCP_DOCS_PORT` first, then `PORT` (the standard Cloud Run
-port variable), then defaults to `8001`.
-
----
-
-### `PORT`
-
-Standard Cloud Run port variable. Used as a fallback when `MCP_DOCS_PORT` is
-not set. You do not normally need to set this manually.
+Operators running outside a managed platform should set
+`MCP_DOCS_PORT` directly; `PORT` exists only so Cloud Run / similar
+deployments work without configuration.
 
 | | |
 |---|---|
-| Required | No |
-| Default | *(falls through to `8001`)* |
+| Default | `8001` |
+
+## Templating from environment variables
+
+Anywhere a string value is accepted in the JSON configuration tree,
+operators can pull the value from an environment variable using
+either of these placeholders:
+
+- `"${env:NAME}"` — substitute the value of `$NAME`; fail if unset.
+- `"${env:NAME:-default}"` — substitute the value of `$NAME`; if
+  unset or empty, use `default`.
+
+The templating engine resolves the placeholder once at file-load
+time. Placeholders may appear anywhere inside a string value, but
+**nesting is not supported** and there is no escape syntax. See the
+*Templating* section of [`docs/CONFIGURATION.md`](CONFIGURATION.md) for
+the full syntax, including the `${file:PATH}` form.
+
+Example:
+
+```json5
+// $DH_AI_DATA_DIR/config/server.json
+{
+  "transport": "http",
+  "port": 8000,
+  "psk": "${env:DH_MCP_PSK}"                          // value from env
+}
+
+// $DH_AI_DATA_DIR/config/enterprise/settings.json
+{
+  "timeouts": {
+    "auth_timeout_seconds": "${env:DH_AUTH_TIMEOUT:-60}"  // env or default
+  }
+}
+```
+
+This is the supported way to make any individual JSON field
+env-overridable. Pick whatever variable name suits your environment;
+the names in the example are just illustrations, not reserved.

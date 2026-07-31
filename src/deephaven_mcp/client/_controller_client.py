@@ -40,10 +40,9 @@ See Also:
 import asyncio
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-if TYPE_CHECKING:
-    import deephaven_enterprise.client.controller  # pragma: no cover
+from deephaven_enterprise.client.controller import ControllerClient, SubState
 
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
@@ -52,26 +51,23 @@ from deephaven_mcp._exceptions import (
     ResourceError,
 )
 
-from ._base import ClientObjectWrapper
-from ._constants import (
-    NO_WAIT_SECONDS,
-    PQ_MANAGEMENT_TIMEOUT_SECONDS,
-    PQ_STATE_CHANGE_TIMEOUT_SECONDS,
-    QUICK_OPERATION_TIMEOUT_SECONDS,
-    SUBSCRIBE_TIMEOUT_SECONDS,
+from ._base import ClientObjectWrapper, describe_exception_chain
+from ._pq_config import (
+    apply_pq_config_fields,
+    env_var_entries_to_wire,
+    validate_pq_config_args,
 )
 from ._protobuf import (
     CorePlusQueryConfig,
     CorePlusQueryInfo,
     CorePlusQuerySerial,
 )
+from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class CorePlusControllerClient(
-    ClientObjectWrapper["deephaven_enterprise.client.controller.ControllerClient"]
-):
+class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
     """Asynchronous wrapper around the ControllerClient for managing persistent queries.
 
     This class provides an asynchronous interface to the ControllerClient, which connects to the
@@ -91,15 +87,21 @@ class CorePlusControllerClient(
     while making it compatible with asynchronous code.
 
     Error handling is enhanced with specific exception types that provide more context and clarity
-    than the underlying Java exceptions. Network issues typically result in DeephavenConnectionError
-    and query-related issues in QueryError.
+    than the underlying gRPC errors surfaced from the Java controller server. Network issues
+    typically result in DeephavenConnectionError and query-related issues in QueryError.
 
     Attributes:
-        wrapped: The underlying Java ControllerClient instance being wrapped
+        wrapped (deephaven_enterprise.client.controller.ControllerClient):
+            The underlying Python ``ControllerClient`` being wrapped. (The
+            controller's *server side* is a Java process; this attribute is the
+            Python gRPC client that talks to it, not a Java object.)
 
     Example:
         # Create a controller client from an authenticated session factory
-        session_factory = await CorePlusSessionFactory.from_url("https://deephaven-server:10000")
+        # (URL must point at the server's connection.json; see CorePlusSessionFactory.from_url)
+        session_factory = await CorePlusSessionFactory.from_url(
+            "https://deephaven.example.com:10000/iris/connection.json"
+        )
         await session_factory.password("username", "password")
         controller_client = session_factory.controller_client
 
@@ -127,24 +129,29 @@ class CorePlusControllerClient(
 
     def __init__(
         self,
-        controller_client: "deephaven_enterprise.client.controller.ControllerClient",  # noqa: F821
+        controller_client: ControllerClient,
+        timeouts: EnterpriseClientTimeouts,
     ):
         """Initialize the CorePlusControllerClient with a ControllerClient instance.
 
         Args:
             controller_client (deephaven_enterprise.client.controller.ControllerClient): The ControllerClient instance to wrap.
+            timeouts (EnterpriseClientTimeouts): Timeout values applied to this
+                client's methods. Read field-by-field at use sites.
+                Constructed by the :class:`CorePlusSessionFactory` that
+                owns this client and forwarded here at construction time.
         """
-        super().__init__(controller_client, is_enterprise=True)
+        super().__init__(controller_client)
         self._subscribed = False
+        self._subscribe_lock: asyncio.Lock = asyncio.Lock()
+        self._timeouts = timeouts
         _LOGGER.debug("[CorePlusControllerClient] Initialized")
 
     # ===========================================================================
     # Initialization & Connection Management
     # ===========================================================================
 
-    async def ping(
-        self, timeout_seconds: float = QUICK_OPERATION_TIMEOUT_SECONDS
-    ) -> bool:
+    async def ping(self) -> bool:
         """Ping the controller and refresh the cookie asynchronously.
 
         This method sends a lightweight ping request to the controller service to verify
@@ -157,9 +164,8 @@ class CorePlusControllerClient(
         You can use this method periodically in long-running applications to ensure
         the connection remains active and detect any connectivity issues promptly.
 
-        Args:
-            timeout_seconds (float): Maximum time in seconds to wait for the ping.
-                Defaults to QUICK_OPERATION_TIMEOUT_SECONDS.
+        The ping timeout is sourced from
+        ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``.
 
         Returns:
             bool: True if the ping was sent successfully and the cookie was refreshed, False if
@@ -170,6 +176,7 @@ class CorePlusControllerClient(
                                     issues, if the controller service is unavailable, timeout,
                                     or if there are communication errors with the server.
         """
+        timeout_seconds = self._timeouts.quick_operation_timeout_seconds
         _LOGGER.debug("[CorePlusControllerClient:ping] Sending ping to controller")
         try:
             return await asyncio.wait_for(
@@ -178,10 +185,13 @@ class CorePlusControllerClient(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusControllerClient:ping] Timed out after {timeout_seconds}s"
+                f"[CorePlusControllerClient:ping] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.quick_operation_timeout_seconds."
             )
             raise DeephavenConnectionError(
-                f"Ping timed out after {timeout_seconds} seconds."
+                f"Controller ping timed out after {timeout_seconds} seconds. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.quick_operation_timeout_seconds in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -192,11 +202,11 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:ping] Unexpected error during ping: {e}"
             )
-            raise DeephavenConnectionError(f"Connection error during ping: {e}") from e
+            raise DeephavenConnectionError(
+                f"Connection error during ping: {describe_exception_chain(e)}"
+            ) from e
 
-    async def subscribe(
-        self, timeout_seconds: float = SUBSCRIBE_TIMEOUT_SECONDS
-    ) -> None:
+    async def subscribe(self) -> None:
         """Subscribe to persistent query state updates asynchronously.
 
         This method establishes a subscription to the controller's persistent query state
@@ -218,12 +228,17 @@ class CorePlusControllerClient(
         A successful call to authenticate should have happened before this call.
 
         This method is idempotent - calling it multiple times is safe and will only
-        subscribe once. Subsequent calls will return immediately without error.
+        subscribe once. Subsequent calls will return immediately without error. If the
+        wrapped vendor client already holds a subscription (the vendor SessionManager
+        subscribes during authentication via ``_init_controller``), that subscription is
+        adopted instead of opening a second stream: the controller server permits one
+        subscription stream per session, so a second stream would terminate the first,
+        whose response thread auto-resubscribes and terminates the second, producing an
+        infinite kill/re-subscribe loop that starves state reads (``map()``/``get()``
+        fail with "Deadline exceeded waiting for subscription to finish").
 
-        Args:
-            timeout_seconds: Maximum time in seconds to wait for subscription to complete.
-                Defaults to SUBSCRIBE_TIMEOUT_SECONDS. If the subscription does not
-                complete within this time, a DeephavenConnectionError is raised.
+        The subscription timeout is sourced from
+        ``EnterpriseClientTimeouts.subscribe_timeout_seconds``.
 
         Raises:
             DeephavenConnectionError: If not authenticated, if unable to connect to the
@@ -237,47 +252,66 @@ class CorePlusControllerClient(
             is called automatically during factory initialization. Manual subscription
             is only needed if you construct the CorePlusControllerClient directly.
         """
-        # If already subscribed, return early (idempotent behavior)
-        if self._subscribed:
-            _LOGGER.debug(
-                "[CorePlusControllerClient:subscribe] Already subscribed, skipping"
-            )
-            return
+        async with self._subscribe_lock:
+            timeout_seconds = self._timeouts.subscribe_timeout_seconds
+            # Double-check the flag now that we hold the lock; a previous
+            # caller may have completed the subscription while we were queued.
+            if self._subscribed:
+                _LOGGER.debug(
+                    "[CorePlusControllerClient:subscribe] Already subscribed, skipping"
+                )
+                return
 
-        _LOGGER.debug(
-            f"[CorePlusControllerClient:subscribe] Subscribing to query state (timeout_seconds={timeout_seconds})"
-        )
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(self.wrapped.subscribe),
-                timeout=timeout_seconds,
-            )
-            self._subscribed = True
+            # The vendor SessionManager subscribes the controller client itself
+            # during authentication (_init_controller). Adopt that subscription
+            # rather than opening a second stream — the controller server allows
+            # one subscription stream per session, so a second stream starts an
+            # infinite mutual kill/re-subscribe loop between response threads.
+            if self.wrapped.sub_state is not SubState.NOT_SUBSCRIBED:
+                self._subscribed = True
+                _LOGGER.debug(
+                    "[CorePlusControllerClient:subscribe] Wrapped client already "
+                    "subscribed by the vendor SessionManager; adopting existing "
+                    "subscription"
+                )
+                return
+
             _LOGGER.debug(
-                "[CorePlusControllerClient:subscribe] Successfully subscribed to query state"
+                f"[CorePlusControllerClient:subscribe] Subscribing to query state (timeout_seconds={timeout_seconds})"
             )
-        except TimeoutError:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:subscribe] Subscription timed out after {timeout_seconds}s"
-            )
-            raise DeephavenConnectionError(
-                f"Controller subscription timed out after {timeout_seconds} seconds. "
-                f"The server may be overloaded or unreachable."
-            ) from None
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:subscribe] Connection error during subscription: {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Unable to connect to controller service: {e}"
-            ) from e
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:subscribe] Failed to subscribe to query state: {e}"
-            )
-            raise QueryError(
-                f"Failed to subscribe to persistent query state: {e}"
-            ) from e
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self.wrapped.subscribe),
+                    timeout=timeout_seconds,
+                )
+                self._subscribed = True
+                _LOGGER.debug(
+                    "[CorePlusControllerClient:subscribe] Successfully subscribed to query state"
+                )
+            except TimeoutError:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] Subscription timed out after {timeout_seconds}s. "
+                    f"Increase enterprise/settings.json: timeouts.client.subscribe_timeout_seconds."
+                )
+                raise DeephavenConnectionError(
+                    f"Controller subscription timed out after {timeout_seconds} seconds. "
+                    f"To allow more time, increase enterprise/settings.json: "
+                    f"timeouts.client.subscribe_timeout_seconds in the operator config."
+                ) from None
+            except ConnectionError as e:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] Connection error during subscription: {e}"
+                )
+                raise DeephavenConnectionError(
+                    f"Unable to connect to controller service: {e}"
+                ) from e
+            except Exception as e:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] Failed to subscribe to query state: {e}"
+                )
+                raise QueryError(
+                    f"Failed to subscribe to persistent query state: {describe_exception_chain(e)}"
+                ) from e
 
     # ===========================================================================
     # Query State Management
@@ -307,11 +341,11 @@ class CorePlusControllerClient(
             managed by the controller. The dictionary will be empty if no queries are managed.
 
         Raises:
+            InternalError: If ``subscribe()`` was not called before this method.
             DeephavenConnectionError: If unable to connect to the controller service due to
                                     network issues or if the controller is unavailable.
-            QueryError: If not subscribed or if the subscription state is invalid, which can
-                       happen if subscribe() was not called or if the subscription has been
-                       invalidated.
+            QueryError: If the subscription state is invalid (for example, if the
+                       subscription has been invalidated server-side).
         """
         if not self._subscribed:
             _LOGGER.error(
@@ -342,7 +376,9 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:map] Failed to retrieve query map: {e}"
             )
-            raise QueryError(f"Failed to retrieve query state: {e}") from e
+            raise QueryError(
+                f"Failed to retrieve query state: {describe_exception_chain(e)}"
+            ) from e
 
     async def map_and_version(
         self,
@@ -364,8 +400,9 @@ class CorePlusControllerClient(
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.
-            QueryError: If not subscribed or subscription state is invalid
-            InternalError: If subscribe() was not called before this method
+            QueryError: If the subscription state is invalid (for example, if the
+                subscription has been invalidated server-side).
+            InternalError: If subscribe() was not called before this method.
         """
         if not self._subscribed:
             _LOGGER.error(
@@ -400,11 +437,11 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:map_and_version] Failed to retrieve query map: {e}"
             )
-            raise QueryError(f"Failed to retrieve query state with version: {e}") from e
+            raise QueryError(
+                f"Failed to retrieve query state with version: {describe_exception_chain(e)}"
+            ) from e
 
-    async def get_serial_for_name(
-        self, name: str, timeout_seconds: float = NO_WAIT_SECONDS
-    ) -> CorePlusQuerySerial:
+    async def get_serial_for_name(self, name: str) -> CorePlusQuerySerial:
         """Retrieve the serial number for a given query name asynchronously.
 
         This method looks up a query by its name and returns the corresponding serial number.
@@ -416,15 +453,12 @@ class CorePlusControllerClient(
         name rather than tracking its serial number. For example, when connecting to an existing
         query that was created by another process or user.
 
-        The timeout_seconds parameter allows waiting for a query with the specified name to
-        appear, which is useful when working with queries that are being created concurrently.
+        The wait duration is sourced from
+        ``EnterpriseClientTimeouts.no_wait_seconds`` (default ``0.0`` — no wait).
 
         Args:
             name (str): The name of the query to find. This is the human-readable name specified
                  when the query was created.
-            timeout_seconds (float): How long to wait for the query to be found, in seconds. Default is 0,
-                           meaning no wait. If greater than 0, the method will wait up to this
-                           many seconds for a query with the specified name to appear.
 
         Returns:
             CorePlusQuerySerial: The serial number for the query with the given name. This can be used with
@@ -433,13 +467,13 @@ class CorePlusControllerClient(
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service due to
                                     network issues or if the controller is unavailable.
-            QueryError: If no query with the given name is found within the timeout period
-                       or if the subscription state is invalid.
-            TimeoutError: If the specified timeout period elapses while waiting for a query
-                        with the given name to appear.
-            ValueError: If the name parameter is invalid, empty, or malformed.
+            QueryError: If no query with the given name is found within the wait period,
+                       if the subscription state is invalid, or for any other operational
+                       failure (the upstream ``RuntimeError`` raised on "not found" is
+                       translated to ``QueryError`` by this wrapper).
             InternalError: If subscribe() was not called before this method.
         """
+        timeout_seconds = self._timeouts.no_wait_seconds
         if not self._subscribed:
             _LOGGER.error(
                 "[CorePlusControllerClient:get_serial_for_name] subscribe() must be called before get_serial_for_name(). "
@@ -473,7 +507,9 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:get_serial_for_name] Failed to get serial for query name '{name}': {e}"
             )
-            raise QueryError(f"Failed to find query with name '{name}': {e}") from e
+            raise QueryError(
+                f"Failed to find query with name '{name}': {describe_exception_chain(e)}"
+            ) from e
 
     async def wait_for_change(self, timeout_seconds: float) -> None:
         """Wait for a change in the query map to occur asynchronously.
@@ -490,19 +526,18 @@ class CorePlusControllerClient(
         respond to query state changes, such as UIs that show the current state of all queries
         or monitoring tools that track query lifecycle events.
 
-        After this method returns (indicating a change has occurred), you typically call map()
-        to get the updated query state information.
+        A normal return means the wait ended; this method does not distinguish
+        "a change was observed" from "the wait ended for any other reason". If
+        that distinction matters, use ``wait_for_change_from_version``, which
+        returns a ``bool``.
 
         Args:
-            timeout_seconds (float): How long to wait for a change, in seconds. This must be a positive
-                           value. If no changes occur within this period, a TimeoutError is raised.
+            timeout_seconds (float): How long to wait for a change, in seconds.
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service due to
                                     network issues or if the controller becomes unavailable.
-            TimeoutError: If the specified timeout elapses while waiting for a change. This is
-                        not necessarily an error condition - it simply indicates that no changes
-                        occurred within the specified time window.
+            TimeoutError: Propagated unchanged when the underlying call raises one.
             QueryError: If there is an issue with the query state or subscription, such as if
                        the subscription was not properly established with subscribe().
         """
@@ -525,22 +560,27 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:wait_for_change] Failed to wait for change: {e}"
             )
-            raise QueryError(f"Failed to wait for query state change: {e}") from e
+            raise QueryError(
+                f"Failed to wait for query state change: {describe_exception_chain(e)}"
+            ) from e
 
     async def wait_for_change_from_version(
         self, map_version: int, timeout_seconds: float
     ) -> bool:
         """Wait for query map version to increment beyond specified version.
 
-        This method blocks the calling thread until the subscription map version
-        becomes greater than ``map_version``, or until ``timeout_seconds`` elapses.
-        It is a **long-poll** API — the underlying Java call holds the thread for up
-        to ``timeout_seconds``.
+        This method blocks until the subscription map version becomes greater than
+        ``map_version``, or until ``timeout_seconds`` elapses. It is a **long-poll**
+        API: the underlying ``ControllerClient.wait_for_change_from_version`` call
+        runs in a background thread (via ``asyncio.to_thread``) and parks on a Python
+        ``threading.Condition.wait()`` for up to ``timeout_seconds``.
 
-        **Important**: ``timeout_seconds`` must be a positive value.  Passing ``0``
-        has undefined behavior at the Java layer and must not be used.  This method
-        is not suitable for non-blocking staleness checks; call ``map_and_version()``
-        directly and compare the returned version yourself instead.
+        **Important**: this wrapper rejects ``timeout_seconds <= 0`` with ``ValueError``.
+        The upstream Python implementation does have defined behavior at zero (it returns
+        ``False`` immediately if the version is unchanged), but a non-blocking staleness
+        check has no business going through a long-poll API — callers that need an
+        instant comparison should call ``map_and_version()`` and compare the returned
+        version themselves.
 
         The version number is monotonically increasing and increments every time the
         subscription map changes (query created, deleted, or state modified).
@@ -555,13 +595,14 @@ class CorePlusControllerClient(
             map_version (int): The version number to wait to exceed. Typically obtained
                               from a previous map_and_version() call.
             timeout_seconds (float): Maximum time to wait for version change, in seconds.
-                                    Must be a positive value — zero is not supported.
+                                    Must be a strictly positive value; zero and negative
+                                    values are rejected by this wrapper.
 
         Returns:
             bool: True if version changed (version > map_version), False if timeout occurred
 
         Raises:
-            ValueError: If ``timeout_seconds`` is not a positive value.
+            ValueError: If ``timeout_seconds`` is not strictly positive.
             DeephavenConnectionError: If unable to connect to controller service.
             QueryError: If subscription state is invalid.
         """
@@ -594,12 +635,10 @@ class CorePlusControllerClient(
                 f"[CorePlusControllerClient:wait_for_change_from_version] Failed: {e}"
             )
             raise QueryError(
-                f"Failed to wait for version change from {map_version}: {e}"
+                f"Failed to wait for version change from {map_version}: {describe_exception_chain(e)}"
             ) from e
 
-    async def get(
-        self, serial: CorePlusQuerySerial, timeout_seconds: float = NO_WAIT_SECONDS
-    ) -> CorePlusQueryInfo:
+    async def get(self, serial: CorePlusQuerySerial) -> CorePlusQueryInfo:
         """Get a specific query's information from the subscription map asynchronously.
 
         This method retrieves detailed information about a single query identified by its
@@ -609,19 +648,12 @@ class CorePlusControllerClient(
         A successful call to subscribe should have happened before this call, as this method
         retrieves data from the subscription snapshot.
 
-        The timeout_seconds parameter enables waiting for a query to appear in the subscription
-        data. This is particularly useful in scenarios where you've just created a query using
-        add_query() and need to wait for its state to be published by the controller before
-        proceeding. Without a timeout, the method would immediately raise an exception if the
-        query doesn't exist in the current snapshot.
+        The wait duration is sourced from
+        ``EnterpriseClientTimeouts.no_wait_seconds`` (default ``0.0`` — no wait).
 
         Args:
             serial (CorePlusQuerySerial): The serial number of the query to get. This must be a valid CorePlusQuerySerial
                    that identifies an existing query.
-            timeout_seconds (float): How long to wait for the query to exist, in seconds. Default is 0,
-                           meaning no wait. Setting this to a positive value will cause the method
-                           to wait up to that many seconds for the query to appear in the
-                           subscription data before failing.
 
         Returns:
             CorePlusQueryInfo: The CorePlusQueryInfo associated with the serial number, containing detailed
@@ -630,12 +662,11 @@ class CorePlusControllerClient(
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service due to
                                     network issues or if the controller is unavailable.
-            QueryError: If the query does not exist within the timeout period or if the
-                       subscription state is invalid (e.g., if subscribe() was not called).
-            TimeoutError: If the specified timeout period elapses while waiting for the
-                        query to appear in the subscription data.
-            ValueError: If the serial parameter is invalid or malformed.
+            QueryError: If the query does not exist within the wait period (the upstream
+                       ``KeyError`` is translated to ``QueryError`` by this wrapper), or if
+                       the subscription state is invalid (e.g., if subscribe() was not called).
         """
+        timeout_seconds = self._timeouts.no_wait_seconds
         _LOGGER.debug(
             f"[CorePlusControllerClient:get] Retrieving query info for serial={serial}, timeout={timeout_seconds}"
         )
@@ -661,7 +692,9 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:get] Failed to get query {serial}: {e}"
             )
-            raise QueryError(f"Failed to retrieve query {serial}: {e}") from e
+            raise QueryError(
+                f"Failed to retrieve query {serial}: {describe_exception_chain(e)}"
+            ) from e
 
     # ===========================================================================
     # Query Creation & Configuration
@@ -670,7 +703,6 @@ class CorePlusControllerClient(
     async def add_query(
         self,
         query_config: CorePlusQueryConfig,
-        timeout_seconds: float = PQ_MANAGEMENT_TIMEOUT_SECONDS,
     ) -> CorePlusQuerySerial:
         """Add a persistent query asynchronously.
 
@@ -696,8 +728,6 @@ class CorePlusControllerClient(
                         settings that control how the query will be created and executed.
                         Consider using make_pq_config() to create a properly configured
                         configuration object.
-            timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to PQ_MANAGEMENT_TIMEOUT_SECONDS.
 
         Returns:
             CorePlusQuerySerial: The serial number of the newly added query. This CorePlusQuerySerial uniquely
@@ -706,13 +736,13 @@ class CorePlusControllerClient(
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
-                                    due to network issues or if the controller is unavailable.
-            ValueError: If the query_config is invalid, malformed, or contains incompatible settings.
-            ResourceError: If there are insufficient resources (memory, CPU, etc.) to create the query
-                        or if resource allocation fails for any reason.
+                                    due to network issues, if the controller is unavailable, or if
+                                    the operation does not complete within the operator-configured
+                                    ``EnterpriseClientTimeouts.pq_management_timeout_seconds``.
             QueryError: If the query creation fails for any other reason such as permission issues,
-                       quota limitations, or internal controller errors.
+                       quota limitations, insufficient resources, or internal controller errors.
         """
+        timeout_seconds = self._timeouts.pq_management_timeout_seconds
         pb = query_config.pb
         _LOGGER.debug(
             f"[CorePlusControllerClient:add_query] Adding query: "
@@ -730,10 +760,13 @@ class CorePlusControllerClient(
             return cast(CorePlusQuerySerial, result)
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusControllerClient:add_query] Timed out after {timeout_seconds}s"
+                f"[CorePlusControllerClient:add_query] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.pq_management_timeout_seconds."
             )
             raise DeephavenConnectionError(
-                f"Query creation timed out after {timeout_seconds} seconds."
+                f"Query creation timed out after {timeout_seconds} seconds. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.pq_management_timeout_seconds in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -749,69 +782,15 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:add_query] Failed to create query: {e}"
             )
-            raise QueryError(f"Failed to create query: {e}") from e
-
-    def _apply_pq_config_parameters(  # noqa: C901
-        self,
-        config: Any,
-        programming_language: str | None,
-        script_body: str | None,
-        script_path: str | None,
-        configuration_type: str | None,
-        enabled: bool | None,
-        restart_users: str | None,
-        extra_class_path: list[str] | None,
-        schedule: list[str] | None,
-        init_timeout_nanos: int | None,
-        jvm_profile: str | None,
-        python_virtual_environment: str | None,
-    ) -> None:
-        """Apply additional configuration parameters to protobuf config.
-
-        Only sets values that are explicitly provided (not None), preserving
-        defaults set by make_temporary_config for unspecified parameters.
-
-        Args:
-            config (Any): The protobuf config object to modify
-            programming_language (str | None): Programming language ("Python" or "Groovy"), or None to use default
-            script_body (str | None): Inline script code, or None if not specified
-            script_path (str | None): Path to script file in Git repository, or None if not specified
-            configuration_type (str | None): Query type ("Script", "RunAndDone", etc.), or None to use default
-            enabled (bool | None): Whether query is enabled, or None to use default
-            restart_users (str | None): Restart permission setting, or None to use controller default
-            extra_class_path (list[str] | None): Additional classpath entries, or None if not specified
-            schedule (list[str] | None): Scheduling configuration as "Key=Value" strings, or None if not specified
-            init_timeout_nanos (int | None): Initialization timeout in nanoseconds, or None to use default
-            jvm_profile (str | None): Named JVM profile, or None if not specified
-            python_virtual_environment (str | None): Named Python venv, or None if not specified
-        """
-        if programming_language is not None:
-            config.scriptLanguage = programming_language
-        if script_body is not None:
-            config.scriptCode = script_body
-        if script_path is not None:
-            config.scriptPath = script_path
-        if configuration_type is not None:
-            config.configurationType = configuration_type
-        if enabled is not None:
-            config.enabled = enabled
-        if restart_users is not None:
-            config.restartUsers = restart_users
-        if extra_class_path:
-            config.extraClassPath.extend(extra_class_path)
-        if schedule:
-            config.scheduling.extend(schedule)
-        if init_timeout_nanos is not None:
-            config.initTimeoutNanos = init_timeout_nanos
-        if jvm_profile is not None:
-            config.jvmProfile = jvm_profile
-        if python_virtual_environment is not None:
-            config.pythonVirtualEnvironment = python_virtual_environment
+            raise QueryError(
+                f"Failed to create query: {describe_exception_chain(e)}"
+            ) from e
 
     async def make_pq_config(
         self,
         name: str,
         heap_size_gb: float | int,
+        *,
         script_body: str | None = None,
         script_path: str | None = None,
         programming_language: str | None = None,
@@ -830,12 +809,29 @@ class CorePlusControllerClient(
         admin_groups: list[str] | None = None,
         viewer_groups: list[str] | None = None,
         restart_users: str | None = None,
+        owner: str | None = None,
     ) -> CorePlusQueryConfig:
         """Create a persistent query configuration.
 
         Creates an in-memory PQ configuration object that can be customized with script content,
         scheduling, resource settings, and access controls. The configuration is not persisted
         until passed to add_query().
+
+        Scheduler semantics:
+            ``auto_delete_timeout`` and ``schedule`` are mutually exclusive (a ValueError is
+            raised if both are supplied), because ``auto_delete_timeout`` installs its own
+            scheduler:
+            - No ``schedule`` and ``auto_delete_timeout`` is ``None`` or ``0``: a continuous
+              (permanent) scheduler with ``SchedulingDisabled=false`` and
+              ``RestartWhenRunning=Yes``; the controller begins acquiring a worker immediately
+              after ``add_query()`` (assuming ``enabled`` is ``True``).
+            - No ``schedule`` and ``auto_delete_timeout`` is a positive integer: a temporary
+              scheduler that auto-deletes the PQ after that many seconds of inactivity.
+            - ``schedule=[...]`` (non-empty list): the caller-supplied list **replaces** the
+              scheduling block wholesale; the caller includes ``SchedulerType`` and any other
+              required entries.
+            - ``schedule=[]``: the scheduling list is cleared; the server decides whether to
+              accept a PQ with no scheduling entries.
 
         Args:
             name (str): The name of the persistent query. This is used for identification.
@@ -855,20 +851,28 @@ class CorePlusControllerClient(
             extra_jvm_args (list[str] | None): A list of extra JVM arguments to pass to the worker.
             extra_class_path (list[str] | None): Additional classpath entries to prepend to worker's classpath.
             python_virtual_environment (str | None): Named Python virtual environment for Core+ workers.
-            extra_environment_vars (list[str] | None): A list of extra environment variables for the worker.
+            extra_environment_vars (list[str] | None): Environment variables for the worker,
+                each entry ``"KEY=VALUE"`` (converted internally to the controller's
+                alternating key/value wire format).
             init_timeout_nanos (int | None): Initialization timeout in nanoseconds.
-            auto_delete_timeout (int | None): The timeout in seconds for auto-deletion of the query
-                after it becomes idle. None (default) creates a permanent query.
+            auto_delete_timeout (int | None): Seconds of inactivity before the controller
+                auto-deletes the query. None (default) and 0 both create a permanent query
+                (auto-delete disabled); a positive value creates a temporary query that is
+                deleted after that many seconds of inactivity.
             admin_groups (list[str] | None): A list of user groups that will have admin access to the query.
             viewer_groups (list[str] | None): A list of user groups that will have viewer access to the query.
             restart_users (str | None): Who can restart the query. Values: "RU_ADMIN", "RU_ADMIN_AND_VIEWERS",
                 "RU_VIEWERS_WHEN_DOWN". Defaults to controller setting.
+            owner (str | None): The user to set as the query owner. None (default) leaves the
+                owner as the authenticated user set by make_temporary_config.
 
         Returns:
             CorePlusQueryConfig: The configuration object for the persistent query.
 
         Raises:
-            ValueError: If invalid parameters are provided.
+            ValueError: If invalid parameters are provided (script_body/script_path or
+                auto_delete_timeout/schedule supplied together, or a malformed
+                extra_environment_vars entry).
             DeephavenConnectionError: If not authenticated or unable to communicate with the controller.
             QueryError: If configuration creation fails for any other reason.
         """
@@ -880,71 +884,71 @@ class CorePlusControllerClient(
             f"script_body={'<set>' if script_body else None}, script_path={script_path!r}, "
             f"schedule={schedule}, jvm_profile={jvm_profile!r}, "
             f"python_virtual_environment={python_virtual_environment!r}, "
-            f"admin_groups={admin_groups}, viewer_groups={viewer_groups}, restart_users={restart_users!r}"
+            f"admin_groups={admin_groups}, viewer_groups={viewer_groups}, restart_users={restart_users!r}, "
+            f"owner={owner!r}"
         )
 
-        # Validate mutually exclusive parameters
-        if script_body is not None and script_path is not None:
-            raise ValueError(
-                "script_body and script_path are mutually exclusive - specify only one"
-            )
+        validate_pq_config_args(auto_delete_timeout, schedule, script_body, script_path)
+
+        # The vendor call places these directly into the protobuf's repeated
+        # extraEnvironmentVariables field, which the controller reads as a flat
+        # alternating key/value list — convert from the KEY=VALUE form here.
+        wire_environment_vars = (
+            env_var_entries_to_wire(extra_environment_vars)
+            if extra_environment_vars is not None
+            else None
+        )
 
         try:
-            # For permanent queries (auto_delete_timeout=None), we need to:
-            # 1. Call make_temporary_config with a default timeout
-            # 2. Then clear the scheduling to make it permanent
-            # This is because make_temporary_config sets up temporary scheduling
-            # which the server rejects if there's no valid timeout.
-            is_permanent = auto_delete_timeout is None
-            effective_timeout = 600 if is_permanent else auto_delete_timeout
-
+            # Baseline config from the vendor: serial, version, defaults, and the
+            # natively-supported fields (name, heap, server, engine, groups, jvm args,
+            # env vars). Pass auto_delete_timeout=None so no stray TerminationDelay or
+            # temporary scheduling leaks in; the shared applier installs the scheduler.
             config = await asyncio.to_thread(
                 self.wrapped.make_temporary_config,
                 name,
                 heap_size_gb,
                 server,
                 extra_jvm_args,
-                extra_environment_vars,
+                wire_environment_vars,
                 engine,
-                effective_timeout,
+                None,
                 admin_groups,
                 viewer_groups,
             )
 
-            # For permanent queries, replace temporary scheduling with continuous scheduling
-            # Note: protobuf RepeatedScalarContainer doesn't have clear(), use slice deletion
-            if is_permanent:
-                del config.scheduling[:]
-                # Set continuous scheduling for permanent queries
-                # Uses the full class name as required by IrisQueryScheduler
-                config.scheduling.append(
-                    "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerContinuous"
-                )
-                config.scheduling.append("StartTime=00:00:00")
-                config.scheduling.append("TimeZone=America/New_York")
-                config.scheduling.append("DailyRestart=false")
-                config.scheduling.append("StopTimeDisabled=true")
-                config.scheduling.append("RestartErrorCount=0")
-                config.scheduling.append("RestartErrorDelay=0")
-                config.scheduling.append("RestartWhenRunning=Yes")
-                config.scheduling.append("SchedulingDisabled=false")
-                _LOGGER.debug(
-                    f"[CorePlusControllerClient:make_pq_config] Set continuous scheduling for permanent query '{name}'"
-                )
-
-            self._apply_pq_config_parameters(
+            # With no explicit schedule, auto_delete_timeout dictates the scheduler;
+            # None and 0 both mean permanent (continuous). An explicit schedule is
+            # mutually exclusive with auto_delete_timeout (validated above), so when
+            # one is given the other is None.
+            effective_auto_delete = (
+                auto_delete_timeout
+                if schedule is not None
+                else (auto_delete_timeout or 0)
+            )
+            apply_pq_config_fields(
                 config,
-                programming_language,
-                script_body,
-                script_path,
-                configuration_type,
-                enabled,
-                restart_users,
-                extra_class_path,
-                schedule,
-                init_timeout_nanos,
-                jvm_profile,
-                python_virtual_environment,
+                pq_name=None,
+                heap_size_gb=None,
+                programming_language=programming_language,
+                script_body=script_body,
+                script_path=script_path,
+                configuration_type=configuration_type,
+                enabled=enabled,
+                schedule=schedule,
+                server=None,
+                engine=None,
+                jvm_profile=jvm_profile,
+                extra_jvm_args=None,
+                extra_class_path=extra_class_path,
+                python_virtual_environment=python_virtual_environment,
+                extra_environment_vars=None,
+                init_timeout_nanos=init_timeout_nanos,
+                auto_delete_timeout=effective_auto_delete,
+                admin_groups=None,
+                viewer_groups=None,
+                restart_users=restart_users,
+                owner=owner,
             )
 
             _LOGGER.debug(
@@ -957,15 +961,112 @@ class CorePlusControllerClient(
             )
             raise
 
+    def update_pq_config(
+        self,
+        config: CorePlusQueryConfig,
+        *,
+        pq_name: str | None = None,
+        heap_size_gb: float | int | None = None,
+        script_body: str | None = None,
+        script_path: str | None = None,
+        programming_language: str | None = None,
+        configuration_type: str | None = None,
+        enabled: bool | None = None,
+        schedule: list[str] | None = None,
+        server: str | None = None,
+        engine: str | None = None,
+        jvm_profile: str | None = None,
+        extra_jvm_args: list[str] | None = None,
+        extra_class_path: list[str] | None = None,
+        python_virtual_environment: str | None = None,
+        extra_environment_vars: list[str] | None = None,
+        init_timeout_nanos: int | None = None,
+        auto_delete_timeout: int | None = None,
+        admin_groups: list[str] | None = None,
+        viewer_groups: list[str] | None = None,
+        restart_users: str | None = None,
+        owner: str | None = None,
+    ) -> bool:
+        """Apply changes to an existing persistent query configuration in place.
+
+        The modify-side counterpart to ``make_pq_config``: both shape a
+        ``PersistentQueryConfigMessage`` through the same field-applier, so the same
+        argument values produce the same config. Every field follows a "None means skip"
+        rule, so only the supplied fields change. This mutates ``config`` in place and does
+        not persist it; pass the result to ``modify_query``.
+
+        ``auto_delete_timeout`` installs its own scheduler and is mutually exclusive with
+        ``schedule`` (a ValueError is raised if both are supplied): ``0`` installs the
+        continuous (permanent) scheduler and clears the auto-delete grace period; a positive
+        integer installs the temporary scheduler and sets the grace period to that many
+        seconds; ``None`` leaves scheduling and auto-delete untouched.
+
+        Args:
+            config (CorePlusQueryConfig): The existing configuration to modify in place.
+            pq_name (str | None): New PQ name.
+            heap_size_gb (float | int | None): New heap size in GB.
+            script_body (str | None): New inline script code (mutually exclusive with script_path).
+            script_path (str | None): New Git script path (mutually exclusive with script_body).
+            programming_language (str | None): "Python" or "Groovy", case-insensitive.
+            configuration_type (str | None): Query type ("Script", "RunAndDone", etc.).
+            enabled (bool | None): Whether the query is enabled.
+            schedule (list[str] | None): Scheduling entries; replaces existing wholesale.
+            server (str | None): Target server name.
+            engine (str | None): Worker kind/engine type.
+            jvm_profile (str | None): Named JVM profile.
+            extra_jvm_args (list[str] | None): JVM arguments; replaces existing.
+            extra_class_path (list[str] | None): Classpath entries; replaces existing.
+            python_virtual_environment (str | None): Python venv control.
+            extra_environment_vars (list[str] | None): Env vars as ``"KEY=VALUE"`` entries
+                (converted internally to the controller's alternating key/value wire
+                format); replaces existing.
+            init_timeout_nanos (int | None): Initialization timeout in nanoseconds.
+            auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion.
+                None leaves it unchanged; 0 makes the query permanent; a positive integer
+                makes it temporary, auto-deleted after that many seconds.
+            admin_groups (list[str] | None): Admin groups; replaces existing.
+            viewer_groups (list[str] | None): Viewer groups; replaces existing.
+            restart_users (str | None): Restart-permission enum name (e.g., "RU_ADMIN").
+            owner (str | None): New query owner.
+
+        Returns:
+            bool: True if any field changed, False if every parameter was None.
+
+        Raises:
+            ValueError: If script_body/script_path or auto_delete_timeout/schedule are
+                supplied together, or if a parameter value is invalid.
+        """
+        validate_pq_config_args(auto_delete_timeout, schedule, script_body, script_path)
+        return apply_pq_config_fields(
+            config.pb,
+            pq_name=pq_name,
+            heap_size_gb=heap_size_gb,
+            programming_language=programming_language,
+            script_body=script_body,
+            script_path=script_path,
+            configuration_type=configuration_type,
+            enabled=enabled,
+            schedule=schedule,
+            server=server,
+            engine=engine,
+            jvm_profile=jvm_profile,
+            extra_jvm_args=extra_jvm_args,
+            extra_class_path=extra_class_path,
+            python_virtual_environment=python_virtual_environment,
+            extra_environment_vars=extra_environment_vars,
+            init_timeout_nanos=init_timeout_nanos,
+            auto_delete_timeout=auto_delete_timeout,
+            admin_groups=admin_groups,
+            viewer_groups=viewer_groups,
+            restart_users=restart_users,
+            owner=owner,
+        )
+
     # ===========================================================================
     # Query Lifecycle Management
     # ===========================================================================
 
-    async def delete_query(
-        self,
-        serial: CorePlusQuerySerial,
-        timeout_seconds: float = PQ_MANAGEMENT_TIMEOUT_SECONDS,
-    ) -> None:
+    async def delete_query(self, serial: CorePlusQuerySerial) -> None:
         """Delete a query asynchronously.
 
         This method permanently removes a query from the controller. When a query is deleted:
@@ -985,17 +1086,17 @@ class CorePlusControllerClient(
         Args:
             serial (CorePlusQuerySerial): The serial number of the query to delete. This must reference a valid,
                    existing query that the authenticated user has permission to delete.
-            timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to PQ_MANAGEMENT_TIMEOUT_SECONDS.
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
-                                    due to network issues or if the controller is unavailable.
-            ValueError: If the serial parameter is invalid or malformed.
-            KeyError: If the query with the given serial does not exist.
+                                    due to network issues, if the controller is unavailable, or if
+                                    the operation does not complete within the operator-configured
+                                    ``EnterpriseClientTimeouts.pq_management_timeout_seconds``.
             QueryError: If the query deletion fails for any other reason such as permission issues,
-                       internal controller errors, or if the query is in a state that prevents deletion.
+                       a non-existent serial number, internal controller errors, or if the query is
+                       in a state that prevents deletion.
         """
+        timeout_seconds = self._timeouts.pq_management_timeout_seconds
         _LOGGER.debug(
             f"[CorePlusControllerClient:delete_query] Starting query deletion for serial={serial}"
         )
@@ -1009,10 +1110,13 @@ class CorePlusControllerClient(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusControllerClient:delete_query] Timed out after {timeout_seconds}s"
+                f"[CorePlusControllerClient:delete_query] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.pq_management_timeout_seconds."
             )
             raise DeephavenConnectionError(
-                f"Query deletion timed out after {timeout_seconds} seconds."
+                f"Query deletion timed out after {timeout_seconds} seconds. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.pq_management_timeout_seconds in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -1028,13 +1132,14 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:delete_query] Failed to delete query {serial}: {e}"
             )
-            raise QueryError(f"Failed to delete query {serial}: {e}") from e
+            raise QueryError(
+                f"Failed to delete query {serial}: {describe_exception_chain(e)}"
+            ) from e
 
     async def modify_query(
         self,
         updated_config: CorePlusQueryConfig,
         restart: bool = False,
-        timeout_seconds: float = PQ_MANAGEMENT_TIMEOUT_SECONDS,
     ) -> None:
         """Modify a persistent query configuration asynchronously.
 
@@ -1062,32 +1167,30 @@ class CorePlusControllerClient(
                         update mechanism.
             restart (bool): Whether to restart the query after modifying the configuration.
                         Defaults to False. Set to True to apply changes immediately.
-            timeout_seconds (float): Maximum time in seconds to wait for the operation.
-                Defaults to PQ_MANAGEMENT_TIMEOUT_SECONDS.
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
-                                    due to network issues or if the controller is unavailable.
-            ValueError: If the configuration is invalid or malformed, or if the serial number
-                       in the configuration is invalid.
-            KeyError: If the query with the serial number in the configuration does not exist.
+                                    due to network issues, if the controller is unavailable, or if
+                                    the operation does not complete within the operator-configured
+                                    ``EnterpriseClientTimeouts.pq_management_timeout_seconds``.
             QueryError: If the query modification fails for any other reason such as permission
-                       issues, configuration conflicts, or internal controller errors.
+                       issues, configuration conflicts, a non-existent serial number, or internal
+                       controller errors.
 
         Example:
-            # Get current query info and modify it
+            # Get current query info and apply changes via update_pq_config (the
+            # partial-update helper; "None means skip" for every field).
             query_info = await controller.get(serial)
             config = query_info.config
+            controller.update_pq_config(config, heap_size_gb=16.0)
 
-            # Update heap size in the protobuf
-            config.pb.heapSizeGb = 16.0
-
-            # Modify without restarting (changes saved for next restart)
+            # Persist without restarting (changes saved for next restart)
             await controller.modify_query(config, restart=False)
 
-            # Or modify and restart immediately
+            # Or persist and restart immediately to apply runtime changes
             await controller.modify_query(config, restart=True)
         """
+        timeout_seconds = self._timeouts.pq_management_timeout_seconds
         pb = updated_config.pb
         _LOGGER.debug(
             f"[CorePlusControllerClient:modify_query] Modifying query: "
@@ -1103,10 +1206,13 @@ class CorePlusControllerClient(
             )
         except TimeoutError:
             _LOGGER.error(
-                f"[CorePlusControllerClient:modify_query] Timed out after {timeout_seconds}s"
+                f"[CorePlusControllerClient:modify_query] Timed out after {timeout_seconds}s. "
+                f"Increase enterprise/settings.json: timeouts.client.pq_management_timeout_seconds."
             )
             raise DeephavenConnectionError(
-                f"Query modification timed out after {timeout_seconds} seconds."
+                f"Query modification timed out after {timeout_seconds} seconds. "
+                f"To allow more time, increase enterprise/settings.json: "
+                f"timeouts.client.pq_management_timeout_seconds in the operator config."
             ) from None
         except ConnectionError as e:
             _LOGGER.error(
@@ -1122,12 +1228,80 @@ class CorePlusControllerClient(
             _LOGGER.error(
                 f"[CorePlusControllerClient:modify_query] Failed to modify query {pb.serial}: {e}"
             )
-            raise QueryError(f"Failed to modify query {pb.serial}: {e}") from e
+            raise QueryError(
+                f"Failed to modify query {pb.serial}: {describe_exception_chain(e)}"
+            ) from e
+
+    async def _run_state_change(
+        self,
+        method_name: str,
+        method_args: tuple[Any, ...],
+        wait: bool,
+        target_description: str,
+        passthrough_excs: tuple[type[BaseException], ...],
+    ) -> None:
+        """Run a controller state-change call with the shared error envelope.
+
+        Backs :meth:`restart_query`, :meth:`stop_query`,
+        :meth:`start_and_wait`, and :meth:`stop_and_wait`, each of which
+        delegates to a corresponding method on the wrapped controller
+        (``self.wrapped.<method_name>``) executed in a worker thread.
+
+        Args:
+            method_name (str): Name of the method on ``self.wrapped`` to
+                invoke. Also used as the log prefix and looked up via
+                :func:`getattr` so callers cannot bind a non-method.
+            method_args (tuple[Any, ...]): Positional arguments passed
+                to the wrapped method, in order, before the trailing
+                ``timeout_seconds`` argument that this helper appends.
+            wait (bool): When ``True`` the wait duration is sourced from
+                :attr:`EnterpriseClientTimeouts.pq_state_change_timeout_seconds`;
+                when ``False`` the wrapped method is invoked with
+                ``timeout_seconds=0`` (fire-and-forget).
+            target_description (str): Human-readable description of the
+                operation target used in log and error messages
+                (e.g. ``"query(s)"`` or ``f"query {serial}"``).
+            passthrough_excs (tuple[type[BaseException], ...]):
+                Exception types from the wrapped method that should
+                propagate unchanged rather than be wrapped in
+                :class:`QueryError`. ``ConnectionError`` is always
+                translated to :class:`DeephavenConnectionError` and is
+                not affected by this tuple.
+
+        Raises:
+            DeephavenConnectionError: If the wrapped call raises
+                :class:`ConnectionError`.
+            QueryError: If the wrapped call raises any other exception
+                not listed in ``passthrough_excs``.
+        """
+        timeout_seconds = self._timeouts.pq_state_change_timeout_seconds if wait else 0
+        log_prefix = f"[CorePlusControllerClient:{method_name}]"
+        _LOGGER.debug(f"{log_prefix} Starting {target_description} (wait={wait})")
+        wrapped_callable = getattr(self.wrapped, method_name)
+        all_args: tuple[Any, ...] = (*method_args, timeout_seconds)
+        try:
+            await asyncio.to_thread(wrapped_callable, *all_args)
+            _LOGGER.debug(f"{log_prefix} {target_description} completed successfully")
+        except ConnectionError as e:
+            _LOGGER.error(
+                f"{log_prefix} Connection error while running {target_description}: {e}"
+            )
+            raise DeephavenConnectionError(
+                f"Unable to connect to controller service: {e}"
+            ) from e
+        except passthrough_excs:
+            # Re-raise native exceptions unchanged
+            raise
+        except Exception as e:
+            _LOGGER.error(f"{log_prefix} Failed to run {target_description}: {e}")
+            raise QueryError(
+                f"Failed to run {target_description}: {describe_exception_chain(e)}"
+            ) from e
 
     async def restart_query(
         self,
         serials: Iterable[CorePlusQuerySerial] | CorePlusQuerySerial,
-        timeout_seconds: float | None = None,
+        wait: bool = True,
     ) -> None:
         """Restart one or more queries asynchronously.
 
@@ -1144,49 +1318,34 @@ class CorePlusControllerClient(
 
         A successful call to authenticate should have happened before this call.
 
+        When ``wait=True`` (default), the wait duration is sourced from
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
+        ``wait=False``, the call returns immediately (fire-and-forget).
+
         Args:
             serials (Iterable[CorePlusQuerySerial] | CorePlusQuerySerial): A query serial number, or an iterable of serial numbers. Each serial must
                     reference a valid, existing query.
-            timeout_seconds (float | None): Timeout in seconds for the operation. If None, the client's
-                           default timeout is used. For restarting multiple queries or complex
-                           queries, a longer timeout may be appropriate.
+            wait (bool): When True, wait for the restart to complete using the operator-configured
+                wait duration. When False, fire-and-forget (submit and return immediately).
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
                                     due to network issues or server unavailability.
-            ValueError: If any serial parameters are invalid or malformed.
-            KeyError: If any queries with the given serials do not exist.
             QueryError: If the query restart fails for any other reason such as insufficient resources,
-                       configuration errors, or internal controller issues.
+                       a non-existent serial number, configuration errors, or internal controller issues.
         """
-        _LOGGER.debug("[CorePlusControllerClient:restart_query] Starting query restart")
-        try:
-            await asyncio.to_thread(
-                self.wrapped.restart_query, serials, timeout_seconds
-            )
-            _LOGGER.debug(
-                "[CorePlusControllerClient:restart_query] Query restart completed successfully"
-            )
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:restart_query] Connection error while restarting query(s): {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Unable to connect to controller service: {e}"
-            ) from e
-        except (ValueError, KeyError):
-            # Re-raise native exceptions unchanged
-            raise
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:restart_query] Failed to restart query(s): {e}"
-            )
-            raise QueryError(f"Failed to restart query(s): {e}") from e
+        await self._run_state_change(
+            method_name="restart_query",
+            method_args=(serials,),
+            wait=wait,
+            target_description="restart query(s)",
+            passthrough_excs=(ValueError, KeyError),
+        )
 
     async def start_and_wait(
         self,
         serial: CorePlusQuerySerial,
-        timeout_seconds: float = PQ_STATE_CHANGE_TIMEOUT_SECONDS,
+        wait: bool = True,
     ) -> None:
         """Start the given query and wait for it to become running asynchronously.
 
@@ -1197,51 +1356,39 @@ class CorePlusControllerClient(
         If the query transitions to a failure state (e.g., FAILED, CRASHED) during startup,
         this method will raise an exception with the appropriate error information.
 
+        When ``wait=True`` (default), the wait duration is sourced from
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
+        ``wait=False``, the call returns immediately after submitting the
+        start request (fire-and-forget).
+
         Args:
             serial (CorePlusQuerySerial): The serial number of the query to start. This must reference a valid query that
                    has been previously created via add_query.
-            timeout_seconds (int): How long to wait for the query to become running, in seconds. Default is
-                           120 seconds (2 minutes). For large or complex queries, a longer timeout
-                           may be necessary.
+            wait (bool): When True, wait for the PQ to reach RUNNING using the operator-configured
+                wait duration. When False, fire-and-forget (submit and return immediately).
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.
-            TimeoutError: If the query does not reach the RUNNING state within the timeout period.
-            ValueError: If the serial parameter is invalid or malformed.
-            KeyError: If the query with the given serial does not exist.
-            QueryError: If the query fails to start due to initialization errors, resource constraints,
-                       or any other operational issues.
+            KeyError: If the query with the given serial does not exist (raised by the upstream
+                ``self.map()[serial]`` lookup performed before the wait begins; propagated
+                unchanged by this wrapper).
+            QueryError: If the query fails to reach the RUNNING state within the wait period, or for
+                any other operational issue such as initialization errors or resource constraints.
+                The upstream ``RuntimeError`` raised on timeout-without-target-state is translated
+                to ``QueryError`` by this wrapper.
         """
-        _LOGGER.debug(
-            f"[CorePlusControllerClient:start_and_wait] Starting query and waiting for serial={serial}"
+        await self._run_state_change(
+            method_name="start_and_wait",
+            method_args=(serial,),
+            wait=wait,
+            target_description=f"start query {serial}",
+            passthrough_excs=(TimeoutError, ValueError, KeyError),
         )
-        try:
-            await asyncio.to_thread(
-                self.wrapped.start_and_wait, serial, timeout_seconds
-            )
-            _LOGGER.debug(
-                f"[CorePlusControllerClient:start_and_wait] Query {serial} started successfully"
-            )
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:start_and_wait] Connection error while starting query {serial}: {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Unable to connect to controller service: {e}"
-            ) from e
-        except (TimeoutError, ValueError, KeyError):
-            # Re-raise native exceptions unchanged
-            raise
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:start_and_wait] Query {serial} failed to start: {e}"
-            )
-            raise QueryError(f"Failed to start query {serial}: {e}") from e
 
     async def stop_query(
         self,
         serials: Iterable[CorePlusQuerySerial] | CorePlusQuerySerial,
-        timeout_seconds: float | None = None,
+        wait: bool = True,
     ) -> None:
         """Stop one or more queries asynchronously.
 
@@ -1259,47 +1406,35 @@ class CorePlusControllerClient(
 
         A successful call to authenticate should have happened before this call.
 
+        When ``wait=True`` (default), the wait duration is sourced from
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
+        ``wait=False``, the call returns immediately (fire-and-forget).
+
         Args:
             serials (Iterable[CorePlusQuerySerial] | CorePlusQuerySerial): A query serial number, or an iterable of serial numbers. Each serial must
                     reference a valid, existing query.
-            timeout_seconds (float | None): Timeout in seconds for the operation. If None, the client's
-                           default timeout is used. For stopping multiple queries, a longer timeout
-                           may be appropriate.
+            wait (bool): When True, wait for the stop to complete using the operator-configured
+                wait duration. When False, fire-and-forget (submit and return immediately).
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
                                     due to network issues or server unavailability.
-            ValueError: If any serial parameters are invalid or malformed.
-            KeyError: If any queries with the given serials do not exist.
             QueryError: If the query stop fails for any other reason such as permission issues,
-                       invalid query state transitions, or internal controller errors.
+                       a non-existent serial number, invalid query state transitions, or internal
+                       controller errors.
         """
-        _LOGGER.debug("[CorePlusControllerClient:stop_query] Starting query stop")
-        try:
-            await asyncio.to_thread(self.wrapped.stop_query, serials, timeout_seconds)
-            _LOGGER.debug(
-                "[CorePlusControllerClient:stop_query] Query stop completed successfully"
-            )
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:stop_query] Connection error when stopping query: {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Connection error when stopping query: {e}"
-            ) from e
-        except (ValueError, KeyError):
-            # Re-raise native exceptions unchanged
-            raise
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:stop_query] Failed to stop query(s): {e}"
-            )
-            raise QueryError(f"Failed to stop query(s): {e}") from e
+        await self._run_state_change(
+            method_name="stop_query",
+            method_args=(serials,),
+            wait=wait,
+            target_description="stop query(s)",
+            passthrough_excs=(ValueError, KeyError),
+        )
 
     async def stop_and_wait(
         self,
         serial: CorePlusQuerySerial,
-        timeout_seconds: float = PQ_STATE_CHANGE_TIMEOUT_SECONDS,
+        wait: bool = True,
     ) -> None:
         """Stop the given query and wait for it to become terminal asynchronously.
 
@@ -1311,40 +1446,27 @@ class CorePlusControllerClient(
         query definition remains in the controller. The query can be restarted later using
         restart_query without needing to recreate it.
 
+        When ``wait=True`` (default), the wait duration is sourced from
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
+        ``wait=False``, the call returns immediately (fire-and-forget).
+
         Args:
             serial (CorePlusQuerySerial): The serial number of the query to stop. This must reference a valid query that
                    has been previously created via add_query.
-            timeout_seconds (int): How long to wait for the query to stop, in seconds. Default is
-                           120 seconds (2 minutes). For large queries with significant cleanup,
-                           a longer timeout may be necessary.
+            wait (bool): When True, wait for the PQ to reach a terminal state using the
+                operator-configured wait duration. When False, fire-and-forget.
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.
-            TimeoutError: If the query does not reach a terminal state within the timeout period.
-            ValueError: If the serial parameter is invalid or malformed.
-            KeyError: If the query with the given serial does not exist.
-            QueryError: If the query fails to stop due to internal errors or invalid state transitions.
+            QueryError: If the query fails to reach a terminal state within the wait period, or for
+                any other reason such as a non-existent serial number, internal errors, or invalid
+                state transitions. The upstream ``RuntimeError`` raised on
+                timeout-without-terminal-state is translated to ``QueryError`` by this wrapper.
         """
-        _LOGGER.debug(
-            f"[CorePlusControllerClient:stop_and_wait] Stopping query and waiting for serial={serial}"
+        await self._run_state_change(
+            method_name="stop_and_wait",
+            method_args=(serial,),
+            wait=wait,
+            target_description=f"stop query {serial}",
+            passthrough_excs=(TimeoutError, ValueError, KeyError),
         )
-        try:
-            await asyncio.to_thread(self.wrapped.stop_and_wait, serial, timeout_seconds)
-            _LOGGER.debug(
-                f"[CorePlusControllerClient:stop_and_wait] Query {serial} stopped successfully"
-            )
-        except ConnectionError as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:stop_and_wait] Connection error while stopping query {serial}: {e}"
-            )
-            raise DeephavenConnectionError(
-                f"Unable to connect to controller service: {e}"
-            ) from e
-        except (TimeoutError, ValueError, KeyError):
-            # Re-raise native exceptions unchanged
-            raise
-        except Exception as e:
-            _LOGGER.error(
-                f"[CorePlusControllerClient:stop_and_wait] Failed to stop query {serial}: {e}"
-            )
-            raise QueryError(f"Failed to stop query {serial}: {e}") from e

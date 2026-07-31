@@ -6,8 +6,7 @@ standard and enterprise client components.
 
 The primary purpose of this module is to establish a consistent wrapping pattern
 for Java client objects, providing them with enhanced Pythonic interfaces and
-asynchronous capabilities. It handles feature detection for enterprise components
-and provides appropriate error handling when required features are not available.
+asynchronous capabilities.
 
 The wrapping pattern implemented here enables several key benefits:
 1. Transparent conversion of blocking Java calls to non-blocking Python async calls
@@ -18,56 +17,64 @@ The wrapping pattern implemented here enables several key benefits:
 Classes:
     ClientObjectWrapper: Generic base class for wrapping client objects with enhanced interfaces
 
-Attributes:
-    is_enterprise_available (bool): Flag indicating if enterprise features are available
-                                   in the current environment. This is determined by attempting
-                                   to import the deephaven_enterprise package.
+Functions:
+    describe_exception_chain: Render an exception and its ``__cause__`` chain into one message, surfacing gRPC status detail
 """
 
 import logging
-from typing import Generic, TypeVar
 
-from deephaven_mcp._exceptions import InternalError
+import grpc
+
+from deephaven_mcp._exception_utils import describe_exception, exception_summary
 
 _LOGGER = logging.getLogger(__name__)
 
-# Check for enterprise features
-is_enterprise_available = False
-try:
-    # The following imports are required for enterprise features
-    import deephaven_enterprise  # noqa: F401
 
-    # # TODO: Workaround: Explicitly import all enterprise proto modules to ensure correct namespace setup -- see https://deephaven.atlassian.net/browse/DH-19813
-    # # The following imports are required to ensure that the proto modules are loaded
-    # import deephaven_enterprise.proto.acl_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.acl_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.auth_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.auth_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.auth_service_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.auth_service_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.common_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.common_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.controller_common_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.controller_common_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.controller_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.controller_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.controller_service_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.controller_service_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.persistent_query_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.persistent_query_pb2_grpc  # noqa: F401
-    # import deephaven_enterprise.proto.table_definition_pb2  # noqa: F401
-    # import deephaven_enterprise.proto.table_definition_pb2_grpc  # noqa: F401
+def _render_grpc_leaf(exc: BaseException) -> str:
+    """Render one exception, surfacing gRPC status detail for :class:`grpc.Call`.
 
-    is_enterprise_available = True
-    _LOGGER.debug("Enterprise features available")
-except ImportError:
-    _LOGGER.debug("Enterprise features not available")
+    Args:
+        exc (BaseException): The exception to render.
 
-# Type variable for the wrapped object
-T = TypeVar("T")
+    Returns:
+        str: ``"gRPC CODE: details"`` for a :class:`grpc.Call`, the
+            canonical ``TypeName: message`` summary otherwise.
+    """
+    if isinstance(exc, grpc.Call):
+        code = exc.code()
+        code_name = code.name if code is not None else "UNKNOWN"
+        return f"gRPC {code_name}: {exc.details()}"
+    return exception_summary(exc)
 
 
-class ClientObjectWrapper(Generic[T]):
+def describe_exception_chain(exc: BaseException) -> str:
+    """Render an exception and its ``__cause__`` chain into a single message.
+
+    A gRPC-aware front for :func:`deephaven_mcp._exception_utils.describe_exception`:
+    for any :class:`grpc.Call` in the chain, the gRPC status code and
+    ``details()`` are included, surfacing the server-side reason (such as
+    an unsupported column type) that a generic wrapper message like
+    "failed to finish FetchTableOp operation" omits.
+
+    Usage:
+        Client wrappers call this to build the message of an exception raised
+        from a caught Deephaven/gRPC error (the ``except Exception`` fallback of
+        a wrapped call), so the underlying server detail is preserved instead of
+        being flattened to the wrapper's own message.
+
+    Args:
+        exc (BaseException): The exception to describe.
+
+    Returns:
+        str: The exception's summary followed by each distinct underlying
+            cause, joined by " -> " (exception-group members joined by
+            "; "). A cause is skipped when its text is already contained
+            in the entry it would follow.
+    """
+    return describe_exception(exc, render=_render_grpc_leaf)
+
+
+class ClientObjectWrapper[T]:
     """Base class for client wrappers with generic type support.
 
     This class serves as a foundation for wrappers around Deephaven client objects.
@@ -78,12 +85,11 @@ class ClientObjectWrapper(Generic[T]):
     Purpose:
         1. Provide a consistent pattern for wrapping Java client objects with Python interfaces
         2. Enable non-blocking asynchronous access to potentially blocking Java methods
-        3. Ensure proper detection and handling of enterprise feature requirements
-        4. Establish a consistent error handling pattern across client components
+        3. Establish a consistent error handling pattern across client components
 
     Usage Pattern:
         When extending this class, implementers should:
-        1. Initialize with the object to be wrapped and specify whether it requires enterprise features
+        1. Initialize with the object to be wrapped
         2. Create async wrapper methods that delegate to the underlying wrapped client object
         3. Use asyncio.to_thread for potentially blocking operations to prevent blocking the event loop
         4. Add enhanced error handling by catching Java exceptions and translating them to Python exceptions
@@ -104,7 +110,7 @@ class ClientObjectWrapper(Generic[T]):
 
         class TableWrapper(ClientObjectWrapper[DeephavenTable]):
             def __init__(self, table: DeephavenTable):
-                super().__init__(table, is_enterprise=False)
+                super().__init__(table)
 
             async def get_column_names(self) -> List[str]:
                 # Wrap potentially blocking operation in a background thread
@@ -120,13 +126,11 @@ class ClientObjectWrapper(Generic[T]):
                     raise ValueError(f"Filter failed: {e}") from e
     """
 
-    def __init__(self, wrapped: T, is_enterprise: bool) -> None:
+    def __init__(self, wrapped: T) -> None:
         """Initialize a wrapper for a client object.
 
-        This constructor creates a wrapper around a client object and verifies that the
-        required features (enterprise or non-enterprise) are available. It performs
-        validation to ensure that the wrapped object is not None and that enterprise
-        features are available when required.
+        This constructor creates a wrapper around a client object and validates that the
+        wrapped object is not None.
 
         The wrapper pattern established by this constructor is fundamental to the
         Deephaven client architecture, allowing Java client objects to be wrapped with
@@ -137,34 +141,16 @@ class ClientObjectWrapper(Generic[T]):
                    object (typically a Java object) that this wrapper will delegate to.
                    The type T is determined by the generic type parameter used when
                    subclassing ClientObjectWrapper.
-            is_enterprise: Specifies whether the wrapped object requires enterprise features.
-                          Must be True for enterprise objects and False for non-enterprise objects.
-                          When True, availability of enterprise features will be verified using
-                          the module-level is_enterprise_available flag. This helps prevent
-                          runtime errors by ensuring required features are available at initialization.
 
         Raises:
             ValueError: If the wrapped object is None. A non-None wrapped object is essential
                       for the wrapper to function correctly.
-            InternalError: If is_enterprise=True but enterprise features are not available.
-                          This typically indicates a programming error in the library, as enterprise
-                          wrappers should only be created in environments where enterprise features
-                          are available.
         """
         if wrapped is None:
             _LOGGER.error("ClientObjectWrapper constructor called with None")
             raise ValueError("Cannot wrap None")
 
         self._wrapped = wrapped
-
-        if is_enterprise and not is_enterprise_available:
-            _LOGGER.error(
-                "[ClientObjectWrapper] Constructor called with enterprise=True when enterprise features are not available. "
-                "Please report this issue."
-            )
-            raise InternalError(
-                "ClientObjectWrapper constructor called with enterprise=True when enterprise features are not available. Please report this issue."
-            )
 
     @property
     def wrapped(self) -> T:
