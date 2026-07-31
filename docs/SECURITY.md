@@ -283,8 +283,10 @@ do **not** accept a `tls` block — the upstream Enterprise
   default; `dhcli config get --reveal-secrets` is the only way to print
   one, and it warns on stderr naming how many it disclosed. A field
   holding only a `${env:NAME}` / `${file:PATH}` reference is shown as
-  written, so a whole-value `[REDACTED]` means a **literal** secret is
-  stored in that file. A reference with a fallback keeps its variable
+  written, so a whole-value `[REDACTED]` means the field holds an
+  **on-disk value** rather than a bare reference — usually a literal
+  secret, though redaction fails closed, so an invalid value (a number,
+  `null`) at a secret field is replaced too. A reference with a fallback keeps its variable
   name but loses the literal (`${env:NAME:-[REDACTED]}`), since the
   fallback is itself a stored secret. Two gaps: `dhcli config edit` opens the file
   verbatim, and redaction is schema-guided, so a secret placed in a

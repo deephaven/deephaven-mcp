@@ -21,7 +21,12 @@ Three rules define what it redacts:
   configured is a diagnostic, not a secret, so an ``auth`` block
   renders as ``{"credentials": {"type": "psk", "token":
   "[REDACTED]"}}``. An anonymous block carries no secret at all and so
-  passes through untouched and uncounted.
+  passes through untouched and uncounted. The exemption is confined to
+  the flagged field's own mapping, and applies equally whether the
+  discriminator is reached through the block or addressed directly.
+  Deeper in, a key named ``type`` is scrubbed like any other: this runs
+  on unvalidated data, so such a key need not be a discriminator at
+  all.
 - **A bare templating reference is left verbatim.** ``"${env:DH_PSK}"``
   names an environment variable and discloses nothing, so redacting it
   would cost the diagnostic that matters most (is this field wired to
@@ -131,6 +136,14 @@ def _redact(points: frozenset[FieldPath], path: FieldPath, value: Any) -> RawRed
     Returns:
         RawRedaction: The redacted value and the replacement count.
     """
+    # Addressing the discriminator directly must agree with how the
+    # enclosing block renders it. Without this, ``config get
+    # ...credentials`` shows ``"type": "psk"`` while ``config get
+    # ...credentials.type`` shows ``[REDACTED]`` and warns of a
+    # disclosure -- contradicting the rule that the discriminator names
+    # the kind of credential, never the credential.
+    if any(path == point + _DISCRIMINATOR for point in points):
+        return RawRedaction(value, 0)
     # ``has_prefix`` is true for the point itself and for anything under
     # it, so addressing a field *inside* a secret block (``config get
     # ...auth.credentials.token``) cannot slip past the check.
@@ -144,11 +157,18 @@ def _redact(points: frozenset[FieldPath], path: FieldPath, value: Any) -> RawRed
     return RawRedaction(value, 0)
 
 
-def _scrub(value: Any) -> RawRedaction:
+def _scrub(value: Any, *, at_point: bool = True) -> RawRedaction:
     """Replace the disclosing material inside one secret field's value.
 
     Args:
         value (Any): The raw value sitting at a redaction point.
+        at_point (bool): Whether ``value`` is the redaction point's own
+            value, or an element of a list at it -- the only positions
+            where a ``type`` key is the union discriminator. Nested
+            mappings recurse with ``False``: this runs on unvalidated
+            data, where a deeper key happens to be named ``type``
+            without being a discriminator, and exempting it would print
+            a secret verbatim.
 
     Returns:
         RawRedaction: The scrubbed value and the replacement count.
@@ -171,18 +191,20 @@ def _scrub(value: Any) -> RawRedaction:
         scrubbed: dict[str, Any] = {}
         count = 0
         for key, item in value.items():
-            if key == _DISCRIMINATOR:
+            if at_point and key == _DISCRIMINATOR:
                 # Which kind of credential this is, never the credential
                 # itself. Keeping it is the difference between a useful
                 # and a useless view of an auth block.
                 scrubbed[key] = item
                 continue
-            outcome = _scrub(item)
+            outcome = _scrub(item, at_point=False)
             scrubbed[key] = outcome.value
             count += outcome.count
         return RawRedaction(scrubbed, count)
     if isinstance(value, list):
-        results = [_scrub(item) for item in value]
+        # A list at the point holds the point's own values (e.g. a list
+        # of credential blocks), so the exemption carries across it.
+        results = [_scrub(item, at_point=at_point) for item in value]
         return RawRedaction(
             [result.value for result in results],
             sum(result.count for result in results),

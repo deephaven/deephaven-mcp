@@ -340,6 +340,83 @@ def test_at_a_non_secret_path_changes_nothing() -> None:
 
 
 # ---------------------------------------------------------------------------
+# scope of the discriminator exemption
+# ---------------------------------------------------------------------------
+
+
+def test_nested_type_key_inside_a_secret_block_is_scrubbed() -> None:
+    """The exemption covers the flagged field's own mapping, not every
+    mapping beneath it. This runs on unvalidated data, where a deeper
+    key named ``type`` need not be a discriminator -- exempting it
+    everywhere printed a literal secret verbatim.
+    """
+    outcome = redact_raw(
+        ConfigFileKind.ENTERPRISE_SYSTEM,
+        {
+            "auth": {
+                "credentials": {
+                    "type": "custom",
+                    "extra": {"type": "literal-secret"},
+                }
+            }
+        },
+    )
+    credentials = outcome.value["auth"]["credentials"]
+    assert credentials["type"] == "custom"
+    assert credentials["extra"] == {"type": "[REDACTED]"}
+    assert outcome.count == 1
+
+
+def test_nested_type_key_is_scrubbed_inside_a_list() -> None:
+    """A list at the point carries the point's own values, so its
+    elements keep the exemption while their nested mappings do not."""
+    outcome = redact_raw(
+        ConfigFileKind.ENTERPRISE_SYSTEM,
+        {"auth": {"credentials": [{"type": "psk", "inner": {"type": "s3cret"}}]}},
+    )
+    entry = outcome.value["auth"]["credentials"][0]
+    assert entry["type"] == "psk"
+    assert entry["inner"] == {"type": "[REDACTED]"}
+    assert outcome.count == 1
+
+
+def test_directly_addressed_discriminator_is_not_redacted() -> None:
+    """``config get ...credentials.type`` must agree with the value the
+    whole-block view shows, and must not warn of a disclosure."""
+    outcome = redact_raw(
+        ConfigFileKind.ENTERPRISE_SYSTEM,
+        "psk",
+        at=_CREDENTIALS + _DISCRIMINATOR,
+    )
+    assert outcome.value == "psk"
+    assert outcome.count == 0
+
+
+def test_directly_addressed_discriminator_agrees_with_the_block_view() -> None:
+    """The two routes to the same field are the contract; pin them
+    together so neither can drift."""
+    block = redact_raw(
+        ConfigFileKind.ENTERPRISE_SYSTEM,
+        {"type": "psk", "token": "literal"},
+        at=_CREDENTIALS,
+    )
+    direct = redact_raw(
+        ConfigFileKind.ENTERPRISE_SYSTEM, "psk", at=_CREDENTIALS + _DISCRIMINATOR
+    )
+    assert direct.value == block.value["type"]
+
+
+def test_a_sibling_of_the_discriminator_is_still_redacted() -> None:
+    """The exemption is keyed to the discriminator name, not to being
+    addressed directly -- a real secret leaf stays covered."""
+    outcome = redact_raw(
+        ConfigFileKind.ENTERPRISE_SYSTEM, "literal", at=_CREDENTIALS + "token"
+    )
+    assert outcome.value == "[REDACTED]"
+    assert outcome.count == 1
+
+
+# ---------------------------------------------------------------------------
 # values the schema does not describe
 # ---------------------------------------------------------------------------
 

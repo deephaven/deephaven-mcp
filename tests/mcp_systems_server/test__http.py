@@ -463,7 +463,10 @@ def test_plan_daemon_ignores_server_json_psk(tmp_path):
     )
     try:
         assert plan.psk
-        assert plan.psk != "from-server-json"
+        # Unwrap: ``plan.psk`` is a SecretStr, and ``SecretStr(x) != x``
+        # is true for every x, so comparing the wrapper to a plain str
+        # would pass even if the configured PSK were reused verbatim.
+        assert plan.psk.get_secret_value() != "from-server-json"
     finally:
         plan.bind.close_unhanded()
 
