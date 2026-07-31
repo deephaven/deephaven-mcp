@@ -283,7 +283,7 @@ def test_config_get_hits_assert_never(
     monkeypatch.setattr(config_mod, "resolve_path", lambda path: object())
     assert config_mod.config_get.callback is not None
     with _ctx(tmp_path).scope(), pytest.raises(AssertionError):
-        config_mod.config_get.callback(None)
+        config_mod.config_get.callback(None, False)
 
 
 def test_config_keys_hits_assert_never(
@@ -372,6 +372,108 @@ def test_get_refs_stay_unexpanded(tmp_path: Path) -> None:
     )
     result = _run(tmp_path, "get", "community.sessions.s1.auth.credentials.token")
     assert json.loads(result.stdout) == "${env:DOES_NOT_EXIST_XYZ}"
+
+
+# ---------------------------------------------------------------------------
+# get: secret redaction and the --reveal-secrets opt-out
+# ---------------------------------------------------------------------------
+
+_TOKEN_PATH = "community.sessions.psk1.auth.credentials.token"
+
+
+def _add_psk_session(tmp_path: Path, token: str, name: str = "psk1") -> None:
+    """Add a Community session whose PSK credential is ``token``."""
+    _run(
+        tmp_path,
+        "session",
+        "add",
+        name,
+        "--host",
+        "localhost",
+        "--auth",
+        "psk",
+        "--token",
+        token,
+        "--no-input",
+    )
+
+
+def test_get_redacts_a_literal_secret_by_default(tmp_path: Path) -> None:
+    """A literal secret must not reach stdout without an explicit opt-in."""
+    _add_psk_session(tmp_path, "literal-s3cret")
+    result = _run(tmp_path, "get", _TOKEN_PATH)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == "[REDACTED]"
+    assert "literal-s3cret" not in result.output
+
+
+def test_get_redacts_a_secret_nested_in_a_subtree(tmp_path: Path) -> None:
+    """Redaction replaces the leaf, not the block containing it."""
+    _add_psk_session(tmp_path, "literal-s3cret")
+    payload = json.loads(_run(tmp_path, "get", "community.sessions.psk1").stdout)
+    assert payload["auth"]["credentials"]["token"] == "[REDACTED]"
+    assert payload["auth"]["credentials"]["type"] == "psk"
+    assert payload["host"] == "localhost"
+
+
+def test_get_redacts_a_secret_in_the_whole_tree(tmp_path: Path) -> None:
+    """The no-PATH aggregate view is redacted too."""
+    _add_psk_session(tmp_path, "literal-s3cret")
+    result = _run(tmp_path, "get")
+    assert "literal-s3cret" not in result.output
+
+
+def test_get_reveal_secrets_prints_the_plaintext(tmp_path: Path) -> None:
+    _add_psk_session(tmp_path, "literal-s3cret")
+    result = _run(tmp_path, "get", _TOKEN_PATH, "--reveal-secrets")
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == "literal-s3cret"
+
+
+def test_get_reveal_secrets_warns_on_stderr_with_a_count(tmp_path: Path) -> None:
+    """The warning must not pollute stdout, which stays parseable JSON."""
+    _add_psk_session(tmp_path, "literal-s3cret")
+    result = _run(tmp_path, "get", _TOKEN_PATH, "--reveal-secrets")
+    assert "--reveal-secrets wrote 1 plaintext secret value" in result.stderr
+    assert json.loads(result.stdout) == "literal-s3cret"
+
+
+def test_get_reveal_secrets_warning_is_plural_for_several(tmp_path: Path) -> None:
+    _add_psk_session(tmp_path, "one-secret", name="psk1")
+    _add_psk_session(tmp_path, "two-secret", name="psk2")
+    result = _run(tmp_path, "get", "community", "--reveal-secrets")
+    assert "wrote 2 plaintext secret values" in result.stderr
+
+
+def test_get_reveal_secrets_is_silent_when_nothing_was_disclosed(
+    tmp_path: Path,
+) -> None:
+    """No warning when the flag revealed nothing; it would cry wolf."""
+    _add_session(tmp_path)
+    result = _run(tmp_path, "get", "community.sessions.local", "--reveal-secrets")
+    assert result.exit_code == 0, result.output
+    assert "--reveal-secrets" not in result.stderr
+
+
+def test_get_does_not_redact_a_bare_templating_ref(tmp_path: Path) -> None:
+    """A ref names the secret rather than being it, so it stays legible
+    and does not trip the disclosure warning."""
+    _add_psk_session(tmp_path, "${env:DH_PSK_XYZ}")
+    result = _run(tmp_path, "get", _TOKEN_PATH)
+    assert json.loads(result.stdout) == "${env:DH_PSK_XYZ}"
+    revealed = _run(tmp_path, "get", _TOKEN_PATH, "--reveal-secrets")
+    assert json.loads(revealed.stdout) == "${env:DH_PSK_XYZ}"
+    assert "--reveal-secrets" not in revealed.stderr
+
+
+def test_get_leaves_non_secret_fields_alone(tmp_path: Path) -> None:
+    """Redaction is schema-guided, not name-guessing: a non-secret field
+    is never touched even when it sits beside a secret."""
+    _add_psk_session(tmp_path, "literal-s3cret")
+    payload = json.loads(_run(tmp_path, "get", "community.sessions.psk1").stdout)
+    assert "[REDACTED]" not in json.dumps(
+        {k: v for k, v in payload.items() if k != "auth"}
+    )
 
 
 def test_get_missing_file_not_found(tmp_path: Path) -> None:

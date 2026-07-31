@@ -89,17 +89,18 @@ class CommunitySecurity(StrictSchema):
     """``security`` sub-block of ``community/settings.json``."""
 
     credential_retrieval_mode: Literal["none", "dynamic_only", "static_only", "all"] = (
-        "none"
+        "dynamic_only"
     )
     """Policy controlling whether the systems server exposes its
     community session credentials to MCP clients through the
     credential-retrieval tool. ``"none"`` disables retrieval;
     ``"dynamic_only"`` permits retrieval for runtime-launched
-    sessions; ``"static_only"`` permits retrieval for sessions defined
-    in ``community/sessions/``; ``"all"`` permits both. The whole
-    ``security:`` block can still be omitted;
-    :attr:`CommunitySettings.security` carries ``None`` as a default
-    to encode absence."""
+    sessions; ``"static_only"`` permits retrieval for sessions
+    configured under ``community.sessions``; ``"all"`` permits both.
+
+    Defaults to ``"dynamic_only"``: a dynamic worker's token was minted
+    for a session the caller just created, while operator-authored
+    static credentials stay withheld until an operator opts in."""
 
 
 class DockerImages(StrictSchema):
@@ -259,10 +260,9 @@ class CommunitySettings(StrictSchema):
     the effective value without further default resolution.
     """
 
-    security: CommunitySecurity | None = None
-    """Optional community-wide security policy. ``None`` means
-    credential retrieval is disabled (the same as
-    ``credential_retrieval_mode: "none"``)."""
+    security: CommunitySecurity = Field(default_factory=CommunitySecurity)
+    """Community-wide security policy. Omitting the block is the same as
+    writing it empty: each field takes its own default."""
 
     session_creation: CommunitySessionCreation | None = None
     """Optional defaults for dynamically-created community sessions.

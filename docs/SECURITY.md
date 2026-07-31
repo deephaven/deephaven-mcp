@@ -124,10 +124,12 @@ anything beyond the local process group.
       Windows: place the directory under the current user profile
       (`%APPDATA%/Deephaven/ai/config/` satisfies this). The startup
       audit aborts otherwise.
-- [ ] **Leave `security.credential_retrieval_mode` at `null` /
-      `"none"`** unless AI agents specifically need to read community
-      session tokens. Other modes return plaintext tokens to the
-      caller of the `session_community_credentials` MCP tool.
+- [ ] **Set `security.credential_retrieval_mode` to `"none"`** if AI
+      agents must never read community session tokens. The default,
+      `"dynamic_only"`, returns only tokens this server minted for
+      sessions the caller created; `"static_only"` and `"all"` also hand
+      operator-authored credentials to the caller of the
+      `session_community_credentials` MCP tool.
 - [ ] **Keep the runtime directory private.** The `dhcli` daemon's
       registry (`<runtime_dir>/daemon/daemon.json`) holds a live PSK in
       plaintext. The defaults are owner-only; do not point
@@ -266,9 +268,26 @@ do **not** accept a `tls` block — the upstream Enterprise
   the `dhcli session credentials` / `session url` / `session open`
   verbs that wrap it, return a **plaintext auth token** and a URL
   containing it. All are gated by
-  `security.credential_retrieval_mode` (default `none`, which refuses
-  them); every retrieval is logged. Treat the output like a password:
-  a session URL pasted into a chat log grants access to that session.
+  `security.credential_retrieval_mode` (default `dynamic_only`, which
+  covers sessions the caller created but withholds operator-authored
+  static credentials); every retrieval is logged. Treat the output like
+  a password: a session URL pasted into a chat log grants access to
+  that session.
+- **Inspecting configuration.** Both read verbs redact secret values by
+  default; `dhcli config get --reveal-secrets` is the only way to print
+  one, and it warns on stderr naming how many it disclosed. A field
+  holding only a `${env:NAME}` / `${file:PATH}` reference is never
+  redacted, so `[REDACTED]` specifically means a **literal** secret is
+  stored in that file. Two gaps: `dhcli config edit` opens the file
+  verbatim, and redaction is schema-guided, so a secret placed in a
+  free-form map (`environment_vars`, `session_arguments`) is not
+  recognized as one.
+- **`daemon.log` holds auto-generated session tokens.** A session
+  created without an explicit auth token gets one minted by the server
+  and logged with a ready-to-use `?psk=<token>` URL — the only place
+  that token is surfaced. `dhcli daemon logs` prints it unredacted, so
+  review that output before sharing it; the file is protected only by
+  the `0700` daemon directory around it.
 
 ## Rotation
 

@@ -202,7 +202,7 @@ def _decide_for_live_entry(
             raise DaemonReuseRefusedError(
                 f"The running daemon (pid {entry.pid}) is a different build than "
                 f"this CLI: {detail}. Run 'dhcli daemon restart' to replace it, "
-                f"or adjust the daemon.reuse policy in cli.json.",
+                f"or adjust the configured cli.daemon.reuse policy.",
                 differing=decision.differing,
             )
         case DaemonReuseAction.RESTART:
@@ -385,8 +385,8 @@ async def get_or_start_daemon(
         if not auto_start:
             raise DaemonClientError(
                 "No daemon is running and auto-start is disabled. "
-                "Run `dhcli daemon start` or set "
-                "`daemon.auto_start: true` in cli.json."
+                "Run `dhcli daemon start` or "
+                "`dhcli config set cli.daemon.auto_start=true`."
             )
         spawned = _spawn_or_defer(
             reg, ctx, startup_deadline_seconds=startup_deadline_seconds

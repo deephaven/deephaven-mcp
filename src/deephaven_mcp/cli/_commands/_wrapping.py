@@ -112,6 +112,28 @@ _ACQUIRE_ERROR_CODES: tuple[ErrorCode, ...] = (
 """Error codes the shared acquire + tool-call flow can raise."""
 
 
+def reveal_secrets_option(f: Any) -> Any:
+    """Attach the shared ``--reveal-secrets`` option to a command.
+
+    One flag spelling and one wording for every verb that can emit a
+    plaintext secret but is not *for* emitting one, so the opt-in cannot
+    drift between them. A verb whose entire output is a credential
+    (``session credentials``, ``session url``) takes no such flag: there
+    the disclosure is the request, gated by
+    ``community.settings.security.credential_retrieval_mode`` instead.
+    """
+    return click.option(
+        "--reveal-secrets",
+        "reveal_secrets",
+        is_flag=True,
+        default=False,
+        help=(
+            "Include plaintext secret values in the output instead of "
+            "[REDACTED]. Treat the result like a password."
+        ),
+    )(f)
+
+
 def yes_option(f: Any) -> Any:
     """Attach the shared ``--yes`` option to a destructive command.
 
@@ -133,8 +155,8 @@ def yes_option(f: Any) -> Any:
         default=False,
         help=(
             "Skip the confirmation asked when the target comes from the "
-            "sticky context (only asked when cli.json's "
-            "context.confirm_destructive is true). The confirmation is "
+            "sticky context (only asked when the configured "
+            "cli.context.confirm_destructive is true). The confirmation is "
             "skipped anyway when prompting is unavailable — stdin is not a "
             "TTY, or --no-input was given — so a non-interactive caller is "
             "never protected by it and must pass the target explicitly."

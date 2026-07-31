@@ -843,9 +843,13 @@ def test_open_launches_browser(tmp_path: Path) -> None:
     ):
         result = _invoke(["-o", "json", "session", "open", _SID], rt)
     assert result.exit_code == 0
+    # The browser gets the authenticated URL...
     wb.assert_called_once_with(_CREDS["connection_url_with_auth"])
     payload = json.loads(result.output)
-    assert payload == {"opened": _CREDS["connection_url_with_auth"], "launched": True}
+    # ...but stdout does not: it already holds the credential, so echoing
+    # the token would only spread it to logs and shell history.
+    assert payload == {"opened": _CREDS["connection_url"], "launched": True}
+    assert _CREDS["auth_token"] not in result.output
 
 
 def test_open_print_only_does_not_launch(tmp_path: Path) -> None:
@@ -856,9 +860,55 @@ def test_open_print_only_does_not_launch(tmp_path: Path) -> None:
         call_p,
         patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
     ):
-        result = _invoke(["session", "open", _SID, "--print"], rt)
+        result = _invoke(["-o", "json", "session", "open", _SID, "--print"], rt)
     assert result.exit_code == 0
     wb.assert_not_called()
+    # --print controls launching only: it is not a disclosure opt-in, so the
+    # token stays out of the output until --reveal-secrets asks for it.
+    payload = json.loads(result.output)
+    assert payload == {"opened": _CREDS["connection_url"], "launched": False}
+    assert _CREDS["auth_token"] not in result.output
+
+
+def test_open_reveal_secrets_includes_the_token(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_CREDS))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
+    ):
+        result = _invoke(
+            ["-o", "json", "session", "open", _SID, "--print", "--reveal-secrets"], rt
+        )
+    assert result.exit_code == 0
+    wb.assert_not_called()
+    payload = json.loads(result.output)
+    assert payload == {
+        "opened": _CREDS["connection_url_with_auth"],
+        "launched": False,
+    }
+
+
+def test_open_reveal_secrets_is_independent_of_print(tmp_path: Path) -> None:
+    """--reveal-secrets discloses the token even when a browser was launched."""
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_CREDS))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
+    ):
+        result = _invoke(
+            ["-o", "json", "session", "open", _SID, "--reveal-secrets"], rt
+        )
+    assert result.exit_code == 0
+    wb.assert_called_once_with(_CREDS["connection_url_with_auth"])
+    payload = json.loads(result.output)
+    assert payload == {
+        "opened": _CREDS["connection_url_with_auth"],
+        "launched": True,
+    }
 
 
 def test_open_no_browser_found_exits_2(tmp_path: Path) -> None:

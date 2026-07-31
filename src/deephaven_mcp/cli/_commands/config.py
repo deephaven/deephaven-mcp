@@ -40,7 +40,10 @@ from deephaven_mcp._platform.fsutil import AdvisoryFileLock
 from deephaven_mcp._pydantic import dump_redacted
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._command import HelpfulCommand, HelpfulGroup
-from deephaven_mcp.cli._commands._wrapping import parse_key_value
+from deephaven_mcp.cli._commands._wrapping import (
+    parse_key_value,
+    reveal_secrets_option,
+)
 from deephaven_mcp.cli._echo import echo_payload, echo_payload_no_runtime
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
 from deephaven_mcp.cli._help import (
@@ -67,6 +70,7 @@ from deephaven_mcp.config._logical_paths import (
     ConfigSection,
     resolve_path,
 )
+from deephaven_mcp.config._redact_raw import redact_raw
 from deephaven_mcp.config._settable_fields import settable_fields
 from deephaven_mcp.config._store import ConfigStore
 
@@ -240,6 +244,22 @@ def _warn_restart_hint() -> None:
     click.echo(
         "note: if a daemon is running, it keeps the configuration it loaded; "
         "run 'dhcli daemon stop' so the next command picks up this change.",
+        err=True,
+    )
+
+
+def _warn_revealed_secrets(count: int) -> None:
+    """Warn on stderr that plaintext secrets were written to stdout.
+
+    Args:
+        count (int): How many secret values were revealed. Callers only
+            invoke this when it is non-zero.
+    """
+    plural = "" if count == 1 else "s"
+    click.echo(
+        f"warning: --reveal-secrets wrote {count} plaintext secret value{plural} "
+        "to stdout; treat this output like a password and keep it out of logs, "
+        "shell history, and shared transcripts.",
         err=True,
     )
 
@@ -486,8 +506,8 @@ def config() -> None:
     every change is schema-validated before an atomic write. Every
     verb except 'show' and 'validate' operates on the raw files
     without loading the runtime, and so honors the root -o/--output
-    flag and DHCLI_OUTPUT but not cli.json's output.format (the file
-    may be the thing being inspected or repaired).
+    flag and DHCLI_OUTPUT but not the configured cli.output.format (the
+    configuration may be the thing being inspected or repaired).
     """
 
 
@@ -495,7 +515,7 @@ _OUTPUT_SHOW = OutputSpec(
     "text",
     note=(
         "The resolved, post-merge configuration, secret-bearing fields "
-        "redacted to ***. With no PATH: a JSON object with 'config_dir' plus "
+        "redacted to [REDACTED]. With no PATH: a JSON object with 'config_dir' plus "
         "'cli' and, when present, 'server'/'community'/'enterprise'. With a "
         "PATH: the value at that path — a JSON object for a subtree or the "
         "bare scalar for a leaf (mirroring 'config get', but resolved rather "
@@ -527,7 +547,7 @@ _OUTPUT_VALIDATE = OutputSpec(
         summary="Print the resolved configuration with secrets redacted.",
         description=(
             "Shows the post-merge view used at runtime. Secret-bearing "
-            "fields (passwords, API keys) are replaced with *** via "
+            "fields (passwords, API keys) are replaced with [REDACTED] via "
             "the schema's redaction hooks. Requires a valid configuration "
             "tree; 'dhcli config get' works on a partial or invalid one "
             "and shows the raw on-disk values instead."
@@ -638,7 +658,10 @@ _OUTPUT_GET = OutputSpec(
         "The raw value at PATH (or the whole tree when PATH is omitted): a "
         "JSON object for a subtree, or the bare scalar for a leaf. "
         "Templating refs ('${env:VAR}') are shown unexpanded — this is the "
-        "on-disk view, not the resolved one ('dhcli config show')."
+        "on-disk view, not the resolved one ('dhcli config show') — and are "
+        "never redacted, since a ref names a secret rather than being one. "
+        "Keys are preserved; only secret values become [REDACTED], unless "
+        "--reveal-secrets is passed."
     ),
 )
 
@@ -656,7 +679,8 @@ _OUTPUT_GET = OutputSpec(
             "configuration tree, assembled from every file. A PATH at a "
             "section (e.g. 'community') aggregates every file under it; a "
             "PATH at or below a file (e.g. 'cli.output.format') reads just "
-            "that file."
+            "that file. Secret values are redacted by default; pass "
+            "--reveal-secrets to print them."
         ),
         arguments=(
             HelpEntry(
@@ -673,6 +697,7 @@ _OUTPUT_GET = OutputSpec(
             "$ dhcli config get",
             "$ dhcli config get community.settings",
             "$ dhcli -o human config get cli.output.format",
+            "$ dhcli -o human config get server.psk --reveal-secrets",
         ),
         see_also=(
             "dhcli config keys",
@@ -690,32 +715,69 @@ _OUTPUT_GET = OutputSpec(
     needs_runtime=False,
 )
 @click.argument("path", required=False, default=None)
+@reveal_secrets_option
 @click.pass_context
 @run_async
-async def config_get(ctx: click.Context, path: str | None) -> None:
+async def config_get(
+    ctx: click.Context, path: str | None, reveal_secrets: bool
+) -> None:
     """Print the raw configuration at a logical path."""
     spec = _authoring_spec(ctx)
     store = _store_from_spec(spec)
     resolved = _resolve_logical_path(path)
     match resolved:
         case ConfigFieldLocation() as target:
-            echo_payload_no_runtime(ctx, _read_field(store, target))
+            payload, secrets = _read_field(store, target, reveal=reveal_secrets)
         case ConfigSection() as section:
-            echo_payload_no_runtime(ctx, _read_section_tree(store, section))
+            payload, secrets = _read_section_tree(store, section, reveal=reveal_secrets)
         case _:
             assert_never(resolved)
+    if reveal_secrets and secrets:
+        _warn_revealed_secrets(secrets)
+    echo_payload_no_runtime(ctx, payload)
 
 
-def _read_field(store: ConfigStore, target: ConfigFieldLocation) -> Any:
+def _redacted(
+    kind: ConfigFileKind, value: Any, *, at: FieldPath, reveal: bool
+) -> tuple[Any, int]:
+    """Redact one file's raw value, counting the secrets it holds.
+
+    The schema walk runs in both modes: under ``reveal`` its redacted
+    output is discarded but its count is what the stderr warning
+    reports, so the count means the same thing either way.
+
+    Args:
+        kind (ConfigFileKind): The file kind whose schema locates the
+            secret-bearing fields.
+        value (Any): The raw on-disk value.
+        at (FieldPath): Where ``value`` sits within the file.
+        reveal (bool): Return ``value`` unchanged when ``True``.
+
+    Returns:
+        tuple[Any, int]: The value to print, and how many secret values
+            it holds. A scalar secret field holding only a templating
+            ref is not counted, because printing it discloses nothing.
+    """
+    outcome = redact_raw(kind, value, at=at)
+    return (value if reveal else outcome.value), outcome.count
+
+
+def _read_field(
+    store: ConfigStore, target: ConfigFieldLocation, *, reveal: bool
+) -> tuple[Any, int]:
     """Return the raw value at ``target`` (whole file or one field).
 
     Args:
         store (ConfigStore): The bound configuration store.
         target (ConfigFieldLocation): The file, plus the field within it
             (:attr:`FieldPath.ROOT` for the whole file).
+        reveal (bool): Leave secret values in plaintext instead of
+            redacting them.
 
     Returns:
-        Any: The raw on-disk value, templating refs unexpanded.
+        tuple[Any, int]: The raw on-disk value with templating refs
+            unexpanded (secrets redacted unless ``reveal``), and how
+            many secret values it holds.
 
     Raises:
         CliError: With ``not_found`` when the file or field is absent,
@@ -732,26 +794,36 @@ def _read_field(store: ConfigStore, target: ConfigFieldLocation) -> Any:
     except ConfigurationError as exc:
         raise _map_config_error(exc) from exc
     try:
-        return get_field(raw.data, target.field_path)
+        value = get_field(raw.data, target.field_path)
     except ConfigurationPathError as exc:
         raise _map_config_error(exc) from exc
+    return _redacted(target.kind, value, at=target.field_path, reveal=reveal)
 
 
-def _read_section_tree(store: ConfigStore, section: ConfigSection) -> dict[str, Any]:
+def _read_section_tree(
+    store: ConfigStore, section: ConfigSection, *, reveal: bool
+) -> tuple[dict[str, Any], int]:
     """Aggregate every existing file below ``section`` into one tree.
+
+    Each file is redacted against its own kind's schema before being
+    merged, so one aggregate view spans several schemas correctly.
 
     Args:
         store (ConfigStore): The bound configuration store.
         section (ConfigSection): The section to aggregate.
+        reveal (bool): Leave secret values in plaintext instead of
+            redacting them.
 
     Returns:
-        dict[str, Any]: The raw on-disk data of each existing file,
-            nested at its logical path relative to the section.
+        tuple[dict[str, Any], int]: The raw on-disk data of each
+            existing file nested at its logical path relative to the
+            section, and how many secret values the tree holds.
 
     Raises:
         CliError: With ``config_invalid`` when a file cannot be parsed.
     """
     tree: dict[str, Any] = {}
+    secrets = 0
     for target in section.files(store.config_dir):
         file_path = store.path_of(target)
         if not file_path.is_file():
@@ -760,10 +832,12 @@ def _read_section_tree(store: ConfigStore, section: ConfigSection) -> dict[str, 
             raw = store.read(target)
         except ConfigurationError as exc:
             raise _map_config_error(exc) from exc
-        tree = set_field(
-            tree, target.logical_path.remove_prefix(section.prefix), raw.data
+        value, count = _redacted(
+            target.kind, raw.data, at=FieldPath.ROOT, reveal=reveal
         )
-    return tree
+        secrets += count
+        tree = set_field(tree, target.logical_path.remove_prefix(section.prefix), value)
+    return tree, secrets
 
 
 # ---------------------------------------------------------------------------
@@ -856,9 +930,8 @@ _OUTPUT_SET = OutputSpec(
             "already-written files rolled back if a later one fails. 'set' "
             "edits an existing entity — it cannot create a "
             "new session or system (use 'config session/system add' for "
-            "that); unnamed files (cli.json, server.json, "
-            "community/settings.json, enterprise/settings.json) are "
-            "created on first write."
+            "that); the unnamed sections (cli, server, community.settings, "
+            "enterprise.settings) are created on first write."
         ),
         arguments=(
             HelpEntry(

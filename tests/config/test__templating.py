@@ -13,7 +13,39 @@ from deephaven_mcp.config._templating import (
     expand_string,
     expand_tree,
     expand_tree_lenient,
+    is_single_placeholder,
 )
+
+# ---------------------------------------------------------------------------
+# is_single_placeholder
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("${env:DH_PSK}", True),
+        ("${file:/etc/ssl/key.pem}", True),
+        # A literal prefix may itself be sensitive, so the string is a
+        # value, not a bare reference.
+        ("tok-${env:DH_PSK}", False),
+        ("${env:DH_PSK}-suffix", False),
+        # Two adjacent placeholders are a concatenation, not one
+        # reference: ``[^}]+`` cannot span the intervening ``}``.
+        ("${env:A}${env:B}", False),
+        # Syntactically malformed forms are values here; they fail later,
+        # at load time, with a proper error.
+        ("${}", False),
+        ("${env:A", False),
+        ("", False),
+        ("plain-secret", False),
+    ],
+)
+def test_is_single_placeholder(value: str, expected: bool) -> None:
+    """Distinguishes a value that *points* at a secret from one that *is*
+    a secret. Redaction leans on this to keep a bare reference legible."""
+    assert is_single_placeholder(value) is expected
+
 
 # ---------------------------------------------------------------------------
 # JsonLoc

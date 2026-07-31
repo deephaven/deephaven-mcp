@@ -117,7 +117,8 @@ class ErrorCode(StrEnum):
             "The running daemon is a different build than this CLI (its "
             "version, virtualenv, or source fingerprint differs) and the "
             "daemon.reuse policy resolved to 'refuse'. Run 'dhcli daemon "
-            "restart' to replace it, or adjust daemon.reuse in cli.json."
+            "restart' to replace it, or adjust the configured "
+            "cli.daemon.reuse."
         ),
     )
     MCP_REQUEST_FAILED = (
@@ -130,8 +131,8 @@ class ErrorCode(StrEnum):
             "The MCP request timed out. The server may still finish "
             "processing the request — if the operation changes state, verify "
             "the result before retrying. Allow more time with --timeout, or "
-            "raise the timeout in cli.json: request.timeouts.default_seconds "
-            "(docs.timeouts.request_seconds for the 'docs' commands)."
+            "raise the configured cli.request.timeouts.default_seconds "
+            "(cli.docs.timeouts.request_seconds for the 'docs' commands)."
         ),
     )
     TOOL_NOT_FOUND = (
@@ -197,7 +198,7 @@ class ErrorCode(StrEnum):
             "one: pass it explicitly, run 'dhcli context set <key> <value>' to "
             "establish a default, or check 'dhcli context show' if one was "
             "expected. Context fallback is skipped entirely when --no-context "
-            "was given or cli.json's context.enabled is false."
+            "was given or the configured cli.context.enabled is false."
         ),
     )
     CONFIG_INVALID = (

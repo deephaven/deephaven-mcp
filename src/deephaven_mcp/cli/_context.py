@@ -568,8 +568,8 @@ def _resolve_required(
             if enabled
             else (
                 "Pass it explicitly. The sticky context cannot supply it: the "
-                "fallback is disabled by --no-context or cli.json's "
-                "context.enabled=false."
+                "fallback is disabled by --no-context or the configured "
+                "cli.context.enabled=false."
             )
         )
         raise CliError(

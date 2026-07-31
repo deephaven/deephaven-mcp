@@ -336,4 +336,6 @@ def test_docs_client_reads_url_and_timeout_from_config(tmp_path: Path) -> None:
     assert client._url == _DOCS_URL  # noqa: SLF001
     assert client._timeout.total_seconds() == 120  # noqa: SLF001
     assert client._headers == {}  # noqa: SLF001
-    assert client._timeout_setting == "docs.timeouts.request_seconds"  # noqa: SLF001
+    assert (  # noqa: SLF001
+        client._timeout_setting == "cli.docs.timeouts.request_seconds"
+    )

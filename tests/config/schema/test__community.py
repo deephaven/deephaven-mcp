@@ -49,7 +49,9 @@ def test_defaults_non_dict_input_passes_through_to_pydantic():
 
 def test_settings_empty_dict_is_valid():
     cfg = CommunitySettings.model_validate({})
-    assert cfg.security is None
+    # ``security`` is schema-defaulted rather than optional, so callers
+    # read the effective policy without a second default to resolve.
+    assert cfg.security.credential_retrieval_mode == "dynamic_only"
     assert cfg.session_creation is None
     # Timer fields carry schema defaults when JSON omits them.
     assert cfg.timeouts.eviction.session_idle_timeout_seconds == 3600.0
@@ -200,18 +202,24 @@ def test_security_accepts_valid_mode():
     cfg = CommunitySettings.model_validate(
         {"security": {"credential_retrieval_mode": "all"}}
     )
-    assert cfg.security is not None
     assert cfg.security.credential_retrieval_mode == "all"
 
 
-def test_security_mode_defaults_to_none_string():
-    """``credential_retrieval_mode`` defaults to ``"none"`` when the
-    ``security`` block is empty; the whole block can also be omitted,
-    in which case ``security`` itself is ``None``.
+def test_security_mode_defaults_to_dynamic_only():
+    """An omitted or empty ``security`` block yields the same effective
+    mode: the field default is the single source of truth, so there is
+    no second place for the two to diverge.
     """
-    cfg = CommunitySettings.model_validate({"security": {}})
-    assert cfg.security is not None
-    assert cfg.security.credential_retrieval_mode == "none"
+    assert (
+        CommunitySettings.model_validate(
+            {"security": {}}
+        ).security.credential_retrieval_mode
+        == "dynamic_only"
+    )
+    assert (
+        CommunitySettings.model_validate({}).security.credential_retrieval_mode
+        == "dynamic_only"
+    )
 
 
 def test_security_mode_rejects_null():
@@ -223,6 +231,15 @@ def test_security_mode_rejects_null():
         CommunitySettings.model_validate(
             {"security": {"credential_retrieval_mode": None}}
         )
+
+
+def test_security_block_rejects_null():
+    """The block itself is no longer nullable: an explicit ``null`` was
+    previously a silent way to disable retrieval, which is now spelled
+    ``credential_retrieval_mode: "none"``.
+    """
+    with pytest.raises(ValidationError):
+        CommunitySettings.model_validate({"security": None})
 
 
 # ---------------------------------------------------------------------------

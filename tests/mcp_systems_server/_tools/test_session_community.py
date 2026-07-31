@@ -1651,12 +1651,17 @@ def test_session_creation_defaults_rejects_invalid_programming_language():
 
 
 @pytest.mark.asyncio
-async def test_session_community_credentials_disabled_by_default():
-    """Test that credential retrieval is disabled by default (mode='none')."""
+async def test_session_community_credentials_dynamic_allowed_by_default():
+    """An absent ``security`` block permits dynamic retrieval.
+
+    The default is ``dynamic_only``, so the mode gate must not be what
+    stops this call; without it the verbs that open a dynamic session
+    cannot work out of the box.
+    """
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
-    # Config without security section (defaults to mode='none')
+    # Config without a security section: the schema default applies.
     config = {
         "session_creation": {
             "max_concurrent_sessions": 5,
@@ -1678,13 +1683,7 @@ async def test_session_community_credentials_disabled_by_default():
 
     result = await session_community_credentials(context, id="community:community:1")
 
-    assert result["success"] is False
-    assert result["isError"] is True
-    assert "Credential retrieval is disabled" in result["error"]
-    assert "mode='none'" in result["error"]
-    assert "security" in result["error"]
-    assert "credential_retrieval_mode" in result["error"]
-    assert "community/settings.json" in result["error"]
+    assert "Credential retrieval is disabled" not in result["error"]
 
 
 @pytest.mark.asyncio
@@ -1714,6 +1713,10 @@ async def test_session_community_credentials_explicit_none():
     assert result["isError"] is True
     assert "Credential retrieval is disabled" in result["error"]
     assert "mode='none'" in result["error"]
+    # The remediation must name the knob and the file that holds it.
+    assert "security" in result["error"]
+    assert "credential_retrieval_mode" in result["error"]
+    assert "community/settings.json" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -1822,11 +1825,11 @@ async def test_session_community_credentials_anonymous_auth():
 
 @pytest.mark.asyncio
 async def test_session_community_credentials_no_config():
-    """Test when community config is empty."""
+    """An entirely empty community config still permits dynamic retrieval."""
     mock_config_manager = MagicMock()
     mock_session_registry = MagicMock(spec=CommunitySessionRegistry)
 
-    # Empty config - should default to disabled
+    # Empty config - every field falls back to its schema default.
     config = {}
     mock_config_manager.get_config = AsyncMock(return_value=config)
     # Stash for _helpers' lifespan adapter (security tests use ``config``
@@ -1842,10 +1845,7 @@ async def test_session_community_credentials_no_config():
 
     result = await session_community_credentials(context, id="community:community:1")
 
-    assert result["success"] is False
-    assert result["isError"] is True
-    assert "Credential retrieval is disabled" in result["error"]
-    assert "mode='none'" in result["error"]
+    assert "Credential retrieval is disabled" not in result["error"]
 
 
 @pytest.mark.asyncio

@@ -77,6 +77,7 @@ __all__ = [
     "expand_string",
     "expand_tree",
     "expand_tree_lenient",
+    "is_single_placeholder",
 ]
 
 import os
@@ -234,6 +235,33 @@ def _validate_placeholder_syntax(
             f"In {source} at {path}: unknown placeholder kind {kind!r} in "
             f"{match.group(0)!r}; expected 'env' or 'file'"
         )
+
+
+def is_single_placeholder(value: str) -> bool:
+    """Whether ``value`` is exactly one ``${...}`` placeholder and nothing else.
+
+    Distinguishes a value that merely *points* at a secret from one that
+    *is* a secret. ``"${env:DH_PSK}"`` names an environment variable and
+    discloses nothing; ``"s3cret"`` in the same field is the secret
+    itself. Callers that redact secret-bearing fields use this to leave
+    the pointer legible, which is what makes a redacted view still
+    useful for diagnosing configuration.
+
+    A string with a placeholder *plus* literal text (``"tok-${env:X}"``)
+    is deliberately **not** a single placeholder: its literal part may
+    itself be sensitive, so it is reported as a value, not a reference.
+
+    Args:
+        value (str): The raw string value as written in the file.
+
+    Returns:
+        bool: ``True`` when ``value`` consists of one placeholder and
+            no surrounding text. Syntactic only — no attempt is made
+            to resolve the placeholder or to validate its kind, so a
+            malformed ``${bogus:x}`` still counts (it fails later, at
+            load time, with a proper error).
+    """
+    return _PLACEHOLDER_RE.fullmatch(value) is not None
 
 
 def expand_string(

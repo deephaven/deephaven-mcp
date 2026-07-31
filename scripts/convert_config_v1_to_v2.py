@@ -585,7 +585,10 @@ def _convert_community_settings(
         community_security = security.get("community")
         if isinstance(community_security, dict):
             mode = community_security.get("credential_retrieval_mode")
-            if mode and mode != "none":
+            if mode:
+                # Carry the mode over verbatim, including "none". Omitting
+                # it would now inherit the "dynamic_only" schema default
+                # and silently widen the posture the v1 file asked for.
                 settings["security"] = {"credential_retrieval_mode": mode}
             _warn_unknown(
                 community_security,

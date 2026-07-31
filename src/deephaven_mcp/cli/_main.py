@@ -228,7 +228,7 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     is_eager=True,
     help=(
         "Output format. Takes precedence over the DHCLI_OUTPUT "
-        "environment variable and the 'output.format' setting in cli.json."
+        "environment variable and the configured cli.output.format."
     ),
 )
 @click.option(
@@ -236,9 +236,9 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     type=int,
     default=None,
     help=(
-        "Per-request timeout in seconds. Overrides the "
-        "'request.timeouts.default_seconds' setting in cli.json (and "
-        "'docs.timeouts.request_seconds' for the 'docs' commands)."
+        "Per-request timeout in seconds. Overrides the configured "
+        "cli.request.timeouts.default_seconds (and "
+        "cli.docs.timeouts.request_seconds for the 'docs' commands)."
     ),
 )
 @click.option(
@@ -273,10 +273,10 @@ def _quiet_dependency_loggers(verbose: int) -> None:
     help=(
         "Disable the sticky context for this invocation: when a session, "
         "system, or PQ id is omitted, the command fails with "
-        "context_not_set instead of falling back to context.json. "
-        "Overrides cli.json's context.enabled. This governs only the "
-        "read: 'session create' and 'pq create' still record the new id "
-        "unless --no-set-context is given."
+        "context_not_set instead of falling back to the stored context. "
+        "Overrides the configured cli.context.enabled. This governs only "
+        "the read: 'session create' and 'pq create' still record the new "
+        "id unless --no-set-context is given."
     ),
 )
 @click.option(

@@ -97,7 +97,7 @@ def _resolve_psk_or_exit(
     cli_psk: str | None,
     server_cfg: ServerConfig,
     config_dir: Path,
-) -> str:
+) -> SecretStr:
     """Resolve the HTTP-transport PSK with CLI > JSON precedence.
 
     Args:
@@ -110,7 +110,7 @@ def _resolve_psk_or_exit(
             used only for the error message when no PSK is available.
 
     Returns:
-        str: The non-empty PSK string from the highest-precedence
+        SecretStr: The non-empty PSK from the highest-precedence
             source.
 
     Raises:
@@ -122,13 +122,13 @@ def _resolve_psk_or_exit(
             "[mcp_systems_server._http:_resolve_psk_or_exit] "
             "Using PSK from --psk CLI flag"
         )
-        return cli_psk
+        return SecretStr(cli_psk)
     if server_cfg.psk is not None and server_cfg.psk.get_secret_value():
         _LOGGER.debug(
             "[mcp_systems_server._http:_resolve_psk_or_exit] "
             "Using PSK from server.json"
         )
-        return server_cfg.psk.get_secret_value()
+        return server_cfg.psk
     _LOGGER.error(
         "[mcp_systems_server._http:_resolve_psk_or_exit] HTTP transport requires a PSK. "
         f"Set --psk or configure 'psk' in {config_dir}/server.json. "
@@ -137,13 +137,16 @@ def _resolve_psk_or_exit(
     sys.exit(1)
 
 
-def _generate_daemon_psk() -> str:
+def _generate_daemon_psk() -> SecretStr:
     """Return a fresh random PSK for the daemon HTTP transport.
 
     Uses :func:`secrets.token_urlsafe` with 32 bytes of entropy (a
     ~43-character URL-safe string).
+
+    Returns:
+        SecretStr: The freshly generated PSK.
     """
-    return secrets.token_urlsafe(32)
+    return SecretStr(secrets.token_urlsafe(32))
 
 
 def _acquire_loopback_socket() -> socket.socket:
@@ -169,7 +172,7 @@ def _acquire_loopback_socket() -> socket.socket:
 def _build_http_app(
     server: FastMCP[LifespanContext],
     *,
-    psk: str,
+    psk: SecretStr,
     activity_timer: IdleTimer | None,
 ) -> Starlette:
     """Assemble the streamable-HTTP ASGI app with the PSK gate (and optional activity bump).
@@ -182,8 +185,8 @@ def _build_http_app(
 
     Args:
         server (FastMCP[LifespanContext]): The FastMCP instance to host.
-        psk (str): The non-empty PSK that :class:`PSKMiddleware` requires on
-            every request.
+        psk (SecretStr): The non-empty PSK that :class:`PSKMiddleware` requires
+            on every request. Unwrapped here, at the middleware boundary.
         activity_timer (IdleTimer | None): When supplied, an
             :class:`ActivityMiddleware` bumps this timer on every successful
             response.
@@ -197,7 +200,7 @@ def _build_http_app(
         0,
         Middleware(
             PSKMiddleware,
-            expected_psk=psk,
+            expected_psk=psk.get_secret_value(),
             bypass_paths=(HEALTH_PATH,),
         ),
     )
@@ -360,8 +363,10 @@ class _HttpRun:
     """FastMCP server name advertised in MCP handshakes. Sourced from
     ``ServerConfig.server_name``."""
 
-    psk: str
-    """Non-empty PSK installed on the :class:`PSKMiddleware`."""
+    psk: SecretStr
+    """Non-empty PSK installed on the :class:`PSKMiddleware`. Held as a
+    :class:`~pydantic.SecretStr` so this plan's ``repr`` — which reaches
+    logs and tracebacks — cannot disclose a live key."""
 
     bind: _BindSpec
     """Resolved uvicorn bind (direct or handoff)."""
@@ -485,7 +490,7 @@ def _plan_daemon(
         f"at {handle.path} (runtime_dir={runtime_dir})"
     )
     if cli_psk:
-        psk = cli_psk
+        psk = SecretStr(cli_psk)
         _LOGGER.debug(
             "[mcp_systems_server._http:_plan_daemon] Using PSK from --psk "
             "override (debug)"
@@ -550,7 +555,7 @@ def _publish_daemon_registry(
         process_name=daemon.process_name,
         host="127.0.0.1",
         port=plan.bind.port,
-        psk=SecretStr(plan.psk),
+        psk=plan.psk,
         started_at=datetime.now(UTC),
         config_dir=plan.multi_config.config_dir,
         server_name=plan.server_name,
