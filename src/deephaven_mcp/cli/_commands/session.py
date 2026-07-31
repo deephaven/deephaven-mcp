@@ -1234,8 +1234,9 @@ _OUTPUT_OPEN = OutputSpec(
             "default browser, which keeps the auth token out of stdout. Same "
             "Community-only scope and security gate as 'session credentials'. "
             "If the browser cannot be launched, exits 2 "
-            "(browser_launch_failed) with the authenticated URL in the message "
-            "so you can open it manually."
+            "(browser_launch_failed) with a URL to open manually -- the "
+            "token-free one unless --reveal-secrets was passed, so a failure "
+            "does not disclose the credential either."
         ),
         arguments=(
             HelpEntry(
@@ -1249,7 +1250,8 @@ _OUTPUT_OPEN = OutputSpec(
         examples=(
             "$ dhcli session open community:community:my-session",
             "$ dhcli session open community:community:my-session --print",
-            "$ dhcli session open my-session --print --reveal-secrets | jq -r .opened",
+            "$ dhcli session open community:community:my-session --print "
+            "--reveal-secrets | jq -r .opened",
         ),
         see_also=(
             "dhcli session url ID",
@@ -1286,9 +1288,30 @@ async def session_open(
     id = require_context_value(runtime, ContextKey.SESSION, id)
     payload = await _fetch_credentials(runtime, id, retry_command="dhcli session open")
     url = _authenticated_url(payload)
-    launched = False if print_only else launch_browser(url)
     # Disclosure is orthogonal to launching: --print says "do not open a
     # browser", not "put the token on stdout". Only --reveal-secrets does
     # that, the same flag 'config get' uses.
     opened = url if reveal_secrets else payload.get("connection_url") or url
+    launched = (
+        False
+        if print_only
+        # The browser still receives the authenticated URL -- it has to,
+        # or the page cannot log in. Only the *error message* falls back
+        # to the token-free URL, so a launch failure does not write the
+        # credential to stderr behind the opt-in's back.
+        else launch_browser(
+            url,
+            manual_url=opened,
+            # Earn the hint: an anonymous session (and any payload with
+            # no separate authenticated URL) makes `opened` identical to
+            # what we opened, so there is no withheld token to explain
+            # and no better URL for 'session url' to hand back.
+            hint=(
+                "That URL omits the auth token; run 'dhcli session url' "
+                "to get one you can log in with."
+                if opened != url
+                else None
+            ),
+        )
+    )
     echo_payload(runtime, {"opened": opened, "launched": launched})

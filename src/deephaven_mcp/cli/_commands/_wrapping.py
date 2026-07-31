@@ -128,8 +128,11 @@ def reveal_secrets_option(f: Any) -> Any:
         is_flag=True,
         default=False,
         help=(
-            "Include plaintext secret values in the output instead of "
-            "[REDACTED]. Treat the result like a password."
+            "Include plaintext secret values in the output. Without this "
+            "flag each command withholds them in whatever way suits its "
+            "output: 'config get' prints [REDACTED], 'session open' "
+            "reports the URL without its auth token. Treat the result "
+            "like a password."
         ),
     )(f)
 

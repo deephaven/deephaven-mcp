@@ -48,7 +48,10 @@ from deephaven_mcp._redaction import REDACTED
 from deephaven_mcp.config._field_path import FieldPath
 from deephaven_mcp.config._file_kinds import ConfigFileKind
 from deephaven_mcp.config._settable_fields import settable_fields
-from deephaven_mcp.config._templating import is_single_placeholder
+from deephaven_mcp.config._templating import (
+    is_single_placeholder,
+    replace_placeholder_default,
+)
 
 _DISCRIMINATOR = "type"
 """Key tagging which member of a discriminated union applies. It names
@@ -155,9 +158,14 @@ def _scrub(value: Any) -> RawRedaction:
     """
     if isinstance(value, str):
         # A lone ``${...}`` reference points at the secret rather than
-        # being it, so it survives.
+        # being it, so it survives -- except for a ``:-`` fallback, which
+        # carries a literal inside the placeholder. Masking just the
+        # fallback keeps the variable name legible.
         if is_single_placeholder(value):
-            return RawRedaction(value, 0)
+            masked = replace_placeholder_default(value, replacement=REDACTED)
+            if masked is None:
+                return RawRedaction(value, 0)
+            return RawRedaction(masked, 1)
         return RawRedaction(REDACTED, 1)
     if isinstance(value, dict):
         scrubbed: dict[str, Any] = {}

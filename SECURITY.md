@@ -56,8 +56,8 @@ process. Please direct reports to the listed parties instead.
   Deephaven MCP defect.
 - **Documented credential-disclosure behavior** — e.g. the plaintext
   session token `security.credential_retrieval_mode` returns. Its
-  default, `dynamic_only`, covers only sessions this server minted a
-  token for at the caller's request; widening it to reach
+  default, `dynamic_only`, covers every session this server launched at
+  runtime, whichever client created it; widening it to reach
   operator-authored static credentials is an explicit opt-in. Both are
   deliberate, documented choices, not defects.
 - **Third-party MCP clients** — Claude Desktop, Cursor, VS Code Copilot,

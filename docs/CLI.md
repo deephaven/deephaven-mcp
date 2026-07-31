@@ -502,11 +502,14 @@ exits `3`.
 `session_community_credentials` tool, whose output contains a
 **plaintext auth token by design**. Retrieval is gated by
 `community.settings.security.credential_retrieval_mode`
-(default `dynamic_only`, which permits sessions created by
-`session create` but withholds statically configured credentials);
+(default `dynamic_only`, which permits every dynamically launched
+session — whichever client created it — but withholds statically
+configured credentials);
 when refused — or the session is missing or not a Community session —
 they exit `3`. `session open` additionally keeps the token out of its
-output unless `--reveal-secrets` is passed. All session verbs exit `0` on
+output unless `--reveal-secrets` is passed — including on the
+`browser_launch_failed` path, where the URL offered for manual opening
+is the token-free one. All session verbs exit `0` on
 success, `2` on client-side/daemon failure, and `3` when the wrapped
 tool reports an error.
 
@@ -1137,7 +1140,7 @@ registry programmatically via `dhcli agents errors` (or the
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `file_read_failed`            | A local file passed on the command line could not be read.          |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
-| `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
+| `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. For `session open` that URL omits the auth token unless `--reveal-secrets` was passed — use `dhcli session url` for one that logs in. |
 | `system_not_found`            | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
 | `context_not_set`             | A session/system/PQ id was omitted and no sticky context supplies one. Pass it explicitly, run `dhcli context set KEY VALUE`, or check `dhcli context show`. `--no-context` / `cli.context.enabled=false` disables the sticky-context fallback step, making this code more likely, not less. |
 | `config_invalid`              | The configuration tree failed validation.                          |

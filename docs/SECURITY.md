@@ -126,9 +126,11 @@ anything beyond the local process group.
       audit aborts otherwise.
 - [ ] **Set `security.credential_retrieval_mode` to `"none"`** if AI
       agents must never read community session tokens. The default,
-      `"dynamic_only"`, returns only tokens this server minted for
-      sessions the caller created; `"static_only"` and `"all"` also hand
-      operator-authored credentials to the caller of the
+      `"dynamic_only"`, returns the token for any session this server
+      launched at runtime — the check is the session's origin, not which
+      client created it, so one agent can read the token of a session
+      another agent created. `"static_only"` and `"all"` additionally
+      hand operator-authored credentials to the caller of the
       `session_community_credentials` MCP tool.
 - [ ] **Keep the runtime directory private.** The `dhcli` daemon's
       registry (`<runtime_dir>/daemon/daemon.json`) holds a live PSK in
@@ -269,25 +271,33 @@ do **not** accept a `tls` block — the upstream Enterprise
   verbs that wrap it, return a **plaintext auth token** and a URL
   containing it. All are gated by
   `security.credential_retrieval_mode` (default `dynamic_only`, which
-  covers sessions the caller created but withholds operator-authored
-  static credentials); every retrieval is logged. Treat the output like
-  a password: a session URL pasted into a chat log grants access to
-  that session.
+  covers every dynamically launched session — whichever client created
+  it — but withholds operator-authored static credentials); every
+  retrieval is logged. `session open` is the exception that does not
+  print the token: it hands the authenticated URL to the browser and
+  reports the token-free one, on success and on launch failure alike,
+  unless `--reveal-secrets` is passed. Treat the output like a
+  password: a session URL pasted into a chat log grants access to that
+  session.
 - **Inspecting configuration.** Both read verbs redact secret values by
   default; `dhcli config get --reveal-secrets` is the only way to print
   one, and it warns on stderr naming how many it disclosed. A field
-  holding only a `${env:NAME}` / `${file:PATH}` reference is never
-  redacted, so `[REDACTED]` specifically means a **literal** secret is
-  stored in that file. Two gaps: `dhcli config edit` opens the file
+  holding only a `${env:NAME}` / `${file:PATH}` reference is shown as
+  written, so a whole-value `[REDACTED]` means a **literal** secret is
+  stored in that file. A reference with a fallback keeps its variable
+  name but loses the literal (`${env:NAME:-[REDACTED]}`), since the
+  fallback is itself a stored secret. Two gaps: `dhcli config edit` opens the file
   verbatim, and redaction is schema-guided, so a secret placed in a
   free-form map (`environment_vars`, `session_arguments`) is not
   recognized as one.
 - **`daemon.log` holds auto-generated session tokens.** A session
   created without an explicit auth token gets one minted by the server
-  and logged with a ready-to-use `?psk=<token>` URL — the only place
-  that token is surfaced. `dhcli daemon logs` prints it unredacted, so
-  review that output before sharing it; the file is protected only by
-  the `0700` daemon directory around it.
+  and logged with a ready-to-use `?psk=<token>` URL. `dhcli daemon logs`
+  prints it unredacted, so review that output before sharing it; the
+  file is protected only by the `0700` daemon directory around it. The
+  log is not the only route to that token — under the default
+  `dynamic_only` mode, `session_community_credentials` and its CLI
+  wrappers return it too.
 
 ## Rotation
 

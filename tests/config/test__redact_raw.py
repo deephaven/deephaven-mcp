@@ -188,6 +188,37 @@ def test_ref_embedded_in_a_larger_string_is_redacted() -> None:
     assert outcome.count == 1
 
 
+def test_defaulted_ref_has_its_fallback_redacted() -> None:
+    """A ``:-`` fallback is a literal secret living inside an otherwise
+    safe reference. The variable name stays legible; the literal does
+    not, and it counts so --reveal-secrets reports it."""
+    outcome = redact_raw(ConfigFileKind.SERVER, {"psk": "${env:DH_PSK:-hunter2}"})
+    assert outcome.value == {"psk": "${env:DH_PSK:-[REDACTED]}"}
+    assert outcome.count == 1
+    assert "hunter2" not in str(outcome.value)
+
+
+def test_defaulted_ref_with_an_empty_fallback_survives() -> None:
+    """An empty fallback resolves to the empty string, so there is no
+    literal to hide and nothing to count."""
+    outcome = redact_raw(ConfigFileKind.SERVER, {"psk": "${env:DH_PSK:-}"})
+    assert outcome.value == {"psk": "${env:DH_PSK:-}"}
+    assert outcome.count == 0
+
+
+def test_defaulted_ref_inside_a_secret_block_is_redacted() -> None:
+    """The fallback rule applies inside a credentials block too."""
+    outcome = redact_raw(
+        ConfigFileKind.COMMUNITY_SESSION,
+        {"auth": {"credentials": {"type": "psk", "token": "${env:T:-s3cret}"}}},
+    )
+    assert outcome.value["auth"]["credentials"] == {
+        "type": "psk",
+        "token": "${env:T:-[REDACTED]}",
+    }
+    assert outcome.count == 1
+
+
 def test_ref_inside_a_secret_block_survives() -> None:
     """The placeholder rule applies inside a block too, so a properly
     externalized credential stays fully readable."""

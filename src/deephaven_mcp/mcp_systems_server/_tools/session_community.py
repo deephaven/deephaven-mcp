@@ -818,7 +818,10 @@ def _log_auto_generated_credentials(
     """Log auto-generated credentials prominently for user access.
 
     Writes the token in plaintext: it was minted for a session the caller
-    just created and is surfaced nowhere else.
+    just created. Under the default ``dynamic_only`` retrieval mode the
+    same token is also reachable through
+    :func:`session_community_credentials`, so this log is a convenience,
+    not the sole copy -- treat ``daemon.log`` accordingly.
 
     Args:
         session_name (str): Display name of the new session.
@@ -1526,18 +1529,24 @@ async def session_community_credentials(
     via web browser. This tool exposes sensitive credentials and should only be called
     when the user explicitly needs browser access.
 
-    IMPORTANT: This tool is DISABLED by default for security. To enable, add to your
+    IMPORTANT: By default (``dynamic_only``) this tool returns credentials for
+    sessions this server launched at runtime, and withholds operator-authored
+    static ones. To change that, set ``credential_retrieval_mode`` in your
     ``community/settings.json`` (in your configuration directory):
 
     {
       "security": {
-        "credential_retrieval_mode": "dynamic_only"  // or "all", "static_only"
+        "credential_retrieval_mode": "none"  // or "static_only", "all"
       }
     }
 
     Valid credential_retrieval_mode values:
-    - "none": Disabled (secure default)
-    - "dynamic_only": Only auto-generated tokens (dynamic sessions)
+    - "none": Disabled entirely
+    - "dynamic_only": Sessions this server launched at runtime (the default).
+      Scope is the session's origin, not its creator: it covers every
+      dynamically launched session regardless of which client created it,
+      and includes a token passed explicitly to session_community_create
+      rather than only server-minted ones.
     - "static_only": Only pre-configured tokens (static sessions)
     - "all": Both dynamic and static session credentials
 
@@ -1560,16 +1569,17 @@ async def session_community_credentials(
     - **Session Types**: Works for both static (config-based) and dynamic (on-demand) sessions,
       but access is controlled by credential_retrieval_mode setting.
     - **Mode Selection Guidance**:
-        * "dynamic_only": Recommended for development - allows retrieving auto-generated tokens
+        * "dynamic_only": The default - credentials for runtime-launched sessions
         * "static_only": For controlled environments with pre-configured credentials
         * "all": Maximum flexibility but requires careful security consideration
-        * "none": Default - no credential retrieval allowed (most secure)
+        * "none": No credential retrieval allowed (most restrictive)
 
     Security Note:
     - Credentials are returned in plain text
     - All calls are logged for security audit
     - Only use for legitimate browser access needs
-    - Disabled by default - must be explicitly enabled in configuration
+    - Operator-authored static credentials are withheld by default; reaching
+      them requires explicitly setting "static_only" or "all"
 
     Args:
         context (Context): MCP context provided by the MCP framework
@@ -1665,7 +1675,7 @@ async def session_community_credentials(
                 "Credential retrieval is disabled (mode='none'). To enable, set security.credential_retrieval_mode in community/settings.json (in your configuration directory):\n\n"
                 "Available modes:\n"
                 '  - "none": Disable all credential retrieval\n'
-                '  - "dynamic_only": Allow only auto-generated session credentials (default)\n'
+                '  - "dynamic_only": Allow credentials for sessions this server launched (default)\n'
                 '  - "static_only": Allow only pre-configured session credentials\n'
                 '  - "all": Allow all credential retrieval\n\n'
                 "Configuration example:\n"

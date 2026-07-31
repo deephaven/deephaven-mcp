@@ -99,8 +99,13 @@ class CommunitySecurity(StrictSchema):
     configured under ``community.sessions``; ``"all"`` permits both.
 
     Defaults to ``"dynamic_only"``: a dynamic worker's token was minted
-    for a session the caller just created, while operator-authored
-    static credentials stay withheld until an operator opts in."""
+    by this server at runtime, while operator-authored static
+    credentials stay withheld until an operator opts in.
+
+    The gate keys on a session's *origin*, not on who created it. Every
+    dynamically launched session is in scope — whichever client created
+    it, and including one created with an explicit ``auth_token`` rather
+    than a server-generated one."""
 
 
 class DockerImages(StrictSchema):

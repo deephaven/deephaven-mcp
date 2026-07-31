@@ -184,7 +184,10 @@ class ErrorCode(StrEnum):
         "browser_launch_failed",
         (
             "The default web browser could not be launched; the URL is included "
-            "in the error message so it can be opened manually."
+            "in the error message so it can be opened manually. For 'session "
+            "open' that URL omits the auth token unless --reveal-secrets was "
+            "passed, so opening it will prompt for credentials; 'dhcli session "
+            "url' returns one that logs in."
         ),
     )
     SYSTEM_NOT_FOUND = (
