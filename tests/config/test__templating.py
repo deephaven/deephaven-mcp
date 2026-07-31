@@ -13,7 +13,95 @@ from deephaven_mcp.config._templating import (
     expand_string,
     expand_tree,
     expand_tree_lenient,
+    is_single_placeholder,
+    replace_placeholder_default,
 )
+
+# ---------------------------------------------------------------------------
+# is_single_placeholder
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("${env:DH_PSK}", True),
+        ("${file:/etc/ssl/key.pem}", True),
+        # Structurally a lone placeholder even though it embeds a literal
+        # fallback; masking that literal is replace_placeholder_default's
+        # job, not this predicate's.
+        ("${env:DH_PSK:-s3cret}", True),
+        # A literal prefix may itself be sensitive, so the string is a
+        # value, not a bare reference.
+        ("tok-${env:DH_PSK}", False),
+        ("${env:DH_PSK}-suffix", False),
+        # Two adjacent placeholders are a concatenation, not one
+        # reference: ``[^}]+`` cannot span the intervening ``}``.
+        ("${env:A}${env:B}", False),
+        # Syntactically malformed forms are values here; they fail later,
+        # at load time, with a proper error.
+        ("${}", False),
+        ("${env:A", False),
+        ("", False),
+        ("plain-secret", False),
+    ],
+)
+def test_is_single_placeholder(value: str, expected: bool) -> None:
+    """Distinguishes a value that *points* at a secret from one that *is*
+    a secret. Redaction leans on this to keep a bare reference legible."""
+    assert is_single_placeholder(value) is expected
+
+
+# ---------------------------------------------------------------------------
+# replace_placeholder_default
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        # The leak this function exists to close: the fallback is a
+        # literal secret sitting inside an otherwise-safe reference.
+        ("${env:DH_PSK:-s3cret}", "${env:DH_PSK:-[REDACTED]}"),
+        # Split on the *first* ``:-`` only; a fallback may contain colons.
+        ("${env:X:-a:b:c}", "${env:X:-[REDACTED]}"),
+        # Kind-agnostic: raw file content may carry an unvalidated kind.
+        ("${bogus:x:-sneaky}", "${bogus:x:-[REDACTED]}"),
+        # Nothing to mask.
+        ("${env:DH_PSK}", None),
+        ("${file:/etc/ssl/key.pem}", None),
+        # An empty fallback resolves to the empty string, disclosing
+        # nothing, so it is left legible rather than implying a secret.
+        ("${env:X:-}", None),
+        # Not a lone placeholder, so out of contract; the caller redacts
+        # the whole value instead.
+        ("tok-${env:X:-s3cret}", None),
+        ("plain-secret", None),
+        ("", None),
+    ],
+)
+def test_replace_placeholder_default(value: str, expected: str | None) -> None:
+    """Masks a ``:-`` fallback literal while leaving the variable name
+    legible, so a redacted view stays useful for diagnosing config."""
+    assert replace_placeholder_default(value, replacement="[REDACTED]") == expected
+
+
+def test_replace_placeholder_default_honors_replacement() -> None:
+    """The replacement text is caller-chosen, not hardcoded."""
+    assert (
+        replace_placeholder_default("${env:X:-s3cret}", replacement="***")
+        == "${env:X:-***}"
+    )
+
+
+def test_replace_placeholder_default_never_leaks_the_literal() -> None:
+    """The whole point: the fallback must not survive into the output."""
+    masked = replace_placeholder_default(
+        "${env:DH_PSK:-hunter2}", replacement="[REDACTED]"
+    )
+    assert masked is not None
+    assert "hunter2" not in masked
+
 
 # ---------------------------------------------------------------------------
 # JsonLoc

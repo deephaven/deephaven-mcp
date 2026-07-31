@@ -54,9 +54,11 @@ process. Please direct reports to the listed parties instead.
 - **Customer infrastructure misconfiguration** — open reverse proxies,
   weak network ACLs, exposed credentials in your own environment. Not a
   Deephaven MCP defect.
-- **Documented security opt-ins** — e.g. plaintext session tokens
-  returned when `security.credential_retrieval_mode` is set to anything
-  other than `none`. These are deliberate, documented, off-by-default
-  choices, not defects.
+- **Documented credential-disclosure behavior** — e.g. the plaintext
+  session token `security.credential_retrieval_mode` returns. Its
+  default, `dynamic_only`, covers every session this server launched at
+  runtime, whichever client created it; widening it to reach
+  operator-authored static credentials is an explicit opt-in. Both are
+  deliberate, documented choices, not defects.
 - **Third-party MCP clients** — Claude Desktop, Cursor, VS Code Copilot,
   Windsurf, etc. Report those to the vendor.

@@ -483,7 +483,6 @@ async def session_details(
                 - deephaven_enterprise_version (str, optional): Version of Deephaven Enterprise/Core+/CorePlus (e.g., "0.24.0")
                   if the session is an enterprise installation
                 - connection_url (str, optional): Base connection URL for dynamically created sessions (e.g., "http://localhost:45123")
-                - connection_url_with_auth (str, optional): Connection URL with auth token for dynamically created sessions
                 - auth_type (str, optional): Authentication type for dynamically created sessions ("PSK" or "Anonymous")
                 - launch_method (str, optional): Launch method for dynamically created sessions ("docker" or "python")
                 - port (int, optional): Port number for dynamically created sessions
@@ -496,6 +495,10 @@ async def session_details(
         deephaven_enterprise_version) will only be present if the session is available and
         the information could be retrieved successfully. Fields with null values are excluded
         from the response.
+
+    Security Note:
+        Returns no credentials; use ``session_community_credentials`` when a
+        token or authenticated URL is needed.
     """
     _LOGGER.info(f"[mcp_systems_server:session_details] Invoked for id: {id}")
     try:

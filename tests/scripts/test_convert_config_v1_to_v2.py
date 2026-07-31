@@ -408,9 +408,16 @@ def test_convert_names_with_dash_underscore_accepted():
     assert "community/sessions/my-session_2.json" in result.files
 
 
-def test_convert_credential_mode_none_omits_security_block():
+def test_convert_credential_mode_none_is_preserved():
+    """An explicit 'none' must survive conversion.
+
+    Omitting it would inherit the v2 schema default ('dynamic_only') and
+    silently widen the posture the v1 file asked for.
+    """
     v1 = {"security": {"community": {"credential_retrieval_mode": "none"}}}
-    assert conv.convert(v1).files == {}
+    assert conv.convert(v1).files == {
+        "community/settings.json": {"security": {"credential_retrieval_mode": "none"}}
+    }
 
 
 def test_convert_docker_image_maps_to_configured_language():

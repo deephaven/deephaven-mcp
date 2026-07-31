@@ -35,16 +35,16 @@ from deephaven_mcp.cli._mcp_client import (
 )
 from deephaven_mcp.cli._runtime import Runtime
 
-_DOCS_TIMEOUT_SETTING = "docs.timeouts.request_seconds"
-"""Dotted ``cli.json`` key for the docs request timeout, named in error hints."""
+_DOCS_TIMEOUT_SETTING = "cli.docs.timeouts.request_seconds"
+"""Logical config path for the docs request timeout, named in error hints."""
 
 
 @click.group(cls=HelpfulGroup)
 def docs() -> None:
     """Query the Deephaven documentation MCP server.
 
-    These commands talk directly to the docs MCP server configured as
-    'docs.url' in cli.json (default: the Deephaven-hosted production
+    These commands talk directly to the docs MCP server named by the
+    configured cli.docs.url (default: the Deephaven-hosted production
     docs server) — the local daemon is not involved and is never
     started. 'ask' sends a one-shot question to the documentation
     assistant; 'status' checks that the configured server is reachable.
@@ -109,7 +109,7 @@ async def _call_docs_tool(
             f"initialize). The server may still finish processing the "
             f"request — if the operation changes state, verify the "
             f"result before retrying. To allow more time, pass --timeout "
-            f"or raise {_DOCS_TIMEOUT_SETTING} in cli.json.",
+            f"or raise {_DOCS_TIMEOUT_SETTING}.",
             code=ErrorCode.MCP_REQUEST_TIMEOUT,
         ) from exc
     except McpClientError as exc:
@@ -194,9 +194,9 @@ _OUTPUT_ASK = OutputSpec(
     help_spec=HelpSpec(
         summary="Ask the Deephaven documentation assistant a question.",
         description=(
-            "Sends a one-shot question to the docs MCP server configured as "
-            "'docs.url' in cli.json (default: the Deephaven-hosted production "
-            "docs server). The assistant is LLM-backed, so responses "
+            "Sends a one-shot question to the docs MCP server named by the "
+            "configured cli.docs.url (default: the Deephaven-hosted "
+            "production docs server). The assistant is LLM-backed, so responses "
             "typically take several seconds; raise --timeout for complex "
             "questions. Multi-turn follow-ups stay one-shot: pass the prior "
             "exchange via --history. The local daemon is not involved."
@@ -322,15 +322,15 @@ _OUTPUT_STATUS = OutputSpec(
     help_spec=HelpSpec(
         summary="Check that the configured docs MCP server is reachable.",
         description=(
-            "Connects to the docs MCP server configured as 'docs.url' in "
-            "cli.json, initializes an MCP session, and lists its tools. Use "
-            "this to distinguish an unreachable or misconfigured docs server "
-            "from a slow assistant answer when 'docs ask' fails. Exits 2 "
-            "with mcp_request_failed when the server cannot be reached, or "
-            "with mcp_request_timeout when the whole probe does not "
-            "complete within the request timeout (--timeout or "
-            "docs.timeouts.request_seconds in cli.json). The local daemon "
-            "is not involved."
+            "Connects to the docs MCP server named by the configured "
+            "cli.docs.url, initializes an MCP session, and lists its tools. "
+            "Use this to distinguish an unreachable or misconfigured docs "
+            "server from a slow assistant answer when 'docs ask' fails. "
+            "Exits 2 with mcp_request_failed when the server cannot be "
+            "reached, or with mcp_request_timeout when the whole probe does "
+            "not complete within the request timeout (--timeout or "
+            "cli.docs.timeouts.request_seconds). The local daemon is not "
+            "involved."
         ),
         output=_OUTPUT_STATUS,
         examples=(
@@ -363,7 +363,7 @@ async def docs_status(runtime: Runtime) -> None:
         raise CliError(
             f"docs status probe of {url} timed out after {timeout_seconds} "
             f"seconds. To allow more time, pass --timeout or raise "
-            f"{_DOCS_TIMEOUT_SETTING} in cli.json.",
+            f"{_DOCS_TIMEOUT_SETTING}.",
             code=ErrorCode.MCP_REQUEST_TIMEOUT,
         ) from exc
     except McpClientError as exc:

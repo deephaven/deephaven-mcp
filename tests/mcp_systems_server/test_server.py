@@ -261,7 +261,7 @@ def test_main_http_path_uses_server_json_values(_mute_logging_setup):
         main([])
     mock_http.assert_called_once()
     plan = mock_http.call_args.args[0]
-    assert plan.psk == "json-psk"
+    assert plan.psk.get_secret_value() == "json-psk"
     assert plan.bind.host == "::1"
     assert plan.bind.port == 9000
 

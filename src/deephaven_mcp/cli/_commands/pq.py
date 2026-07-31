@@ -70,8 +70,9 @@ _BATCH_NOTE = (
 
 _MAX_CONCURRENT_HELP = (
     "Cap on how many ids are operated on in parallel; must be greater than "
-    "0. Omitted: the operator-configured default — pq_tools.default_max_concurrent "
-    "in enterprise/settings.json, itself 20 unless set."
+    "0. Omitted: the operator-configured default — "
+    "enterprise.settings.pq_tools.default_max_concurrent, itself 20 unless "
+    "set."
 )
 """Shared help for the batch verbs' concurrency cap, whose default is server-side."""
 
@@ -1160,10 +1161,10 @@ async def pq_delete(
 
 _WAIT_HELP = (
     "Wait for the state change before returning (default), for the "
-    "operator-configured duration — timeouts.client."
-    "pq_state_change_timeout_seconds in enterprise/settings.json, itself 120 "
-    "seconds unless set. --no-wait submits the request and returns "
-    "immediately, leaving the PQ mid-transition."
+    "operator-configured duration — enterprise.settings.timeouts.client."
+    "pq_state_change_timeout_seconds, itself 120 seconds unless set. "
+    "--no-wait submits the request and returns immediately, leaving the PQ "
+    "mid-transition."
 )
 """Shared help for the lifecycle wait flag, whose duration is server-side."""
 

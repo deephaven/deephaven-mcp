@@ -673,7 +673,7 @@ AGENT_CONVENTIONS: tuple[str, ...] = (
     "message. A command node names the codes it can emit; 'dhcli agents "
     "errors' is where their meanings and recovery steps live.",
     "A session, system, or PQ id omitted from a verb falls back to the "
-    "sticky context in context.json, which the command line does not show "
+    "sticky context, which the command line does not show "
     "— an omitted id means 'whatever the context holds', not 'no target'. "
     "Run 'dhcli context show' before any consequential verb whose id you "
     "intend to omit, or pass the id explicitly.",

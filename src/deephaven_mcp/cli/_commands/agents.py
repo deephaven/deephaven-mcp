@@ -67,8 +67,8 @@ def agents() -> None:
     rest of the CLI — compact single-line json; pass '-o json-pretty'
     for indented json or '-o human' for terminal-friendly output. The
     group runs without a valid configuration tree, so it works even
-    when 'config validate' fails — which is also why it cannot read
-    cli.json's output.format (use -o/DHCLI_OUTPUT instead).
+    when 'config validate' fails — which is also why it cannot read the
+    configured cli.output.format (use -o/DHCLI_OUTPUT instead).
     """
 
 

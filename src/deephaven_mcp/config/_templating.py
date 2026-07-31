@@ -77,6 +77,8 @@ __all__ = [
     "expand_string",
     "expand_tree",
     "expand_tree_lenient",
+    "is_single_placeholder",
+    "replace_placeholder_default",
 ]
 
 import os
@@ -234,6 +236,88 @@ def _validate_placeholder_syntax(
             f"In {source} at {path}: unknown placeholder kind {kind!r} in "
             f"{match.group(0)!r}; expected 'env' or 'file'"
         )
+
+
+def is_single_placeholder(value: str) -> bool:
+    """Whether ``value`` is exactly one ``${...}`` placeholder and nothing else.
+
+    Distinguishes a value that merely *points* at a secret from one that
+    *is* a secret. ``"${env:DH_PSK}"`` names an environment variable;
+    ``"s3cret"`` in the same field is the secret itself. Callers that
+    redact secret-bearing fields use this to leave the pointer legible,
+    which is what makes a redacted view still useful for diagnosing
+    configuration.
+
+    A string with a placeholder *plus* literal text (``"tok-${env:X}"``)
+    is deliberately **not** a single placeholder: its literal part may
+    itself be sensitive, so it is reported as a value, not a reference.
+
+    Note:
+        A single placeholder is *not* automatically safe to display: a
+        ``:-`` fallback embeds a literal in the placeholder itself
+        (``"${env:DH_PSK:-s3cret}"``). This predicate answers only the
+        structural question; a caller displaying the value must pass it
+        through :func:`replace_placeholder_default` first.
+
+    Args:
+        value (str): The raw string value as written in the file.
+
+    Returns:
+        bool: ``True`` when ``value`` consists of one placeholder and
+            no surrounding text. Syntactic only — no attempt is made
+            to resolve the placeholder or to validate its kind, so a
+            malformed ``${bogus:x}`` still counts (it fails later, at
+            load time, with a proper error).
+    """
+    return _PLACEHOLDER_RE.fullmatch(value) is not None
+
+
+def replace_placeholder_default(value: str, *, replacement: str) -> str | None:
+    """Substitute the ``:-`` fallback inside a lone ``${...}`` placeholder.
+
+    A purely syntactic rewrite over the placeholder grammar this module
+    owns: ``"${env:DH_PSK:-s3cret}"`` becomes
+    ``"${env:DH_PSK:-<replacement>}"``, leaving the kind and argument
+    untouched. It lives beside that grammar rather than with its caller
+    because ``_PLACEHOLDER_RE`` and the ``:-`` rule are defined here and
+    enforced by :func:`_validate_placeholder_syntax`; a second parser
+    elsewhere would drift from them.
+
+    The motivating caller is configuration redaction
+    (:mod:`deephaven_mcp.config._redact_raw`), where a fallback is a
+    literal secret embedded in an otherwise-safe reference: replacing
+    only the fallback withholds it while keeping the variable name
+    legible. *What* to substitute, and whether the substitution counts
+    as a disclosure, are that caller's policy — this function only
+    rewrites.
+
+    Deliberately kind-agnostic: it rewrites the fallback for any
+    placeholder body containing ``:-``, not just ``env``. Only ``env``
+    accepts the syntax (``file`` rejects it in
+    :func:`_validate_placeholder_syntax`), but callers run this against
+    *raw, not-yet-validated* file content, where an unknown or
+    malformed kind may still carry a literal.
+
+    Args:
+        value (str): A string for which :func:`is_single_placeholder`
+            returns ``True``. Any other input yields ``None``.
+        replacement (str): Text substituted for the fallback literal,
+            e.g. ``"[REDACTED]"``.
+
+    Returns:
+        str | None: The placeholder with its fallback replaced, or
+            ``None`` when there is nothing to replace — ``value`` is not
+            a lone placeholder, carries no ``:-``, or its fallback is
+            empty (``"${env:X:-}"`` defaults to the empty string, which
+            discloses nothing).
+    """
+    match = _PLACEHOLDER_RE.fullmatch(value)
+    if match is None:
+        return None
+    head, separator, fallback = match.group(1).partition(":-")
+    if not separator or not fallback:
+        return None
+    return f"${{{head}:-{replacement}}}"
 
 
 def expand_string(

@@ -139,12 +139,14 @@ def test_is_loopback_host_unparseable_resolved_addr_is_false():
 def test_resolve_psk_or_exit_cli_flag_wins(tmp_path):
     """CLI ``--psk`` takes precedence over ``server.json``'s ``psk`` field."""
     server_cfg = ServerConfig.model_validate({"psk": "from-server-json"})
-    assert _resolve_psk_or_exit("from-cli", server_cfg, tmp_path) == "from-cli"
+    resolved = _resolve_psk_or_exit("from-cli", server_cfg, tmp_path)
+    assert resolved.get_secret_value() == "from-cli"
 
 
 def test_resolve_psk_or_exit_uses_server_json_psk(tmp_path):
     server_cfg = ServerConfig.model_validate({"psk": "hunter2"})
-    assert _resolve_psk_or_exit(None, server_cfg, tmp_path) == "hunter2"
+    resolved = _resolve_psk_or_exit(None, server_cfg, tmp_path)
+    assert resolved.get_secret_value() == "hunter2"
 
 
 def test_resolve_psk_or_exit_missing_psk_exits(tmp_path):
@@ -192,7 +194,8 @@ def test_resolve_psk_or_exit_treats_empty_cli_psk_as_missing_with_server_json(
     Empty CLI PSK is missing; server.json's PSK fills in.
     """
     server_cfg = ServerConfig.model_validate({"psk": "from-json"})
-    assert _resolve_psk_or_exit("", server_cfg, tmp_path) == "from-json"
+    resolved = _resolve_psk_or_exit("", server_cfg, tmp_path)
+    assert resolved.get_secret_value() == "from-json"
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +293,7 @@ def test_http_run_daemon_bundles_handle_and_process_name():
         multi_config=MagicMock(),
         runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
-        psk="x" * 32,
+        psk=SecretStr("x" * 32),
         bind=bind,
         idle_seconds=0,
         daemon=http_module._DaemonPublish(
@@ -309,7 +312,7 @@ def test_http_run_default_has_no_daemon():
         multi_config=MagicMock(),
         runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
-        psk="x" * 32,
+        psk=SecretStr("x" * 32),
         bind=bind,
         idle_seconds=0,
         daemon=None,
@@ -344,7 +347,7 @@ def test_plan_default_resolves_cli_overrides(tmp_path):
     assert plan.bind.host == "127.0.0.1"
     assert plan.bind.port == 8765
     assert plan.bind.sock is None
-    assert plan.psk == "from-cli"
+    assert plan.psk.get_secret_value() == "from-cli"
     assert plan.idle_seconds == 0
     assert plan.daemon is None
     assert plan.server_name == server_cfg.server_name
@@ -368,7 +371,7 @@ def test_plan_default_falls_back_to_server_cfg(tmp_path):
     )
     assert plan.bind.host == "127.0.0.1"
     assert plan.bind.port == 9000
-    assert plan.psk == "from-json"
+    assert plan.psk.get_secret_value() == "from-json"
 
 
 def test_plan_default_exits_on_non_loopback(tmp_path):
@@ -440,7 +443,7 @@ def test_plan_daemon_uses_cli_psk_override(tmp_path):
         cli_psk="operator-explicit-secret",
     )
     try:
-        assert plan.psk == "operator-explicit-secret"
+        assert plan.psk.get_secret_value() == "operator-explicit-secret"
     finally:
         plan.bind.close_unhanded()
 
@@ -460,7 +463,10 @@ def test_plan_daemon_ignores_server_json_psk(tmp_path):
     )
     try:
         assert plan.psk
-        assert plan.psk != "from-server-json"
+        # Unwrap: ``plan.psk`` is a SecretStr, and ``SecretStr(x) != x``
+        # is true for every x, so comparing the wrapper to a plain str
+        # would pass even if the configured PSK were reused verbatim.
+        assert plan.psk.get_secret_value() != "from-server-json"
     finally:
         plan.bind.close_unhanded()
 
@@ -543,7 +549,7 @@ def _operator_plan(*, psk: str = "secret", port: int = 9999) -> "http_module._Ht
         multi_config=MagicMock(),
         runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
-        psk=psk,
+        psk=SecretStr(psk),
         bind=http_module._BindSpec(host="127.0.0.1", port=port, sock=None),
         idle_seconds=0,
         daemon=None,
@@ -956,7 +962,9 @@ def test_build_http_app_psk_gate_enforced_end_to_end() -> None:
     fake_server = MagicMock()
     fake_server.streamable_http_app = MagicMock(return_value=real_app)
 
-    app = http_module._build_http_app(fake_server, psk=psk, activity_timer=None)
+    app = http_module._build_http_app(
+        fake_server, psk=SecretStr(psk), activity_timer=None
+    )
     client = TestClient(app)
 
     # No PSK header -> gate rejects with 401 before reaching the route.
@@ -1041,7 +1049,7 @@ def _operator_run(*, psk: str = "secret") -> "http_module._HttpRun":
         multi_config=MagicMock(config_dir=Path("/tmp/cfg")),
         runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
-        psk=psk,
+        psk=SecretStr(psk),
         bind=http_module._BindSpec(host="127.0.0.1", port=8000, sock=None),
         idle_seconds=0,
         daemon=None,
@@ -1170,7 +1178,7 @@ def _daemon_publish_plan(handle: DaemonDirectory) -> "http_module._HttpRun":
         multi_config=type("M", (), {"config_dir": Path("/tmp/cfg")})(),
         runtime_dir=Path("/tmp/runtime"),
         server_name="srv",
-        psk="secret",
+        psk=SecretStr("secret"),
         bind=http_module._BindSpec(host="127.0.0.1", port=22000, sock=None),
         idle_seconds=0,
         daemon=http_module._DaemonPublish(handle=handle, process_name="python"),

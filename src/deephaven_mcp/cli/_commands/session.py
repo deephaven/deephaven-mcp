@@ -30,6 +30,7 @@ from deephaven_mcp.cli._commands._wrapping import (
     call_for_payload,
     parse_key_value,
     read_local_script,
+    reveal_secrets_option,
     wrapper_error_codes,
     yes_option,
 )
@@ -1103,8 +1104,10 @@ _CREDENTIALS_DESCRIPTION = (
     "Wraps the session_community_credentials MCP tool (Community sessions "
     "only; a clear error is returned for an Enterprise id). The output "
     "contains a PLAINTEXT auth token by design so you can open the session "
-    "in a browser. Retrieval is gated by security.credential_retrieval_mode "
-    "in community/settings.json (default 'none'); when disabled, or the "
+    "in a browser. Retrieval is gated by the configured "
+    "community.settings.security.credential_retrieval_mode (default "
+    "'dynamic_only', which permits sessions created by 'session create' but "
+    "withholds statically configured credentials); when refused, or the "
     "session is missing or not a Community session, the command exits 3."
 )
 
@@ -1209,7 +1212,12 @@ async def session_url(runtime: Runtime, id: str | None) -> None:
 _OUTPUT_OPEN = OutputSpec(
     "object",
     (
-        OutputField("opened", "string", "The URL that was launched (or would be)."),
+        OutputField(
+            "opened",
+            "string",
+            "The session URL, without the auth token unless "
+            "--reveal-secrets is passed.",
+        ),
         OutputField("launched", "boolean", "True if a browser was launched."),
     ),
 )
@@ -1218,16 +1226,17 @@ _OUTPUT_OPEN = OutputSpec(
 @session.command(
     "open",
     wraps_tool=_CREDENTIALS_TOOL,
-    client_only_params=frozenset({"print_only"}),
+    client_only_params=frozenset({"print_only", "reveal_secrets"}),
     help_spec=HelpSpec(
         summary="Open a Community session in the default web browser.",
         description=(
-            "Fetches the authenticated URL and launches your default browser. "
-            "Pass --print to print the URL instead of launching (use this in "
-            "headless / CI environments). Same Community-only scope and "
-            "security gate as 'session credentials'. If the browser cannot be "
-            "launched, exits 2 (browser_launch_failed) with the URL in the "
-            "message so you can open it manually."
+            "Fetches the session's authenticated URL and hands it to your "
+            "default browser, which keeps the auth token out of stdout. Same "
+            "Community-only scope and security gate as 'session credentials'. "
+            "If the browser cannot be launched, exits 2 "
+            "(browser_launch_failed) with a URL to open manually -- the "
+            "token-free one unless --reveal-secrets was passed, so a failure "
+            "does not disclose the credential either."
         ),
         arguments=(
             HelpEntry(
@@ -1241,7 +1250,8 @@ _OUTPUT_OPEN = OutputSpec(
         examples=(
             "$ dhcli session open community:community:my-session",
             "$ dhcli session open community:community:my-session --print",
-            "$ dhcli session open community:community:my-session --print | jq -r .opened",
+            "$ dhcli session open community:community:my-session --print "
+            "--reveal-secrets | jq -r .opened",
         ),
         see_also=(
             "dhcli session url ID",
@@ -1262,14 +1272,46 @@ _OUTPUT_OPEN = OutputSpec(
     "print_only",
     is_flag=True,
     default=False,
-    help="Print the URL instead of launching a browser (headless-safe).",
+    help=(
+        "Do not launch a browser; only report the URL (headless-safe). Add "
+        "--reveal-secrets to get one you can actually log in with, or use "
+        "'dhcli session url'."
+    ),
 )
+@reveal_secrets_option
 @click.pass_obj
 @run_async
-async def session_open(runtime: Runtime, id: str | None, print_only: bool) -> None:
+async def session_open(
+    runtime: Runtime, id: str | None, print_only: bool, reveal_secrets: bool
+) -> None:
     """Open a Community session in the default web browser."""
     id = require_context_value(runtime, ContextKey.SESSION, id)
     payload = await _fetch_credentials(runtime, id, retry_command="dhcli session open")
     url = _authenticated_url(payload)
-    launched = False if print_only else launch_browser(url)
-    echo_payload(runtime, {"opened": url, "launched": launched})
+    # Disclosure is orthogonal to launching: --print says "do not open a
+    # browser", not "put the token on stdout". Only --reveal-secrets does
+    # that, the same flag 'config get' uses.
+    opened = url if reveal_secrets else payload.get("connection_url") or url
+    launched = (
+        False
+        if print_only
+        # The browser still receives the authenticated URL -- it has to,
+        # or the page cannot log in. Only the *error message* falls back
+        # to the token-free URL, so a launch failure does not write the
+        # credential to stderr behind the opt-in's back.
+        else launch_browser(
+            url,
+            manual_url=opened,
+            # Earn the hint: an anonymous session (and any payload with
+            # no separate authenticated URL) makes `opened` identical to
+            # what we opened, so there is no withheld token to explain
+            # and no better URL for 'session url' to hand back.
+            hint=(
+                "That URL omits the auth token; run 'dhcli session url' "
+                "to get one you can log in with."
+                if opened != url
+                else None
+            ),
+        )
+    )
+    echo_payload(runtime, {"opened": opened, "launched": launched})

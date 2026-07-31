@@ -148,9 +148,10 @@ def _seed_config_dir(
 def _write_community_settings(cfg_dir: Path, *, credential_retrieval_mode: str) -> None:
     """Write ``community/settings.json`` enabling credential retrieval.
 
-    The default config gates credential retrieval off (``mode='none'``),
-    so the e2e test that exercises ``session credentials`` / ``url`` /
-    ``open`` against the static session must turn it on here.
+    The default mode (``dynamic_only``) covers only sessions the server
+    created itself, so the e2e test that exercises ``session
+    credentials`` / ``url`` / ``open`` against a *static* session must
+    widen the mode here.
     """
     settings = {"security": {"credential_retrieval_mode": credential_retrieval_mode}}
     community_dir = cfg_dir / "community"
@@ -866,12 +867,20 @@ async def test_session_wrapper_verbs_e2e(
         assert result.returncode == 0, result.stderr
         assert community_worker in result.stdout
 
-        # session open --print → prints the URL without launching a browser.
+        # session open --print → reports the URL without launching a browser,
+        # and without the token: --print is not a disclosure opt-in.
         result = run(["session", "open", _DEMO_ID, "--print"])
         assert result.returncode == 0, result.stderr
         opened = json.loads(result.stdout)
         assert opened["launched"] is False
-        assert community_worker in opened["opened"]
+        assert community_worker not in opened["opened"]
+
+        # ...which --reveal-secrets asks for explicitly.
+        result = run(["session", "open", _DEMO_ID, "--print", "--reveal-secrets"])
+        assert result.returncode == 0, result.stderr
+        revealed = json.loads(result.stdout)
+        assert revealed["launched"] is False
+        assert community_worker in revealed["opened"]
     finally:
         run(["daemon", "stop"])
 

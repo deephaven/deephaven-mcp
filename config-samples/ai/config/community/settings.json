@@ -1,6 +1,6 @@
 {
   "security": {
-    "credential_retrieval_mode": "none"
+    "credential_retrieval_mode": "dynamic_only"
   },
   "session_creation": {
     "max_concurrent_sessions": 1,

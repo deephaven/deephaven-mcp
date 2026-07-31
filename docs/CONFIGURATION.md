@@ -222,7 +222,7 @@ to the schema-level defaults shown below.
 
 | Field                                  | Type   | Default  | Description                                                |
 | -------------------------------------- | ------ | -------- | ---------------------------------------------------------- |
-| `security.credential_retrieval_mode`   | enum   | `"none"` | One of `none` / `dynamic_only` / `static_only` / `all`. The wrapping `security` block is itself optional; omitting it is equivalent to `"none"`. |
+| `security.credential_retrieval_mode`   | enum   | `"dynamic_only"` | One of `none` / `dynamic_only` / `static_only` / `all`. The default returns credentials for every session this server launched dynamically — the check is the session's origin, not which client created it, and it includes sessions created with an explicit `auth_token` — while withholding operator-authored static credentials. The wrapping `security` block may be omitted, which is equivalent to writing it empty; it may not be `null`. |
 | `session_creation.max_concurrent_sessions` | int \| null | `5` | Hard cap on concurrent dynamic sessions. `null` disables the cap (unbounded). |
 | `session_creation.defaults`            | object | —        | Per-session defaults (see next table).                     |
 | `timeouts`                             | object | `{}` (all defaults) | All operator-tunable durations, grouped under `client` and `eviction`. See next two tables. |

@@ -82,7 +82,7 @@ class McpClient:
         *,
         headers: dict[str, str] | None = None,
         request_timeout_seconds: int = 60,
-        timeout_setting: str = "request.timeouts.default_seconds",
+        timeout_setting: str = "cli.request.timeouts.default_seconds",
     ) -> None:
         """Capture the connection parameters; no I/O yet.
 
@@ -95,9 +95,9 @@ class McpClient:
             request_timeout_seconds (int): Default per-call timeout
                 applied to ``call_tool`` when no override is
                 supplied. Defaults to ``60``.
-            timeout_setting (str): Dotted ``cli.json`` key named in the
+            timeout_setting (str): Logical config path named in the
                 timeout error's recovery hint. Defaults to the daemon
-                request timeout key.
+                request timeout path.
         """
         self._url = url
         self._headers = dict(headers) if headers else {}
@@ -302,8 +302,7 @@ class McpClient:
                     f"{timeout.total_seconds():g} seconds. The server may still "
                     f"finish processing the request — if the operation changes "
                     f"state, verify the result before retrying. To allow more "
-                    f"time, pass --timeout or raise {self._timeout_setting} "
-                    f"in cli.json."
+                    f"time, pass --timeout or raise {self._timeout_setting}."
                 ) from exc
             raise McpClientError(
                 f"call_tool({name!r}) failed: {describe_exception(exc)}"

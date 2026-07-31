@@ -49,7 +49,7 @@ def context() -> None:
     Three keys are tracked: 'session', 'system', and 'pq'. Commands that
     take a session, system, or PQ id fall back to the matching key when
     the argument is omitted, resolved in order: the explicit argument,
-    then context.json. Setting one key with 'context set' never affects
+    then the stored context. Setting one key with 'context set' never affects
     another, but 'session create' and 'pq create' set every key that
     describes the new resource, and the delete verbs clear every key
     that pointed at the deleted one.
@@ -57,11 +57,10 @@ def context() -> None:
     The context is the one input a command's own command line does not
     show, so check it with 'context show' before running anything
     consequential: acting on an unintended context executes or
-    destroys in the wrong worker or system. Set cli.json's
-    context.confirm_destructive to be asked to confirm first (see
-    'dhcli config show'), disable the fallback for one invocation with
-    --no-context, or turn it off entirely via cli.json's
-    context.enabled.
+    destroys in the wrong worker or system. Set
+    cli.context.confirm_destructive to be asked to confirm first,
+    disable the fallback for one invocation with --no-context, or turn
+    it off entirely by setting cli.context.enabled to false.
     """
 
 
@@ -119,8 +118,8 @@ def _warn_if_disabled(runtime: Runtime) -> None:
         return
     render_warning(
         "Context fallback is disabled, so this value will not be used until "
-        "it is re-enabled: drop --no-context, or set context.enabled to true "
-        "in cli.json.",
+        "it is re-enabled: drop --no-context, or run "
+        "'dhcli config set cli.context.enabled=true'.",
         output=runtime.config.cli.output.format,
     )
 
@@ -133,11 +132,11 @@ _OUTPUT_CONTEXT = OutputSpec(
         OutputField("pq", "object", "{value, source} for the sticky PQ id."),
     ),
     note=(
-        "'value' is always what is stored in context.json, and 'source' "
-        "says whether it is in effect: 'file' (stored and active), "
-        "'unset' (nothing stored), or 'disabled' (fallback off via "
-        "--no-context or cli.json's context.enabled, so nothing is "
-        "consulted regardless of what is stored)."
+        "'value' is always what is stored, and 'source' says whether it is "
+        "in effect: 'file' (stored and active), 'unset' (nothing stored), "
+        "or 'disabled' (fallback off via --no-context or "
+        "cli.context.enabled, so nothing is consulted regardless of what "
+        "is stored)."
     ),
 )
 
@@ -156,8 +155,8 @@ _OUTPUT_CONTEXT = OutputSpec(
             "'session', 'system', and 'pq' if a command omitted its id, and "
             "whether it is in effect: 'file' when stored and active, "
             "'unset' when nothing is stored, or 'disabled' when the "
-            "fallback is switched off (--no-context, or cli.json's "
-            "context.enabled) — in which case the stored value is still "
+            "fallback is switched off (--no-context, or "
+            "cli.context.enabled) — in which case the stored value is still "
             "reported, but nothing will consult it. Run this before a "
             "destructive command whose id you intend to omit — the sticky "
             "target is not shown on the command line, and acting on an "

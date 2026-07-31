@@ -215,7 +215,7 @@ The on-disk configuration tree, every file's schema, the `${env:}` / `${file:}` 
 
 #### Community session security and creation
 
-The optional `security.credential_retrieval_mode` knob in `community/settings.json` (enum `none` / `dynamic_only` / `static_only` / `all`, default `none`) controls whether the `session_community_credentials` tool may return plaintext session tokens. The enum, its default, and the security implications are owned by [`docs/CONFIGURATION.md`](CONFIGURATION.md#communitysettingsjson) and [`docs/SECURITY.md`](SECURITY.md#hardening-checklist); the eviction/timeout knobs live in the same CONFIGURATION.md section. The notes below cover only operational behavior not captured by the schema.
+The `security.credential_retrieval_mode` knob in `community/settings.json` (enum `none` / `dynamic_only` / `static_only` / `all`, default `dynamic_only`) controls whether the `session_community_credentials` tool may return plaintext session tokens. The enum, its default, and the security implications are owned by [`docs/CONFIGURATION.md`](CONFIGURATION.md#communitysettingsjson) and [`docs/SECURITY.md`](SECURITY.md#hardening-checklist); the eviction/timeout knobs live in the same CONFIGURATION.md section. The notes below cover only operational behavior not captured by the schema.
 
 ##### Dynamic session launch prerequisites
 
@@ -226,9 +226,9 @@ The optional `security.credential_retrieval_mode` knob in `community/settings.js
 
 ##### Retrieving session credentials
 
-When `credential_retrieval_mode` is not `none`, the `session_community_credentials` tool returns a community session's browser connection details, including a plaintext `auth_token`; every retrieval is logged. Run `dhcli tool show session_community_credentials` for the exact return shape.
+When `credential_retrieval_mode` permits the session's kind, the `session_community_credentials` tool returns a community session's browser connection details, including a plaintext `auth_token`; every retrieval is logged. Run `dhcli tool show session_community_credentials` for the exact return shape. The default `dynamic_only` covers sessions created through `session_community_create` but withholds statically configured credentials.
 
-When the mode is `none`, those details are still printed to the server console when a dynamic session is created (similar to how Jupyter prints a notebook token):
+Even when the mode refuses retrieval, an auto-generated token is still printed to the server console when a dynamic session is created (similar to how Jupyter prints a notebook token):
 
 ```text
 ======================================================================

@@ -843,9 +843,13 @@ def test_open_launches_browser(tmp_path: Path) -> None:
     ):
         result = _invoke(["-o", "json", "session", "open", _SID], rt)
     assert result.exit_code == 0
+    # The browser gets the authenticated URL...
     wb.assert_called_once_with(_CREDS["connection_url_with_auth"])
     payload = json.loads(result.output)
-    assert payload == {"opened": _CREDS["connection_url_with_auth"], "launched": True}
+    # ...but stdout does not: it already holds the credential, so echoing
+    # the token would only spread it to logs and shell history.
+    assert payload == {"opened": _CREDS["connection_url"], "launched": True}
+    assert _CREDS["auth_token"] not in result.output
 
 
 def test_open_print_only_does_not_launch(tmp_path: Path) -> None:
@@ -856,9 +860,55 @@ def test_open_print_only_does_not_launch(tmp_path: Path) -> None:
         call_p,
         patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
     ):
-        result = _invoke(["session", "open", _SID, "--print"], rt)
+        result = _invoke(["-o", "json", "session", "open", _SID, "--print"], rt)
     assert result.exit_code == 0
     wb.assert_not_called()
+    # --print controls launching only: it is not a disclosure opt-in, so the
+    # token stays out of the output until --reveal-secrets asks for it.
+    payload = json.loads(result.output)
+    assert payload == {"opened": _CREDS["connection_url"], "launched": False}
+    assert _CREDS["auth_token"] not in result.output
+
+
+def test_open_reveal_secrets_includes_the_token(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_CREDS))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
+    ):
+        result = _invoke(
+            ["-o", "json", "session", "open", _SID, "--print", "--reveal-secrets"], rt
+        )
+    assert result.exit_code == 0
+    wb.assert_not_called()
+    payload = json.loads(result.output)
+    assert payload == {
+        "opened": _CREDS["connection_url_with_auth"],
+        "launched": False,
+    }
+
+
+def test_open_reveal_secrets_is_independent_of_print(tmp_path: Path) -> None:
+    """--reveal-secrets discloses the token even when a browser was launched."""
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_CREDS))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=True) as wb,
+    ):
+        result = _invoke(
+            ["-o", "json", "session", "open", _SID, "--reveal-secrets"], rt
+        )
+    assert result.exit_code == 0
+    wb.assert_called_once_with(_CREDS["connection_url_with_auth"])
+    payload = json.loads(result.output)
+    assert payload == {
+        "opened": _CREDS["connection_url_with_auth"],
+        "launched": True,
+    }
 
 
 def test_open_no_browser_found_exits_2(tmp_path: Path) -> None:
@@ -867,12 +917,20 @@ def test_open_no_browser_found_exits_2(tmp_path: Path) -> None:
     with (
         acquire_p,
         call_p,
-        patch.object(browser_mod.webbrowser, "open", return_value=False),
+        patch.object(browser_mod.webbrowser, "open", return_value=False) as wb,
     ):
         result = _invoke(["session", "open", _SID], rt, standalone_mode=False)
     assert _error_code(result) == "browser_launch_failed"
     assert result.exception.exit_code == 2
     assert "manually" in str(result.exception)
+    # The browser still got a URL that can actually log in...
+    wb.assert_called_once_with(_CREDS["connection_url_with_auth"])
+    # ...but the failure message did not: an error path must not walk
+    # around --reveal-secrets and put the credential on stderr.
+    message = str(result.exception)
+    assert _CREDS["auth_token"] not in message
+    assert _CREDS["connection_url"] in message
+    assert "dhcli session url" in message
 
 
 def test_open_browser_error_exits_2(tmp_path: Path) -> None:
@@ -889,6 +947,70 @@ def test_open_browser_error_exits_2(tmp_path: Path) -> None:
     assert _error_code(result) == "browser_launch_failed"
     assert result.exception.exit_code == 2
     assert "Could not launch" in str(result.exception)
+    assert _CREDS["auth_token"] not in str(result.exception)
+
+
+def test_open_browser_failure_on_anonymous_session_omits_the_hint(
+    tmp_path: Path,
+) -> None:
+    """An anonymous session has no token, so its authenticated URL *is*
+    its base URL. Nothing was withheld, and 'session url' would return
+    the very same string -- promising a better one would be a lie."""
+    creds = {
+        "success": True,
+        "id": _SID,
+        "auth_type": "ANONYMOUS",
+        "auth_token": "",
+        "connection_url": "http://h:1",
+        "connection_url_with_auth": "http://h:1",
+    }
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(creds))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=False),
+    ):
+        result = _invoke(["session", "open", _SID], rt, standalone_mode=False)
+    assert _error_code(result) == "browser_launch_failed"
+    message = str(result.exception)
+    assert "http://h:1" in message
+    assert "omits the auth token" not in message
+    assert "dhcli session url" not in message
+
+
+def test_open_browser_failure_message_ends_with_the_url(tmp_path: Path) -> None:
+    """Trailing prose after a URL gets swallowed by terminal and chat
+    autolinkers, so the URL must be the last thing in the message."""
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_CREDS))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=False),
+    ):
+        result = _invoke(["session", "open", _SID], rt, standalone_mode=False)
+    assert str(result.exception).endswith(_CREDS["connection_url"])
+
+
+def test_open_browser_failure_reveals_the_token_when_asked(tmp_path: Path) -> None:
+    """--reveal-secrets governs the failure path too, so the operator who
+    opted in gets a URL they can paste straight into a browser."""
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_CREDS))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=False),
+    ):
+        result = _invoke(
+            ["session", "open", _SID, "--reveal-secrets"], rt, standalone_mode=False
+        )
+    assert _error_code(result) == "browser_launch_failed"
+    message = str(result.exception)
+    assert _CREDS["connection_url_with_auth"] in message
+    # The redirect to 'session url' would be noise: they already have it.
+    assert "dhcli session url" not in message
 
 
 def test_open_no_url_exits_2(tmp_path: Path) -> None:

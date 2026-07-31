@@ -822,7 +822,7 @@ def test_manifest_emits_router_and_client_params_for_session() -> None:
 
     open_ = manifest["commands"]["session"]["subcommands"]["open"]["wraps"]
     assert open_["tools"] == ["session_community_credentials"]
-    assert open_["client_only_params"] == ["print_only"]
+    assert open_["client_only_params"] == ["print_only", "reveal_secrets"]
 
 
 # ---------------------------------------------------------------------------

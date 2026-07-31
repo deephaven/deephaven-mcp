@@ -401,10 +401,13 @@ a terminal; `--yes` skips the question, and with no terminal they
 proceed unprompted.
 
 `session credentials`, `session url`, and `session open` are the quiet
-case: they destroy nothing, so nothing confirms them, but each returns a
-URL carrying a live auth token for whatever session was named. Aim one
-at a session you were not given and you have disclosed that session's
-credentials.
+case: they destroy nothing, so nothing confirms them, but each fetches a
+live auth token for whatever session was named. Aim one at a session you
+were not given and you have disclosed that session's credentials.
+`credentials` and `url` print the token — that is what they are for.
+`session open` hands it to the browser instead and keeps it out of
+stdout unless you pass `--reveal-secrets`, the same opt-in `config get`
+uses.
 
 ### `dhcli daemon`
 
@@ -415,7 +418,7 @@ credentials.
 | `status`   | Reports the daemon's `state` (`running`/`stopped`/`crashed`) and a human `message`. Includes a `daemon` object — the running daemon's registry entry, redacted: `pid`, `create_time_ns`, `process_name`, `host`, `port`, redacted `psk`, `started_at`, `config_dir`, `server_name`, and a `build_identity` sub-object with `version`, `venv`, `fingerprint` — **only when running**, and always includes `paths` (config, runtime, registry, log). Read-only: a `crashed` entry is reported, not cleaned up — use `start` or `repair`. Exits 0 in all three states. |
 | `restart`  | `stop` then `start` in one shot; returns the same `{state, message, daemon, paths}` envelope as `start`. |
 | `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
-| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). |
+| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). Auto-generated session tokens appear in the output in plaintext (see [`docs/SECURITY.md`](SECURITY.md#secret-handling)). |
 
 ### `dhcli tool`
 
@@ -498,9 +501,15 @@ exits `3`.
 `credentials`, `url`, and `open` are Community-only and share the
 `session_community_credentials` tool, whose output contains a
 **plaintext auth token by design**. Retrieval is gated by
-`security.credential_retrieval_mode` in `community/settings.json`
-(default `none`); when disabled — or the session is missing or not a
-Community session — they exit `3`. All session verbs exit `0` on
+`community.settings.security.credential_retrieval_mode`
+(default `dynamic_only`, which permits every dynamically launched
+session — whichever client created it — but withholds statically
+configured credentials);
+when refused — or the session is missing or not a Community session —
+they exit `3`. `session open` additionally keeps the token out of its
+output unless `--reveal-secrets` is passed — including on the
+`browser_launch_failed` path, where the URL offered for manual opening
+is the token-free one. All session verbs exit `0` on
 success, `2` on client-side/daemon failure, and `3` when the wrapped
 tool reports an error.
 
@@ -514,7 +523,7 @@ dhcli session exec community:community:dev --script 'print(1)'
 cat job.py | dhcli session exec community:community:dev --script-path -
 dhcli session pip-list community:community:dev
 dhcli session delete community:community:dev
-dhcli session open community:community:dev --print
+dhcli session open community:community:dev --print --reveal-secrets
 ```
 
 ### `dhcli system`
@@ -717,7 +726,7 @@ The `source` each key reports is one of:
 |------------|--------------------------------------------------------------------------------------|
 | `file`     | The key holds a value in `context.json`, and the fallback is on, so an omitted argument will use it. |
 | `unset`    | The key holds no value; a command that omits the argument exits `2` (`context_not_set`). |
-| `disabled` | The fallback is off (`--no-context`, or `cli.json`'s `context.enabled: false`), so no command will consult the context. `value` still shows what is stored. |
+| `disabled` | The fallback is off (`--no-context`, or `cli.context.enabled` set to `false`), so no command will consult the context. `value` still shows what is stored. |
 
 `set` and `unset` write to `context.json` even when the fallback is off,
 printing a one-line warning on stderr.
@@ -734,7 +743,7 @@ share an id, but setting one never changes another. The `create` and
 | `session delete` / `pq delete`| clears `session` and `pq` when either pointed at a deleted id |
 
 Disable the fallback for one invocation with `--no-context`, or
-permanently via `cli.json`'s `context.enabled` (see the `context.*`
+permanently via `cli.context.enabled` (see the `context.*`
 configuration table above).
 
 The two flags govern opposite directions and are easy to confuse:
@@ -754,8 +763,8 @@ show` first whenever you intend to omit an id and are not certain what
 the context holds. Every consequential verb repeats this warning in its
 own `--help` and `--agents` output.
 
-By default dhcli acts on the context without asking. Set `cli.json`'s
-`context.confirm_destructive` to `true` to be asked first:
+By default dhcli acts on the context without asking. Set
+`cli.context.confirm_destructive` to `true` to be asked first:
 
 ```text
 Run script in session 'community:community:dev' (from sticky context)? [y/N]
@@ -795,7 +804,7 @@ dhcli context unset --all
 ### `dhcli docs`
 
 Queries the Deephaven documentation MCP server. These verbs connect
-**directly** to the docs server configured as `docs.url` in `cli.json`
+**directly** to the docs server named by `cli.docs.url`
 (default: the Deephaven-hosted production docs server at
 `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp`) — the local
 daemon is not involved and is never started.
@@ -847,7 +856,7 @@ contain dots. File boundaries surface only in `config files`.
 | `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. A zero-system tree is valid (the no-systems invariant is enforced only where a system is required, not by this check). Validation runs before every command body, so this is CI-friendly. |
 | `files`     | Lists every configuration file: logical path, absolute file path, exists, valid, first validation error, template-resolution warnings. Works even when the configuration is broken or empty — the first command to run when diagnosing configuration problems. |
 | `init`      | Creates a working configuration in one step: afterwards `dhcli session create dev` starts a local Deephaven worker, with no Docker and nothing further to install. Asks no questions and contacts no server, so it is safe to script or run from an agent. Will not touch a configuration that is already there — if `community/settings.json` exists it stops with `already_exists` and changes nothing, so use `config set` to adjust an existing file. To use a Deephaven server you already run, or an Enterprise system, use `session add` / `system add` instead. |
-| `get [PATH]` | Prints the raw on-disk value at `PATH` (or the whole tree when omitted): a JSON object for a subtree, the bare scalar for a leaf. Works on a broken or partial tree and shows raw values with templating refs unresolved — unlike `show`, which prints the validated, template-resolved view. |
+| `get [PATH]` | Prints the raw on-disk value at `PATH` (or the whole tree when omitted): a JSON object for a subtree, the bare scalar for a leaf. Works on a broken or partial tree and shows raw values with templating refs unresolved — unlike `show`, which prints the validated, template-resolved view. Secrets are `[REDACTED]` unless `--reveal-secrets` is passed, which additionally warns on stderr naming how many values it disclosed. |
 | `set ASSIGNMENT...` | Sets one or more fields via `PATH=VALUE` tokens (VALUE parsed as JSON first, falling back to a plain string). Intermediate objects are created as needed; a `PATH` naming a whole file takes a JSON object that **replaces** the file's contents (assignment, not a merge). Assignments spanning multiple files are validated first, then each file is written atomically, with the already-written files rolled back if a later write fails (per-file atomic with batch rollback, not cross-file atomic: a concurrent reader may briefly see a partial multi-file update). Cannot create a new session/system (use `session/system add`); refuses to rewrite a file with JSON5-only syntax (`config_not_rewritable` — use `config edit` instead). |
 | `unset PATH...` | Removes one or more fields, reverting each to its schema default. Cannot unset a whole file (use `session/system remove`); same JSON5-rewrite refusal as `set`. |
 | `keys [PATH]` | Lists every settable logical path below `PATH` (or the whole tree), with type and description — the discovery companion to `get`/`set`. Not exhaustive by design: a discriminated union (e.g. `auth.credentials`) and an open/free-form object (e.g. `session_arguments`) each collapse to a single `object` entry, so their variant- or user-chosen children (such as `auth.credentials.token`) are not listed even though `config set` accepts them. A whole file (its logical path; run `config files`) is likewise omitted. |
@@ -871,9 +880,8 @@ type is checked when the server resolves the ref.
 
 Every `config` verb except `show` and `validate` operates on the raw
 files without loading the runtime, and so honors the root
-`-o/--output` flag and `DHCLI_OUTPUT` but not `cli.json`'s
-`output.format` (the file may be the thing being inspected or
-repaired).
+`-o/--output` flag and `DHCLI_OUTPUT` but not `cli.output.format`
+(the configuration may be the thing being inspected or repaired).
 
 ### `dhcli agents`
 
@@ -886,8 +894,8 @@ root `-o/--output` flag and `DHCLI_OUTPUT` (`human`, `json`,
 `json`** — compact single-line JSON; pass `-o json-pretty` for
 indented JSON or `-o human` for terminal-friendly output. Both run
 without a valid configuration tree, so they work even when `config
-validate` fails; that same bypass means they cannot read `cli.json`'s
-`output.format` (use `-o`/`DHCLI_OUTPUT` instead).
+validate` fails; that same bypass means they cannot read
+`cli.output.format` (use `-o`/`DHCLI_OUTPUT` instead).
 
 Which surface to use:
 
@@ -1019,13 +1027,13 @@ variable the project reads, with the reasoning for each.
 | `--config-dir PATH` |                      | Override the configuration directory. No per-subdir env var; use `DH_AI_DATA_DIR` to move both `config/` and `runtime/` together. |
 | `--runtime-dir PATH`|                      | Override the runtime directory (where `daemon.json` lives). No per-subdir env var.   |
 |                     | `DH_AI_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
-| `-o`, `--output`    | `DHCLI_OUTPUT`      | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.json`'s `output.format`. |
-| `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.json`'s `request.timeouts.default_seconds` (and `docs.timeouts.request_seconds` for the `docs` commands). |
+| `-o`, `--output`    | `DHCLI_OUTPUT`      | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.output.format`. |
+| `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.request.timeouts.default_seconds` (and `cli.docs.timeouts.request_seconds` for the `docs` commands). |
 | `--agents`          |                      | Print the command's machine-readable description, tuned for AI agents, and exit (the machine twin of `--help`); available on every command. Honors the `-o`/`DHCLI_OUTPUT` mode, compact `json` by default. On the root, emits the summary tree; `dhcli agents tree` prints the whole surface. |
 | `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
 | `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
 | `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
-| `--no-context`      |                      | Disable the sticky context for this invocation: when a session, system, or PQ id is omitted, the command fails with `context_not_set` instead of falling back to `context.json`. Overrides `cli.json`'s `context.enabled`. Governs only the read. See [`dhcli context`](#dhcli-context) below. |
+| `--no-context`      |                      | Disable the sticky context for this invocation: when a session, system, or PQ id is omitted, the command fails with `context_not_set` instead of falling back to the stored context. Overrides `cli.context.enabled`. Governs only the read. See [`dhcli context`](#dhcli-context) below. |
 | `--no-input`        |                      | Never prompt interactively; a command missing a required value fails with a structured `missing_required_option` error naming the flag to supply. Prompting is already disabled when stdin is not a TTY. |
 | `--version`         |                      | Print the package version and exit.                                                  |
 
@@ -1044,12 +1052,12 @@ verbatim).
 ## Output modes
 
 Every verb honors `-o/--output`, selecting how its result is rendered. The mode
-is resolved per invocation: `-o/--output` flag → `DHCLI_OUTPUT` → `cli.json`'s
-`output.format` (default `json`). The CLI is **machine-first** (primarily driven
-by AI agents), so the default is `json`; for human-readable output, pass
-`-o human`, set `DHCLI_OUTPUT=human`, or set `output.format: "human"` in
-`cli.json`. `dhcli agents`, the `--agents` flag, and error output run
-without the validated config, so they skip the `cli.json` step — use
+is resolved per invocation: `-o/--output` flag → `DHCLI_OUTPUT` →
+`cli.output.format` (default `json`). The CLI is **machine-first** (primarily
+driven by AI agents), so the default is `json`; for human-readable output, pass
+`-o human`, set `DHCLI_OUTPUT=human`, or run `dhcli config set
+cli.output.format=human`. `dhcli agents`, the `--agents` flag, and error output
+run without the validated config, so they skip the configured step — use
 `-o`/`DHCLI_OUTPUT` for those (so `DHCLI_OUTPUT=human` is the most complete way
 to get human output everywhere).
 
@@ -1121,9 +1129,9 @@ registry programmatically via `dhcli agents errors` (or the
 | `daemon_client_error`         | A client-side daemon-management failure (signal denied, etc.).     |
 | `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dhcli daemon repair`. |
 | `daemon_registry_live`        | `dhcli daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dhcli daemon stop` first. |
-| `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `daemon.reuse` resolved to `refuse`. Run `dhcli daemon restart`, or adjust `daemon.reuse` in `cli.json`. |
+| `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `cli.daemon.reuse` resolved to `refuse`. Run `dhcli daemon restart` to replace it, or adjust `cli.daemon.reuse`. |
 | `mcp_request_failed`          | The MCP transport reported an error (connect, parse, server failure). |
-| `mcp_request_timeout`         | The MCP request timed out. The server may still finish processing the request — if the operation changes state, verify the result before retrying. Allow more time with `--timeout`, or raise the timeout in `cli.json`: `request.timeouts.default_seconds` (`docs.timeouts.request_seconds` for the `docs` commands). |
+| `mcp_request_timeout`         | The MCP request timed out. The server may still finish processing the request — if the operation changes state, verify the result before retrying. Allow more time with `--timeout`, or raise `cli.request.timeouts.default_seconds` (`cli.docs.timeouts.request_seconds` for the `docs` commands). |
 | `tool_not_found`              | `dhcli tool show/call` referenced an unknown tool name.           |
 | `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
 | `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
@@ -1132,9 +1140,9 @@ registry programmatically via `dhcli agents errors` (or the
 | `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
 | `file_read_failed`            | A local file passed on the command line could not be read.          |
 | `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
-| `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. |
+| `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. For `session open` that URL omits the auth token unless `--reveal-secrets` was passed — use `dhcli session url` for one that logs in. |
 | `system_not_found`            | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
-| `context_not_set`             | A session/system/PQ id was omitted and no sticky context supplies one. Pass it explicitly, run `dhcli context set KEY VALUE`, or check `dhcli context show`. `--no-context` / `cli.json`'s `context.enabled=false` disables the `context.json` fallback step, making this code more likely, not less. |
+| `context_not_set`             | A session/system/PQ id was omitted and no sticky context supplies one. Pass it explicitly, run `dhcli context set KEY VALUE`, or check `dhcli context show`. `--no-context` / `cli.context.enabled=false` disables the sticky-context fallback step, making this code more likely, not less. |
 | `config_invalid`              | The configuration tree failed validation.                          |
 | `no_systems_configured`       | A system-dependent verb (`system`, `session`, `table`, `catalog`, `pq`, `tool`) ran against a valid tree that declares no system (no community session file, no `session_creation` block, no enterprise system file); the daemon serves systems, so acquiring one is refused. (The systems server likewise refuses to start on a zero-system tree.) The discovery verbs `system list` / `session list` are exempt — they return an empty list with this guidance on stderr instead of exiting non-zero. Add one (`dhcli config session add`, `dhcli config system add`, or `dhcli config init`), or check that `--config-dir` / `DH_AI_DATA_DIR` points at the intended directory. |
 | `config_path_invalid`         | A configuration path argument is malformed or does not name a known location. Run `dhcli config files` to list files and `dhcli config keys` to list settable paths. |
@@ -1198,8 +1206,8 @@ sudo chown -R $USER ~/.deephaven/ai/runtime
 
 **`No daemon is running and auto-start is disabled.`**
 
-You set `daemon.auto_start: false` in `cli.json`. Run `dhcli
-daemon start` explicitly, or flip the config back to `true`.
+You set `cli.daemon.auto_start` to `false`. Run `dhcli daemon start`
+explicitly, or run `dhcli config set cli.daemon.auto_start=true`.
 
 **Build mismatch (`daemon_reuse_refused`).**
 
@@ -1213,7 +1221,7 @@ than silently driving a stale daemon. Replace it:
 dhcli daemon restart   # stop the stale daemon and spawn a fresh one
 ```
 
-To relax the policy per field, set `daemon.reuse` in `cli.json`
+To relax the policy per field, set `cli.daemon.reuse`
 (see the `daemon.*` configuration table above). For parallel
 development across multiple checkouts, give each its own daemon by pointing
 `DH_AI_DATA_DIR` at a per-worktree directory (e.g.
