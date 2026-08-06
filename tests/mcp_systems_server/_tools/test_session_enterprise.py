@@ -363,6 +363,9 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -399,6 +402,9 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -435,6 +441,9 @@ async def test_session_enterprise_delete_pq_deletion_failure():
     mock_controller.delete_query = AsyncMock(side_effect=Exception("controller down"))
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -483,6 +492,9 @@ async def test_session_enterprise_delete_refuses_non_dynamic_session(origin):
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -529,6 +541,9 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -564,6 +579,9 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -1717,6 +1735,9 @@ async def test_session_enterprise_delete_success():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -1876,6 +1897,9 @@ async def test_session_enterprise_delete_close_failure_continues():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -2430,6 +2454,9 @@ async def test_session_enterprise_delete_success_v2():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_session_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_session_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {

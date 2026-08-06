@@ -901,8 +901,91 @@ class TestCorePlusSessionFactoryManager:
         )
         mock_factory.ping.assert_awaited_once()
 
+    @staticmethod
+    def _make_factory_with_controller(poisoned: bool):
+        """Return a mock factory whose controller_client.is_poisoned == poisoned."""
+        controller = MagicMock()
+        controller.is_poisoned = poisoned
+        factory = MagicMock()
+        factory.controller_client = controller
+        return factory, controller
 
-class TestDynamicCommunitySessionManager:
+    def _make_factory_manager(self):
+        return CorePlusSessionFactoryManager(
+            name="test_factory",
+            system_config=_stub_enterprise_config(name="test_factory"),
+            creds=self._make_creds(),
+            timeouts=EnterpriseClientTimeouts(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_controller_client_healthy(self):
+        """A healthy controller is returned without recreating the factory."""
+        manager = self._make_factory_manager()
+        factory, controller = self._make_factory_with_controller(poisoned=False)
+        manager.get = AsyncMock(return_value=factory)
+        manager.close = AsyncMock()
+
+        result = await manager.get_controller_client()
+
+        assert result is controller
+        manager.get.assert_awaited_once()
+        manager.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_controller_client_heals_poisoned(self):
+        """A poisoned controller triggers factory recreation and returns the fresh one."""
+        manager = self._make_factory_manager()
+        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
+        healthy_factory, healthy_controller = self._make_factory_with_controller(
+            poisoned=False
+        )
+        # First two gets see the poisoned factory; after close(), a fresh one.
+        manager.get = AsyncMock(
+            side_effect=[poisoned_factory, poisoned_factory, healthy_factory]
+        )
+        manager.close = AsyncMock()
+
+        result = await manager.get_controller_client()
+
+        assert result is healthy_controller
+        manager.close.assert_awaited_once()
+        assert manager.get.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_get_controller_client_recheck_finds_healed(self):
+        """A concurrent heal is observed on re-check; no second recreation occurs."""
+        manager = self._make_factory_manager()
+        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
+        healthy_factory, healthy_controller = self._make_factory_with_controller(
+            poisoned=False
+        )
+        # Poisoned on first read, healed by the time the heal lock is held.
+        manager.get = AsyncMock(side_effect=[poisoned_factory, healthy_factory])
+        manager.close = AsyncMock()
+
+        result = await manager.get_controller_client()
+
+        assert result is healthy_controller
+        manager.close.assert_not_called()
+        assert manager.get.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_controller_client_still_poisoned_after_recreate(self):
+        """If recreation cannot recover, the poisoned controller is returned as-is."""
+        manager = self._make_factory_manager()
+        poisoned_factory, poisoned_controller = self._make_factory_with_controller(
+            poisoned=True
+        )
+        manager.get = AsyncMock(return_value=poisoned_factory)
+        manager.close = AsyncMock()
+
+        result = await manager.get_controller_client()
+
+        assert result is poisoned_controller
+        manager.close.assert_awaited_once()
+        assert manager.get.await_count == 3
+
     """Tests for DynamicCommunitySessionManager class."""
 
     def test_init_stores_launched_session(self):

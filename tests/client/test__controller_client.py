@@ -1200,11 +1200,10 @@ async def test_subscribe_idempotent(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("vendor_state", ["SUBSCRIBING", "SUBSCRIBED"])
 async def test_subscribe_adopts_existing_vendor_subscription(
-    coreplus_controller_client, dummy_controller_client, vendor_state
+    coreplus_controller_client, dummy_controller_client
 ):
-    """An existing vendor-side subscription is adopted, not duplicated.
+    """A SUBSCRIBED vendor-side subscription is adopted, not duplicated.
 
     Regression test: the vendor SessionManager subscribes the controller client
     during authentication (_init_controller). Opening a second stream makes the
@@ -1214,7 +1213,7 @@ async def test_subscribe_adopts_existing_vendor_subscription(
     """
     from deephaven_enterprise.client.controller import SubState
 
-    dummy_controller_client.sub_state = SubState[vendor_state]
+    dummy_controller_client.sub_state = SubState.SUBSCRIBED
     await coreplus_controller_client.subscribe()
     dummy_controller_client.subscribe.assert_not_called()
     assert coreplus_controller_client._subscribed is True
@@ -1222,6 +1221,27 @@ async def test_subscribe_adopts_existing_vendor_subscription(
     # State-read methods are usable after adoption.
     dummy_controller_client.map.return_value = {}
     assert await coreplus_controller_client.map() == {}
+
+
+@pytest.mark.asyncio
+async def test_subscribe_poisoned_vendor_subscription_raises(
+    coreplus_controller_client, dummy_controller_client
+):
+    """A vendor client wedged at SUBSCRIBING is treated as poisoned, not adopted.
+
+    Adopting it would leave every state read blocking on the vendor's
+    subscription timeout; racing a second stream would deadlock. The wrapper
+    raises so the owning factory is recreated instead.
+    """
+    from deephaven_enterprise.client.controller import SubState
+
+    from deephaven_mcp._exceptions import DeephavenConnectionError
+
+    dummy_controller_client.sub_state = SubState.SUBSCRIBING
+    with pytest.raises(DeephavenConnectionError):
+        await coreplus_controller_client.subscribe()
+    dummy_controller_client.subscribe.assert_not_called()
+    assert coreplus_controller_client._subscribed is False
 
 
 @pytest.mark.asyncio
@@ -1260,6 +1280,55 @@ async def test_map_without_subscribe_raises_internal_error(
     with pytest.raises(InternalError) as exc_info:
         await coreplus_controller_client.map()
     assert "subscribe() must be called before map()" in str(exc_info.value)
+
+
+def test_is_poisoned_reflects_vendor_sub_state(
+    coreplus_controller_client, dummy_controller_client
+):
+    """``is_poisoned`` is True only when the vendor is wedged at SUBSCRIBING."""
+    from deephaven_enterprise.client.controller import SubState
+
+    dummy_controller_client.sub_state = SubState.SUBSCRIBING
+    assert coreplus_controller_client.is_poisoned is True
+
+    dummy_controller_client.sub_state = SubState.SUBSCRIBED
+    assert coreplus_controller_client.is_poisoned is False
+
+    dummy_controller_client.sub_state = SubState.NOT_SUBSCRIBED
+    assert coreplus_controller_client.is_poisoned is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method, args",
+    [
+        ("map", ()),
+        ("map_and_version", ()),
+        ("get", (12345,)),
+        ("get_serial_for_name", ("some-pq",)),
+    ],
+)
+async def test_reads_fast_fail_when_poisoned(
+    coreplus_controller_client, dummy_controller_client, method, args
+):
+    """Poisoned reads raise QueryError immediately without touching the vendor.
+
+    The vendor call would otherwise block for the full subscription timeout
+    before failing; the fast-fail removes that wait and names the recovery step.
+    """
+    from deephaven_enterprise.client.controller import SubState
+
+    from deephaven_mcp._exceptions import QueryError
+
+    coreplus_controller_client._subscribed = True
+    dummy_controller_client.sub_state = SubState.SUBSCRIBING
+
+    with pytest.raises(QueryError) as exc_info:
+        await getattr(coreplus_controller_client, method)(*args)
+
+    assert "poisoned" in str(exc_info.value)
+    assert "restart" in str(exc_info.value).lower()
+    getattr(dummy_controller_client, method).assert_not_called()
 
 
 @pytest.mark.asyncio

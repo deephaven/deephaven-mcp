@@ -98,6 +98,7 @@ from deephaven_mcp._taxonomy import SessionOrigin, SystemType
 from deephaven_mcp.auth.credentials import Credentials
 from deephaven_mcp.client import (
     CommunityClientTimeouts,
+    CorePlusControllerClient,
     CorePlusSession,
     CorePlusSessionFactory,
     CoreSession,
@@ -2943,6 +2944,62 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         self._system_config = system_config
         self._creds = creds
         self._timeouts = timeouts
+        self._controller_heal_lock = asyncio.Lock()
+
+    async def get_controller_client(self) -> CorePlusControllerClient:
+        """Return a controller client with a live subscription, healing a poisoned one.
+
+        Obtains the cached factory's controller client and returns it directly
+        when its subscription is healthy. When the subscription is poisoned
+        (wedged at ``SUBSCRIBING`` — see
+        :attr:`CorePlusControllerClient.is_poisoned`), the client cannot recover
+        on its own, so the factory is recreated: the cached factory is closed
+        (dropping the poisoned vendor ``SessionManager``) and a fresh one is
+        built by the next :meth:`get`, which re-authenticates and re-subscribes.
+
+        Recreation is serialized by ``_controller_heal_lock`` so that concurrent
+        callers heal once; callers queued behind the heal re-check and return the
+        already-recovered client without recreating again.
+
+        Returns:
+            CorePlusControllerClient: A controller client whose subscription is
+                live, or — if recreation could not restore it — the freshly built
+                client (whose own reads then fast-fail with a clear restart
+                message rather than blocking on the vendor timeout).
+
+        Raises:
+            DeephavenConnectionError: If (re)creating the factory times out or the
+                enterprise system is unreachable.
+            AuthenticationError: If re-authentication fails during recreation.
+            Exception: Any other error raised by factory creation.
+        """
+        factory = await self.get()
+        controller = factory.controller_client
+        if not controller.is_poisoned:
+            return controller
+
+        async with self._controller_heal_lock:
+            # A concurrent caller may have already recreated the factory.
+            factory = await self.get()
+            controller = factory.controller_client
+            if not controller.is_poisoned:
+                return controller
+
+            _LOGGER.warning(
+                f"[{self.__class__.__name__}:get_controller_client] Controller "
+                f"subscription poisoned for '{self.qualified_session_id}'; "
+                f"recreating factory to recover"
+            )
+            await self.close()
+            factory = await self.get()
+            controller = factory.controller_client
+            if controller.is_poisoned:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}:get_controller_client] Controller "
+                    f"subscription still poisoned for '{self.qualified_session_id}' "
+                    f"after recreating the factory"
+                )
+            return controller
 
     @override
     async def _create_item(self) -> CorePlusSessionFactory:

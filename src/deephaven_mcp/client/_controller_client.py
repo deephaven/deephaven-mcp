@@ -66,6 +66,12 @@ from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
+_POISONED_SUBSCRIPTION_MESSAGE = (
+    "Controller subscription is stuck in the SUBSCRIBING state and can never "
+    "complete; the enterprise connection is poisoned. Reconnect the enterprise "
+    "system (recreate the session factory) or restart the MCP server to recover."
+)
+
 
 class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
     """Asynchronous wrapper around the ControllerClient for managing persistent queries.
@@ -150,6 +156,41 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
     # ===========================================================================
     # Initialization & Connection Management
     # ===========================================================================
+
+    @property
+    def is_poisoned(self) -> bool:
+        """Whether the underlying subscription is wedged and can never complete.
+
+        A poisoned client has its vendor ``sub_state`` stuck at ``SUBSCRIBING``
+        (e.g. after a subscribe timeout, or a failed background re-subscription
+        started by the vendor response thread). Every subscription-dependent
+        read (:meth:`map`, :meth:`map_and_version`, :meth:`get`,
+        :meth:`get_serial_for_name`) would otherwise block for the vendor's full
+        subscription timeout before failing. The client cannot heal itself; the
+        owning factory must be recreated to recover.
+
+        Returns:
+            bool: True if the vendor subscription is wedged at ``SUBSCRIBING``.
+        """
+        return self.wrapped.sub_state is SubState.SUBSCRIBING
+
+    def _raise_if_poisoned(self, operation: str) -> None:
+        """Fast-fail a subscription-dependent read when the client is poisoned.
+
+        Skips the vendor's multi-minute subscription wait when the subscription
+        can never complete.
+
+        Args:
+            operation (str): Name of the calling method, for the log prefix.
+
+        Raises:
+            QueryError: If the subscription is wedged at ``SUBSCRIBING``.
+        """
+        if self.is_poisoned:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:{operation}] {_POISONED_SUBSCRIPTION_MESSAGE}"
+            )
+            raise QueryError(_POISONED_SUBSCRIPTION_MESSAGE)
 
     async def ping(self) -> bool:
         """Ping the controller and refresh the cookie asynchronously.
@@ -267,7 +308,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             # rather than opening a second stream — the controller server allows
             # one subscription stream per session, so a second stream starts an
             # infinite mutual kill/re-subscribe loop between response threads.
-            if self.wrapped.sub_state is not SubState.NOT_SUBSCRIBED:
+            if self.wrapped.sub_state is SubState.SUBSCRIBED:
                 self._subscribed = True
                 _LOGGER.debug(
                     "[CorePlusControllerClient:subscribe] Wrapped client already "
@@ -275,6 +316,14 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                     "subscription"
                 )
                 return
+
+            # A wedged mid-subscribe stream cannot be adopted and must not be
+            # raced with a second stream; the factory has to be recreated.
+            if self.wrapped.sub_state is SubState.SUBSCRIBING:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] {_POISONED_SUBSCRIPTION_MESSAGE}"
+                )
+                raise DeephavenConnectionError(_POISONED_SUBSCRIPTION_MESSAGE)
 
             _LOGGER.debug(
                 f"[CorePlusControllerClient:subscribe] Subscribing to query state (timeout_seconds={timeout_seconds})"
@@ -356,6 +405,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 "subscribe() must be called before map(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
             )
+        self._raise_if_poisoned("map")
         _LOGGER.debug("[CorePlusControllerClient:map] Retrieving query map")
         try:
             # The map is from int to QueryInfo, but we need to cast the keys to QuerySerial
@@ -413,6 +463,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 "subscribe() must be called before map_and_version(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
             )
+        self._raise_if_poisoned("map_and_version")
         _LOGGER.debug(
             "[CorePlusControllerClient:map_and_version] Retrieving query map with version"
         )
@@ -483,6 +534,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 "subscribe() must be called before get_serial_for_name(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
             )
+        self._raise_if_poisoned("get_serial_for_name")
         _LOGGER.debug(
             f"[CorePlusControllerClient:get_serial_for_name] Looking up serial for query name='{name}'"
         )
@@ -667,6 +719,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                        the subscription state is invalid (e.g., if subscribe() was not called).
         """
         timeout_seconds = self._timeouts.no_wait_seconds
+        self._raise_if_poisoned("get")
         _LOGGER.debug(
             f"[CorePlusControllerClient:get] Retrieving query info for serial={serial}, timeout={timeout_seconds}"
         )

@@ -160,7 +160,7 @@ def _make_pq_info(pq_name: str) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_fetch_factory_pqs_no_cached_client_success():
-    """No cached client → creates new client via factory_manager.get(), calls map()."""
+    """No cached client → creates client via get_controller_client(), calls map()."""
     snapshot = _make_factory_snapshot(client=None)
 
     mock_client = AsyncMock()
@@ -170,9 +170,7 @@ async def test_fetch_factory_pqs_no_cached_client_success():
             "q2": _make_pq_info("pq2"),
         }
     )
-    mock_factory_instance = MagicMock()
-    mock_factory_instance.controller_client = mock_client
-    snapshot.factory_manager.get = AsyncMock(return_value=mock_factory_instance)
+    snapshot.factory_manager.get_controller_client = AsyncMock(return_value=mock_client)
 
     result = await _fetch_factory_pqs(snapshot)
 
@@ -182,9 +180,35 @@ async def test_fetch_factory_pqs_no_cached_client_success():
 
 
 @pytest.mark.asyncio
+async def test_fetch_factory_pqs_poisoned_cached_client_recreates():
+    """Poisoned cached client → discarded and recreated via get_controller_client()."""
+    mock_old_client = AsyncMock()
+    mock_old_client.is_poisoned = True
+
+    mock_new_client = AsyncMock()
+    mock_new_client.is_poisoned = False
+    mock_new_client.map = AsyncMock(return_value={"q1": _make_pq_info("healed-pq")})
+
+    snapshot = _make_factory_snapshot(client=mock_old_client)
+    snapshot.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_new_client
+    )
+
+    result = await _fetch_factory_pqs(snapshot)
+
+    assert isinstance(result, _FactoryQueryResult)
+    assert result.new_client is mock_new_client
+    assert result.query_map == {"q1": "healed-pq"}
+    # Poisoned client is discarded without pinging.
+    mock_old_client.ping.assert_not_called()
+    snapshot.factory_manager.get_controller_client.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_fetch_factory_pqs_cached_client_ping_ok():
     """Cached client with good ping → reuses client, new_client is NOT set (stays None in result's new_client)."""
     mock_client = AsyncMock()
+    mock_client.is_poisoned = False
     mock_client.ping = AsyncMock(return_value=True)
     mock_client.map = AsyncMock(
         return_value={
@@ -200,14 +224,15 @@ async def test_fetch_factory_pqs_cached_client_ping_ok():
     # When ping ok, we reuse the cached client and return it as new_client
     assert result.new_client is mock_client
     assert result.query_map == {"q1": "mypq"}
-    # factory_manager.get should NOT have been called
-    snapshot.factory_manager.get.assert_not_called()
+    # get_controller_client should NOT have been called
+    snapshot.factory_manager.get_controller_client.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_fetch_factory_pqs_cached_client_ping_returns_false():
-    """Ping returns False → recreates client via factory_manager.get()."""
+    """Ping returns False → recreates client via get_controller_client()."""
     mock_old_client = AsyncMock()
+    mock_old_client.is_poisoned = False
     mock_old_client.ping = AsyncMock(return_value=False)
 
     mock_new_client = AsyncMock()
@@ -216,24 +241,25 @@ async def test_fetch_factory_pqs_cached_client_ping_returns_false():
             "q1": _make_pq_info("fresh-pq"),
         }
     )
-    mock_factory_instance = MagicMock()
-    mock_factory_instance.controller_client = mock_new_client
 
     snapshot = _make_factory_snapshot(client=mock_old_client)
-    snapshot.factory_manager.get = AsyncMock(return_value=mock_factory_instance)
+    snapshot.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_new_client
+    )
 
     result = await _fetch_factory_pqs(snapshot)
 
     assert isinstance(result, _FactoryQueryResult)
     assert result.new_client is mock_new_client
     assert result.query_map == {"q1": "fresh-pq"}
-    snapshot.factory_manager.get.assert_awaited_once()
+    snapshot.factory_manager.get_controller_client.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_fetch_factory_pqs_cached_client_ping_raises():
     """Ping raises Exception → recreates client."""
     mock_old_client = AsyncMock()
+    mock_old_client.is_poisoned = False
     mock_old_client.ping = AsyncMock(side_effect=ConnectionError("timeout"))
 
     mock_new_client = AsyncMock()
@@ -242,11 +268,11 @@ async def test_fetch_factory_pqs_cached_client_ping_raises():
             "q1": _make_pq_info("recovered-pq"),
         }
     )
-    mock_factory_instance = MagicMock()
-    mock_factory_instance.controller_client = mock_new_client
 
     snapshot = _make_factory_snapshot(client=mock_old_client)
-    snapshot.factory_manager.get = AsyncMock(return_value=mock_factory_instance)
+    snapshot.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_new_client
+    )
 
     result = await _fetch_factory_pqs(snapshot)
 
@@ -257,9 +283,11 @@ async def test_fetch_factory_pqs_cached_client_ping_raises():
 
 @pytest.mark.asyncio
 async def test_fetch_factory_pqs_no_cached_client_factory_get_raises():
-    """No cached client, factory.get() raises → returns _FactoryQueryError with new_client=None."""
+    """No cached client, get_controller_client() raises → _FactoryQueryError(new_client=None)."""
     snapshot = _make_factory_snapshot(client=None)
-    snapshot.factory_manager.get = AsyncMock(side_effect=RuntimeError("factory down"))
+    snapshot.factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("factory down")
+    )
 
     result = await _fetch_factory_pqs(snapshot)
 
@@ -271,34 +299,34 @@ async def test_fetch_factory_pqs_no_cached_client_factory_get_raises():
 
 @pytest.mark.asyncio
 async def test_fetch_factory_pqs_cached_client_ping_fails_recreate_fails():
-    """Ping raises AND factory.get() also raises → _FactoryQueryError(new_client=None)."""
+    """Ping raises AND get_controller_client() also raises → _FactoryQueryError(new_client=None)."""
     mock_old_client = AsyncMock()
+    mock_old_client.is_poisoned = False
     mock_old_client.ping = AsyncMock(side_effect=ConnectionError("dead"))
 
     snapshot = _make_factory_snapshot(client=mock_old_client)
-    snapshot.factory_manager.get = AsyncMock(
+    snapshot.factory_manager.get_controller_client = AsyncMock(
         side_effect=RuntimeError("factory unreachable")
     )
 
     result = await _fetch_factory_pqs(snapshot)
 
     assert isinstance(result, _FactoryQueryError)
-    # new_client is None because factory.get() failed before assignment
+    # new_client is None because get_controller_client() failed before assignment
     assert result.new_client is None
     assert "RuntimeError" in result.error
 
 
 @pytest.mark.asyncio
 async def test_fetch_factory_pqs_map_raises_new_client_created():
-    """No cached client, factory.get() succeeds, but client.map() raises → _FactoryQueryError(new_client=<new>, ...)."""
+    """No cached client, get_controller_client() succeeds, but client.map() raises → _FactoryQueryError(new_client=<new>, ...)."""
     mock_new_client = AsyncMock()
     mock_new_client.map = AsyncMock(side_effect=IOError("map failed"))
 
-    mock_factory_instance = MagicMock()
-    mock_factory_instance.controller_client = mock_new_client
-
     snapshot = _make_factory_snapshot(client=None)
-    snapshot.factory_manager.get = AsyncMock(return_value=mock_factory_instance)
+    snapshot.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_new_client
+    )
 
     result = await _fetch_factory_pqs(snapshot)
 
@@ -315,6 +343,7 @@ async def test_fetch_factory_pqs_map_raises_using_cached_client():
     new_client stays None because we reused the cached client (no new creation).
     """
     mock_client = AsyncMock()
+    mock_client.is_poisoned = False
     mock_client.ping = AsyncMock(return_value=True)
     mock_client.map = AsyncMock(side_effect=ValueError("bad map"))
 

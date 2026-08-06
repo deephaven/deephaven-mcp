@@ -152,9 +152,13 @@ async def _fetch_factory_pqs(
     Pure I/O function — accesses no shared registry state.
 
     Algorithm:
-        1. If no cached client, create one via ``factory_manager.get()``.
-        2. If cached client exists, ping to verify liveness; recreate if dead.
-        3. Call ``map()`` to get the current PQ list.
+        1. If the cached client is poisoned (subscription wedged), discard it.
+        2. If no live cached client, obtain one via
+           ``factory_manager.get_controller_client()`` (which recreates the
+           factory when the current controller is poisoned).
+        3. Otherwise ping the cached client to verify liveness; recreate via
+           ``get_controller_client()`` if dead.
+        4. Call ``map()`` to get the current PQ list.
 
     Args:
         snapshot (_FactorySnapshot): Factory state captured in Phase 1.
@@ -166,11 +170,17 @@ async def _fetch_factory_pqs(
     new_client: CorePlusControllerClient | None = None
 
     try:
+        if client is not None and client.is_poisoned:
+            _LOGGER.warning(
+                "[_fetch_factory_pqs] cached controller client is poisoned "
+                "(subscription wedged in SUBSCRIBING); recreating factory to recover"
+            )
+            client = None
+
         if client is None:
-            _LOGGER.debug("[_fetch_factory_pqs] no cached client, creating")
+            _LOGGER.debug("[_fetch_factory_pqs] no live cached client, creating")
             t0 = time.monotonic()
-            factory_instance = await snapshot.factory_manager.get()
-            client = factory_instance.controller_client
+            client = await snapshot.factory_manager.get_controller_client()
             new_client = client
             _LOGGER.debug(
                 f"[_fetch_factory_pqs] client created in {time.monotonic()-t0:.2f}s"
@@ -191,8 +201,7 @@ async def _fetch_factory_pqs(
                     f"({type(ping_err).__name__}: {ping_err}); discarding and recreating"
                 )
                 t0 = time.monotonic()
-                factory_instance = await snapshot.factory_manager.get()
-                client = factory_instance.controller_client
+                client = await snapshot.factory_manager.get_controller_client()
                 new_client = client
                 _LOGGER.debug(
                     f"[_fetch_factory_pqs] client recreated in {time.monotonic()-t0:.2f}s"

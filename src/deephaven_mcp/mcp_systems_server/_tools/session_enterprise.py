@@ -1079,8 +1079,7 @@ async def session_enterprise_delete(
         # caller can retry.
         try:
             serial = CorePlusQuerySerial(int(qsid.session_id))
-            factory = await session_registry.factory_manager.get()
-            controller = factory.controller_client
+            controller = await session_registry.factory_manager.get_controller_client()
             _LOGGER.debug(
                 f"[mcp_systems_server:session_enterprise_delete] Deleting persistent query "
                 f"(serial={serial}) for session '{id}'"
