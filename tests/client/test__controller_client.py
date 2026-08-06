@@ -1311,23 +1311,24 @@ def test_is_poisoned_reflects_vendor_sub_state(
 async def test_reads_fast_fail_when_poisoned(
     coreplus_controller_client, dummy_controller_client, method, args
 ):
-    """Poisoned reads raise QueryError immediately without touching the vendor.
+    """Poisoned reads raise DeephavenConnectionError immediately without touching the vendor.
 
     The vendor call would otherwise block for the full subscription timeout
     before failing; the fast-fail removes that wait and names the recovery step.
     """
     from deephaven_enterprise.client.controller import SubState
 
-    from deephaven_mcp._exceptions import QueryError
+    from deephaven_mcp._exceptions import DeephavenConnectionError
 
     coreplus_controller_client._subscribed = True
     dummy_controller_client.sub_state = SubState.SUBSCRIBING
 
-    with pytest.raises(QueryError) as exc_info:
+    with pytest.raises(DeephavenConnectionError) as exc_info:
         await getattr(coreplus_controller_client, method)(*args)
 
-    assert "poisoned" in str(exc_info.value)
-    assert "restart" in str(exc_info.value).lower()
+    message = str(exc_info.value).lower()
+    assert "connect" in message
+    assert "restart" in message
     getattr(dummy_controller_client, method).assert_not_called()
 
 

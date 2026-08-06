@@ -2945,30 +2945,31 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         self._creds = creds
         self._timeouts = timeouts
         self._controller_heal_lock = asyncio.Lock()
+        self._controller_reconnect_attempted = False
 
     async def get_controller_client(self) -> CorePlusControllerClient:
-        """Return a controller client with a live subscription, healing a poisoned one.
+        """Return the factory's controller client, reconnecting once if it is unreachable.
 
-        Obtains the cached factory's controller client and returns it directly
-        when its subscription is healthy. When the subscription is poisoned
-        (wedged at ``SUBSCRIBING`` — see
-        :attr:`CorePlusControllerClient.is_poisoned`), the client cannot recover
-        on its own, so the factory is recreated: the cached factory is closed
-        (dropping the poisoned vendor ``SessionManager``) and a fresh one is
-        built by the next :meth:`get`, which re-authenticates and re-subscribes.
+        Returns the cached factory's controller client when the controller
+        connection is healthy. When the connection has been lost (see
+        :attr:`CorePlusControllerClient.is_poisoned`), the factory is recreated
+        one time -- closing the dead factory and building a fresh one that
+        re-authenticates and reconnects. This reconnect is attempted at most once
+        for the lifetime of this manager: if it does not restore the connection,
+        the connection is treated as permanently unrecoverable and no further
+        reconnect is attempted; callers then receive a controller whose reads fail
+        fast with a clear "session must be restarted" error rather than blocking
+        on the vendor timeout.
 
-        Recreation is serialized by ``_controller_heal_lock`` so that concurrent
-        callers heal once; callers queued behind the heal re-check and return the
-        already-recovered client without recreating again.
+        Serialized by ``_controller_heal_lock`` so concurrent callers reconnect at
+        most once.
 
         Returns:
-            CorePlusControllerClient: A controller client whose subscription is
-                live, or — if recreation could not restore it — the freshly built
-                client (whose own reads then fast-fail with a clear restart
-                message rather than blocking on the vendor timeout).
+            CorePlusControllerClient: A controller client, reconnected when
+                possible; otherwise one that fails fast on use.
 
         Raises:
-            DeephavenConnectionError: If (re)creating the factory times out or the
+            DeephavenConnectionError: If recreating the factory times out or the
                 enterprise system is unreachable.
             AuthenticationError: If re-authentication fails during recreation.
             Exception: Any other error raised by factory creation.
@@ -2979,25 +2980,29 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             return controller
 
         async with self._controller_heal_lock:
-            # A concurrent caller may have already recreated the factory.
+            # Re-check under the lock: a concurrent caller may have already
+            # reconnected or used up the one-shot reconnect attempt.
             factory = await self.get()
             controller = factory.controller_client
-            if not controller.is_poisoned:
+            if not controller.is_poisoned or self._controller_reconnect_attempted:
                 return controller
 
+            # One-shot reconnect; a connection that cannot be re-established is
+            # treated as permanently unrecoverable.
+            self._controller_reconnect_attempted = True
             _LOGGER.warning(
-                f"[{self.__class__.__name__}:get_controller_client] Controller "
-                f"subscription poisoned for '{self.qualified_session_id}'; "
-                f"recreating factory to recover"
+                f"[{self.__class__.__name__}:get_controller_client] Enterprise "
+                f"controller connection lost for '{self.qualified_session_id}'; "
+                f"reconnecting"
             )
             await self.close()
             factory = await self.get()
             controller = factory.controller_client
             if controller.is_poisoned:
                 _LOGGER.error(
-                    f"[{self.__class__.__name__}:get_controller_client] Controller "
-                    f"subscription still poisoned for '{self.qualified_session_id}' "
-                    f"after recreating the factory"
+                    f"[{self.__class__.__name__}:get_controller_client] Enterprise "
+                    f"controller connection for '{self.qualified_session_id}' could "
+                    f"not be re-established; the session must be restarted"
                 )
             return controller
 
@@ -3231,6 +3236,14 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             EnterpriseSessionManager._check_liveness(): Session-level health checking counterpart
             ResourceLivenessStatus: The enum values returned by this method
         """
+        # A lost controller connection is a factory-level health failure even
+        # when the transport still pings, so surface it as its own OFFLINE reason.
+        if item.controller_client.is_poisoned:
+            return (
+                ResourceLivenessStatus.OFFLINE,
+                "controller connection unavailable",
+            )
+
         alive = await item.ping()
 
         if alive:

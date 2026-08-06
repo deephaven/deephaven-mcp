@@ -877,6 +877,7 @@ class TestCorePlusSessionFactoryManager:
     async def test_check_liveness(self):
         """Test that _check_liveness correctly calls the item's ping method."""
         mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
+        mock_factory.controller_client.is_poisoned = False
         manager = CorePlusSessionFactoryManager(
             name="test_factory",
             system_config=_stub_enterprise_config(name="test_factory"),
@@ -900,6 +901,24 @@ class TestCorePlusSessionFactoryManager:
             "Ping returned False",
         )
         mock_factory.ping.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_check_liveness_poisoned_controller(self):
+        """A wedged controller subscription reports OFFLINE without pinging."""
+        mock_factory = AsyncMock(spec=client.CorePlusSessionFactory)
+        mock_factory.controller_client.is_poisoned = True
+        manager = CorePlusSessionFactoryManager(
+            name="test_factory",
+            system_config=_stub_enterprise_config(name="test_factory"),
+            creds=self._make_creds(),
+            timeouts=EnterpriseClientTimeouts(),
+        )
+
+        status, detail = await manager._check_liveness(mock_factory)
+
+        assert status == ResourceLivenessStatus.OFFLINE
+        assert detail is not None and "connection" in detail
+        mock_factory.ping.assert_not_awaited()
 
     @staticmethod
     def _make_factory_with_controller(poisoned: bool):
@@ -985,6 +1004,24 @@ class TestCorePlusSessionFactoryManager:
         assert result is poisoned_controller
         manager.close.assert_awaited_once()
         assert manager.get.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_get_controller_client_reconnects_at_most_once(self):
+        """A second unrecoverable call does not recreate the factory again."""
+        manager = self._make_factory_manager()
+        poisoned_factory, poisoned_controller = self._make_factory_with_controller(
+            poisoned=True
+        )
+        manager.get = AsyncMock(return_value=poisoned_factory)
+        manager.close = AsyncMock()
+
+        first = await manager.get_controller_client()
+        second = await manager.get_controller_client()
+
+        assert first is poisoned_controller
+        assert second is poisoned_controller
+        # Only the first call attempts a reconnect; the second gives up.
+        manager.close.assert_awaited_once()
 
     """Tests for DynamicCommunitySessionManager class."""
 

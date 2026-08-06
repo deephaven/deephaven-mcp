@@ -66,10 +66,9 @@ from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
-_POISONED_SUBSCRIPTION_MESSAGE = (
-    "Controller subscription is stuck in the SUBSCRIBING state and can never "
-    "complete; the enterprise connection is poisoned. Reconnect the enterprise "
-    "system (recreate the session factory) or restart the MCP server to recover."
+_CONTROLLER_UNAVAILABLE_MESSAGE = (
+    "Unable to connect to the Deephaven controller; the enterprise session "
+    "must be restarted to reconnect."
 )
 
 
@@ -175,22 +174,23 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         return self.wrapped.sub_state is SubState.SUBSCRIBING
 
     def _raise_if_poisoned(self, operation: str) -> None:
-        """Fast-fail a subscription-dependent read when the client is poisoned.
+        """Fast-fail a subscription-dependent read when the controller is unreachable.
 
-        Skips the vendor's multi-minute subscription wait when the subscription
-        can never complete.
+        Skips the vendor's multi-minute subscription wait when the controller
+        connection can no longer be established.
 
         Args:
             operation (str): Name of the calling method, for the log prefix.
 
         Raises:
-            QueryError: If the subscription is wedged at ``SUBSCRIBING``.
+            DeephavenConnectionError: If the controller connection is wedged and
+                cannot be re-established.
         """
         if self.is_poisoned:
             _LOGGER.error(
-                f"[CorePlusControllerClient:{operation}] {_POISONED_SUBSCRIPTION_MESSAGE}"
+                f"[CorePlusControllerClient:{operation}] {_CONTROLLER_UNAVAILABLE_MESSAGE}"
             )
-            raise QueryError(_POISONED_SUBSCRIPTION_MESSAGE)
+            raise DeephavenConnectionError(_CONTROLLER_UNAVAILABLE_MESSAGE)
 
     async def ping(self) -> bool:
         """Ping the controller and refresh the cookie asynchronously.
@@ -317,13 +317,14 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 )
                 return
 
-            # A wedged mid-subscribe stream cannot be adopted and must not be
-            # raced with a second stream; the factory has to be recreated.
+            # Vendor is mid-subscribe. The subscription isn't ready to adopt, 
+            # and falling through would open a second competing stream. 
+            # Fail fast; the factory will be recreated to reconnect.
             if self.wrapped.sub_state is SubState.SUBSCRIBING:
                 _LOGGER.error(
-                    f"[CorePlusControllerClient:subscribe] {_POISONED_SUBSCRIPTION_MESSAGE}"
+                    f"[CorePlusControllerClient:subscribe] {_CONTROLLER_UNAVAILABLE_MESSAGE}"
                 )
-                raise DeephavenConnectionError(_POISONED_SUBSCRIPTION_MESSAGE)
+                raise DeephavenConnectionError(_CONTROLLER_UNAVAILABLE_MESSAGE)
 
             _LOGGER.debug(
                 f"[CorePlusControllerClient:subscribe] Subscribing to query state (timeout_seconds={timeout_seconds})"
