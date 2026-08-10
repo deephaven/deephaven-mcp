@@ -317,8 +317,8 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 )
                 return
 
-            # Vendor is mid-subscribe. The subscription isn't ready to adopt, 
-            # and falling through would open a second competing stream. 
+            # Vendor is mid-subscribe. The subscription isn't ready to adopt,
+            # and falling through would open a second competing stream.
             # Fail fast; the factory will be recreated to reconnect.
             if self.wrapped.sub_state is SubState.SUBSCRIBING:
                 _LOGGER.error(

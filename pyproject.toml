@@ -169,7 +169,13 @@ markers = [
 ]
 asyncio_mode = "strict"
 filterwarnings = [
-    "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning"
+    "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning",
+    # FastMCP's Settings model (pydantic-settings) declares a 'lifespan' field
+    # with a forward-reference annotation it never rebuilds; the resulting
+    # warning originates in the dependency, not our code. Matched by message so
+    # the filter holds across pydantic-settings versions (the warning class is
+    # absent in older ones).
+    "ignore:Field .* has an incomplete definition:",
 ]
 asyncio_default_fixture_loop_scope = "function"
 
