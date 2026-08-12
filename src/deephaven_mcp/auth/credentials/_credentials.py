@@ -129,7 +129,9 @@ class PrivateKeyCredentials(Credentials):
     object as Enterprise private-key credentials."""
 
     key_text: SecretStr
-    """The PEM contents as UTF-8 text."""
+    """The Deephaven private key as UTF-8 text (proprietary base64
+    keypair format, typically the contents of a
+    ``priv-<keyname>.base64.txt`` file — not a PEM file)."""
 
 
 class CustomTokenCredentials(Credentials):
