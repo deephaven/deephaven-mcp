@@ -211,7 +211,7 @@ Credentials are typed `pydantic` models discriminated by
 | `anonymous` | — | No bearer material; community-only. |
 | `psk` | `token` | Pre-shared key for Deephaven Community PSK auth; community-only. |
 | `password` | `username`, `password` | Optional `effective_user` for Enterprise sudo-style delegation. |
-| `private_key` | `key_text` | PEM contents (use `${file:/path/to/key.pem}` to load from disk). |
+| `private_key` | `key_text` | Deephaven private key contents — proprietary base64 keypair format, typically `priv-<keyname>.base64.txt`, not a PEM file (use `${file:/path/to/priv-<keyname>.base64.txt}` to load from disk). |
 | `custom` | `auth_type`, `auth_token` | Escape hatch for arbitrary Java auth handler classes; community-only. |
 
 Enterprise systems accept only `password` and `private_key`. The

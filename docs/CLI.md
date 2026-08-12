@@ -864,7 +864,7 @@ contain dots. File boundaries surface only in `config files`.
 | `session add NAME` | Declares a community session file (`community/sessions/<NAME>.json`). Flags: `--host`, `--port`, `--language`, `--auth anonymous\|psk\|password\|custom` plus the matching credential flags (`--token`; `--username`/`--password`/`--effective-user`; `--auth-type`/`--auth-token`). Missing values are prompted for on a terminal (stderr); non-interactive runs fail with `missing_required_option`. Refuses to overwrite (`already_exists`). |
 | `session remove NAME` | Deletes the session file. Confirms on a terminal; requires `--yes` otherwise.       |
 | `session list` | Lists declared session files with per-file validity. Contrast: `dhcli session list` shows *live* sessions. |
-| `system add NAME` | Declares an enterprise system file (`enterprise/systems/<NAME>.json`). Flags: `--url` (connection.json URL), `--auth password\|private_key` plus the matching credential flags (`--username`/`--password`/`--effective-user`; `--key` — use `${file:/path/key.pem}`), optional `--max-sessions`, `--heap-gb`. `community` is a reserved name. |
+| `system add NAME` | Declares an enterprise system file (`enterprise/systems/<NAME>.json`). Flags: `--url` (connection.json URL), `--auth password\|private_key` plus the matching credential flags (`--username`/`--password`/`--effective-user`; `--key` — the Deephaven private key, use `${file:/path/to/priv-<keyname>.base64.txt}`), optional `--max-sessions`, `--heap-gb`. `community` is a reserved name. |
 | `system remove NAME` | Deletes the system file. Confirms on a terminal; requires `--yes` otherwise.        |
 | `system list` | Lists declared system files with per-file validity. Contrast: `dhcli system list` shows what the daemon serves. |
 

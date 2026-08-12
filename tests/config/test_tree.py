@@ -1015,12 +1015,14 @@ async def test_examples_ai_config_loads_end_to_end(
     # *inside* the configuration directory. The templating engine
     # refuses ``${file:...}`` references that resolve outside the
     # audited configuration root.
-    keyfile = config_dir / "staging-key.pem"
+    keyfile = config_dir / "priv-staging.base64.txt"
     keyfile.write_text("-----BEGIN FAKE KEY-----\nx\n-----END FAKE KEY-----\n")
     keyfile.chmod(0o600)
     staging_path = config_dir / "enterprise" / "systems" / "staging.json"
     staging_path.write_text(
-        staging_path.read_text().replace("/etc/deephaven/staging-key.pem", str(keyfile))
+        staging_path.read_text().replace(
+            "/etc/deephaven/priv-staging.base64.txt", str(keyfile)
+        )
     )
 
     # Provide the env vars the example references via ${env:...}.

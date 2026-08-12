@@ -2322,7 +2322,10 @@ def _build_system_credentials(
             key = require_value(
                 key,
                 flag="--key",
-                label="Private key (use a ref like ${file:/path/to/key.pem})",
+                label=(
+                    "Private key (use a ref like "
+                    "${file:/path/to/priv-<keyname>.base64.txt})"
+                ),
                 no_input=no_input,
                 hide=True,
             )
@@ -2357,7 +2360,7 @@ async def _add_system_entity(
         password (str | None): Password for ``auth="password"``.
         effective_user (str | None): Optional operate-as identity for
             ``auth="password"``.
-        key (str | None): Private-key PEM material for
+        key (str | None): Deephaven private-key material for
             ``auth="private_key"``.
         max_sessions (int | None): Optional concurrent-session cap.
         heap_gb (float | None): Optional default JVM heap size in GB.
@@ -2437,7 +2440,7 @@ async def _add_system_entity(
             "they fail with missing_required_option naming the flag. "
             "Secret flags accept templating refs ('${env:VAR}', "
             "'${file:/path}') verbatim — for --key a '${file:...}' ref is "
-            "the practical form (PEM text is multi-line)."
+            "the practical form (the key material lives in a file)."
         ),
         arguments=(
             HelpEntry(
@@ -2454,7 +2457,7 @@ async def _add_system_entity(
             "--url https://dhe.example.com/iris/connection.json "
             "--auth password --username alice --password '${env:DH_PROD_PASSWORD}'",
             "$ dhcli config system add staging --url https://stg/iris/connection.json "
-            "--auth private_key --key '${file:/etc/deephaven/staging-key.pem}'",
+            "--auth private_key --key '${file:/etc/deephaven/priv-staging.base64.txt}'",
             "$ dhcli config system add staging --url https://stg/iris/connection.json "
             "--auth password --username alice "
             "--password '${env:DH_STAGING_PASSWORD}' | jq -r .file",
@@ -2523,9 +2526,11 @@ async def _add_system_entity(
     "--key",
     default=None,
     help=(
-        "Private-key PEM material for --auth private_key. PEM text is "
-        "multi-line, so a templating ref is the practical form: "
-        "'${file:/path/to/key.pem}'."
+        "Deephaven private-key material for --auth private_key "
+        "(proprietary base64 keypair format, typically "
+        "priv-<keyname>.base64.txt, not a PEM file). The key lives in a "
+        "file, so a templating ref is the practical form: "
+        "'${file:/path/to/priv-<keyname>.base64.txt}'."
     ),
 )
 @click.option(

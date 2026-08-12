@@ -249,7 +249,7 @@ Each Enterprise system is one file at `$DH_AI_DATA_DIR/config/enterprise/systems
 Credentials are read once at startup from each system's `auth.credentials` block and reused for the process lifetime — there is no per-request resolution. The two enterprise credential kinds map to session-factory calls:
 
 - `password` → `SessionManager.password(username, password)`.
-- `private_key` → `SessionManager.private_key(key_text)` (PEM text, typically loaded via `${file:/path/to/key.pem}`).
+- `private_key` → `SessionManager.private_key(key_text)` (Deephaven private key — proprietary base64 keypair format, typically loaded via `${file:/path/to/priv-<keyname>.base64.txt}`).
 
 At startup each validated `EnterpriseSystemConfig` drives an `EnterpriseSessionRegistry`, which builds a `CorePlusSessionFactoryManager` and starts its discovery task. Credentials are never refreshed at runtime (restart to rotate) and never written to disk.
 
