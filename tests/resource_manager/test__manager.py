@@ -1023,6 +1023,42 @@ class TestCorePlusSessionFactoryManager:
         # Only the first call attempts a reconnect; the second gives up.
         manager.close.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_get_controller_client_rearms_after_successful_reconnect(self):
+        """A successful reconnect re-arms the guard so a later outage reconnects again."""
+        manager = self._make_factory_manager()
+        poisoned_1, _ = self._make_factory_with_controller(poisoned=True)
+        healthy_1, healthy_controller_1 = self._make_factory_with_controller(
+            poisoned=False
+        )
+        poisoned_2, _ = self._make_factory_with_controller(poisoned=True)
+        healthy_2, healthy_controller_2 = self._make_factory_with_controller(
+            poisoned=False
+        )
+        # Episode 1: poisoned, poisoned (re-check), healed after close().
+        # Episode 2: poisoned again, poisoned (re-check), healed after close().
+        manager.get = AsyncMock(
+            side_effect=[
+                poisoned_1,
+                poisoned_1,
+                healthy_1,
+                poisoned_2,
+                poisoned_2,
+                healthy_2,
+            ]
+        )
+        manager.close = AsyncMock()
+
+        first = await manager.get_controller_client()
+        # The successful reconnect re-armed the one-shot guard.
+        assert manager._controller_reconnect_attempted is False
+        second = await manager.get_controller_client()
+
+        assert first is healthy_controller_1
+        assert second is healthy_controller_2
+        # Each outage triggered its own recreation.
+        assert manager.close.await_count == 2
+
     """Tests for DynamicCommunitySessionManager class."""
 
     def test_init_stores_launched_session(self):

@@ -2945,21 +2945,25 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         self._creds = creds
         self._timeouts = timeouts
         self._controller_heal_lock = asyncio.Lock()
+        # One-shot reconnect guard, re-armed on a successful reconnect; see
+        # get_controller_client.
         self._controller_reconnect_attempted = False
 
     async def get_controller_client(self) -> CorePlusControllerClient:
-        """Return the factory's controller client, reconnecting once if it is unreachable.
+        """Return the factory's controller client, reconnecting once per outage if it is unreachable.
 
         Returns the cached factory's controller client when the controller
         connection is healthy. When the connection has been lost (see
         :attr:`CorePlusControllerClient.is_poisoned`), the factory is recreated
-        one time -- closing the dead factory and building a fresh one that
-        re-authenticates and reconnects. This reconnect is attempted at most once
-        for the lifetime of this manager: if it does not restore the connection,
-        the connection is treated as permanently unrecoverable and no further
-        reconnect is attempted; callers then receive a controller whose reads fail
-        fast with a clear "session must be restarted" error rather than blocking
-        on the vendor timeout.
+        -- closing the dead factory and building a fresh one that re-authenticates
+        and reconnects. Reconnect is attempted at most once per outage: the
+        one-shot guard (:attr:`_controller_reconnect_attempted`) is armed before
+        the attempt and re-armed only when the attempt restores the connection.
+        A recreate that leaves the controller still poisoned is treated as
+        unrecoverable for that outage -- the guard stays set and subsequent calls
+        return the poisoned controller (whose reads fail fast with a clear
+        "session must be restarted" error rather than blocking on the vendor
+        timeout) until a later call observes a healthy reconnect and re-arms.
 
         Serialized by ``_controller_heal_lock`` so concurrent callers reconnect at
         most once.
@@ -2987,8 +2991,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             if not controller.is_poisoned or self._controller_reconnect_attempted:
                 return controller
 
-            # One-shot reconnect; a connection that cannot be re-established is
-            # treated as permanently unrecoverable.
+            # One-shot reconnect for this outage; re-armed below only if the
+            # recreate actually restores the connection.
             self._controller_reconnect_attempted = True
             _LOGGER.warning(
                 f"[{self.__class__.__name__}:get_controller_client] Enterprise "
@@ -3004,6 +3008,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                     f"controller connection for '{self.qualified_session_id}' could "
                     f"not be re-established; the session must be restarted"
                 )
+            else:
+                # Reconnect succeeded; re-arm so a future outage can reconnect again.
+                self._controller_reconnect_attempted = False
             return controller
 
     @override
