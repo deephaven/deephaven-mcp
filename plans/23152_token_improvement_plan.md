@@ -355,9 +355,10 @@ beside it.
    (catalog tools keep 10,000 / 1,000), reserving `null` for an explicit uncapped
    response.
 5. Apply the layer to the first-pass collections — `pq list`, `sessions list`,
-   `list systems`, `pip list`, `enterprise_systems_status`, and the catalog
-   listings (`match` / `fields` / `prune_empty` atop their existing `filters`)
-   — and add nested `fields` to `pq details`.
+   `list systems`, `pip list`, `session_tables_list`,
+   `enterprise_systems_status`, and the catalog listings (`match` / `fields` /
+   `prune_empty` atop their existing `filters`) — and add nested `fields` to
+   `pq details`.
 6. Add `unmatched_fields` to every successful response that received `fields`.
    Populate it after pruning and projection; preserve requested-path order.
 7. Update CLI help, machine-readable command metadata, and user documentation
