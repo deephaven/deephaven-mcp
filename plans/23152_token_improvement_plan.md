@@ -189,6 +189,19 @@ beyond selection and narrowing is out of scope: a caller who needs exact
 reshaping runs a downstream transform such as `jq` on the CLI. The server does
 not grow an expression language.
 
+`match` is intended to stay small permanently. Its scope may grow slightly —
+basic numeric comparisons are a plausible future addition — but never toward
+arbitrary reshaping. The compilable, one-spelling-per-intent character that lets
+it push down to the engine and be verified at a glance is the whole point;
+expanding it past that would forfeit both. If customers do need a general query
+language, the answer is a *separate* argument (something like JMESPath), never a
+bigger `match`. Such an argument would be relevant only to the MCP tools — a CLI
+caller already has `jq` downstream — and it carries the costs `match`
+deliberately avoids: it cannot compile to engine-side `filters`, and it can
+reshape the response into an arbitrary, less predictable output shape that
+callers and tests can no longer rely on. It stays out of scope unless and until
+that demand is real.
+
 ## Field grammar
 
 `fields` uses dotted paths with protobuf `FieldMask`-style semantics.
@@ -403,7 +416,9 @@ the complete test suite. Smoke checks include a multi-owner `--match`, a nested
 
 ## Non-goals
 
-Numeric comparison operators; matching detail objects; field-path wildcards or
-array indexes; grouping syntax; server-side output transformation or expression
-languages; replacing Deephaven engine `filters`; new configuration or
-environment variables.
+Numeric comparison operators (a plausible later extension, but not this pass);
+matching detail objects; field-path wildcards or array indexes; grouping syntax;
+server-side output transformation or expression languages (a JMESPath-style
+capability, if ever needed, would be a separate argument, not a bigger
+`match`); replacing Deephaven engine `filters`; new configuration or environment
+variables.
