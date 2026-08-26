@@ -42,7 +42,7 @@ readable inputs and explicit feedback make results inspectable.
 
 | Argument | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `match` | array of strings | `[]` | Output-layer row predicates. Separate entries are ANDed. Available on every collection tool. |
+| `match` | array of strings | `[]` | Row predicates. Separate entries are ANDed. Available on every collection tool; compiled to engine-side `filters` and run on the server when the tool is table-backed, else evaluated in the output layer. |
 | `filters` | array of strings | `[]` | Engine-side Deephaven Query Language where-clauses. Offered only by tools whose rows come from a live Deephaven table (e.g. `catalog_tables_list`); absent otherwise. |
 | `fields` | array of strings | `[]` | Fields to retain from each returned row. |
 | `max_rows` | integer or null | `null` | Maximum returned rows; `null` is unbounded. |
@@ -124,13 +124,23 @@ that may be far larger than any response. The cost is that it is more complex to
 write, requires knowing the backing column names, and is simply unavailable on
 any tool with no table behind it.
 
+`match` is not confined to the output layer when a table is available. Where a
+tool is table-backed, its `match` predicates are compiled to the equivalent
+engine-side `filters` and pushed to the server, so the matching runs on the
+worker before the rows are read — the same place `filters` runs, at the same
+cost. The output-layer evaluation is the fallback for tools with no table
+behind them; the simple grammar is chosen so this compilation is always
+possible. An agent therefore gets server-side narrowing from the simple `match`
+API without writing DQL, and `filters` remains available for the predicates the
+grammar cannot express.
+
 | | `match` | `filters` |
 | --- | --- | --- |
-| Evaluated by | Tool output layer | Deephaven engine |
+| Evaluated by | Engine when table-backed (compiled), else the tool output layer | Deephaven engine |
 | Grammar | This simple grammar | Deephaven Query Language |
 | Availability | Every collection tool | Only table-backed tools |
 | Cost to write | Low; equality / contains over field names | Higher; full DQL over backing columns |
-| Applied | After the tool builds its rows | Before the rows are read from the source |
+| Applied | At the source when table-backed, else after the tool builds its rows | Before the rows are read from the source |
 
 Offering both on a table-backed tool is not ambiguous: `filters` cuts the data
 at the source, then `match` (and the rest of the output-shaping layer) narrows
