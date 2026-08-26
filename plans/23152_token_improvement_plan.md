@@ -283,7 +283,7 @@ beside it.
 
 ## Implementation approach
 
-1. Rename the existing quick-filter surface to `match` and expose it as
+1. Make the new quick-filter surface `match` and expose it as
    `--match`; reserve `filters` for Deephaven engine filters.
 2. Extract reusable matching, nested projection, pruning, and row-shaping
    helpers so tools share one set of semantics.
