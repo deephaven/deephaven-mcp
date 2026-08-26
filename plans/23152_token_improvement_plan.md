@@ -81,10 +81,10 @@ truncated the matched result.
 | `fields` | array of strings | `[]` | Fields to retain from the detail object. Empty (the default) applies no projection: the whole object is preserved. Omission and an explicit `[]` are identical. |
 | `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
 
-A successful projected detail response always retains its identity keys (`success`
-and `id`) and includes `unmatched_fields`. An empty list confirms every
-requested path was found in the delivered result; a non-empty list identifies
-paths that did not produce output.
+A successful projected detail response always retains `success` and the tool's
+existing identity path (`pq_details` retains top-level `id`) and includes
+`unmatched_fields`. An empty list confirms every requested path was found in
+the delivered result; a non-empty list identifies paths that produced no output.
 
 `dhcli` exposes array arguments as repeatable flags. `--fields` additionally
 accepts comma-separated names:
