@@ -154,9 +154,12 @@ async def _fetch_factory_pqs(
     Algorithm:
         1. If the cached client is poisoned (subscription wedged), discard it.
         2. If no live cached client, obtain one via
-           ``factory_manager.get_controller_client()`` (which recreates the
-           factory when the current controller is poisoned).
-        3. Otherwise ping the cached client to verify liveness; recreate via
+           ``factory_manager.get_controller_client()``. While the controller
+           subscription is wedged that call raises (the background healer owns
+           recreation); the raise is caught below and returned as a
+           ``_FactoryQueryError`` so discovery degrades gracefully until the
+           healer restores the connection.
+        3. Otherwise ping the cached client to verify liveness; re-obtain via
            ``get_controller_client()`` if dead.
         4. Call ``map()`` to get the current PQ list.
 
@@ -381,6 +384,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             self._creds,
             timeouts=self._timeouts,
         )
+        await self._factory_manager.start_healer()
         self._phase = InitializationPhase.PARTIAL
         self._discovery_task = asyncio.create_task(self._discover_enterprise_sessions())
         _LOGGER.info(
@@ -434,6 +438,14 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
 
         # Step 4: close factory manager via local ref captured under the lock.
         if factory is not None:
+            # Stop the subscription healer before closing so it cannot recreate
+            # the factory mid-shutdown.
+            try:
+                await factory.stop_healer()
+            except Exception as e:
+                _LOGGER.error(
+                    f"[{self.__class__.__name__}] error stopping subscription healer: {e}"
+                )
             try:
                 await factory.close()
             except Exception as e:

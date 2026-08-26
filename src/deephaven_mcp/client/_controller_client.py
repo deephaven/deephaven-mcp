@@ -66,9 +66,20 @@ from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
+CONTROLLER_SUBSCRIBING_ERROR_CODE = "CONTROLLER_SUBSCRIBING"
+"""Machine-readable token embedded in the error message a controller-backed
+call returns while the subscription is still wedged in ``SUBSCRIBING``.
+
+Shared with :class:`~deephaven_mcp.resource_manager.CorePlusSessionFactoryManager`,
+which prefixes its richer "still initializing (waited Xs, N attempts, next
+recreate in ~Zs)" status message with the same token. Callers can key off the
+token to recognize the retryable "subscription healing in progress" condition
+without parsing prose."""
+
 _CONTROLLER_UNAVAILABLE_MESSAGE = (
-    "Unable to connect to the Deephaven controller; the enterprise session "
-    "must be restarted to reconnect."
+    f"[{CONTROLLER_SUBSCRIBING_ERROR_CODE}] Unable to connect to the Deephaven "
+    "controller; the enterprise session subscription is still initializing and "
+    "is being healed in the background. Retry this call shortly."
 )
 
 
@@ -165,8 +176,11 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         started by the vendor response thread). Every subscription-dependent
         read (:meth:`map`, :meth:`map_and_version`, :meth:`get`,
         :meth:`get_serial_for_name`) would otherwise block for the vendor's full
-        subscription timeout before failing. The client cannot heal itself; the
-        owning factory must be recreated to recover.
+        subscription timeout before failing. The client cannot heal itself in
+        place; recovery is driven by
+        :class:`~deephaven_mcp.resource_manager.CorePlusSessionFactoryManager`,
+        whose background healer recreates the owning factory on an interval until
+        a fresh controller subscribes cleanly.
 
         Returns:
             bool: True if the vendor subscription is wedged at ``SUBSCRIBING``.
@@ -176,15 +190,19 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
     def _raise_if_poisoned(self, operation: str) -> None:
         """Fast-fail a subscription-dependent read when the controller is unreachable.
 
-        Skips the vendor's multi-minute subscription wait when the controller
-        connection can no longer be established.
+        Skips the vendor's multi-minute subscription wait when the subscription
+        is wedged at ``SUBSCRIBING``. This is the read-level secondary guard;
+        the primary gate is
+        :meth:`~deephaven_mcp.resource_manager.CorePlusSessionFactoryManager.get_controller_client`,
+        which callers invoke first and which raises a richer status message
+        (elapsed wait, recreate-attempt count, next-recreate countdown) carrying
+        the same :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE` token.
 
         Args:
             operation (str): Name of the calling method, for the log prefix.
 
         Raises:
-            DeephavenConnectionError: If the controller connection is wedged and
-                cannot be re-established.
+            DeephavenConnectionError: If the controller subscription is wedged.
         """
         if self.is_poisoned:
             _LOGGER.error(

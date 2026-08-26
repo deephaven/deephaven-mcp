@@ -1319,6 +1319,7 @@ async def test_reads_fast_fail_when_poisoned(
     from deephaven_enterprise.client.controller import SubState
 
     from deephaven_mcp._exceptions import DeephavenConnectionError
+    from deephaven_mcp.client import CONTROLLER_SUBSCRIBING_ERROR_CODE
 
     coreplus_controller_client._subscribed = True
     dummy_controller_client.sub_state = SubState.SUBSCRIBING
@@ -1326,9 +1327,11 @@ async def test_reads_fast_fail_when_poisoned(
     with pytest.raises(DeephavenConnectionError) as exc_info:
         await getattr(coreplus_controller_client, method)(*args)
 
-    message = str(exc_info.value).lower()
-    assert "connect" in message
-    assert "restart" in message
+    message = str(exc_info.value)
+    assert CONTROLLER_SUBSCRIBING_ERROR_CODE in message
+    lower = message.lower()
+    assert "connect" in lower
+    assert "retry" in lower
     getattr(dummy_controller_client, method).assert_not_called()
 
 

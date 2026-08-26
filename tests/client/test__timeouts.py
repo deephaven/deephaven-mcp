@@ -77,6 +77,7 @@ def test_enterprise_client_default_values():
     cfg = EnterpriseClientTimeouts()
     assert cfg.session_connect_timeout_seconds == 60.0
     assert cfg.subscribe_timeout_seconds == 30.0
+    assert cfg.controller_resubscribe_recreate_interval_seconds == 30.0
     assert cfg.pq_connection_timeout_seconds == 60.0
     assert cfg.worker_creation_timeout_seconds == 60.0
     assert cfg.auth_timeout_seconds == 60.0
@@ -96,6 +97,7 @@ def test_enterprise_client_model_fields_set():
         "saml_auth_timeout_seconds",
         "quick_operation_timeout_seconds",
         "subscribe_timeout_seconds",
+        "controller_resubscribe_recreate_interval_seconds",
         "pq_management_timeout_seconds",
         "pq_state_change_timeout_seconds",
         "no_wait_seconds",
@@ -107,6 +109,7 @@ def test_enterprise_client_validate_full_block():
         {
             "session_connect_timeout_seconds": 1.0,
             "subscribe_timeout_seconds": 2.0,
+            "controller_resubscribe_recreate_interval_seconds": 2.5,
             "pq_connection_timeout_seconds": 3.0,
             "worker_creation_timeout_seconds": 4.0,
             "auth_timeout_seconds": 5.0,

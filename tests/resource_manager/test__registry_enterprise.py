@@ -512,6 +512,7 @@ async def test_load_items_builds_factory_and_launches_discovery():
     assert registry._factory_manager is mock_factory
     assert registry._phase == InitializationPhase.PARTIAL
     assert registry._discovery_task is not None
+    mock_factory.start_healer.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -596,6 +597,35 @@ async def test_close_factory_close_raises_is_caught():
     await registry.close()
 
     assert not registry._initialized
+
+
+@pytest.mark.asyncio
+async def test_close_stops_healer_before_closing_factory():
+    """close() stops the subscription healer before closing the factory."""
+    registry = _make_initialized_registry()
+    factory = registry._factory_manager
+    registry._discovery_task = None
+
+    await registry.close()
+
+    factory.stop_healer.assert_awaited_once()
+    factory.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_stop_healer_raises_is_caught():
+    """close() catches exceptions from factory.stop_healer() and still closes."""
+    registry = _make_initialized_registry()
+    factory = registry._factory_manager
+    factory.stop_healer = AsyncMock(side_effect=RuntimeError("healer stop error"))
+    registry._discovery_task = None
+
+    # Should not raise
+    await registry.close()
+
+    assert not registry._initialized
+    # The factory is still closed even though stopping the healer failed.
+    factory.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

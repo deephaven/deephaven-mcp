@@ -106,6 +106,17 @@ class EnterpriseClientTimeouts(StrictSchema):
     """Timeout (seconds) for subscribing to controller state updates
     (the initial snapshot must arrive within this budget)."""
 
+    controller_resubscribe_recreate_interval_seconds: Annotated[float, Field(gt=0)] = (
+        30.0
+    )
+    """Cadence (seconds) at which a wedged controller subscription is
+    healed. When the controller subscription is stuck initializing, a
+    background healer recreates the enterprise factory on this interval
+    until the connection recovers; controller-backed calls fail fast with
+    a status message meanwhile instead of blocking on the vendor
+    subscription timeout. Increase to reduce recreate churn on a slow
+    controller; decrease to recover faster once it becomes reachable."""
+
     pq_management_timeout_seconds: Annotated[float, Field(gt=0)] = 60.0
     """Timeout (seconds) for persistent-query management RPCs (add,
     delete, modify). These mutate controller state without waiting
