@@ -1,5 +1,20 @@
 # Output Shaping for MCP Tools and `dhcli`
 
+## Table of Contents
+
+- [Problem](#problem)
+- [Design goals](#design-goals)
+- [API](#api)
+- [Match grammar](#match-grammar)
+- [Scope and prior art](#scope-and-prior-art)
+- [Field grammar](#field-grammar)
+- [Pruning](#pruning)
+- [First-pass scope](#first-pass-scope)
+- [Follow-on candidates](#follow-on-candidates)
+- [Implementation approach](#implementation-approach)
+- [Testing and verification](#testing-and-verification)
+- [Non-goals](#non-goals)
+
 ## Problem
 
 Collection tools can return more rows and columns than a caller needs. Detail
@@ -44,14 +59,16 @@ readable inputs and explicit feedback make results inspectable.
 | --- | --- | --- | --- |
 | `match` | array of strings | `[]` | Row predicates. Separate entries are ANDed. Available on every collection tool; compiled to engine-side `filters` and run on the server when the tool is table-backed, else evaluated in the output layer. |
 | `filters` | array of strings | `[]` | Engine-side Deephaven Query Language where-clauses. Offered only by tools whose rows come from a live Deephaven table (e.g. `catalog_tables_list`); absent otherwise. |
-| `fields` | array of strings | `[]` | Fields to retain from each returned row. |
-| `max_rows` | integer or null | `null` | Maximum returned rows; `null` is unbounded. |
-| `prune_empty` | boolean | `false` | Remove null and empty values before projection. |
+| `fields` | array of strings | `[]` | Fields to retain from each returned row. Empty (the default) applies no projection: every field is preserved. Omission and an explicit `[]` are identical. |
+| `max_rows` | integer or null | per-tool default | Maximum returned rows. Each tool sets a conservative numeric default (see [First-pass scope](#first-pass-scope)); pass `null` to opt into an uncapped response. |
+| `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
 
 `match` is universal; `filters` is conditional on a Deephaven backing and so is
 not part of every collection tool's signature. Where both are present they
-compose — `filters` at the source, then the output-shaping layer — as detailed
-under [Why both `match` and `filters`](#why-both-match-and-filters). A
+compose without ambiguity: `match` compiles to `filters`, so both run at the
+source before `max_rows` bounds the result, and only then does the
+output-shaping layer (`fields`, `prune_empty`) trim whatever came back —
+detailed under [Why both `match` and `filters`](#why-both-match-and-filters). A
 successful projected collection response includes `unmatched_fields: []` when
 all requested paths matched at least one delivered row. It lists any requested
 path that matches no delivered row. `is_complete: false` means `max_rows`
@@ -61,8 +78,8 @@ truncated the matched result.
 
 | Argument | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `fields` | array of strings | `[]` | Fields to retain from the detail object. |
-| `prune_empty` | boolean | `false` | Remove null and empty values before projection. |
+| `fields` | array of strings | `[]` | Fields to retain from the detail object. Empty (the default) applies no projection: the whole object is preserved. Omission and an explicit `[]` are identical. |
+| `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
 
 A successful projected detail response always retains its identity keys (`success`
 and `id`) and includes `unmatched_fields`. An empty list confirms every
@@ -100,6 +117,13 @@ Language where-clauses that are evaluated by the engine.
 
 Separate `match` entries are ANDed. For example, `--match 'owner=user or
 owner=user2' --match status=RUNNING` retains running PQs owned by either user.
+
+Every tool documents a closed match vocabulary — the field names it accepts on
+the left of a predicate. A predicate naming a field outside that vocabulary
+(`owenr=user`) is rejected with an error that echoes the allowed field names; it
+is never silently treated as a no-match. This keeps a typo distinguishable from
+a valid empty result and satisfies the repairability goal. The vocabulary is the
+same set of names a tool exposes to `fields`.
 
 ### Why both `match` and `filters`
 
@@ -142,10 +166,13 @@ grammar cannot express.
 | Cost to write | Low; equality / contains over field names | Higher; full DQL over backing columns |
 | Applied | At the source when table-backed, else after the tool builds its rows | Before the rows are read from the source |
 
-Offering both on a table-backed tool is not ambiguous: `filters` cuts the data
-at the source, then `match` (and the rest of the output-shaping layer) narrows
-whatever came back. `catalog_tables_list` keeps its engine-side `filters`
-unchanged and gains the output-side capabilities on top.
+Offering both on a table-backed tool is not ambiguous, and the order is fixed:
+`filters` and the compiled `match` predicates are applied together at the source,
+*before* the engine-side `max_rows` bounds the result, so `max_rows` and
+`is_complete` describe the matched result rather than a pre-match slice. The
+output-side layer (`fields`, `prune_empty`) then trims whatever came back.
+`catalog_tables_list` keeps its engine-side `filters` unchanged and gains the
+output-side capabilities on top.
 
 ## Scope and prior art
 
@@ -190,6 +217,22 @@ Validation is intentionally per-tool:
   through `unmatched_fields`. This allows optional or version-specific fields
   without turning a partial projection into a failed request.
 
+## Pruning
+
+`prune_empty` removes only values that carry no information, applied recursively
+to nested objects and arrays. The exact set pruned is:
+
+- JSON `null`.
+- Empty strings (`""`).
+- Empty arrays (`[]`).
+- Empty objects (`{}`), including objects that become empty after their own
+  children are pruned.
+
+Booleans and numbers are never pruned: `enabled: false` and a numeric `0` are
+meaningful values, so pruning is a structural emptiness test, never a truthiness
+test. Detail tools always retain their identity keys (`success`, `id`) even when
+otherwise empty.
+
 ## First-pass scope
 
 A survey of the systems server's collection and detail tools decides which get
@@ -214,11 +257,21 @@ Detail and table-data tools with a deeper output shape — `session_details`, th
 schema tools, `session_table_data`, `catalog_table_sample` — stay out of the
 first pass; they are the [follow-on candidates](#follow-on-candidates).
 
+Every first-pass collection sets a conservative numeric `max_rows` default rather
+than returning an unbounded list, and reports `is_complete: false` when it
+truncates. `catalog_tables_list` keeps its existing default of 10,000 and
+`catalog_namespaces_list` its 1,000; the remaining lists (`pq_list`,
+`sessions_list`, `list_systems`, `session_pip_list`, `session_tables_list`,
+`enterprise_systems_status`) default to 1,000. A caller passes `max_rows: null`
+to opt into an uncapped response.
+
 ### `pq list`
 
 Adds `match`, `fields`, `max_rows`, and `prune_empty` to the list of PQ
-summaries. Matching happens server-side; then the result is bounded, pruned, and
-projected. Its closed vocabulary is:
+summaries. `pq_list` has no Deephaven table behind it (see the refactor note
+below), so `match` runs in the MCP server's output layer; the result is then
+bounded by `max_rows`, pruned, and projected, in that order. Its closed match
+and projection vocabulary is:
 
 | Field | Meaning |
 | --- | --- |
@@ -257,9 +310,13 @@ keeps its existing `type` / `system` / `origin` scoping arguments; those select
 The catalog listings already carry engine-side `filters` and `max_rows`; this
 pass adds the output-side capabilities on top — `match`, `fields`, and
 `prune_empty` for `catalog_tables_list`, and `match` for the scalar
-`catalog_namespaces_list`. The two scalar lists (`catalog_namespaces_list` and
-`session_tables_list`) expose `match` through one documented synthetic field,
-`name`, matched against each string element.
+`catalog_namespaces_list`. Because these tools apply `max_rows` at the engine
+before converting rows to Arrow, their `match` predicates must compile to
+engine-side `filters` and be applied *before* that row limit; otherwise the
+limit could discard rows that a later `match` would have kept, and `is_complete`
+would no longer describe the matched result. The two scalar lists
+(`catalog_namespaces_list` and `session_tables_list`) expose `match` through one
+documented synthetic field, `name`, matched against each string element.
 
 `enterprise_systems_status` returns one record per system with several optional
 diagnostic fields; it takes `match` (e.g. narrow to unhealthy systems) and
@@ -285,17 +342,27 @@ beside it.
 
 1. Make the new quick-filter surface `match` and expose it as
    `--match`; reserve `filters` for Deephaven engine filters.
-2. Extract reusable matching, nested projection, pruning, and row-shaping
-   helpers so tools share one set of semantics.
-3. Apply the layer to the first-pass collections — `pq list`, `sessions list`,
+2. Extract reusable helpers with one set of semantics: match compilation,
+   nested projection, recursive pruning, and row shaping. The matcher validates
+   each predicate against the tool's documented vocabulary and rejects an unknown
+   field with an error that lists the allowed names.
+3. For table-backed tools, compile `match` to engine-side `filters` and apply it
+   before the engine's `max_rows` row limit, so the bound and `is_complete`
+   describe the matched result. `catalog_tables_list` currently limits rows
+   before Arrow conversion (`queries.get_catalog_table` → `_apply_row_limit`);
+   reorder so the compiled `match` reaches the table ahead of that limit.
+4. Give every first-pass collection a conservative numeric `max_rows` default
+   (catalog tools keep 10,000 / 1,000), reserving `null` for an explicit uncapped
+   response.
+5. Apply the layer to the first-pass collections — `pq list`, `sessions list`,
    `list systems`, `pip list`, `enterprise_systems_status`, and the catalog
    listings (`match` / `fields` / `prune_empty` atop their existing `filters`)
    — and add nested `fields` to `pq details`.
-4. Add `unmatched_fields` to every successful response that received `fields`.
+6. Add `unmatched_fields` to every successful response that received `fields`.
    Populate it after pruning and projection; preserve requested-path order.
-5. Update CLI help, machine-readable command metadata, and user documentation
+7. Update CLI help, machine-readable command metadata, and user documentation
    with the grammar tables and canonical examples.
-6. Apply the same layer to the follow-on candidates only after their field
+8. Apply the same layer to the follow-on candidates only after their field
    vocabularies and output contracts are reviewed.
 
 ## Testing and verification
@@ -304,12 +371,21 @@ Tests cover:
 
 - Every match operator, wildcard, escape, `null`, case-insensitivity, OR, and
   AND behavior.
+- Rejection of an unknown match field, asserting the error echoes the allowed
+  vocabulary (the `owenr=user` typo case).
 - Flat and nested projection, parent/descendant precedence, arrays,
-  escaped-dot keys, and empty projection.
+  escaped-dot keys, and empty projection (an omitted and an explicit `[]`
+  `fields` both preserve the full result).
+- `prune_empty` removing exactly `null` / `""` / `[]` / `{}` recursively while
+  preserving `false` and numeric `0`.
+- Per-tool `max_rows` defaults (including the catalog 10,000 / 1,000) and the
+  `null` uncapped opt-in.
 - `unmatched_fields` for absent paths, partially present paths, and values
   removed by `prune_empty`.
 - `pq list` ordering: match, bound, prune, project; truncation and strict
   unknown-field validation.
+- Catalog `match` compiled to `filters` and applied before the engine `max_rows`
+  limit, with `is_complete` describing the matched result.
 - The other first-pass collections (`sessions list`, `list systems`, `pip
   list`, catalog listings, `enterprise_systems_status`): the same shaping layer,
   the synthetic `name` field on the scalar lists, and `filters` composing with
