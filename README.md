@@ -499,10 +499,10 @@ in the PQ id (form `enterprise:<system>:<serial>`).
 
 *Catalog discovery:*
 
-- `catalog_tables_list(id, ...)` - List catalog tables
-- `catalog_namespaces_list(id, ...)` - Browse catalog namespaces
-- `catalog_table_schema(id, ...)` - Get one catalog table's schema
-- `catalog_table_sample(id, ...)` - Sample catalog table data
+- `catalog_tables_list(system, ...)` - List catalog tables
+- `catalog_namespaces_list(system, ...)` - Browse catalog namespaces
+- `catalog_table_schema(system, ...)` - Get one catalog table's schema
+- `catalog_table_sample(system, ...)` - Sample catalog table data
 
 *Session & table operations (any session, community or enterprise):*
 

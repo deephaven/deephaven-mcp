@@ -34,7 +34,7 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp._taxonomy import SessionOrigin
 from deephaven_mcp.auth.credentials import PasswordCredentials
-from deephaven_mcp.client import EnterpriseClientTimeouts
+from deephaven_mcp.client import CorePlusSession, EnterpriseClientTimeouts
 from deephaven_mcp.resource_manager import (
     EnterpriseSessionRegistry,
     InitializationPhase,
@@ -1446,3 +1446,109 @@ async def test_sync_enterprise_sessions_controller_error_preserves_all_state():
     assert registry._items[controller_key] is controller_mgr
     assert registry._items[dynamic_key] is dynamic_mgr
     assert registry._error is not None
+
+
+# ---------------------------------------------------------------------------
+# web_client_data_session
+# ---------------------------------------------------------------------------
+
+
+def _wcd_registry_with_session(session):
+    """Return an initialized registry whose factory yields ``session`` for a PQ."""
+    registry = _make_initialized_registry()
+    factory_instance = MagicMock()
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=session)
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+    return registry, factory_instance
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_connects_by_pq_name():
+    session = MagicMock(spec=CorePlusSession)
+    registry, factory_instance = _wcd_registry_with_session(session)
+
+    result = await registry.web_client_data_session()
+
+    assert result is session
+    factory_instance.connect_to_persistent_query.assert_awaited_once_with(
+        name="WebClientData"
+    )
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_reuses_live_cached_session():
+    session = MagicMock(spec=CorePlusSession)
+    session.is_alive = AsyncMock(return_value=True)
+    registry, factory_instance = _wcd_registry_with_session(session)
+
+    first = await registry.web_client_data_session()
+    second = await registry.web_client_data_session()
+
+    assert first is second
+    # Only the first call connects; the second reuses the cache.
+    factory_instance.connect_to_persistent_query.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_replaces_dead_cached_session():
+    dead = MagicMock(spec=CorePlusSession)
+    dead.is_alive = AsyncMock(return_value=False)
+    dead.close = AsyncMock()
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(dead)
+    registry._web_client_data_session = dead
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    result = await registry.web_client_data_session()
+
+    assert result is fresh
+    dead.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_replaces_session_whose_liveness_check_raises():
+    dead = MagicMock(spec=CorePlusSession)
+    dead.is_alive = AsyncMock(side_effect=RuntimeError("connection reset"))
+    dead.close = AsyncMock()
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(dead)
+    registry._web_client_data_session = dead
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    result = await registry.web_client_data_session()
+
+    assert result is fresh
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_requires_initialized_registry():
+    registry = _make_registry()
+    with pytest.raises(InternalError):
+        await registry.web_client_data_session()
+
+
+@pytest.mark.asyncio
+async def test_close_web_client_data_session_swallows_close_errors():
+    registry = _make_initialized_registry()
+    session = MagicMock(spec=CorePlusSession)
+    session.close = AsyncMock(side_effect=RuntimeError("already gone"))
+
+    await registry._close_web_client_data_session(session)
+
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_releases_cached_web_client_data_session():
+    registry = _make_initialized_registry()
+    session = MagicMock(spec=CorePlusSession)
+    session.close = AsyncMock()
+    registry._web_client_data_session = session
+    registry._factory_manager.close = AsyncMock()
+
+    await registry.close()
+
+    session.close.assert_awaited_once()
+    assert registry._web_client_data_session is None

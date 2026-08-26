@@ -10,7 +10,7 @@ Provides common helpers used across the MCP tool modules:
 - ID parsers and formatters: :func:`parse_pq_id`, :func:`make_pq_id`
   (use :meth:`QualifiedSessionId.from_str` directly for session ids).
 - Session retrieval: :func:`get_session_from_context`,
-  :func:`get_enterprise_session`.
+  :func:`get_enterprise_session`, :func:`get_system_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
   :func:`build_table_data_response`, :func:`format_schema_result`.
 - Parameter guards: :func:`validate_programming_language`.
@@ -81,6 +81,7 @@ __all__ = [
     "get_registry",
     "get_response_limits",
     "get_session_from_context",
+    "get_system_session",
     "make_pq_id",
     "parse_pq_id",
     "redact_json_sensitive_fields",
@@ -558,6 +559,48 @@ async def get_enterprise_session(
     return session
 
 
+async def get_system_session(
+    function_name: str, context: Context, system: str
+) -> CorePlusSession:
+    """Get the shared WebClientData session for an enterprise system.
+
+    Routes to the system's :class:`EnterpriseSessionRegistry` and returns its
+    cached ``WebClientData`` session. Use this for system-scoped reads —
+    catalog metadata and other data every worker on the system reports
+    identically — so the result does not depend on which persistent query
+    happens to be running.
+
+    Args:
+        function_name (str): Name of calling function for logging.
+        context (Context): The MCP context object.
+        system (str): Enterprise system name (the ``system_name`` field in
+            the system's config file).
+
+    Returns:
+        CorePlusSession: A live session on the system's ``WebClientData``
+            persistent query.
+
+    Raises:
+        InvalidSessionNameError: If ``system`` is not a configured
+            enterprise system.
+        InternalError: If the registry is missing from the lifespan context.
+        Exception: Any exception raised while connecting to
+            ``WebClientData`` propagates unchanged; a system where that
+            persistent query is not running cannot serve these reads.
+    """
+    _LOGGER.debug(
+        f"[mcp_systems_server:{function_name}] Acquiring WebClientData session "
+        f"for system '{system}'"
+    )
+    registry = get_enterprise_registry(context, system)
+    session = await registry.web_client_data_session()
+    _LOGGER.info(
+        f"[mcp_systems_server:{function_name}] WebClientData session established "
+        f"for system '{system}'"
+    )
+    return session
+
+
 # ---------------------------------------------------------------------------
 # Response size guards
 # ---------------------------------------------------------------------------
@@ -699,6 +742,7 @@ def format_schema_result(
     id: str,
     table_name: str,
     namespace: str | None = None,
+    id_key: str = "id",
 ) -> dict:
     """Format a PyArrow meta table into a lean single-table schema result.
 
@@ -713,12 +757,14 @@ def format_schema_result(
 
     Args:
         arrow_meta_table (pyarrow.Table): The PyArrow meta table.
-        id (str): Fully qualified session id to echo back.
+        id (str): Identifier to echo back under ``id_key``.
         table_name (str): Name of the table being described.
         namespace (str | None): Optional namespace for catalog tables.
+        id_key (str): Response key the identifier is echoed under. Defaults
+            to ``"id"``; system-scoped tools pass ``"system"``.
 
     Returns:
-        dict: ``{"success": True, "id": ..., "namespace": ... (if provided),
+        dict: ``{"success": True, <id_key>: ..., "namespace": ... (if provided),
             "table_name": ..., "schema": [...], "column_count": ...}``. The
             ``type`` values are Deephaven type names from the meta table
             (e.g. ``"java.lang.String"``, ``"int"``), not PyArrow names.
@@ -739,7 +785,7 @@ def format_schema_result(
         if column_type and column_type != "Normal":
             column["column_type"] = column_type
         schema.append(column)
-    result: dict[str, object] = {"success": True, "id": id}
+    result: dict[str, object] = {"success": True, id_key: id}
     if namespace is not None:
         result["namespace"] = namespace
     result["table_name"] = table_name
@@ -755,6 +801,7 @@ def build_table_data_response(
     id: str,
     table_name: str | None = None,
     namespace: str | None = None,
+    id_key: str = "id",
 ) -> dict:
     """Build a standardized table-data response with schema and metadata.
 
@@ -764,12 +811,14 @@ def build_table_data_response(
         is_complete (bool): Whether the entire table was retrieved
             (``False`` if truncated by ``max_rows``).
         format (TableFormat): Desired output format.
-        id (str): Fully qualified session id to echo back.
+        id (str): Identifier to echo back under ``id_key``.
         table_name (str | None): Optional table name to include.
         namespace (str | None): Optional namespace (for catalog tables).
+        id_key (str): Response key the identifier is echoed under. Defaults
+            to ``"id"``; system-scoped tools pass ``"system"``.
 
     Returns:
-        dict: ``{"success": True, "id": ..., "format": ..., "schema": [...],
+        dict: ``{"success": True, <id_key>: ..., "format": ..., "schema": [...],
             "row_count": ..., "is_complete": ..., "data": ...,
             "table_name": ... (optional), "namespace": ... (optional)}``.
     """
@@ -777,7 +826,7 @@ def build_table_data_response(
         {"name": field.name, "type": str(field.type)} for field in arrow_table.schema
     ]
     actual_format, formatted_data = format_table_data(arrow_table, format_type=format)
-    response: dict[str, object] = {"success": True, "id": id}
+    response: dict[str, object] = {"success": True, id_key: id}
     if namespace is not None:
         response["namespace"] = namespace
     if table_name is not None:

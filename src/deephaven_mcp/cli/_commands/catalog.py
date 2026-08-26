@@ -2,8 +2,8 @@
 
 Verbs: ``tables``, ``namespaces``, ``schema``, ``sample``.
 
-Enterprise (Core+) only — these operate on an enterprise session's
-catalog (database). The ID must name an enterprise session.
+Enterprise (Core+) only — these operate on an enterprise system's
+catalog (database). The SYSTEM must name a configured enterprise system.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import click
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
-    TABULAR_OUTPUT_FIELDS,
+    TABULAR_OUTPUT_BODY_FIELDS,
     TABULAR_OUTPUT_NOTE,
     call_and_echo,
     call_and_echo_field,
@@ -45,14 +45,18 @@ def catalog() -> None:
 
     Enterprise (Core+) only. 'tables' and 'namespaces' enumerate the
     catalog; 'schema' returns column definitions; 'sample' returns a few
-    rows of a catalog table. All take an enterprise session id and
+    rows of a catalog table. All take an enterprise system name and
     auto-start the daemon unless --no-auto-start is set. The catalog is
     the system's stored data, shared by every user — these verbs read it
-    through a session but do not change it.
+    but do not change it.
 
-    'tables' and 'namespaces' fall back to the sticky context session
-    when their id is omitted; 'schema' and 'sample' cannot, because a
-    namespace and table name follow the id — pass their id explicitly
+    These verbs need no worker of your own: they read through the
+    system's shared 'WebClientData' persistent query, so the result never
+    depends on which PQ happens to be running.
+
+    'tables' and 'namespaces' fall back to the sticky context system
+    when their system is omitted; 'schema' and 'sample' cannot, because a
+    namespace and table name follow it — pass their system explicitly
     (run 'context show' to see the current default).
     """
 
@@ -112,27 +116,27 @@ _OUTPUT_TABLES = OutputSpec(
         ),
         arguments=(
             HelpEntry(
-                "ID",
-                "Enterprise session id. Run 'session list'. Defaults to the "
-                f"sticky context session if omitted. {CONTEXT_HINT}",
+                "SYSTEM",
+                "Enterprise system name. Run 'system list'. Defaults to the "
+                f"sticky context system if omitted. {CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_TABLES,
         examples=(
-            "$ dhcli catalog tables enterprise:prod:rpt",
-            "$ dhcli catalog tables enterprise:prod:rpt --max-rows 100",
-            "$ dhcli catalog tables enterprise:prod:rpt | jq -r '.[].table_name'",
+            "$ dhcli catalog tables prod",
+            "$ dhcli catalog tables prod --max-rows 100",
+            "$ dhcli catalog tables prod | jq -r '.[].table_name'",
         ),
         see_also=(
-            "dhcli catalog namespaces ID",
-            "dhcli catalog schema ID NAMESPACE TABLE",
+            "dhcli catalog namespaces SYSTEM",
+            "dhcli catalog schema SYSTEM NAMESPACE TABLE",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id", required=False)
+@click.argument("system", required=False)
 @click.option(
     "--max-rows",
     "max_rows",
@@ -149,13 +153,13 @@ _OUTPUT_TABLES = OutputSpec(
 @run_async
 async def catalog_tables(
     runtime: Runtime,
-    id: str | None,
+    system: str | None,
     max_rows: int | None,
     filters: tuple[str, ...],
 ) -> None:
     """List tables in the Enterprise catalog."""
-    id = require_context_value(runtime, ContextKey.SESSION, id)
-    arguments: dict[str, Any] = {"id": id}
+    system = require_context_value(runtime, ContextKey.SYSTEM, system)
+    arguments: dict[str, Any] = {"system": system}
     if max_rows is not None:
         arguments["max_rows"] = max_rows
     if filters:
@@ -198,22 +202,22 @@ _OUTPUT_NAMESPACES = OutputSpec(
         ),
         arguments=(
             HelpEntry(
-                "ID",
-                "Enterprise session id. Run 'session list'. Defaults to the "
-                f"sticky context session if omitted. {CONTEXT_HINT}",
+                "SYSTEM",
+                "Enterprise system name. Run 'system list'. Defaults to the "
+                f"sticky context system if omitted. {CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_NAMESPACES,
         examples=(
-            "$ dhcli catalog namespaces enterprise:prod:rpt",
-            "$ dhcli catalog namespaces enterprise:prod:rpt | jq -r '.[]'",
+            "$ dhcli catalog namespaces prod",
+            "$ dhcli catalog namespaces prod | jq -r '.[]'",
         ),
-        see_also=("dhcli catalog tables ID", "dhcli context show"),
+        see_also=("dhcli catalog tables SYSTEM", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
     ),
 )
-@click.argument("id", required=False)
+@click.argument("system", required=False)
 @click.option(
     "--max-rows",
     "max_rows",
@@ -230,13 +234,13 @@ _OUTPUT_NAMESPACES = OutputSpec(
 @run_async
 async def catalog_namespaces(
     runtime: Runtime,
-    id: str | None,
+    system: str | None,
     max_rows: int | None,
     filters: tuple[str, ...],
 ) -> None:
     """List namespaces in the Enterprise catalog."""
-    id = require_context_value(runtime, ContextKey.SESSION, id)
-    arguments: dict[str, Any] = {"id": id}
+    system = require_context_value(runtime, ContextKey.SYSTEM, system)
+    arguments: dict[str, Any] = {"system": system}
     if max_rows is not None:
         arguments["max_rows"] = max_rows
     if filters:
@@ -259,7 +263,7 @@ async def catalog_namespaces(
 _OUTPUT_SCHEMA = OutputSpec(
     "object",
     (
-        OutputField("id", "string", "The session id, echoed back."),
+        OutputField("system", "string", "The enterprise system name, echoed back."),
         OutputField("namespace", "string", "The catalog namespace."),
         OutputField("table_name", "string", "The table name."),
         OutputField(
@@ -287,8 +291,8 @@ _OUTPUT_SCHEMA = OutputSpec(
         ),
         arguments=(
             HelpEntry(
-                "ID",
-                "Enterprise session id. Run 'session list'. Required — with "
+                "SYSTEM",
+                "Enterprise system name. Run 'system list'. Required — with "
                 "NAMESPACE and TABLE_NAME following it, it cannot fall back "
                 f"to the sticky context. {CONTEXT_HINT}",
             ),
@@ -305,33 +309,33 @@ _OUTPUT_SCHEMA = OutputSpec(
         ),
         output=_OUTPUT_SCHEMA,
         examples=(
-            "$ dhcli catalog schema enterprise:prod:rpt Market Trades",
-            "$ dhcli catalog schema enterprise:prod:rpt Market Trades "
+            "$ dhcli catalog schema prod Market Trades",
+            "$ dhcli catalog schema prod Market Trades "
             "| jq -r '.schema[] | select(.column_type) | .name'",
         ),
         see_also=(
-            "dhcli catalog tables ID",
-            "dhcli catalog sample ID NAMESPACE TABLE",
+            "dhcli catalog tables SYSTEM",
+            "dhcli catalog sample SYSTEM NAMESPACE TABLE",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("id")
+@click.argument("system")
 @click.argument("namespace")
 @click.argument("table_name")
 @click.pass_obj
 @run_async
 async def catalog_schema(
     runtime: Runtime,
-    id: str,
+    system: str,
     namespace: str,
     table_name: str,
 ) -> None:
     """Show column definitions for one catalog table."""
     arguments: dict[str, Any] = {
-        "id": id,
+        "system": system,
         "namespace": namespace,
         "table_name": table_name,
     }
@@ -350,8 +354,9 @@ async def catalog_schema(
 _OUTPUT_TABULAR = OutputSpec(
     "object",
     (
-        *TABULAR_OUTPUT_FIELDS,
+        OutputField("system", "string", "The enterprise system name, echoed back."),
         OutputField("namespace", "string", "The catalog namespace, echoed back."),
+        *TABULAR_OUTPUT_BODY_FIELDS,
     ),
     note=TABULAR_OUTPUT_NOTE,
 )
@@ -376,8 +381,8 @@ _OUTPUT_TABULAR = OutputSpec(
         ),
         arguments=(
             HelpEntry(
-                "ID",
-                "Enterprise session id. Run 'session list'. Required — with "
+                "SYSTEM",
+                "Enterprise system name. Run 'system list'. Required — with "
                 "NAMESPACE and TABLE_NAME following it, it cannot fall back "
                 f"to the sticky context. {CONTEXT_HINT}",
             ),
@@ -389,21 +394,21 @@ _OUTPUT_TABULAR = OutputSpec(
         ),
         output=_OUTPUT_TABULAR,
         examples=(
-            "$ dhcli catalog sample enterprise:prod:rpt Market Trades",
-            "$ dhcli catalog sample enterprise:prod:rpt Market Trades --max-rows 20 --tail",
-            "$ dhcli catalog sample enterprise:prod:rpt Market Trades "
+            "$ dhcli catalog sample prod Market Trades",
+            "$ dhcli catalog sample prod Market Trades --max-rows 20 --tail",
+            "$ dhcli catalog sample prod Market Trades "
             "| jq '.row_count, .is_complete'",
         ),
         see_also=(
-            "dhcli catalog tables ID",
-            "dhcli catalog schema ID NAMESPACE TABLE",
+            "dhcli catalog tables SYSTEM",
+            "dhcli catalog schema SYSTEM NAMESPACE TABLE",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("id")
+@click.argument("system")
 @click.argument("namespace")
 @click.argument("table_name")
 @click.option(
@@ -430,7 +435,7 @@ _OUTPUT_TABULAR = OutputSpec(
 @run_async
 async def catalog_sample(
     runtime: Runtime,
-    id: str,
+    system: str,
     namespace: str,
     table_name: str,
     max_rows: int | None,
@@ -439,7 +444,7 @@ async def catalog_sample(
 ) -> None:
     """Sample rows from a catalog table."""
     arguments: dict[str, Any] = {
-        "id": id,
+        "system": system,
         "namespace": namespace,
         "table_name": table_name,
         "head": head,

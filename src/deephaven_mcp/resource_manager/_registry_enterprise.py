@@ -85,6 +85,12 @@ from ._session_id import QualifiedSessionId, SessionId
 
 _LOGGER = logging.getLogger(__name__)
 
+WEB_CLIENT_DATA_PQ = "WebClientData"
+"""Name of the Enterprise persistent query that serves web-client state.
+
+Every Enterprise system runs it under this name, so system-scoped reads can
+reach a worker without the caller naming a persistent query of their own."""
+
 
 # ---------------------------------------------------------------------------
 # Module-level result types for the factory query pipeline
@@ -303,6 +309,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         self._timeouts = timeouts
         self._factory_manager: CorePlusSessionFactoryManager | None = None
         self._controller_client: CorePlusControllerClient | None = None
+        self._web_client_data_session: CorePlusSession | None = None
+        self._web_client_data_lock = asyncio.Lock()
         self._phase: InitializationPhase = InitializationPhase.NOT_STARTED
         self._error: str | None = None
         self._discovery_task: asyncio.Task[None] | None = None
@@ -351,6 +359,76 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         return self._factory_manager
 
     # ------------------------------------------------------------------
+    # WebClientData session
+    # ------------------------------------------------------------------
+
+    async def web_client_data_session(self) -> CorePlusSession:
+        """Return a live session connected to this system's WebClientData PQ.
+
+        The session is created on first use and cached. A cached session is
+        returned only after a liveness check passes; a dead session is
+        discarded and replaced. Because the registry owns exactly one factory
+        manager, and therefore one credential set, the returned session is
+        authenticated as this system's configured principal without the caller
+        supplying credentials.
+
+        Returns:
+            CorePlusSession: A live session on the ``WebClientData`` persistent
+                query, usable for any system-scoped read such as the catalog.
+
+        Raises:
+            InternalError: If the registry has not been initialized.
+            Exception: Any exception raised while connecting to the
+                ``WebClientData`` persistent query propagates unchanged; a
+                system where that PQ is not running cannot serve these tables.
+        """
+        factory_manager = self.factory_manager
+
+        async with self._web_client_data_lock:
+            cached = self._web_client_data_session
+            if cached is not None:
+                try:
+                    if await cached.is_alive():
+                        return cached
+                    raise RuntimeError("is_alive() returned False")
+                except Exception as e:
+                    _LOGGER.warning(
+                        f"[{self.__class__.__name__}] cached '{WEB_CLIENT_DATA_PQ}' session "
+                        f"failed liveness check ({exception_summary(e)}); reconnecting"
+                    )
+                    self._web_client_data_session = None
+                    await self._close_web_client_data_session(cached)
+
+            _LOGGER.debug(
+                f"[{self.__class__.__name__}] connecting to '{WEB_CLIENT_DATA_PQ}' "
+                f"for system '{self._system_name}'"
+            )
+            factory_instance = await factory_manager.get()
+            session = await factory_instance.connect_to_persistent_query(
+                name=WEB_CLIENT_DATA_PQ
+            )
+            self._web_client_data_session = session
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] connected to '{WEB_CLIENT_DATA_PQ}' "
+                f"for system '{self._system_name}'"
+            )
+            return session
+
+    async def _close_web_client_data_session(self, session: CorePlusSession) -> None:
+        """Close a WebClientData session, logging and swallowing any failure.
+
+        Args:
+            session (CorePlusSession): The session to close.
+        """
+        try:
+            await session.close()
+        except Exception as e:
+            _LOGGER.warning(
+                f"[{self.__class__.__name__}] error closing '{WEB_CLIENT_DATA_PQ}' "
+                f"session: {exception_summary(e)}"
+            )
+
+    # ------------------------------------------------------------------
     # BaseRegistry overrides — lifecycle
     # ------------------------------------------------------------------
 
@@ -390,7 +468,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         2. Acquire ``_refresh_lock`` as a barrier — waits for any in-flight
            ``_sync_enterprise_sessions`` to finish before proceeding.
         3. Cancel and await the background discovery task (outside lock).
-        4. Close the factory manager using the local ref captured in step 1.
+        4. Close the cached WebClientData session, then the factory manager,
+           using the local refs captured in step 1.
         5. Under ``self._lock``: clear remaining mutable state and ``_items``.
         6. Close remaining session managers (outside lock) via ``_close_items``.
 
@@ -407,6 +486,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             self._discovery_task = None
             factory = self._factory_manager
             self._factory_manager = None
+            web_client_data = self._web_client_data_session
+            self._web_client_data_session = None
 
         # Step 2: barrier — wait for any in-flight _sync_enterprise_sessions.
         async with self._refresh_lock:
@@ -424,6 +505,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             )
 
         # Step 4: close factory manager via local ref captured under the lock.
+        if web_client_data is not None:
+            await self._close_web_client_data_session(web_client_data)
+
         if factory is not None:
             try:
                 await factory.close()

@@ -179,6 +179,51 @@ async def _apply_row_limit(
         return table, True
 
 
+async def _snapshot_filtered(
+    table: Table,
+    *,
+    filters: list[str] | None,
+    max_rows: int | None,
+    head: bool = True,
+    context_name: str,
+) -> tuple[pyarrow.Table, bool]:
+    """
+    Filter a Deephaven table, cap its rows, and snapshot it to Arrow.
+
+    This helper is the shared tail of every table-listing query: filters are
+    evaluated server-side, the row cap is applied, and the result is converted
+    to Arrow in one step.
+
+    Args:
+        table (Table): The Deephaven table to snapshot.
+        filters (list[str] | None): Deephaven where clause expressions, combined
+                                    with AND logic. None or empty means no filtering.
+        max_rows (int | None): Maximum number of rows to retrieve. None means the
+                               entire table (logs a warning).
+        head (bool): If True, take rows from the start; if False, from the end.
+                     Ignored when max_rows is None. Default is True.
+        context_name (str): Context description for logging (e.g., "catalog table").
+
+    Returns:
+        tuple[pyarrow.Table, bool]: A tuple containing:
+            - pyarrow.Table: The filtered, row-capped snapshot
+            - bool: True if the entire (filtered) table was retrieved, False if truncated
+
+    Note:
+        This is a private helper function for internal use only.
+    """
+    table = await _apply_filters(table, filters, context_name=context_name)
+    limited_table, is_complete = await _apply_row_limit(
+        table, max_rows, head=head, context_name=context_name
+    )
+    arrow_table = await asyncio.to_thread(limited_table.to_arrow)
+    _LOGGER.debug(
+        f"[queries:_snapshot_filtered] {context_name.capitalize()} converted to Arrow "
+        f"({arrow_table.num_rows} rows, is_complete={is_complete})"
+    )
+    return arrow_table, is_complete
+
+
 # ===== Public API Functions =====
 
 
@@ -668,28 +713,13 @@ async def get_catalog_table_data(
             effective_filters = None
 
     # Apply filters if any
-    table = await _apply_filters(
+    return await _snapshot_filtered(
         table,
-        effective_filters,
-        context_name=f"catalog table '{namespace}.{table_name}'",
-    )
-
-    # Apply row limiting using helper function
-    limited_table, is_complete = await _apply_row_limit(
-        table,
-        max_rows,
+        filters=effective_filters,
+        max_rows=max_rows,
         head=head,
         context_name=f"catalog table '{namespace}.{table_name}'",
     )
-
-    # Convert to Arrow format
-    arrow_table = await asyncio.to_thread(limited_table.to_arrow)
-
-    _LOGGER.debug(
-        f"[queries:get_catalog_table_data] Catalog table '{namespace}.{table_name}' converted to Arrow format successfully "
-        f"({arrow_table.num_rows} rows, is_complete={is_complete})"
-    )
-    return arrow_table, is_complete
 
 
 async def get_catalog_meta_table(
@@ -1088,23 +1118,10 @@ async def get_catalog_table(
     # Determine table type for logging
     table_type = "namespace table" if distinct_namespaces else "catalog table"
 
-    # Apply filters if provided (works for both full catalog and distinct namespaces)
-    catalog_table = await _apply_filters(
-        catalog_table, filters, context_name=table_type
-    )
-
-    # Apply row limiting using helper function (always from head for catalog tables)
-    catalog_table, is_complete = await _apply_row_limit(
+    return await _snapshot_filtered(
         catalog_table,
-        max_rows,
+        filters=filters,
+        max_rows=max_rows,
         head=True,
         context_name=table_type,
     )
-
-    # Convert to Arrow format
-    arrow_table = await asyncio.to_thread(catalog_table.to_arrow)
-
-    _LOGGER.debug(
-        "[queries:get_catalog_table] Catalog table converted to Arrow format successfully."
-    )
-    return arrow_table, is_complete

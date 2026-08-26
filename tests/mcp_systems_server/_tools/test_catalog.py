@@ -68,6 +68,7 @@ from deephaven_mcp.resource_manager import (
     DockerLaunchedSession,
     DynamicCommunitySessionManager,
     EnterpriseSessionManager,
+    EnterpriseSessionRegistry,
     PythonLaunchedSession,
     ResourceLivenessStatus,
     SystemType,
@@ -85,18 +86,20 @@ def _mock_catalog_arrow(entries, nbytes=1000, num_rows=None):
     return table
 
 
-def _catalog_context(session):
-    """Build a MockContext whose registry resolves to ``session``."""
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=session)
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    return MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+def _catalog_context(session, system="prod"):
+    """Build a MockContext whose enterprise registry serves ``session`` as WebClientData."""
+    registry = MagicMock(spec=EnterpriseSessionRegistry)
+    registry.system_name = system
+    registry.web_client_data_session = AsyncMock(return_value=session)
+    return MockContext({"config_manager": MagicMock(), "registry": registry})
+
+
+def _unavailable_catalog_context(exc, system="prod"):
+    """Build a MockContext whose WebClientData connect fails with ``exc``."""
+    registry = MagicMock(spec=EnterpriseSessionRegistry)
+    registry.system_name = system
+    registry.web_client_data_session = AsyncMock(side_effect=exc)
+    return MockContext({"config_manager": MagicMock(), "registry": registry})
 
 
 @pytest.mark.asyncio
@@ -116,11 +119,11 @@ async def test_catalog_tables_success_no_filters():
     ) as mock_get_catalog:
         mock_get_catalog.return_value = (mock_arrow, True)
 
-        result = await catalog_tables_list(context, "enterprise:prod:1")
+        result = await catalog_tables_list(context, "prod")
 
         assert result == {
             "success": True,
-            "id": "enterprise:prod:1",
+            "system": "prod",
             "tables": [
                 {"namespace": "ns1", "table_name": "t1"},
                 {"namespace": "ns2", "table_name": "t2"},
@@ -148,9 +151,7 @@ async def test_catalog_tables_success_with_filters():
         mock_get_catalog.return_value = (mock_arrow, True)
 
         filters = ["Namespace = `market_data`", "TableName.contains(`price`)"]
-        result = await catalog_tables_list(
-            context, "enterprise:prod:1", filters=filters
-        )
+        result = await catalog_tables_list(context, "prod", filters=filters)
 
         assert result["success"] is True
         assert result["count"] == 1
@@ -173,7 +174,7 @@ async def test_catalog_tables_incomplete_results():
     ) as mock_get_catalog:
         mock_get_catalog.return_value = (mock_arrow, False)  # Incomplete
 
-        result = await catalog_tables_list(context, "enterprise:prod:1", max_rows=3)
+        result = await catalog_tables_list(context, "prod", max_rows=3)
 
         assert result["success"] is True
         assert result["is_complete"] is False  # Truncated
@@ -181,39 +182,35 @@ async def test_catalog_tables_incomplete_results():
 
 
 @pytest.mark.asyncio
-async def test_catalog_tables_not_enterprise_session():
-    """A non-enterprise session is rejected before any catalog query runs."""
-    context = _catalog_context(MagicMock())  # Not CorePlusSession
+async def test_catalog_tables_unknown_system():
+    """An unconfigured system is rejected before any catalog query runs."""
+    context = _catalog_context(MagicMock(spec=CorePlusSession), system="prod")
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
     ) as mock_get_catalog:
-        result = await catalog_tables_list(context, "community:local:2")
+        result = await catalog_tables_list(context, "nope")
 
     assert result["success"] is False
-    assert "only works with enterprise (Core+) sessions" in result["error"]
+    assert "nope" in result["error"]
     assert result["isError"] is True
     mock_get_catalog.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_catalog_tables_session_not_found():
-    """Test catalog when session is not found."""
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+async def test_catalog_tables_web_client_data_unavailable():
+    """A WebClientData connect failure surfaces as a structured error."""
+    context = _unavailable_catalog_context(RuntimeError("WebClientData is not running"))
 
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
-
-    result = await catalog_tables_list(context, "enterprise:prod:invalid_session")
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
+    ) as mock_get_catalog:
+        result = await catalog_tables_list(context, "prod")
 
     assert result["success"] is False
-    assert "Session not found" in result["error"]
+    assert "WebClientData is not running" in result["error"]
     assert result["isError"] is True
+    mock_get_catalog.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -227,7 +224,7 @@ async def test_catalog_tables_invalid_filter():
         mock_get_catalog.side_effect = RuntimeError("Invalid filter syntax")
 
         result = await catalog_tables_list(
-            context, "enterprise:prod:1", filters=["InvalidFilter!!!"]
+            context, "prod", filters=["InvalidFilter!!!"]
         )
 
         assert result["success"] is False
@@ -247,7 +244,7 @@ async def test_catalog_tables_size_limit_exceeded():
     ) as mock_get_catalog:
         mock_get_catalog.return_value = (mock_arrow, False)
 
-        result = await catalog_tables_list(context, "enterprise:prod:1")
+        result = await catalog_tables_list(context, "prod")
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
@@ -267,7 +264,7 @@ async def test_catalog_tables_size_limit_counts_serialization_overhead():
     ) as mock_get_catalog:
         mock_get_catalog.return_value = (mock_arrow, False)
 
-        result = await catalog_tables_list(context, "enterprise:prod:1")
+        result = await catalog_tables_list(context, "prod")
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
@@ -277,19 +274,8 @@ async def test_catalog_tables_size_limit_counts_serialization_overhead():
 @pytest.mark.asyncio
 async def test_catalog_namespaces_success_no_filters():
     """Test catalog_namespaces with no filters and default max_rows."""
-    mock_registry = MagicMock()
-    mock_session_manager = MagicMock()
     mock_session = MagicMock(spec=CorePlusSession)
-
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     # Mock namespaces arrow table
     namespaces_table_mock = MagicMock()
@@ -304,10 +290,10 @@ async def test_catalog_namespaces_success_no_filters():
     ) as mock_get_namespaces:
         mock_get_namespaces.return_value = (namespaces_table_mock, True)
 
-        result = await catalog_namespaces_list(context, "enterprise:prod:1")
+        result = await catalog_namespaces_list(context, "prod")
 
         assert result["success"] is True
-        assert result["id"] == "enterprise:prod:1"
+        assert result["system"] == "prod"
         assert result["namespaces"] == ["market_data", "reference"]
         assert result["count"] == 2
         assert result["is_complete"] is True
@@ -321,19 +307,8 @@ async def test_catalog_namespaces_success_no_filters():
 @pytest.mark.asyncio
 async def test_catalog_namespaces_success_with_filters():
     """Test catalog_namespaces with filters applied."""
-    mock_registry = MagicMock()
-    mock_session_manager = MagicMock()
     mock_session = MagicMock(spec=CorePlusSession)
-
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     # Mock namespaces arrow table
     namespaces_table_mock = MagicMock()
@@ -346,9 +321,7 @@ async def test_catalog_namespaces_success_with_filters():
         mock_get_namespaces.return_value = (namespaces_table_mock, True)
 
         filters = ["TableName.contains(`daily`)"]
-        result = await catalog_namespaces_list(
-            context, "enterprise:prod:1", filters=filters
-        )
+        result = await catalog_namespaces_list(context, "prod", filters=filters)
 
         assert result["success"] is True
         assert result["namespaces"] == ["market_data"]
@@ -363,19 +336,7 @@ async def test_catalog_namespaces_success_with_filters():
 @pytest.mark.asyncio
 async def test_catalog_namespaces_incomplete_results():
     """Test catalog_namespaces when results are incomplete (truncated by max_rows)."""
-    mock_registry = MagicMock()
-    mock_session_manager = MagicMock()
-    mock_session = MagicMock(spec=CorePlusSession)
-
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(MagicMock(spec=CorePlusSession))
 
     # Mock namespaces arrow table
     namespaces_table_mock = MagicMock()
@@ -389,9 +350,7 @@ async def test_catalog_namespaces_incomplete_results():
     ) as mock_get_namespaces:
         mock_get_namespaces.return_value = (namespaces_table_mock, False)  # Incomplete
 
-        result = await catalog_namespaces_list(
-            context, "enterprise:prod:1", max_rows=500
-        )
+        result = await catalog_namespaces_list(context, "prod", max_rows=500)
 
         assert result["success"] is True
         assert result["is_complete"] is False  # Truncated
@@ -399,57 +358,37 @@ async def test_catalog_namespaces_incomplete_results():
 
 
 @pytest.mark.asyncio
-async def test_catalog_namespaces_not_enterprise_session():
-    """A non-enterprise session is rejected before any catalog query runs."""
-    context = _catalog_context(MagicMock())  # Not CorePlusSession
+async def test_catalog_namespaces_unknown_system():
+    """An unconfigured system is rejected before any catalog query runs."""
+    context = _catalog_context(MagicMock(spec=CorePlusSession), system="prod")
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
     ) as mock_get_namespaces:
-        result = await catalog_namespaces_list(context, "community:local:2")
+        result = await catalog_namespaces_list(context, "nope")
 
     assert result["success"] is False
-    assert "only works with enterprise (Core+) sessions" in result["error"]
+    assert "nope" in result["error"]
     assert result["isError"] is True
     mock_get_namespaces.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_catalog_namespaces_session_not_found():
-    """Test catalog_namespaces when session is not found."""
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+async def test_catalog_namespaces_web_client_data_unavailable():
+    """A WebClientData connect failure surfaces as a structured error."""
+    context = _unavailable_catalog_context(RuntimeError("WebClientData is not running"))
 
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
-
-    result = await catalog_namespaces_list(context, "enterprise:prod:invalid_session")
+    result = await catalog_namespaces_list(context, "prod")
 
     assert result["success"] is False
-    assert "Session not found" in result["error"]
+    assert "WebClientData is not running" in result["error"]
     assert result["isError"] is True
 
 
 @pytest.mark.asyncio
 async def test_catalog_namespaces_size_limit_exceeded():
     """Test catalog_namespaces when response size exceeds limit."""
-    mock_registry = MagicMock()
-    mock_session_manager = MagicMock()
-    mock_session = MagicMock(spec=CorePlusSession)
-
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(MagicMock(spec=CorePlusSession))
 
     # Mock namespaces arrow table with size exceeding limit
     namespaces_table_mock = MagicMock()
@@ -463,7 +402,7 @@ async def test_catalog_namespaces_size_limit_exceeded():
     ) as mock_get_namespaces:
         mock_get_namespaces.return_value = (namespaces_table_mock, False)
 
-        result = await catalog_namespaces_list(context, "enterprise:prod:1")
+        result = await catalog_namespaces_list(context, "prod")
 
         assert result["success"] is False
         assert "50MB" in result["error"] or "max" in result["error"].lower()
@@ -490,12 +429,12 @@ async def test_catalog_table_schema_success():
         mock_get_schema.return_value = create_mock_arrow_meta_table(meta_rows)
 
         result = await catalog_table_schema(
-            context, "enterprise:prod:1", "market_data", "daily_prices"
+            context, "prod", "market_data", "daily_prices"
         )
 
     assert result == {
         "success": True,
-        "id": "enterprise:prod:1",
+        "system": "prod",
         "namespace": "market_data",
         "table_name": "daily_prices",
         "schema": [
@@ -511,39 +450,27 @@ async def test_catalog_table_schema_success():
 
 
 @pytest.mark.asyncio
-async def test_catalog_table_schema_not_enterprise_session():
-    """catalog_table_schema fails with a non-enterprise session."""
-    context = _catalog_context(MagicMock())  # Not CorePlusSession
+async def test_catalog_table_schema_unknown_system():
+    """catalog_table_schema fails for an unconfigured system."""
+    context = _catalog_context(MagicMock(spec=CorePlusSession), system="prod")
 
-    result = await catalog_table_schema(
-        context, "community:local:2", "market_data", "daily_prices"
-    )
+    result = await catalog_table_schema(context, "nope", "market_data", "daily_prices")
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "enterprise" in result["error"].lower() or "Core+" in result["error"]
+    assert "nope" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_catalog_table_schema_session_not_found():
-    """catalog_table_schema surfaces session resolution failures."""
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(side_effect=Exception("Session not found"))
+async def test_catalog_table_schema_web_client_data_unavailable():
+    """catalog_table_schema surfaces WebClientData connect failures."""
+    context = _unavailable_catalog_context(RuntimeError("WebClientData is not running"))
 
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
-
-    result = await catalog_table_schema(
-        context, "enterprise:prod:999", "market_data", "daily_prices"
-    )
+    result = await catalog_table_schema(context, "prod", "market_data", "daily_prices")
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "Session not found" in result["error"]
+    assert "WebClientData is not running" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -560,7 +487,7 @@ async def test_catalog_table_schema_retrieval_error():
         mock_get_schema.side_effect = Exception("Table 'daily_prices' not found")
 
         result = await catalog_table_schema(
-            context, "enterprise:prod:1", "market_data", "daily_prices"
+            context, "prod", "market_data", "daily_prices"
         )
 
     assert result["success"] is False
@@ -574,18 +501,7 @@ async def test_catalog_table_sample_success():
     from deephaven_mcp.client import CorePlusSession
 
     mock_session = MagicMock(spec=CorePlusSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     # Mock arrow table with data
     mock_arrow_table = MagicMock()
@@ -606,10 +522,11 @@ async def test_catalog_table_sample_success():
         mock_get_data.return_value = (mock_arrow_table, True)
 
         result = await catalog_table_sample(
-            context, "enterprise:prod:1", "public", "users", max_rows=10
+            context, "prod", "public", "users", max_rows=10
         )
 
     assert result["success"] is True
+    assert result["system"] == "prod"
     assert result["row_count"] == 10
     assert result["is_complete"] is True
     assert (
@@ -630,18 +547,7 @@ async def test_catalog_table_sample_with_format():
     from deephaven_mcp.client import CorePlusSession
 
     mock_session = MagicMock(spec=CorePlusSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     mock_arrow_table = MagicMock()
     mock_arrow_table.__len__ = MagicMock(return_value=5)
@@ -658,7 +564,7 @@ async def test_catalog_table_sample_with_format():
 
         result = await catalog_table_sample(
             context,
-            "enterprise:prod:1",
+            "prod",
             "analytics",
             "events",
             max_rows=5,
@@ -671,28 +577,26 @@ async def test_catalog_table_sample_with_format():
 
 
 @pytest.mark.asyncio
-async def test_catalog_table_sample_not_enterprise_session():
-    """Test catalog_table_sample with non-enterprise session."""
-    from deephaven_mcp.client import BaseSession
+async def test_catalog_table_sample_unknown_system():
+    """catalog_table_sample fails for an unconfigured system."""
+    context = _catalog_context(MagicMock(spec=CorePlusSession), system="prod")
 
-    mock_session = MagicMock(spec=BaseSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
-
-    result = await catalog_table_sample(context, "enterprise:prod:1", "public", "users")
+    result = await catalog_table_sample(context, "nope", "public", "users")
 
     assert result["success"] is False
-    assert "only works with enterprise (Core+) sessions" in result["error"]
+    assert "nope" in result["error"]
+    assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_catalog_table_sample_web_client_data_unavailable():
+    """catalog_table_sample surfaces WebClientData connect failures."""
+    context = _unavailable_catalog_context(RuntimeError("WebClientData is not running"))
+
+    result = await catalog_table_sample(context, "prod", "public", "users")
+
+    assert result["success"] is False
+    assert "WebClientData is not running" in result["error"]
     assert result["isError"] is True
 
 
@@ -702,27 +606,14 @@ async def test_catalog_table_sample_exception():
     from deephaven_mcp.client import CorePlusSession
 
     mock_session = MagicMock(spec=CorePlusSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     with patch(
         "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table_data"
     ) as mock_get_data:
         mock_get_data.side_effect = Exception("Database connection failed")
 
-        result = await catalog_table_sample(
-            context, "enterprise:prod:1", "public", "users"
-        )
+        result = await catalog_table_sample(context, "prod", "public", "users")
 
     assert result["success"] is False
     assert "Database connection failed" in result["error"]
@@ -735,18 +626,7 @@ async def test_catalog_table_sample_response_too_large():
     from deephaven_mcp.client import CorePlusSession
 
     mock_session = MagicMock(spec=CorePlusSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     # Mock arrow table with huge data that exceeds size limit
     mock_arrow_table = MagicMock()
@@ -759,9 +639,7 @@ async def test_catalog_table_sample_response_too_large():
     ) as mock_get_data:
         mock_get_data.return_value = (mock_arrow_table, True)
 
-        result = await catalog_table_sample(
-            context, "enterprise:prod:1", "public", "huge_table"
-        )
+        result = await catalog_table_sample(context, "prod", "public", "huge_table")
 
     assert result["success"] is False
     assert "max 52MB" in result["error"]
@@ -775,16 +653,7 @@ async def test_catalog_table_sample_with_explicit_filters():
     from deephaven_mcp.client import CorePlusSession
 
     mock_session = MagicMock(spec=CorePlusSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     mock_arrow_table = MagicMock()
     mock_arrow_table.__len__ = MagicMock(return_value=5)
@@ -801,7 +670,7 @@ async def test_catalog_table_sample_with_explicit_filters():
 
         result = await catalog_table_sample(
             context,
-            "enterprise:prod:1",
+            "prod",
             "DbInternal",
             "ProcessEventLog",
             filters=["Date == `2024-01-15`"],
@@ -818,16 +687,7 @@ async def test_catalog_table_sample_empty_filters_skips_autodetect():
     from deephaven_mcp.client import CorePlusSession
 
     mock_session = MagicMock(spec=CorePlusSession)
-    mock_session_manager = MagicMock()
-    mock_session_manager.get = AsyncMock(return_value=mock_session)
-    mock_registry = MagicMock()
-    mock_registry.get = AsyncMock(return_value=mock_session_manager)
-    context = MockContext(
-        {
-            "config_manager": MagicMock(),
-            "registry": mock_registry,
-        }
-    )
+    context = _catalog_context(mock_session)
 
     mock_arrow_table = MagicMock()
     mock_arrow_table.__len__ = MagicMock(return_value=0)
@@ -842,7 +702,7 @@ async def test_catalog_table_sample_empty_filters_skips_autodetect():
 
         await catalog_table_sample(
             context,
-            "enterprise:prod:1",
+            "prod",
             "DbInternal",
             "ProcessEventLog",
             filters=[],

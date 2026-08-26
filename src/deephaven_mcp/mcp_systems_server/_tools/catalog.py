@@ -7,6 +7,10 @@ Provides MCP tools for querying Deephaven Enterprise (Core+) data catalogs:
 - catalog_table_sample: Sample data from catalog tables
 
 These tools require Deephaven Enterprise (Core+) and are not available in Community.
+
+All four are system-scoped: they name an enterprise system, not a session, and
+read the catalog through the system's shared ``WebClientData`` persistent query.
+The catalog is system-level data, identical from every worker on the system.
 """
 
 import logging
@@ -21,8 +25,8 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_response_size,
     error_response,
     format_schema_result,
-    get_enterprise_session,
-    get_response_limits,
+    get_enterprise_settings,
+    get_system_session,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,29 +39,31 @@ delimiters (~38 characters), none of which ``pyarrow.Table.nbytes``
 counts."""
 
 
-def _catalog_failure_error(tool_name: str, id: str, e: Exception) -> dict[str, object]:
+def _catalog_failure_error(
+    tool_name: str, system: str, e: Exception
+) -> dict[str, object]:
     """Log (with traceback) and build the error response for a failed catalog operation.
 
     Args:
         tool_name (str): Name of the calling tool for logging.
-        id (str): The session id the caller supplied.
+        system (str): The enterprise system name the caller supplied.
         e (Exception): The exception that aborted the operation.
 
     Returns:
         dict[str, object]: Standard error response dict from :func:`error_response`.
     """
     _LOGGER.error(
-        f"[mcp_systems_server:{tool_name}] Failed for session '{id}': {e!r}",
+        f"[mcp_systems_server:{tool_name}] Failed for system '{system}': {e!r}",
         exc_info=True,
     )
     return error_response(
-        f"Catalog operation failed for session '{id}': {exception_summary(e)}"
+        f"Catalog operation failed for system '{system}': {exception_summary(e)}"
     )
 
 
 async def catalog_tables_list(
     context: Context,
-    id: str,
+    system: str,
     max_rows: int | None = 10000,
     filters: list[str] | None = None,
 ) -> dict:
@@ -71,7 +77,7 @@ async def catalog_tables_list(
     `deephaven_enterprise.database` package (the `db` variable) in an
     enterprise session, e.g. `db.live_table(namespace, table_name)` or
     `db.historical_table(namespace, table_name)`. Only works with
-    enterprise sessions.
+    enterprise systems.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -81,7 +87,17 @@ async def catalog_tables_list(
     - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'PQ' is shorthand for Persistent Query
+    - This tool only works with enterprise systems; community deployments do not have catalog tables
+
+    System Scope:
+    - Takes an enterprise SYSTEM name (e.g. 'prod'), not a session id
+    - Reads through the system's shared 'WebClientData' persistent query, so no
+      worker of your own is needed and the result never depends on which PQ
+      happens to be running
+    - The catalog is system-level data shared by every user; this tool reads it
+      and never changes it
+    - Run list_systems to discover configured enterprise system names
 
     AI Agent Usage:
     - Use this to discover what tables exist; follow up with catalog_table_schema
@@ -109,8 +125,7 @@ async def catalog_tables_list(
 
     Args:
         context (Context): The MCP context object.
-        id (str): Fully qualified id of an enterprise (Core+) session
-            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
+        system (str): Enterprise system name (e.g. 'prod'), as returned by list_systems.
         max_rows (int | None): Maximum number of catalog entries to return. Default is 10000.
                                Set to None to retrieve entire catalog (use with caution for large deployments).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter catalog.
@@ -119,7 +134,7 @@ async def catalog_tables_list(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if catalog was retrieved successfully, False on error.
-            - 'id' (str, optional): The session ID if successful.
+            - 'system' (str, optional): The enterprise system name if successful.
             - 'tables' (list[dict], optional): One entry per catalog table if successful.
                 Each contains 'namespace' (str) and 'table_name' (str).
             - 'count' (int, optional): Number of entries returned if successful.
@@ -128,30 +143,30 @@ async def catalog_tables_list(
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
 
     Error Scenarios:
-        - Invalid id: Returns error if session doesn't exist or is not accessible
-        - Community session: Returns error if session is not an enterprise (Core+) session
+        - Unknown system: Returns error if system is not a configured enterprise system
+        - WebClientData unavailable: Returns error if the system's 'WebClientData' PQ is not running
         - Invalid filters: Returns error if filter syntax is invalid or references non-existent columns
         - Response too large: Returns error if estimated response would exceed the configured response-size limit (default 50MB)
-        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Connection issues: Returns error if unable to communicate with Deephaven server
 
     Example Usage:
         # List catalog tables (up to 10000)
         Tool: catalog_tables_list
         Parameters: {
-            "id": "enterprise:prod:analytics"
+            "system": "prod"
         }
 
         # Filter by namespace
         Tool: catalog_tables_list
         Parameters: {
-            "id": "enterprise:prod:analytics",
+            "system": "prod",
             "filters": ["Namespace = `market_data`"]
         }
 
     Example Successful Response:
         {
             'success': True,
-            'id': 'enterprise:prod:analytics',
+            'system': 'prod',
             'tables': [
                 {'namespace': 'market_data', 'table_name': 'daily_prices'},
                 {'namespace': 'market_data', 'table_name': 'trades'}
@@ -161,12 +176,12 @@ async def catalog_tables_list(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_tables_list] Invoked: id={id!r}, "
+        f"[mcp_systems_server:catalog_tables_list] Invoked: system={system!r}, "
         f"max_rows={max_rows}, filters={filters!r}"
     )
 
     try:
-        session = await get_enterprise_session("catalog_tables_list", context, id)
+        session = await get_system_session("catalog_tables_list", context, system)
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_tables_list] Retrieving catalog entries with filters: {filters}"
@@ -184,7 +199,7 @@ async def catalog_tables_list(
         # Arrow buffer bytes undercount the serialized list-of-dicts form,
         # so add a per-entry envelope allowance on top.
         estimated_size = subset.nbytes + _ENTRY_OVERHEAD_BYTES * subset.num_rows
-        limits = get_response_limits(context, id)
+        limits = get_enterprise_settings(context).response_limits
         size_check_result = check_response_size(
             "catalog_tables_list", estimated_size, limits
         )
@@ -203,19 +218,19 @@ async def catalog_tables_list(
 
         return {
             "success": True,
-            "id": id,
+            "system": system,
             "tables": tables,
             "count": len(tables),
             "is_complete": is_complete,
         }
 
     except Exception as e:
-        return _catalog_failure_error("catalog_tables_list", id, e)
+        return _catalog_failure_error("catalog_tables_list", system, e)
 
 
 async def catalog_namespaces_list(
     context: Context,
-    id: str,
+    system: str,
     max_rows: int | None = 1000,
     filters: list[str] | None = None,
 ) -> dict:
@@ -229,7 +244,7 @@ async def catalog_namespaces_list(
     contain tables in the catalog (database) accessible using methods like `db.live_table(namespace, table_name)` or
     `db.historical_table(namespace, table_name)`. This enables efficient discovery of data domains
     before drilling down into specific tables. This is typically the first step in exploring an
-    enterprise data catalog. Only works with enterprise sessions.
+    enterprise data catalog. Only works with enterprise systems.
 
     For more information, see:
     - https://deephaven.io
@@ -243,8 +258,18 @@ async def catalog_namespaces_list(
     - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'PQ' is shorthand for Persistent Query
+    - This tool only works with enterprise systems; community deployments do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables
+
+    System Scope:
+    - Takes an enterprise SYSTEM name (e.g. 'prod'), not a session id
+    - Reads through the system's shared 'WebClientData' persistent query, so no
+      worker of your own is needed and the result never depends on which PQ
+      happens to be running
+    - The catalog is system-level data shared by every user; this tool reads it
+      and never changes it
+    - Run list_systems to discover configured enterprise system names
 
     AI Agent Usage:
     - Use this as the first step to discover available data domains in the enterprise catalog/database
@@ -259,8 +284,7 @@ async def catalog_namespaces_list(
 
     Args:
         context (Context): The MCP context object.
-        id (str): Fully qualified id of an enterprise (Core+) session
-            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
+        system (str): Enterprise system name (e.g. 'prod'), as returned by list_systems.
         max_rows (int | None): Maximum number of namespaces to return. Default is 1000.
                                Set to None to retrieve all namespaces (use with caution).
         filters (list[str] | None): Optional list of Deephaven where clause expressions to filter
@@ -269,7 +293,7 @@ async def catalog_namespaces_list(
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if namespaces were retrieved successfully, False on error.
-            - 'id' (str, optional): The session ID if successful.
+            - 'system' (str, optional): The enterprise system name if successful.
             - 'namespaces' (list[str], optional): Sorted distinct namespace names if successful.
             - 'count' (int, optional): Number of namespaces returned if successful.
             - 'is_complete' (bool, optional): True if all namespaces returned, False if truncated by max_rows.
@@ -277,11 +301,11 @@ async def catalog_namespaces_list(
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
 
     Error Scenarios:
-        - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
-        - Session not found: Returns error if id does not exist or is not accessible
+        - Unknown system: Returns error if system is not a configured enterprise system
+        - WebClientData unavailable: Returns error if the system's 'WebClientData' PQ is not running
         - Invalid filter: Returns error if filter syntax is invalid
         - Response too large: Returns error if estimated response would exceed the configured response-size limit (default 50MB)
-        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Connection issues: Returns error if unable to communicate with Deephaven server
 
     Performance Considerations:
         - Default max_rows of 1000 is safe for most enterprise deployments
@@ -293,26 +317,26 @@ async def catalog_namespaces_list(
         # Get all namespaces (up to 1000)
         Tool: catalog_namespaces_list
         Parameters: {
-            "id": "enterprise:prod:analytics"
+            "system": "prod"
         }
 
         # Get namespaces from filtered catalog
         Tool: catalog_namespaces_list
         Parameters: {
-            "id": "enterprise:prod:analytics",
+            "system": "prod",
             "filters": ["TableName.contains(`daily`)"]
         }
 
     Example Successful Response:
-        {'success': True, 'id': 'enterprise:prod:analytics', 'namespaces': ['market_data', 'reference'], 'count': 2, 'is_complete': True}
+        {'success': True, 'system': 'prod', 'namespaces': ['market_data', 'reference'], 'count': 2, 'is_complete': True}
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_namespaces_list] Invoked: id={id!r}, "
+        f"[mcp_systems_server:catalog_namespaces_list] Invoked: system={system!r}, "
         f"max_rows={max_rows}, filters={filters!r}"
     )
 
     try:
-        session = await get_enterprise_session("catalog_namespaces_list", context, id)
+        session = await get_system_session("catalog_namespaces_list", context, system)
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_namespaces_list] Retrieving namespaces with filters: {filters}"
@@ -326,7 +350,7 @@ async def catalog_namespaces_list(
 
         # Reject an over-limit response before materializing it as Python objects.
         estimated_size = arrow_table.nbytes
-        limits = get_response_limits(context, id)
+        limits = get_enterprise_settings(context).response_limits
         size_check_result = check_response_size(
             "catalog_namespaces_list", estimated_size, limits
         )
@@ -342,29 +366,29 @@ async def catalog_namespaces_list(
 
         return {
             "success": True,
-            "id": id,
+            "system": system,
             "namespaces": namespaces,
             "count": len(namespaces),
             "is_complete": is_complete,
         }
 
     except Exception as e:
-        return _catalog_failure_error("catalog_namespaces_list", id, e)
+        return _catalog_failure_error("catalog_namespaces_list", system, e)
 
 
 async def catalog_table_schema(
     context: Context,
-    id: str,
+    system: str,
     namespace: str,
     table_name: str,
 ) -> dict:
-    """MCP Tool: Retrieve the schema of one catalog table in a Deephaven Enterprise (Core+) session.
+    """MCP Tool: Retrieve the schema of one catalog table on a Deephaven Enterprise (Core+) system.
 
     Returns the column definitions for a single catalog table identified by
     namespace and table name. Deliberately single-table: discover tables with
     catalog_namespaces_list / catalog_tables_list first, then fetch schemas
     one table per call (calls can run in parallel). Only works with
-    enterprise sessions.
+    enterprise systems.
 
     For more information, see:
     - https://deephaven.io
@@ -378,8 +402,18 @@ async def catalog_table_schema(
     - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'PQ' is shorthand for Persistent Query
+    - This tool only works with enterprise systems; community deployments do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
+
+    System Scope:
+    - Takes an enterprise SYSTEM name (e.g. 'prod'), not a session id
+    - Reads through the system's shared 'WebClientData' persistent query, so no
+      worker of your own is needed and the result never depends on which PQ
+      happens to be running
+    - The catalog is system-level data shared by every user; this tool reads it
+      and never changes it
+    - Run list_systems to discover configured enterprise system names
 
     AI Agent Usage:
     - Use catalog_tables_list first to discover namespace/table pairs, then call this per table
@@ -392,16 +426,15 @@ async def catalog_table_schema(
       Normal column
 
     Args:
-        context (Context): The MCP context object, used to access the enterprise session.
-        id (str): Fully qualified id of an enterprise (Core+) session
-            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
+        context (Context): The MCP context object.
+        system (str): Enterprise system name (e.g. 'prod'), as returned by list_systems.
         namespace (str): The catalog namespace containing the table.
         table_name (str): Name of the catalog table whose schema to retrieve.
 
     Returns:
         dict: Structured result object with keys:
             - 'success' (bool): True if the schema was retrieved, False on error.
-            - 'id' (str, optional): The session id echoed back if successful.
+            - 'system' (str, optional): The enterprise system name echoed back if successful.
             - 'namespace' (str, optional): The catalog namespace if successful.
             - 'table_name' (str, optional): The table name if successful.
             - 'schema' (list[dict], optional): One entry per column if successful.
@@ -413,15 +446,15 @@ async def catalog_table_schema(
             - 'isError' (bool, optional): Present and True if this is an error response.
 
     Error Scenarios:
-        - Non-enterprise session: Returns error if session is not an enterprise (Core+) session
-        - Invalid id: Returns error if session doesn't exist or is not accessible
+        - Unknown system: Returns error if system is not a configured enterprise system
+        - WebClientData unavailable: Returns error if the system's 'WebClientData' PQ is not running
         - Table not found: Returns error if the table cannot be loaded from the catalog
-        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Connection issues: Returns error if unable to communicate with Deephaven server
 
     Example Successful Response:
         {
             'success': True,
-            'id': 'enterprise:prod:analytics',
+            'system': 'prod',
             'namespace': 'market_data',
             'table_name': 'daily_prices',
             'schema': [
@@ -435,12 +468,12 @@ async def catalog_table_schema(
         {'success': False, 'error': "Failed to get schema for catalog table ...", 'isError': True}
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_table_schema] Invoked: id={id!r}, "
+        f"[mcp_systems_server:catalog_table_schema] Invoked: system={system!r}, "
         f"namespace={namespace!r}, table_name={table_name!r}"
     )
 
     try:
-        session = await get_enterprise_session("catalog_table_schema", context, id)
+        session = await get_system_session("catalog_table_schema", context, system)
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_table_schema] Retrieving schema for "
@@ -450,7 +483,11 @@ async def catalog_table_schema(
             session, namespace, table_name
         )
         result = format_schema_result(
-            arrow_meta_table, id, table_name, namespace=namespace
+            arrow_meta_table,
+            system,
+            table_name,
+            namespace=namespace,
+            id_key="system",
         )
 
         _LOGGER.info(
@@ -461,19 +498,19 @@ async def catalog_table_schema(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:catalog_table_schema] Failed for session '{id}', "
+            f"[mcp_systems_server:catalog_table_schema] Failed for system '{system}', "
             f"namespace '{namespace}', table '{table_name}': {e!r}",
             exc_info=True,
         )
         return error_response(
             f"Failed to get schema for catalog table '{namespace}.{table_name}' "
-            f"in session '{id}': {exception_summary(e)}"
+            f"on system '{system}': {exception_summary(e)}"
         )
 
 
 async def catalog_table_sample(
     context: Context,
-    id: str,
+    system: str,
     namespace: str,
     table_name: str,
     max_rows: int | None = 100,
@@ -481,14 +518,14 @@ async def catalog_table_sample(
     format: TableFormat = "optimize-rendering",
     filters: list[str] | None = None,
 ) -> dict:
-    r"""MCP Tool: Retrieve sample TABULAR DATA from a catalog table in a Deephaven Enterprise (Core+) session.
+    r"""MCP Tool: Retrieve sample TABULAR DATA from a catalog table on a Deephaven Enterprise (Core+) system.
 
     **Returns**: Sample table data formatted as TABULAR DATA for display. This tabular data should be
     displayed as a table to users for previewing catalog table contents.
 
     This tool loads a catalog table (trying historical_table first, then live_table as fallback) and
     retrieves a sample of its data with flexible formatting options. Use this to preview catalog table
-    contents before loading the full table into a session. Only works with enterprise sessions.
+    contents before loading the full table into a session. Only works with enterprise systems.
 
     **Format Accuracy for AI Agents** (based on empirical research):
     - markdown-kv: 61% accuracy (highest comprehension, more tokens)
@@ -510,8 +547,18 @@ async def catalog_table_sample(
     - In Deephaven, "catalog" and "database" are interchangeable terms - the catalog is the database of available tables.
     - 'DHC' is shorthand for Deephaven Community (also called 'Core')
     - 'DHE' is shorthand for Deephaven Enterprise (also called 'Core+')
-    - This tool only works with enterprise sessions; community sessions do not have catalog tables
+    - 'PQ' is shorthand for Persistent Query
+    - This tool only works with enterprise systems; community deployments do not have catalog tables
     - 'Namespace' refers to a data domain or organizational grouping of tables in the catalog
+
+    System Scope:
+    - Takes an enterprise SYSTEM name (e.g. 'prod'), not a session id
+    - Reads through the system's shared 'WebClientData' persistent query, so no
+      worker of your own is needed and the result never depends on which PQ
+      happens to be running
+    - This is a preview, not a query engine: keep max_rows small, because the
+      read runs on shared infrastructure the whole deployment relies on
+    - Run list_systems to discover configured enterprise system names
 
     Table Rendering:
     - **This tool returns TABULAR SAMPLE DATA that MUST be displayed as a table to users**
@@ -537,8 +584,7 @@ async def catalog_table_sample(
 
     Args:
         context (Context): The MCP context object.
-        id (str): Fully qualified id of an enterprise (Core+) session
-            (e.g. 'enterprise:prod:12345', as returned by sessions_list or pq_list).
+        system (str): Enterprise system name (e.g. 'prod'), as returned by list_systems.
         namespace (str): The catalog namespace containing the table.
         table_name (str): Name of the catalog table to sample.
         max_rows (int | None, optional): Maximum number of rows to retrieve. Defaults to 100 for safe sampling.
@@ -571,7 +617,7 @@ async def catalog_table_sample(
     Returns:
         dict: Structured result object with the following keys:
             - 'success' (bool): Always present. True if sample was retrieved successfully, False on any error.
-            - 'id' (str, optional): The session id echoed back if successful.
+            - 'system' (str, optional): The enterprise system name echoed back if successful.
             - 'namespace' (str, optional): The catalog namespace if successful.
             - 'table_name' (str, optional): Name of the sampled table if successful.
             - 'format' (str, optional): Actual format used for the data if successful. May differ from request when using optimization strategies.
@@ -584,8 +630,8 @@ async def catalog_table_sample(
             - 'isError' (bool, optional): Present and True only when success=False. Explicit error flag.
 
     Error Scenarios:
-        - Invalid id: Returns error if session doesn't exist or is not accessible
-        - Community session: Returns error if session is not an enterprise (Core+) session
+        - Unknown system: Returns error if system is not a configured enterprise system
+        - WebClientData unavailable: Returns error if the system's 'WebClientData' PQ is not running
         - Invalid namespace: Returns error if namespace doesn't exist in the catalog
         - Invalid table_name: Returns error if table doesn't exist in the namespace
         - Inaccessible catalog entry: table is listed in the catalog but cannot be
@@ -594,7 +640,7 @@ async def catalog_table_sample(
           this gracefully.
         - Invalid format: Returns error if format is not one of the supported options
         - Response too large: Returns error if estimated response would exceed the configured response-size limit (default 50MB)
-        - Session connection issues: Returns error if unable to communicate with Deephaven server
+        - Connection issues: Returns error if unable to communicate with Deephaven server
         - Table access errors: Returns error if table cannot be accessed via historical_table or live_table
 
     Performance Considerations:
@@ -602,12 +648,13 @@ async def catalog_table_sample(
         - Use csv format or limit max_rows for very wide tables
         - Default optimize-rendering format provides good table display
         - Response size limit: configured response-size limit (default 50MB) to prevent memory issues
+        - The read runs on the shared 'WebClientData' worker; prefer small samples
 
     Example Usage:
         # Sample first 100 rows with default format
         Tool: catalog_table_sample
         Parameters: {
-            "id": "enterprise:prod:analytics",
+            "system": "prod",
             "namespace": "market_data",
             "table_name": "daily_prices"
         }
@@ -615,7 +662,7 @@ async def catalog_table_sample(
         # Sample last 50 rows (most recent for time-series)
         Tool: catalog_table_sample
         Parameters: {
-            "id": "enterprise:prod:analytics",
+            "system": "prod",
             "namespace": "market_data",
             "table_name": "trades",
             "max_rows": 50,
@@ -625,7 +672,7 @@ async def catalog_table_sample(
         # Sample with CSV format
         Tool: catalog_table_sample
         Parameters: {
-            "id": "enterprise:prod:analytics",
+            "system": "prod",
             "namespace": "reference_data",
             "table_name": "symbols",
             "max_rows": 200,
@@ -633,18 +680,13 @@ async def catalog_table_sample(
         }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:catalog_table_sample] Invoked: id={id!r}, "
+        f"[mcp_systems_server:catalog_table_sample] Invoked: system={system!r}, "
         f"namespace={namespace!r}, table_name={table_name!r}, max_rows={max_rows}, head={head}, "
         f"format={format!r}, filters={filters!r}"
     )
 
     try:
-        # Get and validate enterprise session
-        session = await get_enterprise_session("catalog_table_sample", context, id)
-
-        _LOGGER.debug(
-            f"[mcp_systems_server:catalog_table_sample] Session established for enterprise session: '{id}'"
-        )
+        session = await get_system_session("catalog_table_sample", context, system)
 
         # Get catalog table data using queries module
         _LOGGER.debug(
@@ -662,7 +704,7 @@ async def catalog_table_sample(
         # Check response size before formatting
         row_count = len(arrow_table)
         col_count = len(arrow_table.schema)
-        limits = get_response_limits(context, id)
+        limits = get_enterprise_settings(context).response_limits
         estimated_size = row_count * col_count * limits.estimated_bytes_per_cell
         size_error = check_response_size(
             f"{namespace}.{table_name}", estimated_size, limits
@@ -679,9 +721,10 @@ async def catalog_table_sample(
             arrow_table,
             is_complete,
             format,
-            id,
+            system,
             table_name=table_name,
             namespace=namespace,
+            id_key="system",
         )
 
         _LOGGER.info(
@@ -693,13 +736,13 @@ async def catalog_table_sample(
 
     except Exception as e:
         _LOGGER.error(
-            f"[mcp_systems_server:catalog_table_sample] Failed for session: '{id}', "
+            f"[mcp_systems_server:catalog_table_sample] Failed for system: '{system}', "
             f"namespace: '{namespace}', table: '{table_name}', error: {e!r}",
             exc_info=True,
         )
         return error_response(
             f"Failed to sample catalog table '{namespace}.{table_name}' "
-            f"in session '{id}': {exception_summary(e)}"
+            f"on system '{system}': {exception_summary(e)}"
         )
 
 

@@ -14,6 +14,7 @@ describe the wrapper categories that build on this module.
 from __future__ import annotations
 
 __all__ = [
+    "TABULAR_OUTPUT_BODY_FIELDS",
     "TABULAR_OUTPUT_FIELDS",
     "TABULAR_OUTPUT_NOTE",
     "acquire",
@@ -57,8 +58,7 @@ from deephaven_mcp.daemon_registry import DaemonRegistryEntry
 _BOOKKEEPING_KEYS = frozenset({"success", "isError"})
 """Envelope keys stripped from a tool payload before it is rendered."""
 
-TABULAR_OUTPUT_FIELDS: tuple[OutputField, ...] = (
-    OutputField("id", "string", "The session id, echoed back."),
+TABULAR_OUTPUT_BODY_FIELDS: tuple[OutputField, ...] = (
     OutputField("table_name", "string", "The table read, echoed back."),
     OutputField(
         "format",
@@ -84,12 +84,22 @@ TABULAR_OUTPUT_FIELDS: tuple[OutputField, ...] = (
         "data", "array", "The rows: one JSON object per row, keyed by column name."
     ),
 )
-"""Output fields of the tabular tools, shared by ``table data`` and ``catalog sample``.
+"""Tabular output fields after the identity field, shared by every tabular verb.
 
-Both commands render one envelope through :func:`call_and_echo_table`, so
-describing it once keeps the two help surfaces from drifting from each
-other and from the tools. ``catalog sample`` adds ``namespace``; see its
-own spec.
+The verbs differ in what identifies the read — ``table data`` echoes a
+session ``id``, ``catalog sample`` a ``system`` and ``namespace`` — so the
+identity fields are prepended per command and only the envelope below them
+is shared.
+"""
+
+TABULAR_OUTPUT_FIELDS: tuple[OutputField, ...] = (
+    OutputField("id", "string", "The session id, echoed back."),
+    *TABULAR_OUTPUT_BODY_FIELDS,
+)
+"""Output fields of the session-scoped tabular tools, used by ``table data``.
+
+System-scoped ``catalog sample`` builds its own identity fields on top of
+:data:`TABULAR_OUTPUT_BODY_FIELDS`; see its own spec.
 """
 
 TABULAR_OUTPUT_NOTE = (
