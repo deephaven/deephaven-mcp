@@ -226,18 +226,19 @@ async def fetch_web_client_data_table(
         f"[fetch_web_client_data_table] Requesting table: table={str(table)!r}, "
         f"operate_as={operate_as!r}, timeout_seconds={timeout_seconds}"
     )
-    plugin = await asyncio.to_thread(_open_plugin, session.wrapped)
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                _request_table,
-                plugin,
-                table,
-                operate_as,
-                timeout_seconds,
-            ),
-            timeout=timeout_seconds,
+    plugin: PluginClient | None = None
+
+    async def _open_and_request() -> Table:
+        nonlocal plugin
+        plugin = await asyncio.to_thread(_open_plugin, session.wrapped)
+        return await asyncio.to_thread(
+            _request_table, plugin, table, operate_as, timeout_seconds
         )
+
+    try:
+        # Opening the stream is inside the deadline: a stalled widget connect
+        # must fail on the same budget as a stalled read.
+        result = await asyncio.wait_for(_open_and_request(), timeout=timeout_seconds)
     except TimeoutError:
         # wait_for abandons the worker thread mid-read; only the plugin close
         # in the finally below ends that read, so the thread is not stranded.
@@ -262,7 +263,8 @@ async def fetch_web_client_data_table(
             f"{describe_exception_chain(e)}"
         ) from e
     finally:
-        await asyncio.to_thread(plugin.close)
+        if plugin is not None:
+            await asyncio.to_thread(plugin.close)
 
     _LOGGER.debug(f"[fetch_web_client_data_table] Received table: table={str(table)!r}")
     return result

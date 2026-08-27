@@ -325,8 +325,7 @@ Test the enterprise catalog tools. These are read-only operations. The two disco
 
 Setup:
 - Call list_systems. Pick an enterprise system and record its name. If no enterprise system is configured, report that and skip the rest.
-- Call sessions_list. If at least one session belongs to the recorded system, pick one and record its id. Sessions on any other system are not usable here — steps 3-5 must run against a worker on the same system whose catalog steps 1-2 list. If none belong to it, call session_enterprise_create with system set to the recorded system and session_name="mcp-test-catalog", and record the returned id.
-- Record whether you created a new session (true/false) — this determines cleanup.
+- Call session_enterprise_create with system set to the recorded system and session_name="mcp-test-catalog", and record the returned id. Always create a dedicated session rather than reusing one from sessions_list: steps 3-5 require a worker you administer, and a discovered session on the right system may still be one the configured principal can see but not administer, which would report a false failure.
 
 1. Call catalog_namespaces_list with the system from Setup. Verify success==true. Record the count of namespaces returned (may be 0 if no catalog is configured — that is acceptable).
 
@@ -340,7 +339,7 @@ Setup:
 
 6. Call catalog_tables_list with system="nonexistent_system_xyz". Verify success==false and the error names the unconfigured system.
 
-CLEANUP: If you created a new session in Setup, call session_enterprise_delete with that id. Verify success==true.
+CLEANUP: Call session_enterprise_delete with the id from Setup. Verify success==true.
 
 Report: PASS/FAIL for each numbered step (or SKIPPED with reason). Include namespace count and table count from steps 1 and 2.
 ```

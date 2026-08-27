@@ -211,6 +211,46 @@ async def test_fetch_web_client_data_table_propagates_open_failure():
 
 
 @pytest.mark.asyncio
+async def test_fetch_web_client_data_table_wraps_a_vendor_error_from_open():
+    """Opening the stream is guarded too, so PluginClient errors are wrapped."""
+    session = MagicMock()
+    session.wrapped = _session_with_factory()
+    with patch(
+        "deephaven_mcp.client._webclientdata._open_plugin",
+        side_effect=RuntimeError("connect refused"),
+    ):
+        with pytest.raises(WebClientDataError, match="Failed to fetch"):
+            await fetch_web_client_data_table(
+                session,
+                WebClientDataTable.CATALOG,
+                operate_as="iris",
+                timeout_seconds=30.0,
+            )
+
+
+@pytest.mark.asyncio
+async def test_fetch_web_client_data_table_times_out_on_a_stalled_open():
+    """A widget connect that never returns is bounded by the same deadline."""
+    session = MagicMock()
+    session.wrapped = _session_with_factory()
+    release = threading.Event()
+
+    def stalled_open(*_args, **_kwargs):
+        release.wait(timeout=10)
+        return DummyPluginClient([])
+
+    with patch("deephaven_mcp.client._webclientdata._open_plugin", stalled_open):
+        with pytest.raises(WebClientDataError, match="Timed out"):
+            await fetch_web_client_data_table(
+                session,
+                WebClientDataTable.CATALOG,
+                operate_as="iris",
+                timeout_seconds=0.05,
+            )
+    release.set()
+
+
+@pytest.mark.asyncio
 async def test_fetch_web_client_data_table_propagates_web_client_data_error():
     plugin = DummyPluginClient([])
     session = MagicMock()

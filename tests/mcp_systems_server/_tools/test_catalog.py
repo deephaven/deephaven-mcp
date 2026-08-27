@@ -58,6 +58,7 @@ def create_mock_arrow_meta_table(
 
 from deephaven_mcp import config
 from deephaven_mcp.client import CorePlusSession
+from deephaven_mcp.config.schema._enterprise import EnterpriseSettings
 from deephaven_mcp.mcp_systems_server._tools.catalog import (
     catalog_namespaces_list,
     catalog_table_sample,
@@ -362,6 +363,38 @@ async def test_catalog_namespaces_success_with_filters():
         call_kwargs = mock_get_namespaces.call_args[1]
         assert call_kwargs["filters"] == filters
         assert call_kwargs["distinct_namespaces"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool,arrow",
+    [
+        (catalog_tables_list, _mock_catalog_arrow([])),
+        (catalog_namespaces_list, MagicMock(nbytes=0)),
+    ],
+)
+async def test_catalog_listing_forwards_the_configured_widget_timeout(tool, arrow):
+    """The configured web_client_data timeout reaches the widget fetch verbatim."""
+    settings = EnterpriseSettings.model_validate(
+        {"timeouts": {"client": {"web_client_data_timeout_seconds": 7.5}}}
+    )
+    context = _catalog_context(MagicMock(spec=CorePlusSession))
+
+    with (
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.catalog.get_enterprise_settings",
+            return_value=settings,
+        ),
+        patch(
+            "deephaven_mcp.mcp_systems_server._tools.catalog.queries.get_catalog_table"
+        ) as mock_get_catalog,
+    ):
+        mock_get_catalog.return_value = (arrow, True)
+
+        result = await tool(context, "prod")
+
+    assert result["success"] is True
+    assert mock_get_catalog.call_args[1]["timeout_seconds"] == 7.5
 
 
 @pytest.mark.asyncio
