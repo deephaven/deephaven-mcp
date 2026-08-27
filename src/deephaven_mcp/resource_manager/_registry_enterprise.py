@@ -414,6 +414,37 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             )
             return session
 
+    async def effective_user(self) -> str:
+        """Return the identity this system's factory authenticated as.
+
+        Read from the authentication token, so it reflects the operate-as
+        identity for every credential kind. Per-user reads through the
+        ``WebClientData`` widget must name this identity.
+
+        Returns:
+            str: The effective user for this system.
+
+        Raises:
+            InternalError: If the registry has not been initialized, or if the
+                controller client has authenticated but reports no user.
+            Exception: Any exception raised while reaching the controller
+                propagates unchanged.
+        """
+        factory_instance = await self.factory_manager.get()
+        controller = factory_instance.controller_client
+        user = controller.effective_user
+        if user is None:
+            # The controller authenticates lazily; a ping forces the token.
+            await controller.ping()
+            user = controller.effective_user
+        if user is None:
+            raise InternalError(
+                f"Controller client for enterprise system "
+                f"'{self._system_name}' reports no effective user after "
+                f"authenticating; cannot perform a per-user read."
+            )
+        return user
+
     async def _close_web_client_data_session(self, session: CorePlusSession) -> None:
         """Close a WebClientData session, logging and swallowing any failure.
 

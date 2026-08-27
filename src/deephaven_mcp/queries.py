@@ -10,7 +10,7 @@ This module provides coroutine-compatible utility functions for querying Deephav
     - `get_catalog_table_partition_columns(session, namespace, table_name)`: Return partition column definitions (name/type) for a catalog table.
     - `get_catalog_table_partition_values(session, namespace, table_name, column)`: Return distinct values for a partition column, sorted descending.
     - `find_catalog_table_recent_partition(session, namespace, table_name)`: Find DQL filter strings for the most recent partition slice with data.
-    - `get_catalog_table(session)`: Retrieve the catalog table from an enterprise session with optional filtering and namespace extraction.
+    - `get_catalog_table(session)`: Retrieve one user's catalog table via the WebClientData widget, with optional filtering and namespace extraction.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
     - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
     - `get_programming_language_version(session)`: Get the programming language version string from a Deephaven session.
@@ -32,7 +32,12 @@ import pyarrow
 from pydeephaven.table import Table
 
 from deephaven_mcp._exceptions import InternalError, UnsupportedOperationError
-from deephaven_mcp.client import BaseSession, CorePlusSession
+from deephaven_mcp.client import (
+    BaseSession,
+    CorePlusSession,
+    WebClientDataTable,
+    fetch_web_client_data_table,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -994,25 +999,33 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
 async def get_catalog_table(
     session: BaseSession,
     *,
+    operate_as: str,
+    timeout_seconds: float,
     max_rows: int | None,
     filters: list[str] | None = None,
     distinct_namespaces: bool,
 ) -> tuple[pyarrow.Table, bool]:
     """
-    Asynchronously retrieve the catalog table from a Deephaven Enterprise (Core+) session.
+    Asynchronously retrieve the catalog table for one user from a WebClientData session.
 
-    The catalog table contains metadata about tables accessible via the `deephaven_enterprise.database`
-    package (the `db` variable) in an enterprise session. This includes tables that can be accessed
-    using methods like `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`.
-    The catalog includes table names, namespaces, schemas, and other descriptive information. This
-    function is only available for enterprise sessions (CorePlusSession).
+    The catalog table lists the tables accessible via the `deephaven_enterprise.database`
+    package (the `db` variable), e.g. `db.live_table(namespace, table_name)` or
+    `db.historical_table(namespace, table_name)`. It is fetched through the
+    ``WebClientData`` table-factory widget, which builds it with ``operate_as``'s
+    ACLs applied, so ordinary users see their own visible subset. Fetching the
+    catalog directly off a shared worker instead would be refused for anyone who
+    does not administer that worker.
 
     For more information, see:
     - https://deephaven.io
     - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
 
     Args:
-        session (BaseSession): An active Deephaven enterprise session. Must be a CorePlusSession.
+        session (BaseSession): An active session connected to the system's
+                               ``WebClientData`` persistent query. Must be a
+                               CorePlusSession.
+        operate_as (str): Identity whose ACLs the catalog is built with.
+        timeout_seconds (float): Budget for the widget request/response round-trip.
         max_rows (int | None): Maximum number of rows to retrieve. Must be specified as keyword argument.
                                Set to None to retrieve the entire catalog (use with caution for large catalogs).
                                Set to a positive integer to limit rows (recommended for production use).
@@ -1029,7 +1042,8 @@ async def get_catalog_table(
 
     Raises:
         UnsupportedOperationError: If the session is not an enterprise (Core+) session.
-        Exception: If the catalog cannot be retrieved, filters are invalid, or conversion to Arrow fails.
+        WebClientDataError: If the widget cannot produce the catalog table.
+        Exception: If filters are invalid or conversion to Arrow fails.
 
     Warning:
         Setting max_rows=None on large enterprise deployments with thousands of tables can cause
@@ -1038,41 +1052,30 @@ async def get_catalog_table(
     Examples:
         # Get first 1000 catalog entries
         catalog, is_complete = await get_catalog_table(
-            session, max_rows=1000, distinct_namespaces=False
+            session,
+            operate_as="jdoe",
+            timeout_seconds=30.0,
+            max_rows=1000,
+            distinct_namespaces=False,
         )
 
         # Filter by namespace
         catalog, is_complete = await get_catalog_table(
             session,
+            operate_as="jdoe",
+            timeout_seconds=30.0,
             max_rows=1000,
             filters=["Namespace = `market_data`"],
             distinct_namespaces=False,
         )
 
-        # Filter by table name pattern (case-sensitive contains)
-        catalog, is_complete = await get_catalog_table(
-            session,
-            max_rows=1000,
-            filters=["TableName.contains(`price`)"],
-            distinct_namespaces=False,
-        )
-
-        # Multiple filters (AND logic)
-        catalog, is_complete = await get_catalog_table(
-            session,
-            max_rows=1000,
-            filters=["Namespace = `market_data`", "TableName.contains(`daily`)"],
-            distinct_namespaces=False,
-        )
-
         # Get distinct namespaces only
         namespaces, is_complete = await get_catalog_table(
-            session, max_rows=1000, distinct_namespaces=True
-        )
-
-        # Full catalog retrieval (dangerous for large deployments)
-        catalog, is_complete = await get_catalog_table(
-            session, max_rows=None, distinct_namespaces=False
+            session,
+            operate_as="jdoe",
+            timeout_seconds=30.0,
+            max_rows=1000,
+            distinct_namespaces=True,
         )
 
     Note:
@@ -1080,12 +1083,13 @@ async def get_catalog_table(
         - Filters use Deephaven query language syntax (see https://deephaven.io/core/docs/how-to-guides/use-filters/)
         - String literals in filters must use backticks (`), not single or double quotes
         - This function is intended for internal use by MCP tools
-        - Only works with enterprise (Core+) sessions that have catalog_table() method
+        - Catalog columns are ``Namespace``, ``NamespaceSet``, and ``TableName``
     """
     from deephaven_mcp.client import CorePlusSession
 
     _LOGGER.debug(
-        f"[queries:get_catalog_table] Retrieving catalog table from enterprise session (max_rows={max_rows}, filters={filters})..."
+        f"[queries:get_catalog_table] Retrieving catalog table via WebClientData "
+        f"(operate_as={operate_as!r}, max_rows={max_rows}, filters={filters})..."
     )
 
     # Check if the session is an enterprise session
@@ -1098,8 +1102,12 @@ async def get_catalog_table(
             f"but session is {type(session).__name__}."
         )
 
-    # Get the catalog table
-    catalog_table = await session.catalog_table()
+    catalog_table = await fetch_web_client_data_table(
+        session,
+        WebClientDataTable.CATALOG,
+        operate_as=operate_as,
+        timeout_seconds=timeout_seconds,
+    )
     _LOGGER.debug("[queries:get_catalog_table] Catalog table retrieved successfully.")
 
     # Handle distinct namespaces case

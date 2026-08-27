@@ -98,6 +98,7 @@ def test_enterprise_client_model_fields_set():
         "subscribe_timeout_seconds",
         "pq_management_timeout_seconds",
         "pq_state_change_timeout_seconds",
+        "web_client_data_timeout_seconds",
         "no_wait_seconds",
     }
 

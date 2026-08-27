@@ -2,8 +2,10 @@
 
 Verbs: ``tables``, ``namespaces``, ``schema``, ``sample``.
 
-Enterprise (Core+) only — these operate on an enterprise system's
-catalog (database). The SYSTEM must name a configured enterprise system.
+Enterprise (Core+) only. ``tables`` and ``namespaces`` name a SYSTEM and read
+the listing through that system's shared ``WebClientData`` persistent query;
+``schema`` and ``sample`` name a session ID, because reading a catalog table's
+schema or rows requires a worker the caller administers.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import click
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
-    TABULAR_OUTPUT_BODY_FIELDS,
+    TABULAR_OUTPUT_FIELDS,
     TABULAR_OUTPUT_NOTE,
     call_and_echo,
     call_and_echo_field,
@@ -45,19 +47,20 @@ def catalog() -> None:
 
     Enterprise (Core+) only. 'tables' and 'namespaces' enumerate the
     catalog; 'schema' returns column definitions; 'sample' returns a few
-    rows of a catalog table. All take an enterprise system name and
-    auto-start the daemon unless --no-auto-start is set. The catalog is
-    the system's stored data, shared by every user — these verbs read it
-    but do not change it.
+    rows of a catalog table. All auto-start the daemon unless
+    --no-auto-start is set, and none of them change anything.
 
-    These verbs need no worker of your own: they read through the
-    system's shared 'WebClientData' persistent query, so the result never
-    depends on which PQ happens to be running.
+    The two halves address differently. 'tables' and 'namespaces' take a
+    SYSTEM and need no worker of your own: they read through the system's
+    shared 'WebClientData' persistent query, which applies your own ACLs, so
+    the listing shows what you may see. 'schema' and 'sample' take a session
+    ID, because reading a catalog table's schema or rows is a data access the
+    server allows only on a worker you administer.
 
-    'tables' and 'namespaces' fall back to the sticky context system
-    when their system is omitted; 'schema' and 'sample' cannot, because a
-    namespace and table name follow it — pass their system explicitly
-    (run 'context show' to see the current default).
+    'tables' and 'namespaces' fall back to the sticky context system when
+    their SYSTEM is omitted; 'schema' and 'sample' cannot fall back, because a
+    namespace and table name follow the id (run 'context show' to see the
+    current defaults).
     """
 
 
@@ -263,7 +266,7 @@ async def catalog_namespaces(
 _OUTPUT_SCHEMA = OutputSpec(
     "object",
     (
-        OutputField("system", "string", "The enterprise system name, echoed back."),
+        OutputField("id", "string", "The session id, echoed back."),
         OutputField("namespace", "string", "The catalog namespace."),
         OutputField("table_name", "string", "The table name."),
         OutputField(
@@ -287,12 +290,14 @@ _OUTPUT_SCHEMA = OutputSpec(
         description=(
             "Enterprise (Core+) only. Returns the schema (column names and "
             "types) for a single catalog table. Discover namespace/table pairs "
-            "with 'catalog tables' first."
+            "with 'catalog tables' first. Takes a session id, not a system "
+            "name: reading a catalog table is a data access the server allows "
+            "only on a worker you administer."
         ),
         arguments=(
             HelpEntry(
-                "SYSTEM",
-                "Enterprise system name. Run 'system list'. Required — with "
+                "ID",
+                "Enterprise session id. Run 'session list'. Required — with "
                 "NAMESPACE and TABLE_NAME following it, it cannot fall back "
                 f"to the sticky context. {CONTEXT_HINT}",
             ),
@@ -309,33 +314,33 @@ _OUTPUT_SCHEMA = OutputSpec(
         ),
         output=_OUTPUT_SCHEMA,
         examples=(
-            "$ dhcli catalog schema prod Market Trades",
-            "$ dhcli catalog schema prod Market Trades "
+            "$ dhcli catalog schema enterprise:prod:rpt Market Trades",
+            "$ dhcli catalog schema enterprise:prod:rpt Market Trades "
             "| jq -r '.schema[] | select(.column_type) | .name'",
         ),
         see_also=(
             "dhcli catalog tables SYSTEM",
-            "dhcli catalog sample SYSTEM NAMESPACE TABLE",
+            "dhcli catalog sample ID NAMESPACE TABLE",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("system")
+@click.argument("id")
 @click.argument("namespace")
 @click.argument("table_name")
 @click.pass_obj
 @run_async
 async def catalog_schema(
     runtime: Runtime,
-    system: str,
+    id: str,
     namespace: str,
     table_name: str,
 ) -> None:
     """Show column definitions for one catalog table."""
     arguments: dict[str, Any] = {
-        "system": system,
+        "id": id,
         "namespace": namespace,
         "table_name": table_name,
     }
@@ -354,9 +359,8 @@ async def catalog_schema(
 _OUTPUT_TABULAR = OutputSpec(
     "object",
     (
-        OutputField("system", "string", "The enterprise system name, echoed back."),
+        *TABULAR_OUTPUT_FIELDS,
         OutputField("namespace", "string", "The catalog namespace, echoed back."),
-        *TABULAR_OUTPUT_BODY_FIELDS,
     ),
     note=TABULAR_OUTPUT_NOTE,
 )
@@ -377,12 +381,14 @@ _OUTPUT_TABULAR = OutputSpec(
             "partition columns and samples the most recent partition holding "
             "data; passing --filter replaces that with your own expressions. "
             "'catalog schema' marks partition columns with column_type "
-            "'Partitioning'."
+            "'Partitioning'. Takes a session id, not a system name: sampling "
+            "a catalog table is a data access the server allows only on a "
+            "worker you administer."
         ),
         arguments=(
             HelpEntry(
-                "SYSTEM",
-                "Enterprise system name. Run 'system list'. Required — with "
+                "ID",
+                "Enterprise session id. Run 'session list'. Required — with "
                 "NAMESPACE and TABLE_NAME following it, it cannot fall back "
                 f"to the sticky context. {CONTEXT_HINT}",
             ),
@@ -394,21 +400,21 @@ _OUTPUT_TABULAR = OutputSpec(
         ),
         output=_OUTPUT_TABULAR,
         examples=(
-            "$ dhcli catalog sample prod Market Trades",
-            "$ dhcli catalog sample prod Market Trades --max-rows 20 --tail",
-            "$ dhcli catalog sample prod Market Trades "
+            "$ dhcli catalog sample enterprise:prod:rpt Market Trades",
+            "$ dhcli catalog sample enterprise:prod:rpt Market Trades --max-rows 20 --tail",
+            "$ dhcli catalog sample enterprise:prod:rpt Market Trades "
             "| jq '.row_count, .is_complete'",
         ),
         see_also=(
             "dhcli catalog tables SYSTEM",
-            "dhcli catalog schema SYSTEM NAMESPACE TABLE",
+            "dhcli catalog schema ID NAMESPACE TABLE",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
         error_codes=wrapper_error_codes(),
     ),
 )
-@click.argument("system")
+@click.argument("id")
 @click.argument("namespace")
 @click.argument("table_name")
 @click.option(
@@ -435,7 +441,7 @@ _OUTPUT_TABULAR = OutputSpec(
 @run_async
 async def catalog_sample(
     runtime: Runtime,
-    system: str,
+    id: str,
     namespace: str,
     table_name: str,
     max_rows: int | None,
@@ -444,7 +450,7 @@ async def catalog_sample(
 ) -> None:
     """Sample rows from a catalog table."""
     arguments: dict[str, Any] = {
-        "system": system,
+        "id": id,
         "namespace": namespace,
         "table_name": table_name,
         "head": head,

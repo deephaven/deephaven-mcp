@@ -982,13 +982,31 @@ async def test_get_programming_language_version_table_failure():
 
 # ===== get_catalog_table tests =====
 
+_OPERATE_AS = "jdoe"
+"""Identity the catalog is fetched for in these tests."""
+
+_WIDGET_TIMEOUT = 30.0
+"""Widget round-trip budget passed by these tests."""
+
+
+def _patch_catalog_fetch(result=None, *, side_effect=None):
+    """Patch the WebClientData widget fetch that get_catalog_table calls."""
+    return patch(
+        "deephaven_mcp.queries.fetch_web_client_data_table",
+        new=AsyncMock(return_value=result, side_effect=side_effect),
+    )
+
+
+async def _fake_to_thread(fn, *args, **kwargs):
+    """Run the callable inline so table operations stay synchronous in tests."""
+    return fn(*args, **kwargs)
+
 
 @pytest.mark.asyncio
 async def test_get_catalog_table_success_no_filters():
     """Test get_catalog_table with no filters and row limit"""
     from deephaven_mcp.client import CorePlusSession
 
-    # Create mock catalog table
     catalog_table_mock = MagicMock()
     catalog_table_mock.size = 5000
     probe_table_mock = MagicMock()
@@ -1000,20 +1018,51 @@ async def test_get_catalog_table_success_no_filters():
         side_effect=[probe_table_mock, limited_table_mock]
     )
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock) as fetch_mock,
+    ):
         result_table, is_complete = await get_catalog_table(
-            session_mock, max_rows=1000, filters=None, distinct_namespaces=False
+            session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=1000,
+            filters=None,
+            distinct_namespaces=False,
         )
         assert result_table is arrow_mock
         assert is_complete is False  # probe_size 1001 > 1000
-        session_mock.catalog_table.assert_awaited_once()
+        fetch_mock.assert_awaited_once()
+        assert fetch_mock.await_args[1]["operate_as"] == _OPERATE_AS
+        assert fetch_mock.await_args[1]["timeout_seconds"] == _WIDGET_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_get_catalog_table_requests_the_catalog_table():
+    """get_catalog_table asks the widget for the per-user catalog table."""
+    from deephaven_mcp.client import CorePlusSession, WebClientDataTable
+
+    catalog_table_mock = MagicMock()
+    catalog_table_mock.size = 1
+    catalog_table_mock.head = lambda n: catalog_table_mock
+    arrow_mock = MagicMock(spec=pyarrow.Table)
+    catalog_table_mock.to_arrow = lambda: arrow_mock
+
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock) as fetch_mock,
+    ):
+        await get_catalog_table(
+            MagicMock(spec=CorePlusSession),
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=10,
+            distinct_namespaces=False,
+        )
+
+    assert fetch_mock.await_args[0][1] is WebClientDataTable.CATALOG
 
 
 @pytest.mark.asyncio
@@ -1021,34 +1070,32 @@ async def test_get_catalog_table_success_with_filters():
     """Test get_catalog_table with filters applied"""
     from deephaven_mcp.client import CorePlusSession
 
-    # Create mock filtered table
     filtered_table_mock = MagicMock()
     filtered_table_mock.size = 50  # probe size 50 < max_rows=1000
     filtered_table_mock.head = lambda n: filtered_table_mock
     arrow_mock = MagicMock(spec=pyarrow.Table)
     filtered_table_mock.to_arrow = lambda: arrow_mock
 
-    # Create mock catalog table with where method
     catalog_table_mock = MagicMock()
     catalog_table_mock.where = lambda filters: filtered_table_mock
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock) as fetch_mock,
+    ):
         result_table, is_complete = await get_catalog_table(
             session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
             max_rows=1000,
             filters=["Namespace = `market_data`", "TableName.contains(`price`)"],
             distinct_namespaces=False,
         )
         assert result_table is arrow_mock
         assert is_complete is True  # 50 <= 1000, so complete
-        session_mock.catalog_table.assert_awaited_once()
+        fetch_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1056,25 +1103,26 @@ async def test_get_catalog_table_success_full_catalog():
     """Test get_catalog_table with max_rows=None (full catalog)"""
     from deephaven_mcp.client import CorePlusSession
 
-    # Create mock catalog table
     catalog_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     catalog_table_mock.to_arrow = lambda: arrow_mock
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock),
+    ):
         result_table, is_complete = await get_catalog_table(
-            session_mock, max_rows=None, filters=None, distinct_namespaces=False
+            session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=None,
+            filters=None,
+            distinct_namespaces=False,
         )
         assert result_table is arrow_mock
         assert is_complete is True
-        session_mock.catalog_table.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1082,29 +1130,38 @@ async def test_get_catalog_table_not_enterprise_session():
     """Test get_catalog_table raises error for non-enterprise session"""
     from deephaven_mcp.client import BaseSession
 
-    # Create mock community session (not CorePlusSession)
     session_mock = MagicMock(spec=BaseSession)
 
     with pytest.raises(
         UnsupportedOperationError,
         match="get_catalog_table only supports enterprise.*sessions",
     ):
-        await get_catalog_table(session_mock, max_rows=1000, distinct_namespaces=False)
+        await get_catalog_table(
+            session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=1000,
+            distinct_namespaces=False,
+        )
 
 
 @pytest.mark.asyncio
 async def test_get_catalog_table_catalog_retrieval_error():
-    """Test get_catalog_table handles catalog_table() errors"""
+    """Test get_catalog_table surfaces widget fetch failures"""
+    from deephaven_mcp._exceptions import WebClientDataError
     from deephaven_mcp.client import CorePlusSession
 
-    # Create mock session that fails to get catalog
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(
-        side_effect=RuntimeError("Catalog not available")
-    )
 
-    with pytest.raises(RuntimeError, match="Catalog not available"):
-        await get_catalog_table(session_mock, max_rows=1000, distinct_namespaces=False)
+    with _patch_catalog_fetch(side_effect=WebClientDataError("Catalog not available")):
+        with pytest.raises(WebClientDataError, match="Catalog not available"):
+            await get_catalog_table(
+                session_mock,
+                operate_as=_OPERATE_AS,
+                timeout_seconds=_WIDGET_TIMEOUT,
+                max_rows=1000,
+                distinct_namespaces=False,
+            )
 
 
 @pytest.mark.asyncio
@@ -1112,23 +1169,22 @@ async def test_get_catalog_table_filter_error():
     """Test get_catalog_table handles invalid filter syntax"""
     from deephaven_mcp.client import CorePlusSession
 
-    # Create mock catalog table with where method that raises error
     catalog_table_mock = MagicMock()
     catalog_table_mock.where = MagicMock(
         side_effect=RuntimeError("Invalid filter syntax")
     )
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock),
+    ):
         with pytest.raises(RuntimeError, match="Invalid filter syntax"):
             await get_catalog_table(
                 session_mock,
+                operate_as=_OPERATE_AS,
+                timeout_seconds=_WIDGET_TIMEOUT,
                 max_rows=1000,
                 filters=["InvalidFilter!!!"],
                 distinct_namespaces=False,
@@ -1144,31 +1200,30 @@ async def test_get_catalog_table_distinct_namespaces_success_no_filters():
     from deephaven_mcp.client import CorePlusSession
     from deephaven_mcp.queries import get_catalog_table
 
-    # Create mock namespace table (after sort)
     sorted_namespace_table_mock = MagicMock()
     sorted_namespace_table_mock.size = 50  # probe size 50 < max_rows=1000
     sorted_namespace_table_mock.head = lambda n: sorted_namespace_table_mock
     arrow_mock = MagicMock(spec=pyarrow.Table)
     sorted_namespace_table_mock.to_arrow = lambda: arrow_mock
 
-    # Create mock namespace table (after select_distinct)
     namespace_table_mock = MagicMock()
     namespace_table_mock.sort = lambda col: sorted_namespace_table_mock
 
-    # Create mock catalog table with select_distinct
     catalog_table_mock = MagicMock()
     catalog_table_mock.select_distinct = lambda col: namespace_table_mock
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock),
+    ):
         result_table, is_complete = await get_catalog_table(
-            session_mock, max_rows=1000, distinct_namespaces=True
+            session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=1000,
+            distinct_namespaces=True,
         )
         assert result_table is arrow_mock
         assert is_complete is True  # 50 <= 1000, so complete
@@ -1180,35 +1235,31 @@ async def test_get_catalog_namespaces_success_with_filters():
     from deephaven_mcp.client import CorePlusSession
     from deephaven_mcp.queries import get_catalog_table
 
-    # Create mock filtered namespace table (after where)
     filtered_namespace_table_mock = MagicMock()
     filtered_namespace_table_mock.size = 10  # probe size 10 < max_rows=1000
     filtered_namespace_table_mock.head = lambda n: filtered_namespace_table_mock
     arrow_mock = MagicMock(spec=pyarrow.Table)
     filtered_namespace_table_mock.to_arrow = lambda: arrow_mock
 
-    # Create mock sorted namespace table (after sort)
     sorted_namespace_table_mock = MagicMock()
     sorted_namespace_table_mock.where = lambda filters: filtered_namespace_table_mock
 
-    # Create mock namespace table (after select_distinct)
     namespace_table_mock = MagicMock()
     namespace_table_mock.sort = lambda col: sorted_namespace_table_mock
 
-    # Create mock catalog table with select_distinct
     catalog_table_mock = MagicMock()
     catalog_table_mock.select_distinct = lambda col: namespace_table_mock
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock),
+    ):
         result_table, is_complete = await get_catalog_table(
             session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
             max_rows=1000,
             filters=["TableName.contains(`daily`)"],
             distinct_namespaces=True,
@@ -1223,29 +1274,28 @@ async def test_get_catalog_namespaces_success_full():
     from deephaven_mcp.client import CorePlusSession
     from deephaven_mcp.queries import get_catalog_table
 
-    # Create mock sorted namespace table
     sorted_namespace_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     sorted_namespace_table_mock.to_arrow = lambda: arrow_mock
 
-    # Create mock namespace table (after select_distinct)
     namespace_table_mock = MagicMock()
     namespace_table_mock.sort = lambda col: sorted_namespace_table_mock
 
-    # Create mock catalog table
     catalog_table_mock = MagicMock()
     catalog_table_mock.select_distinct = lambda col: namespace_table_mock
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock),
+    ):
         result_table, is_complete = await get_catalog_table(
-            session_mock, max_rows=None, distinct_namespaces=True
+            session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=None,
+            distinct_namespaces=True,
         )
         assert result_table is arrow_mock
         assert is_complete is True
@@ -1257,38 +1307,36 @@ async def test_get_catalog_namespaces_incomplete():
     from deephaven_mcp.client import CorePlusSession
     from deephaven_mcp.queries import get_catalog_table
 
-    # Create mock probe table and limited table (head called twice: probe then actual limit)
     probe_table_mock = MagicMock()
     probe_table_mock.size = 1001  # probe size 1001 > max_rows=1000
     limited_table_mock = MagicMock()
     arrow_mock = MagicMock(spec=pyarrow.Table)
     limited_table_mock.to_arrow = lambda: arrow_mock
 
-    # Create mock sorted namespace table with more rows than max_rows
     sorted_namespace_table_mock = MagicMock()
     sorted_namespace_table_mock.size = 2000
     sorted_namespace_table_mock.head = MagicMock(
         side_effect=[probe_table_mock, limited_table_mock]
     )
 
-    # Create mock namespace table (after select_distinct)
     namespace_table_mock = MagicMock()
     namespace_table_mock.sort = lambda col: sorted_namespace_table_mock
 
-    # Create mock catalog table
     catalog_table_mock = MagicMock()
     catalog_table_mock.select_distinct = lambda col: namespace_table_mock
 
-    # Create mock session
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(return_value=catalog_table_mock)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with patch("deephaven_mcp.queries.asyncio.to_thread", new=fake_to_thread):
+    with (
+        patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
+        _patch_catalog_fetch(catalog_table_mock),
+    ):
         result_table, is_complete = await get_catalog_table(
-            session_mock, max_rows=1000, distinct_namespaces=True
+            session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=1000,
+            distinct_namespaces=True,
         )
         assert result_table is arrow_mock
         assert is_complete is False  # probe_size 1001 > 1000
@@ -1300,31 +1348,39 @@ async def test_get_catalog_namespaces_not_enterprise_session():
     from deephaven_mcp._exceptions import UnsupportedOperationError
     from deephaven_mcp.queries import get_catalog_table
 
-    # Create mock non-enterprise session
     session_mock = MagicMock()
-    session_mock.catalog_table = AsyncMock()
 
     with pytest.raises(
         UnsupportedOperationError,
         match="get_catalog_table only supports enterprise.*sessions",
     ):
-        await get_catalog_table(session_mock, max_rows=1000, distinct_namespaces=True)
+        await get_catalog_table(
+            session_mock,
+            operate_as=_OPERATE_AS,
+            timeout_seconds=_WIDGET_TIMEOUT,
+            max_rows=1000,
+            distinct_namespaces=True,
+        )
 
 
 @pytest.mark.asyncio
 async def test_get_catalog_namespaces_catalog_retrieval_error():
-    """Test get_catalog_namespaces handles catalog retrieval errors"""
+    """Test get_catalog_namespaces surfaces widget fetch failures"""
+    from deephaven_mcp._exceptions import WebClientDataError
     from deephaven_mcp.client import CorePlusSession
     from deephaven_mcp.queries import get_catalog_table
 
-    # Create mock session that fails to retrieve catalog
     session_mock = MagicMock(spec=CorePlusSession)
-    session_mock.catalog_table = AsyncMock(
-        side_effect=RuntimeError("Catalog not available")
-    )
 
-    with pytest.raises(RuntimeError, match="Catalog not available"):
-        await get_catalog_table(session_mock, max_rows=1000, distinct_namespaces=True)
+    with _patch_catalog_fetch(side_effect=WebClientDataError("Catalog not available")):
+        with pytest.raises(WebClientDataError, match="Catalog not available"):
+            await get_catalog_table(
+                session_mock,
+                operate_as=_OPERATE_AS,
+                timeout_seconds=_WIDGET_TIMEOUT,
+                max_rows=1000,
+                distinct_namespaces=True,
+            )
 
 
 # ===== get_catalog_meta_table tests =====

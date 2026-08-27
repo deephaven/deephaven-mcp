@@ -1552,3 +1552,49 @@ async def test_close_releases_cached_web_client_data_session():
 
     session.close.assert_awaited_once()
     assert registry._web_client_data_session is None
+
+
+@pytest.mark.asyncio
+async def test_effective_user_returns_the_controller_identity():
+    registry = _make_initialized_registry()
+    controller = MagicMock()
+    controller.effective_user = "jdoe"
+    factory_instance = MagicMock()
+    factory_instance.controller_client = controller
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+
+    assert await registry.effective_user() == "jdoe"
+
+
+@pytest.mark.asyncio
+async def test_effective_user_pings_when_not_yet_authenticated():
+    """A controller that has not authenticated is pinged, then re-read."""
+    registry = _make_initialized_registry()
+    controller = MagicMock()
+    controller.effective_user = None
+
+    async def _ping():
+        controller.effective_user = "jdoe"
+        return True
+
+    controller.ping = AsyncMock(side_effect=_ping)
+    factory_instance = MagicMock()
+    factory_instance.controller_client = controller
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+
+    assert await registry.effective_user() == "jdoe"
+    controller.ping.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_effective_user_raises_when_still_unknown_after_ping():
+    registry = _make_initialized_registry()
+    controller = MagicMock()
+    controller.effective_user = None
+    controller.ping = AsyncMock(return_value=True)
+    factory_instance = MagicMock()
+    factory_instance.controller_client = controller
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+
+    with pytest.raises(InternalError, match="no effective user"):
+        await registry.effective_user()

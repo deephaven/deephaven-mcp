@@ -117,6 +117,12 @@ class EnterpriseClientTimeouts(StrictSchema):
     STOPPED after stop). Whole-second resolution; sub-second timing
     is not supported."""
 
+    web_client_data_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
+    """Timeout (seconds) for the ``WebClientData`` table-factory widget to
+    return a requested per-user table (such as the data catalog). Covers the
+    widget request/response round-trip only, not the session connect to the
+    ``WebClientData`` persistent query."""
+
     no_wait_seconds: Annotated[float, Field(ge=0)] = 0.0
     """Wait window (seconds) for controller subscription-map lookups
     (``get_serial_for_name`` / ``get``). The default ``0.0`` makes the

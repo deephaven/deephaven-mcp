@@ -588,28 +588,32 @@ dhcli table data community:community:dev trades | jq '.row_count, .is_complete'
 
 ### `dhcli catalog`
 
-**Enterprise (Core+) only.** Queries an enterprise system's catalog
-(database); `SYSTEM` must name a configured enterprise system.
+**Enterprise (Core+) only.** Queries an enterprise data catalog (database).
+The two halves of this noun address differently.
 
-These verbs need no worker of your own. The catalog is system-level data,
-identical from every worker on the system, so they read it through the
-system's shared `WebClientData` persistent query rather than through a
-session you name — the result never depends on which PQ happens to be
-running. `WebClientData` must be running on the system.
+`tables` and `namespaces` take a `SYSTEM` and need no worker of your own: they
+read the listing through the system's shared `WebClientData` persistent query,
+which builds the catalog with *your own* ACLs applied — so the listing shows
+what you may see, and works for ordinary users. `WebClientData` must be
+running on the system.
 
-| Verb                                      | Purpose                                                                               |
-|-------------------------------------------|---------------------------------------------------------------------------------------|
-| `tables [SYSTEM]`                         | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
-| `namespaces [SYSTEM]`                     | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
-| `schema <system> <namespace> <table>`     | Column definitions for one catalog table: name and type per column, plus `column_type` where meaningful. Wraps `catalog_table_schema`. |
-| `sample <system> <namespace> <table>`     | Sample rows. `--max-rows` (default 100), `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
+`schema` and `sample` take a session `ID`. Reading a catalog table's schema or
+rows is a data access, and the server admits that only on a worker you
+administer; asking the shared worker for it is refused with a permission
+error. Point them at a session you own.
 
-`schema` and `sample` require an explicit `SYSTEM` (a namespace and
-table name follow it), while `tables` and `namespaces` fall back to the
-sticky context system.
+| Verb                                  | Purpose                                                                               |
+|---------------------------------------|---------------------------------------------------------------------------------------|
+| `tables [SYSTEM]`                     | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
+| `namespaces [SYSTEM]`                 | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
+| `schema <id> <namespace> <table>`     | Column definitions for one catalog table: name and type per column, plus `column_type` where meaningful. Wraps `catalog_table_schema`. |
+| `sample <id> <namespace> <table>`     | Sample rows. `--max-rows` (default 100), `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
 
-`sample` is a preview, not a query — it reads on shared infrastructure,
-so keep `--max-rows` small. Partitioned tables would return
+`tables` and `namespaces` fall back to the sticky context system when `SYSTEM`
+is omitted. `schema` and `sample` cannot fall back, because a namespace and
+table name follow the id.
+
+`sample` is a preview, not a query. Partitioned tables would return
 nothing without a partition filter, so with no `--filter` the tool
 detects the table's partition columns and samples the most recent
 partition holding data; passing `--filter` replaces that with your own
@@ -618,8 +622,9 @@ expressions. `catalog schema` marks partition columns with
 
 ```bash
 dhcli catalog tables prod
-dhcli catalog schema prod Market Trades
-dhcli catalog sample prod Market Trades --max-rows 20
+dhcli catalog namespaces prod
+dhcli catalog schema enterprise:prod:42 Market Trades
+dhcli catalog sample enterprise:prod:42 Market Trades --max-rows 20
 ```
 
 ### `dhcli pq`
@@ -791,9 +796,9 @@ enabling the setting never breaks a script. In practice an interactive
 human gets the prompt and a non-interactive caller does not.
 
 Five verbs keep a **required** leading positional despite the fallback:
-`table schema`, `table data` (each an `ID`), and `catalog schema`,
-`catalog sample`, `pq name-to-id` (each a `SYSTEM`). Each takes a further
-required positional after it, and a leading optional argument followed by a
+`table schema`, `table data`, `catalog schema`, `catalog sample` (each an
+`ID`), and `pq name-to-id` (a `SYSTEM`). Each takes a further required
+positional after it, and a leading optional argument followed by a
 required one is ambiguous to parse, so the first stays mandatory. The
 verb tables above mark this difference: bracketed (`[ID]`) means the
 sticky context can supply it, angled (`<id>`) means you must pass it.
