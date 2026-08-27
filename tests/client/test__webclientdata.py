@@ -1,7 +1,7 @@
 """Tests for deephaven_mcp.client._webclientdata."""
 
-import asyncio
 import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,14 +10,15 @@ from deephaven_mcp._exceptions import WebClientDataError
 
 # Table is bound from the module under test: tests/client/test__session.py
 # replaces sys.modules["pydeephaven.table"], so importing it directly here can
-# yield a different class than the one _fetch_blocking's isinstance check uses.
+# yield a different class than the one _request_table's isinstance check uses.
 from deephaven_mcp.client._webclientdata import (
     WEB_CLIENT_DATA_PQ,
     Table,
     WebClientDataTable,
-    _fetch_blocking,
+    _open_plugin,
     _refusal_reason,
     _request_payload,
+    _request_table,
     fetch_web_client_data_table,
 )
 
@@ -104,78 +105,66 @@ def test_refusal_reason_renders_non_json_payload():
     assert "not json" in _refusal_reason(b"not json")
 
 
-# ===== _fetch_blocking =====
+# ===== _open_plugin =====
 
 
-def test_fetch_blocking_returns_exported_table():
+def test_open_plugin_missing_factory_field():
+    session = MagicMock()
+    session.exportable_objects = {}
+    with pytest.raises(WebClientDataError, match="does not export a table factory"):
+        _open_plugin(session)
+
+
+def test_open_plugin_returns_connected_client():
+    plugin = DummyPluginClient([])
+    with patch("deephaven_mcp.client._webclientdata.PluginClient", return_value=plugin):
+        assert _open_plugin(_session_with_factory()) is plugin
+
+
+# ===== _request_table =====
+
+
+def test_request_table_returns_exported_table():
     table = MagicMock(spec=Table)
     plugin = DummyPluginClient([(b"", _exported(table))])
-    with patch("deephaven_mcp.client._webclientdata.PluginClient", return_value=plugin):
-        result = _fetch_blocking(
-            _session_with_factory(), WebClientDataTable.CATALOG, "iris", 30.0
-        )
+    result = _request_table(plugin, WebClientDataTable.CATALOG, "iris", 30.0)
     assert result is table
-    assert plugin.closed
     payload = json.loads(plugin.req_stream.writes[0][0])
     assert payload["tableNames"] == ["catalog"]
 
 
-def test_fetch_blocking_skips_responses_without_payload_or_exports():
+def test_request_table_skips_responses_without_payload_or_exports():
     table = MagicMock(spec=Table)
     plugin = DummyPluginClient([(b"", []), (b"", _exported(table))])
-    with patch("deephaven_mcp.client._webclientdata.PluginClient", return_value=plugin):
-        result = _fetch_blocking(
-            _session_with_factory(), WebClientDataTable.CATALOG, "iris", 30.0
-        )
+    result = _request_table(plugin, WebClientDataTable.CATALOG, "iris", 30.0)
     assert result is table
 
 
-def test_fetch_blocking_missing_factory_field():
-    session = MagicMock()
-    session.exportable_objects = {}
-    with pytest.raises(WebClientDataError, match="does not export a table factory"):
-        _fetch_blocking(session, WebClientDataTable.CATALOG, "iris", 30.0)
-
-
-def test_fetch_blocking_surfaces_a_refusal():
+def test_request_table_surfaces_a_refusal():
     """A payload with no exports is the server refusing; it must not hang."""
     refusal = json.dumps({"id": "x", "error": "not allowed"}).encode("utf-8")
     plugin = DummyPluginClient([(refusal, [])])
-    with patch("deephaven_mcp.client._webclientdata.PluginClient", return_value=plugin):
-        with pytest.raises(WebClientDataError, match="not allowed"):
-            _fetch_blocking(
-                _session_with_factory(), WebClientDataTable.CATALOG, "iris", 30.0
-            )
-    assert plugin.closed
+    with pytest.raises(WebClientDataError, match="not allowed"):
+        _request_table(plugin, WebClientDataTable.CATALOG, "iris", 30.0)
 
 
-def test_fetch_blocking_non_table_object():
+def test_request_table_non_table_object():
     plugin = DummyPluginClient([(b"", _exported("not-a-table"))])
-    with patch("deephaven_mcp.client._webclientdata.PluginClient", return_value=plugin):
-        with pytest.raises(WebClientDataError, match="expected a table"):
-            _fetch_blocking(
-                _session_with_factory(), WebClientDataTable.CATALOG, "iris", 30.0
-            )
-    assert plugin.closed
+    with pytest.raises(WebClientDataError, match="expected a table"):
+        _request_table(plugin, WebClientDataTable.CATALOG, "iris", 30.0)
 
 
-def test_fetch_blocking_stream_exhausted_without_table():
+def test_request_table_stream_exhausted_without_table():
     plugin = DummyPluginClient([])
-    with patch("deephaven_mcp.client._webclientdata.PluginClient", return_value=plugin):
-        with pytest.raises(WebClientDataError, match="returned no table"):
-            _fetch_blocking(
-                _session_with_factory(), WebClientDataTable.CATALOG, "iris", 30.0
-            )
+    with pytest.raises(WebClientDataError, match="returned no table"):
+        _request_table(plugin, WebClientDataTable.CATALOG, "iris", 30.0)
 
 
-def test_fetch_blocking_breaks_on_deadline():
+def test_request_table_breaks_on_deadline():
     """A zero budget stops the loop after the first empty response."""
     plugin = DummyPluginClient([(b"", []), (b"", [])])
-    with patch("deephaven_mcp.client._webclientdata.PluginClient", return_value=plugin):
-        with pytest.raises(WebClientDataError, match="returned no table"):
-            _fetch_blocking(
-                _session_with_factory(), WebClientDataTable.CATALOG, "iris", 0.0
-            )
+    with pytest.raises(WebClientDataError, match="returned no table"):
+        _request_table(plugin, WebClientDataTable.CATALOG, "iris", 0.0)
 
 
 # ===== fetch_web_client_data_table =====
@@ -184,11 +173,15 @@ def test_fetch_blocking_breaks_on_deadline():
 @pytest.mark.asyncio
 async def test_fetch_web_client_data_table_success():
     table = MagicMock(spec=Table)
+    plugin = DummyPluginClient([])
     session = MagicMock()
     session.wrapped = _session_with_factory()
-    with patch(
-        "deephaven_mcp.client._webclientdata._fetch_blocking", return_value=table
-    ) as blocking:
+    with (
+        patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin),
+        patch(
+            "deephaven_mcp.client._webclientdata._request_table", return_value=table
+        ) as request,
+    ):
         result = await fetch_web_client_data_table(
             session,
             WebClientDataTable.CATALOG,
@@ -196,17 +189,38 @@ async def test_fetch_web_client_data_table_success():
             timeout_seconds=30.0,
         )
     assert result is table
-    assert blocking.call_args[0][1] is WebClientDataTable.CATALOG
-    assert blocking.call_args[0][2] == "iris"
+    assert request.call_args[0][0] is plugin
+    assert request.call_args[0][1] is WebClientDataTable.CATALOG
+    assert request.call_args[0][2] == "iris"
+    assert plugin.closed
+
+
+@pytest.mark.asyncio
+async def test_fetch_web_client_data_table_propagates_open_failure():
+    """A missing widget fails before any plugin exists to close."""
+    session = MagicMock()
+    session.wrapped = MagicMock()
+    session.wrapped.exportable_objects = {}
+    with pytest.raises(WebClientDataError, match="does not export a table factory"):
+        await fetch_web_client_data_table(
+            session,
+            WebClientDataTable.CATALOG,
+            operate_as="iris",
+            timeout_seconds=30.0,
+        )
 
 
 @pytest.mark.asyncio
 async def test_fetch_web_client_data_table_propagates_web_client_data_error():
+    plugin = DummyPluginClient([])
     session = MagicMock()
     session.wrapped = _session_with_factory()
-    with patch(
-        "deephaven_mcp.client._webclientdata._fetch_blocking",
-        side_effect=WebClientDataError("widget said no"),
+    with (
+        patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin),
+        patch(
+            "deephaven_mcp.client._webclientdata._request_table",
+            side_effect=WebClientDataError("widget said no"),
+        ),
     ):
         with pytest.raises(WebClientDataError, match="widget said no"):
             await fetch_web_client_data_table(
@@ -215,15 +229,20 @@ async def test_fetch_web_client_data_table_propagates_web_client_data_error():
                 operate_as="iris",
                 timeout_seconds=30.0,
             )
+    assert plugin.closed
 
 
 @pytest.mark.asyncio
 async def test_fetch_web_client_data_table_wraps_unexpected_error():
+    plugin = DummyPluginClient([])
     session = MagicMock()
     session.wrapped = _session_with_factory()
-    with patch(
-        "deephaven_mcp.client._webclientdata._fetch_blocking",
-        side_effect=RuntimeError("grpc exploded"),
+    with (
+        patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin),
+        patch(
+            "deephaven_mcp.client._webclientdata._request_table",
+            side_effect=RuntimeError("grpc exploded"),
+        ),
     ):
         with pytest.raises(WebClientDataError, match="Failed to fetch"):
             await fetch_web_client_data_table(
@@ -232,21 +251,49 @@ async def test_fetch_web_client_data_table_wraps_unexpected_error():
                 operate_as="iris",
                 timeout_seconds=30.0,
             )
+    assert plugin.closed
 
 
 @pytest.mark.asyncio
-async def test_fetch_web_client_data_table_timeout():
+async def test_fetch_web_client_data_table_timeout_releases_the_worker():
+    """A timeout must close the stream so the blocked worker thread returns.
+
+    ``asyncio.wait_for`` abandons the thread but cannot interrupt it, so the
+    close in the ``finally`` is the only thing that ends the read. Uses a
+    genuinely blocking worker rather than a coroutine stand-in.
+    """
+    stream_closed = threading.Event()
+    worker_returned = threading.Event()
+
+    class BlockingPlugin:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+            stream_closed.set()
+
+    plugin = BlockingPlugin()
+
+    def blocking_request(*_args, **_kwargs):
+        # Stands in for a read on resp_stream: returns only once closed.
+        assert stream_closed.wait(timeout=10)
+        worker_returned.set()
+        return MagicMock(spec=Table)
+
     session = MagicMock()
     session.wrapped = _session_with_factory()
-
-    async def never(*_args, **_kwargs):
-        await asyncio.sleep(10)
-
-    with patch("deephaven_mcp.client._webclientdata.asyncio.to_thread", never):
+    with (
+        patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin),
+        patch("deephaven_mcp.client._webclientdata._request_table", blocking_request),
+    ):
         with pytest.raises(WebClientDataError, match="Timed out"):
             await fetch_web_client_data_table(
                 session,
                 WebClientDataTable.CATALOG,
                 operate_as="iris",
-                timeout_seconds=0.01,
+                timeout_seconds=0.05,
             )
+
+    assert plugin.closed
+    assert worker_returned.wait(timeout=10), "worker thread was left stranded"

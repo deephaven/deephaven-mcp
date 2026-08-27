@@ -59,7 +59,8 @@ class WebClientDataTable(enum.StrEnum):
     """A per-user table the WebClientData table factory can produce."""
 
     CATALOG = "catalog"
-    """The data catalog, built with the requesting user's ACLs applied.
+    """The data catalog, built with the ACLs of the identity named in the
+    request (``operate_as``).
     Columns: ``Namespace``, ``NamespaceSet``, ``TableName``."""
 
     QUERY_INFO = "QueryInfo"
@@ -111,29 +112,20 @@ def _refusal_reason(payload: bytes) -> str:
     return repr(decoded)
 
 
-def _fetch_blocking(
-    session: DndSession,
-    table: WebClientDataTable,
-    operate_as: str,
-    deadline_seconds: float,
-) -> Table:
-    """Drive the table-factory widget synchronously and return the table.
+def _open_plugin(session: DndSession) -> PluginClient:
+    """Open a message stream to the table-factory widget.
 
     Args:
         session (DndSession): A session connected to the ``WebClientData``
             persistent query.
-        table (WebClientDataTable): The per-user table to request.
-        operate_as (str): Identity whose ACLs the table is built with.
-        deadline_seconds (float): Wall-clock budget for a table to arrive on
-            the response stream.
 
     Returns:
-        Table: The requested table on the ``WebClientData`` worker.
+        PluginClient: The connected widget client. The caller owns it and must
+            close it.
 
     Raises:
         WebClientDataError: If the widget is not exported under the expected
-            scope field, refuses the request, returns a non-table object, or
-            produces no table before ``deadline_seconds`` elapses.
+            scope field.
     """
     try:
         factory_obj = session.exportable_objects[_TABLE_FACTORY_FIELD]
@@ -144,38 +136,63 @@ def _fetch_blocking(
             f"version that exports it under a different name."
         ) from e
 
-    # PluginClient sends the initial ConnectRequest; we write one data message
-    # and then read the response stream.
-    plugin = PluginClient(session, factory_obj)
-    try:
-        plugin.req_stream.write(_request_payload(table, operate_as), references=[])
+    # PluginClient sends the initial ConnectRequest.
+    return PluginClient(session, factory_obj)
 
-        deadline = time.monotonic() + deadline_seconds
-        for payload, exported in plugin.resp_stream:
-            if exported:
-                fetched = exported[0].fetch()
-                if not isinstance(fetched, Table):
-                    raise WebClientDataError(
-                        f"The '{_TABLE_FACTORY_FIELD}' widget returned a "
-                        f"{type(fetched).__name__} for table '{table}'; expected a table."
-                    )
-                return fetched
-            # A refusal carries a payload and exports nothing. Reading on would
-            # block until the stream closes, so the deadline below never fires.
-            if payload:
+
+def _request_table(
+    plugin: PluginClient,
+    table: WebClientDataTable,
+    operate_as: str,
+    deadline_seconds: float,
+) -> Table:
+    """Write the widget request and read back the exported table.
+
+    Blocks on the response stream. Closing ``plugin`` from another thread is
+    what interrupts that read; the deadline below only advances once the
+    server has sent something.
+
+    Args:
+        plugin (PluginClient): An open widget client from :func:`_open_plugin`.
+        table (WebClientDataTable): The per-user table to request.
+        operate_as (str): Identity whose ACLs the table is built with.
+        deadline_seconds (float): Wall-clock budget for a table to arrive on
+            the response stream.
+
+    Returns:
+        Table: The requested table on the ``WebClientData`` worker.
+
+    Raises:
+        WebClientDataError: If the widget refuses the request, returns a
+            non-table object, or produces no table before ``deadline_seconds``
+            elapses.
+    """
+    plugin.req_stream.write(_request_payload(table, operate_as), references=[])
+
+    deadline = time.monotonic() + deadline_seconds
+    for payload, exported in plugin.resp_stream:
+        if exported:
+            fetched = exported[0].fetch()
+            if not isinstance(fetched, Table):
                 raise WebClientDataError(
-                    f"The '{_TABLE_FACTORY_FIELD}' widget refused the request for "
-                    f"'{table}' as user '{operate_as}': {_refusal_reason(payload)}"
+                    f"The '{_TABLE_FACTORY_FIELD}' widget returned a "
+                    f"{type(fetched).__name__} for table '{table}'; expected a table."
                 )
-            if time.monotonic() > deadline:
-                break
+            return fetched
+        # A refusal carries a payload and exports nothing. Reading on would
+        # block until the stream closes, so the deadline below never fires.
+        if payload:
+            raise WebClientDataError(
+                f"The '{_TABLE_FACTORY_FIELD}' widget refused the request for "
+                f"'{table}' as user '{operate_as}': {_refusal_reason(payload)}"
+            )
+        if time.monotonic() > deadline:
+            break
 
-        raise WebClientDataError(
-            f"The '{_TABLE_FACTORY_FIELD}' widget returned no table for "
-            f"'{table}' within {deadline_seconds:.0f}s."
-        )
-    finally:
-        plugin.close()
+    raise WebClientDataError(
+        f"The '{_TABLE_FACTORY_FIELD}' widget returned no table for "
+        f"'{table}' within {deadline_seconds:.0f}s."
+    )
 
 
 async def fetch_web_client_data_table(
@@ -209,11 +226,12 @@ async def fetch_web_client_data_table(
         f"[fetch_web_client_data_table] Requesting table: table={str(table)!r}, "
         f"operate_as={operate_as!r}, timeout_seconds={timeout_seconds}"
     )
+    plugin = await asyncio.to_thread(_open_plugin, session.wrapped)
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(
-                _fetch_blocking,
-                session.wrapped,
+                _request_table,
+                plugin,
                 table,
                 operate_as,
                 timeout_seconds,
@@ -221,8 +239,8 @@ async def fetch_web_client_data_table(
             timeout=timeout_seconds,
         )
     except TimeoutError:
-        # The worker thread blocks on the response stream and cannot be
-        # interrupted; it exits when the stream yields or the session closes.
+        # wait_for abandons the worker thread mid-read; only the plugin close
+        # in the finally below ends that read, so the thread is not stranded.
         _LOGGER.error(
             f"[fetch_web_client_data_table] Timed out after {timeout_seconds}s "
             f"waiting for table {str(table)!r}"
@@ -243,6 +261,8 @@ async def fetch_web_client_data_table(
             f"Failed to fetch '{table}' from '{WEB_CLIENT_DATA_PQ}': "
             f"{describe_exception_chain(e)}"
         ) from e
+    finally:
+        await asyncio.to_thread(plugin.close)
 
     _LOGGER.debug(f"[fetch_web_client_data_table] Received table: table={str(table)!r}")
     return result

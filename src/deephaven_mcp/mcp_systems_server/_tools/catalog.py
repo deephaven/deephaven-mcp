@@ -10,10 +10,11 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 
 The two discovery tools are system-scoped: they name an enterprise system and
 read the catalog listing through that system's shared ``WebClientData``
-persistent query, which builds it with the caller's ACLs applied. The two
-table-level tools are session-scoped: reading a catalog table's schema or rows
-is a data access that the server admits only on a worker the caller
-administers, so they take a session id.
+persistent query, scoped to the Enterprise principal the server is configured
+with for that system — not to the MCP caller, so every caller sees the same
+listing. The two table-level tools are session-scoped: reading a catalog
+table's schema or rows is a data access that the server admits only on a worker
+the caller administers, so they take a session id.
 """
 
 import logging

@@ -1231,26 +1231,40 @@ async def test_get_catalog_table_distinct_namespaces_success_no_filters():
 
 @pytest.mark.asyncio
 async def test_get_catalog_namespaces_success_with_filters():
-    """Test get_catalog_namespaces with filters applied"""
+    """A namespace filter runs on the full catalog, before the projection.
+
+    The documented filters reference TableName, which
+    ``select_distinct("Namespace")`` drops \u2014 so filtering must happen while
+    that column still exists.
+    """
     from deephaven_mcp.client import CorePlusSession
     from deephaven_mcp.queries import get_catalog_table
 
-    filtered_namespace_table_mock = MagicMock()
-    filtered_namespace_table_mock.size = 10  # probe size 10 < max_rows=1000
-    filtered_namespace_table_mock.head = lambda n: filtered_namespace_table_mock
     arrow_mock = MagicMock(spec=pyarrow.Table)
-    filtered_namespace_table_mock.to_arrow = lambda: arrow_mock
 
     sorted_namespace_table_mock = MagicMock()
-    sorted_namespace_table_mock.where = lambda filters: filtered_namespace_table_mock
+    sorted_namespace_table_mock.size = 10  # probe size 10 < max_rows=1000
+    sorted_namespace_table_mock.head = lambda n: sorted_namespace_table_mock
+    sorted_namespace_table_mock.to_arrow = lambda: arrow_mock
 
     namespace_table_mock = MagicMock()
     namespace_table_mock.sort = lambda col: sorted_namespace_table_mock
 
+    # Only the filtered catalog offers select_distinct, so the projection can
+    # only be reached by filtering first.
+    filtered_catalog_mock = MagicMock()
+    filtered_catalog_mock.select_distinct = lambda col: namespace_table_mock
+
     catalog_table_mock = MagicMock()
-    catalog_table_mock.select_distinct = lambda col: namespace_table_mock
+    catalog_table_mock.where = MagicMock(return_value=filtered_catalog_mock)
+    catalog_table_mock.select_distinct = MagicMock(
+        side_effect=AssertionError(
+            "select_distinct ran before the filter; TableName is gone by then"
+        )
+    )
 
     session_mock = MagicMock(spec=CorePlusSession)
+    filters = ["TableName.contains(`daily`)"]
 
     with (
         patch("deephaven_mcp.queries.asyncio.to_thread", new=_fake_to_thread),
@@ -1261,11 +1275,13 @@ async def test_get_catalog_namespaces_success_with_filters():
             operate_as=_OPERATE_AS,
             timeout_seconds=_WIDGET_TIMEOUT,
             max_rows=1000,
-            filters=["TableName.contains(`daily`)"],
+            filters=filters,
             distinct_namespaces=True,
         )
-        assert result_table is arrow_mock
-        assert is_complete is True
+
+    catalog_table_mock.where.assert_called_once_with(filters)
+    assert result_table is arrow_mock
+    assert is_complete is True
 
 
 @pytest.mark.asyncio

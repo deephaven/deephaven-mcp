@@ -377,14 +377,18 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 query, usable for any system-scoped read such as the catalog.
 
         Raises:
-            InternalError: If the registry has not been initialized.
+            InternalError: If the registry has not been initialized, or was
+                closed while this call waited for the cache lock.
             Exception: Any exception raised while connecting to the
                 ``WebClientData`` persistent query propagates unchanged; a
                 system where that PQ is not running cannot serve these tables.
         """
-        factory_manager = self.factory_manager
-
         async with self._web_client_data_lock:
+            # Resolved inside the lock: a close() that lands while this call
+            # waits clears the manager, and this then fails rather than
+            # connecting a session nothing will ever close.
+            factory_manager = self.factory_manager
+
             cached = self._web_client_data_session
             if cached is not None:
                 try:
@@ -499,8 +503,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         2. Acquire ``_refresh_lock`` as a barrier — waits for any in-flight
            ``_sync_enterprise_sessions`` to finish before proceeding.
         3. Cancel and await the background discovery task (outside lock).
-        4. Close the cached WebClientData session, then the factory manager,
-           using the local refs captured in step 1.
+        4. Close the cached WebClientData session (drained in step 1b), then
+           the factory manager, using the local refs captured earlier.
         5. Under ``self._lock``: clear remaining mutable state and ``_items``.
         6. Close remaining session managers (outside lock) via ``_close_items``.
 
@@ -517,6 +521,11 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             self._discovery_task = None
             factory = self._factory_manager
             self._factory_manager = None
+
+        # Step 1b: drain the WebClientData cache under its own lock, so an
+        # in-flight connect completes and is handed over here rather than
+        # storing a session after shutdown.
+        async with self._web_client_data_lock:
             web_client_data = self._web_client_data_session
             self._web_client_data_session = None
 

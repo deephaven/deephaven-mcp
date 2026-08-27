@@ -1555,6 +1555,56 @@ async def test_close_releases_cached_web_client_data_session():
 
 
 @pytest.mark.asyncio
+async def test_web_client_data_session_after_close_does_not_connect():
+    """The factory is resolved inside the lock, so a post-close caller fails."""
+    registry, factory_instance = _wcd_registry_with_session(
+        MagicMock(spec=CorePlusSession)
+    )
+    registry._factory_manager.close = AsyncMock()
+
+    await registry.close()
+
+    with pytest.raises(InternalError):
+        await registry.web_client_data_session()
+    factory_instance.connect_to_persistent_query.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_an_in_flight_web_client_data_connect():
+    """A connect racing close() must not leave an unclosed session behind."""
+    session = MagicMock(spec=CorePlusSession)
+    session.close = AsyncMock()
+    registry, factory_instance = _wcd_registry_with_session(session)
+    registry._factory_manager.close = AsyncMock()
+
+    connect_started = asyncio.Event()
+    release_connect = asyncio.Event()
+
+    async def slow_connect(**_kwargs):
+        connect_started.set()
+        await release_connect.wait()
+        return session
+
+    factory_instance.connect_to_persistent_query = AsyncMock(side_effect=slow_connect)
+
+    connect_task = asyncio.create_task(registry.web_client_data_session())
+    await connect_started.wait()
+
+    close_task = asyncio.create_task(registry.close())
+    # Let close() run up to the WebClientData lock the connect still holds.
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert not close_task.done()
+
+    release_connect.set()
+    assert await connect_task is session
+    await close_task
+
+    session.close.assert_awaited_once()
+    assert registry._web_client_data_session is None
+
+
+@pytest.mark.asyncio
 async def test_effective_user_returns_the_controller_identity():
     registry = _make_initialized_registry()
     controller = MagicMock()

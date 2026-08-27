@@ -3,9 +3,10 @@
 Verbs: ``tables``, ``namespaces``, ``schema``, ``sample``.
 
 Enterprise (Core+) only. ``tables`` and ``namespaces`` name a SYSTEM and read
-the listing through that system's shared ``WebClientData`` persistent query;
-``schema`` and ``sample`` name a session ID, because reading a catalog table's
-schema or rows requires a worker the caller administers.
+the listing through that system's shared ``WebClientData`` persistent query,
+scoped to the Enterprise principal the server is configured with; ``schema``
+and ``sample`` name a session ID, because reading a catalog table's schema or
+rows requires a worker the caller administers.
 """
 
 from __future__ import annotations
@@ -52,10 +53,11 @@ def catalog() -> None:
 
     The two halves address differently. 'tables' and 'namespaces' take a
     SYSTEM and need no worker of your own: they read through the system's
-    shared 'WebClientData' persistent query, which applies your own ACLs, so
-    the listing shows what you may see. 'schema' and 'sample' take a session
-    ID, because reading a catalog table's schema or rows is a data access the
-    server allows only on a worker you administer.
+    shared 'WebClientData' persistent query. That listing reflects the
+    Enterprise principal the server is configured with for that system, not
+    your own identity — every caller sees the same set. 'schema' and 'sample'
+    take a session ID, because reading a catalog table's schema or rows is a
+    data access the server allows only on a worker you administer.
 
     'tables' and 'namespaces' fall back to the sticky context system when
     their SYSTEM is omitted; 'schema' and 'sample' cannot fall back, because a
@@ -132,7 +134,7 @@ _OUTPUT_TABLES = OutputSpec(
         ),
         see_also=(
             "dhcli catalog namespaces SYSTEM",
-            "dhcli catalog schema SYSTEM NAMESPACE TABLE",
+            "dhcli catalog schema ID NAMESPACE TABLE",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),

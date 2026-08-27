@@ -325,7 +325,7 @@ Test the enterprise catalog tools. These are read-only operations. The two disco
 
 Setup:
 - Call list_systems. Pick an enterprise system and record its name. If no enterprise system is configured, report that and skip the rest.
-- Call sessions_list. If at least one enterprise session exists, pick one and record its id. If none exist, call session_enterprise_create with session_name="mcp-test-catalog" and record the returned id.
+- Call sessions_list. If at least one session belongs to the recorded system, pick one and record its id. Sessions on any other system are not usable here — steps 3-5 must run against a worker on the same system whose catalog steps 1-2 list. If none belong to it, call session_enterprise_create with system set to the recorded system and session_name="mcp-test-catalog", and record the returned id.
 - Record whether you created a new session (true/false) — this determines cleanup.
 
 1. Call catalog_namespaces_list with the system from Setup. Verify success==true. Record the count of namespaces returned (may be 0 if no catalog is configured — that is acceptable).

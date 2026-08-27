@@ -593,8 +593,9 @@ The two halves of this noun address differently.
 
 `tables` and `namespaces` take a `SYSTEM` and need no worker of your own: they
 read the listing through the system's shared `WebClientData` persistent query,
-which builds the catalog with *your own* ACLs applied — so the listing shows
-what you may see, and works for ordinary users. `WebClientData` must be
+which builds the catalog with the ACLs of the Enterprise principal the server
+is configured with for that system. That is not your CLI identity — every
+caller of a given system sees the same listing. `WebClientData` must be
 running on the system.
 
 `schema` and `sample` take a session `ID`. Reading a catalog table's schema or

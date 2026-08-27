@@ -10,7 +10,7 @@ Provides common helpers used across the MCP tool modules:
 - ID parsers and formatters: :func:`parse_pq_id`, :func:`make_pq_id`
   (use :meth:`QualifiedSessionId.from_str` directly for session ids).
 - Session retrieval: :func:`get_session_from_context`,
-  :func:`get_enterprise_session`, :func:`get_system_session`.
+  :func:`get_enterprise_session`, :func:`get_wcd_system_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
   :func:`build_table_data_response`, :func:`format_schema_result`.
 - Parameter guards: :func:`validate_programming_language`.

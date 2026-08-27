@@ -1012,7 +1012,9 @@ async def get_catalog_table(
     package (the `db` variable), e.g. `db.live_table(namespace, table_name)` or
     `db.historical_table(namespace, table_name)`. It is fetched through the
     ``WebClientData`` table-factory widget, which builds it with ``operate_as``'s
-    ACLs applied, so ordinary users see their own visible subset. Fetching the
+    ACLs applied. That identity is the server's configured Enterprise principal
+    for the system, not the MCP caller, so every caller sees the same listing.
+    Fetching the
     catalog directly off a shared worker instead would be refused for anyone who
     does not administer that worker.
 
@@ -1033,7 +1035,8 @@ async def get_catalog_table(
                                     Multiple filters are combined with AND logic. Filters use Deephaven query
                                     language syntax with backticks (`) for string literals.
         distinct_namespaces (bool): Required. If True, returns only distinct namespaces (sorted) instead of full catalog.
-                                   Filters are applied after selecting distinct namespaces. Must be explicitly specified.
+                                   Filters are applied to the full catalog before the namespaces are extracted, so a
+                                   filter may reference TableName. Must be explicitly specified.
 
     Returns:
         tuple[pyarrow.Table, bool]: A tuple containing:
@@ -1110,25 +1113,28 @@ async def get_catalog_table(
     )
     _LOGGER.debug("[queries:get_catalog_table] Catalog table retrieved successfully.")
 
-    # Handle distinct namespaces case
+    # Determine table type for logging
+    table_type = "namespace table" if distinct_namespaces else "catalog table"
+
+    # Filters run before the namespace projection: documented expressions
+    # reference TableName, which select_distinct("Namespace") would drop.
+    catalog_table = await _apply_filters(
+        catalog_table, filters, context_name=table_type
+    )
+
     if distinct_namespaces:
         _LOGGER.debug("[queries:get_catalog_table] Extracting distinct namespaces...")
-        # Step 1: Select distinct namespaces
         catalog_table = await asyncio.to_thread(
             lambda: catalog_table.select_distinct("Namespace")
         )
-        # Step 2: Sort namespaces
         catalog_table = await asyncio.to_thread(lambda: catalog_table.sort("Namespace"))
         _LOGGER.debug(
             "[queries:get_catalog_table] Distinct namespaces extracted and sorted."
         )
 
-    # Determine table type for logging
-    table_type = "namespace table" if distinct_namespaces else "catalog table"
-
     return await _snapshot_filtered(
         catalog_table,
-        filters=filters,
+        filters=None,
         max_rows=max_rows,
         head=True,
         context_name=table_type,
