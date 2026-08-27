@@ -21,10 +21,7 @@ from deephaven_mcp.cli._daemon import (
     DaemonStartupTimeoutError,
 )
 from deephaven_mcp.cli._daemon import _lifecycle as ll
-from deephaven_mcp.cli._daemon import (
-    get_or_start_daemon,
-    stop_daemon,
-)
+from deephaven_mcp.cli._daemon import get_or_start_daemon, stop_daemon
 from deephaven_mcp.cli._daemon._reuse import ReuseDecision
 from deephaven_mcp.config.schema import DaemonReusePolicy
 from deephaven_mcp.daemon_registry import (
