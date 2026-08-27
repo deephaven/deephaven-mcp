@@ -15,8 +15,11 @@ from deephaven_mcp.client._webclientdata import (
     WEB_CLIENT_DATA_PQ,
     Table,
     WebClientDataTable,
+    _open_and_request,
     _open_plugin,
+    _PluginHandoff,
     _refusal_reason,
+    _release_plugin,
     _request_payload,
     _request_table,
     fetch_web_client_data_table,
@@ -40,9 +43,11 @@ class DummyPluginClient:
         self.req_stream = DummyReqStream()
         self.resp_stream = responses
         self.closed = False
+        self.close_called = threading.Event()
 
     def close(self):
         self.closed = True
+        self.close_called.set()
 
 
 def _session_with_factory():
@@ -230,14 +235,15 @@ async def test_fetch_web_client_data_table_wraps_a_vendor_error_from_open():
 
 @pytest.mark.asyncio
 async def test_fetch_web_client_data_table_times_out_on_a_stalled_open():
-    """A widget connect that never returns is bounded by the same deadline."""
+    """A stalled connect hits the deadline; its late plugin is still closed."""
     session = MagicMock()
     session.wrapped = _session_with_factory()
+    plugin = DummyPluginClient([])
     release = threading.Event()
 
     def stalled_open(*_args, **_kwargs):
-        release.wait(timeout=10)
-        return DummyPluginClient([])
+        assert release.wait(timeout=10)
+        return plugin
 
     with patch("deephaven_mcp.client._webclientdata._open_plugin", stalled_open):
         with pytest.raises(WebClientDataError, match="Timed out"):
@@ -247,7 +253,9 @@ async def test_fetch_web_client_data_table_times_out_on_a_stalled_open():
                 operate_as="iris",
                 timeout_seconds=0.05,
             )
-    release.set()
+        release.set()
+        # The caller already gave up, so the abandoned worker owns the close.
+        assert plugin.close_called.wait(timeout=10), "late plugin was leaked"
 
 
 @pytest.mark.asyncio
@@ -337,3 +345,90 @@ async def test_fetch_web_client_data_table_timeout_releases_the_worker():
 
     assert plugin.closed
     assert worker_returned.wait(timeout=10), "worker thread was left stranded"
+
+
+# ===== plugin ownership =====
+
+
+def test_handoff_gives_the_plugin_to_the_first_claimant():
+    handoff = _PluginHandoff()
+    plugin = DummyPluginClient([])
+    assert handoff.offer(plugin) is True
+    assert handoff.release() is plugin
+    assert handoff.release() is None
+
+
+def test_handoff_refuses_an_offer_after_release():
+    handoff = _PluginHandoff()
+    assert handoff.release() is None
+    assert handoff.offer(DummyPluginClient([])) is False
+
+
+def test_open_and_request_closes_its_plugin_when_abandoned():
+    """A worker that finishes opening too late owns the close itself."""
+    handoff = _PluginHandoff()
+    handoff.release()
+    plugin = DummyPluginClient([])
+    with patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin):
+        with pytest.raises(WebClientDataError, match="abandoned"):
+            _open_and_request(
+                handoff, MagicMock(), WebClientDataTable.CATALOG, "iris", 30.0
+            )
+    assert plugin.closed
+
+
+def test_release_plugin_is_a_no_op_without_a_plugin():
+    _release_plugin(_PluginHandoff())
+
+
+def test_release_plugin_swallows_a_close_failure():
+    handoff = _PluginHandoff()
+    plugin = MagicMock()
+    plugin.close.side_effect = RuntimeError("stream already gone")
+    handoff.offer(plugin)
+
+    _release_plugin(handoff)
+
+    plugin.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_web_client_data_table_close_failure_does_not_mask_success():
+    table = MagicMock(spec=Table)
+    plugin = MagicMock()
+    plugin.close.side_effect = RuntimeError("stream already gone")
+    session = MagicMock()
+    session.wrapped = _session_with_factory()
+    with (
+        patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin),
+        patch("deephaven_mcp.client._webclientdata._request_table", return_value=table),
+    ):
+        result = await fetch_web_client_data_table(
+            session,
+            WebClientDataTable.CATALOG,
+            operate_as="iris",
+            timeout_seconds=30.0,
+        )
+    assert result is table
+
+
+@pytest.mark.asyncio
+async def test_fetch_web_client_data_table_close_failure_does_not_mask_an_error():
+    plugin = MagicMock()
+    plugin.close.side_effect = RuntimeError("stream already gone")
+    session = MagicMock()
+    session.wrapped = _session_with_factory()
+    with (
+        patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin),
+        patch(
+            "deephaven_mcp.client._webclientdata._request_table",
+            side_effect=WebClientDataError("widget said no"),
+        ),
+    ):
+        with pytest.raises(WebClientDataError, match="widget said no"):
+            await fetch_web_client_data_table(
+                session,
+                WebClientDataTable.CATALOG,
+                operate_as="iris",
+                timeout_seconds=30.0,
+            )
