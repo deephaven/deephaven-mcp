@@ -89,9 +89,9 @@ class BlockingResource[R]:
                 timeout=timeout_seconds,
             )
         finally:
-            await self._release_off_pool()
+            await self._release_off_pool(timeout_seconds)
 
-    async def _release_off_pool(self) -> None:
+    async def _release_off_pool(self, timeout_seconds: float) -> None:
         """Close the resource on a thread of its own, then return.
 
         Never the default executor: once every worker there is parked in a
@@ -99,6 +99,11 @@ class BlockingResource[R]:
         release them, and the deadline would stop being enforceable. The
         thread is a daemon so a close that never returns cannot hold up
         interpreter exit.
+
+        Args:
+            timeout_seconds (float): How long to wait for the close before
+                detaching it and returning, so a stalled close cannot outlast
+                the deadline the caller asked for.
         """
         loop = asyncio.get_running_loop()
         finished: asyncio.Future[None] = loop.create_future()
@@ -112,7 +117,13 @@ class BlockingResource[R]:
         threading.Thread(
             target=_cleanup, name="dh-mcp-blocking-cleanup", daemon=True
         ).start()
-        await finished
+        try:
+            await asyncio.wait_for(finished, timeout=timeout_seconds)
+        except TimeoutError:
+            _LOGGER.warning(
+                f"[BlockingResource:_release_off_pool] Close did not finish within "
+                f"{timeout_seconds}s; leaving it to the cleanup thread"
+            )
 
     def _open_and_use[T](self, use: Callable[[R], T]) -> T:
         """Open the resource, claim ownership of it, then use it.

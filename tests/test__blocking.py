@@ -143,6 +143,33 @@ async def test_release_is_idempotent_when_nothing_was_opened():
 
 
 @pytest.mark.asyncio
+async def test_a_stalled_close_does_not_hold_up_the_caller():
+    """Cleanup is bounded: a close that stalls is detached, not awaited.
+
+    The constructor allows close to block, so an unbounded wait here would let
+    a request that already timed out never return.
+    """
+    stuck = threading.Event()
+    closing = threading.Event()
+
+    def stalled_close(_r):
+        closing.set()
+        stuck.wait(timeout=30)
+
+    blocking = BlockingResource(DummyResource, stalled_close)
+
+    try:
+        result = await asyncio.wait_for(
+            blocking.run(lambda _r: "done", timeout_seconds=0.05), timeout=5
+        )
+    finally:
+        stuck.set()
+
+    assert result == "done"
+    assert closing.is_set(), "the close never started"
+
+
+@pytest.mark.asyncio
 async def test_timeouts_still_fire_when_the_default_executor_is_saturated():
     """Cleanup must not queue behind the workers it has to release.
 

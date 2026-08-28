@@ -387,7 +387,12 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             cached = self._web_client_data_session
             if cached is not None:
                 try:
-                    if await cached.is_alive():
+                    # Bounded: an unbounded probe would hold the lock and stall
+                    # every catalog request for this system.
+                    if await asyncio.wait_for(
+                        cached.is_alive(),
+                        timeout=self._timeouts.quick_operation_timeout_seconds,
+                    ):
                         return cached
                     raise RuntimeError("is_alive() returned False")
                 except Exception as e:

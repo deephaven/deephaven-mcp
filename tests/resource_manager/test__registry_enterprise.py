@@ -1523,6 +1523,32 @@ async def test_web_client_data_session_replaces_session_whose_liveness_check_rai
 
 
 @pytest.mark.asyncio
+async def test_web_client_data_session_replaces_session_whose_liveness_check_stalls():
+    """A stalled probe must not hold the lock; it falls into the reconnect path."""
+
+    async def never_answers():
+        await asyncio.sleep(30)
+        return True
+
+    stalled = MagicMock(spec=CorePlusSession)
+    stalled.is_alive = never_answers
+    stalled.close = AsyncMock()
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(stalled)
+    registry._timeouts = EnterpriseClientTimeouts.model_validate(
+        {"quick_operation_timeout_seconds": 0.05}
+    )
+    registry._web_client_data_session = stalled
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    result = await asyncio.wait_for(registry.web_client_data_session(), timeout=5)
+
+    assert result is fresh
+    stalled.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_web_client_data_session_requires_initialized_registry():
     registry = _make_registry()
     with pytest.raises(InternalError):
