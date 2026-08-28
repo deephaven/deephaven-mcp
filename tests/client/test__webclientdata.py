@@ -1,5 +1,6 @@
 """Tests for deephaven_mcp.client._webclientdata."""
 
+import asyncio
 import json
 import threading
 from unittest.mock import MagicMock, patch
@@ -15,6 +16,7 @@ from deephaven_mcp.client._webclientdata import (
     WEB_CLIENT_DATA_PQ,
     Table,
     WebClientDataTable,
+    _close_plugin,
     _open_plugin,
     _refusal_reason,
     _request_payload,
@@ -167,6 +169,74 @@ def test_request_table_breaks_on_deadline():
     plugin = DummyPluginClient([(b"", []), (b"", [])])
     with pytest.raises(WebClientDataError, match="returned no table"):
         _request_table(plugin, WebClientDataTable.CATALOG, "iris", 0.0)
+
+
+class LockingRespStream:
+    """Mimics PluginResponseStream's locking: a blocked read holds the lock.
+
+    ``__next__`` keeps ``_rlock`` for the whole of a blocked read and
+    ``close()`` needs that same lock, so only ``cancel()`` can end the read.
+    A close-only teardown deadlocks against this, which is the point.
+    """
+
+    def __init__(self):
+        self._rlock = threading.RLock()
+        self.canceled = threading.Event()
+        self.reading = threading.Event()
+        self.stream_resp = self
+
+    def cancel(self):
+        self.canceled.set()
+
+    def close(self):
+        with self._rlock:
+            pass
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        with self._rlock:
+            self.reading.set()
+            # Generous only to stop a regression hanging the suite forever.
+            self.canceled.wait(timeout=30)
+            raise StopIteration
+
+
+class LockingPluginClient:
+    """A plugin whose close() can only succeed after the read is canceled."""
+
+    def __init__(self):
+        self.req_stream = DummyReqStream()
+        self.resp_stream = LockingRespStream()
+        self.closed = False
+        self.close_called = threading.Event()
+
+    def close(self):
+        self.resp_stream.close()
+        self.closed = True
+        self.close_called.set()
+
+
+# ===== _close_plugin =====
+
+
+def test_close_plugin_cancels_the_call_before_closing():
+    plugin = LockingPluginClient()
+
+    _close_plugin(plugin)
+
+    assert plugin.resp_stream.canceled.is_set()
+    assert plugin.closed
+
+
+def test_close_plugin_still_closes_when_the_call_cannot_be_canceled():
+    """A pydeephaven version without stream_resp degrades to a plain close."""
+    plugin = DummyPluginClient([])
+
+    _close_plugin(plugin)
+
+    assert plugin.closed
 
 
 # ===== fetch_web_client_data_table =====
@@ -342,6 +412,34 @@ async def test_fetch_web_client_data_table_timeout_releases_the_worker():
 
     assert plugin.closed
     assert worker_returned.wait(timeout=10), "worker thread was left stranded"
+
+
+@pytest.mark.asyncio
+async def test_fetch_web_client_data_table_timeout_ends_a_lock_held_read():
+    """The real teardown must survive pydeephaven's response-stream locking.
+
+    Uses the actual _request_table against a stream that holds its lock while
+    blocked, so a close-only teardown would stall in the cleanup instead of
+    surfacing the timeout. The deadline below is what catches that.
+    """
+    plugin = LockingPluginClient()
+    session = MagicMock()
+    session.wrapped = _session_with_factory()
+
+    with patch("deephaven_mcp.client._webclientdata._open_plugin", return_value=plugin):
+        with pytest.raises(WebClientDataError, match="Timed out"):
+            await asyncio.wait_for(
+                fetch_web_client_data_table(
+                    session,
+                    WebClientDataTable.CATALOG,
+                    operate_as="iris",
+                    timeout_seconds=0.05,
+                ),
+                timeout=5,
+            )
+
+    assert plugin.resp_stream.reading.is_set(), "the read never started"
+    assert plugin.closed
 
 
 @pytest.mark.asyncio

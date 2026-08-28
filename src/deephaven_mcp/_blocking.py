@@ -20,6 +20,16 @@ from collections.abc import Callable
 _LOGGER = logging.getLogger(__name__)
 
 
+def _resolve(finished: asyncio.Future[None]) -> None:
+    """Complete ``finished`` unless the loop already canceled it.
+
+    Args:
+        finished (asyncio.Future[None]): The future awaiting a cleanup thread.
+    """
+    if not finished.done():
+        finished.set_result(None)
+
+
 class _AbandonedError(Exception):
     """Raised in the worker when the caller gave up before the open finished.
 
@@ -79,8 +89,30 @@ class BlockingResource[R]:
                 timeout=timeout_seconds,
             )
         finally:
-            # Closing may itself block, so it must not run on the event loop.
-            await asyncio.to_thread(self._release)
+            await self._release_off_pool()
+
+    async def _release_off_pool(self) -> None:
+        """Close the resource on a thread of its own, then return.
+
+        Never the default executor: once every worker there is parked in a
+        blocking ``use``, a close queued behind them could never run to
+        release them, and the deadline would stop being enforceable. The
+        thread is a daemon so a close that never returns cannot hold up
+        interpreter exit.
+        """
+        loop = asyncio.get_running_loop()
+        finished: asyncio.Future[None] = loop.create_future()
+
+        def _cleanup() -> None:
+            try:
+                self._release()
+            finally:
+                loop.call_soon_threadsafe(_resolve, finished)
+
+        threading.Thread(
+            target=_cleanup, name="dh-mcp-blocking-cleanup", daemon=True
+        ).start()
+        await finished
 
     def _open_and_use[T](self, use: Callable[[R], T]) -> T:
         """Open the resource, claim ownership of it, then use it.

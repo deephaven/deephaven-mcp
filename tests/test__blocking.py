@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -139,3 +140,36 @@ async def test_release_is_idempotent_when_nothing_was_opened():
     await asyncio.to_thread(blocking._release)
 
     assert closed == []
+
+
+@pytest.mark.asyncio
+async def test_timeouts_still_fire_when_the_default_executor_is_saturated():
+    """Cleanup must not queue behind the workers it has to release.
+
+    Every worker is parked in a blocking use, so a close scheduled on the
+    default executor could never run and no run() would finish. The generous
+    fallback inside the use exists only to stop a regression from hanging the
+    suite forever; the deadline below is what actually fails.
+    """
+    workers = 2
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=workers)
+    )
+    resources = [DummyResource() for _ in range(workers)]
+
+    def blocking_use(r):
+        r.close_called.wait(timeout=30)
+
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            *(
+                _resource_for(r).run(blocking_use, timeout_seconds=0.05)
+                for r in resources
+            ),
+            return_exceptions=True,
+        ),
+        timeout=5,
+    )
+
+    assert all(isinstance(r, TimeoutError) for r in results)
+    assert all(r.closed for r in resources)

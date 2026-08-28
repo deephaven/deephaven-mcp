@@ -140,6 +140,28 @@ def _open_plugin(session: DndSession) -> PluginClient:
     return PluginClient(session, factory_obj)
 
 
+def _close_plugin(plugin: PluginClient) -> None:
+    """Cancel the widget's underlying call, then close the client.
+
+    ``PluginResponseStream.__next__`` holds a lock for the whole of a blocked
+    read and ``close()`` needs that same lock, so closing alone cannot end the
+    read. Canceling the gRPC call is what unblocks it; ``stream_resp`` is a
+    pydeephaven internal, so a version that renames it degrades to the plain
+    close rather than failing.
+
+    Args:
+        plugin (PluginClient): The widget client to tear down.
+    """
+    try:
+        plugin.resp_stream.stream_resp.cancel()
+    except Exception as e:
+        _LOGGER.debug(
+            f"[_close_plugin] Could not cancel the '{_TABLE_FACTORY_FIELD}' "
+            f"call before closing: {e!r}"
+        )
+    plugin.close()
+
+
 def _request_table(
     plugin: PluginClient,
     table: WebClientDataTable,
@@ -228,7 +250,7 @@ async def fetch_web_client_data_table(
     )
     widget = BlockingResource(
         lambda: _open_plugin(session.wrapped),
-        lambda plugin: plugin.close(),
+        _close_plugin,
     )
 
     try:
