@@ -452,11 +452,17 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     async def _close_web_client_data_session(self, session: CorePlusSession) -> None:
         """Close a WebClientData session, logging and swallowing any failure.
 
+        Bounded because this runs under ``_web_client_data_lock`` and again
+        during shutdown, where a stalled close would block every later request.
+
         Args:
             session (CorePlusSession): The session to close.
         """
         try:
-            await session.close()
+            await asyncio.wait_for(
+                session.close(),
+                timeout=self._timeouts.quick_operation_timeout_seconds,
+            )
         except Exception as e:
             _LOGGER.warning(
                 f"[{self.__class__.__name__}] error closing '{WEB_CLIENT_DATA_PQ}' "

@@ -83,7 +83,7 @@ async def test_run_times_out_and_closes_to_end_the_blocked_use():
     with pytest.raises(TimeoutError):
         await _resource_for(resource).run(blocking_use, timeout_seconds=0.05)
 
-    assert resource.closed
+    assert resource.close_called.wait(timeout=10), "the resource was never closed"
     assert worker_returned.wait(timeout=10), "worker thread was left stranded"
 
 
@@ -171,32 +171,85 @@ async def test_a_stalled_close_does_not_hold_up_the_caller():
 
 @pytest.mark.asyncio
 async def test_timeouts_still_fire_when_the_default_executor_is_saturated():
-    """Cleanup must not queue behind the workers it has to release.
+    """A saturated default executor must not affect this class at all.
 
-    Every worker is parked in a blocking use, so a close scheduled on the
-    default executor could never run and no run() would finish. The generous
-    fallback inside the use exists only to stop a regression from hanging the
-    suite forever; the deadline below is what actually fails.
+    Nothing here runs on that executor, so both the deadline and the close
+    still hold while every shared worker is parked.
     """
     workers = 2
     asyncio.get_running_loop().set_default_executor(
         ThreadPoolExecutor(max_workers=workers)
     )
+    hog = threading.Event()
+    hogs = [
+        asyncio.ensure_future(asyncio.to_thread(hog.wait, 30)) for _ in range(workers)
+    ]
+    await asyncio.sleep(0.05)
+
     resources = [DummyResource() for _ in range(workers)]
 
     def blocking_use(r):
         r.close_called.wait(timeout=30)
 
-    results = await asyncio.wait_for(
-        asyncio.gather(
-            *(
-                _resource_for(r).run(blocking_use, timeout_seconds=0.05)
-                for r in resources
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    _resource_for(r).run(blocking_use, timeout_seconds=0.05)
+                    for r in resources
+                ),
+                return_exceptions=True,
             ),
-            return_exceptions=True,
-        ),
-        timeout=5,
-    )
+            timeout=5,
+        )
+    finally:
+        hog.set()
+        await asyncio.gather(*hogs, return_exceptions=True)
 
     assert all(isinstance(r, TimeoutError) for r in results)
-    assert all(r.closed for r in resources)
+    for r in resources:
+        assert r.close_called.wait(timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_open_does_not_consume_a_shared_executor_worker():
+    """An open that never returns must not block unrelated pool work."""
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=1))
+    never = threading.Event()
+
+    def stalled_open():
+        never.wait(timeout=30)
+        return DummyResource()
+
+    blocking = BlockingResource(stalled_open, lambda r: r.close())
+
+    try:
+        with pytest.raises(TimeoutError):
+            await blocking.run(lambda _r: None, timeout_seconds=0.05)
+
+        # The one shared worker is still free.
+        assert await asyncio.wait_for(asyncio.to_thread(lambda: "free"), timeout=5)
+    finally:
+        never.set()
+
+
+@pytest.mark.asyncio
+async def test_run_is_bounded_by_one_deadline_not_two():
+    """A stalled use followed by a stalled close stays within the budget."""
+    stuck = threading.Event()
+
+    def stalled_close(_r):
+        stuck.wait(timeout=30)
+
+    blocking = BlockingResource(DummyResource, stalled_close)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    try:
+        with pytest.raises(TimeoutError):
+            await blocking.run(lambda _r: stuck.wait(timeout=30), timeout_seconds=0.2)
+        elapsed = loop.time() - started
+    finally:
+        stuck.set()
+
+    assert elapsed < 0.35, f"cleanup extended the deadline: {elapsed:.3f}s"

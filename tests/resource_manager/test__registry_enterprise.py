@@ -1549,6 +1549,30 @@ async def test_web_client_data_session_replaces_session_whose_liveness_check_sta
 
 
 @pytest.mark.asyncio
+async def test_web_client_data_session_replaces_session_whose_close_stalls():
+    """A stalled close of a dead session must not hold the cache lock."""
+
+    async def never_closes():
+        await asyncio.sleep(30)
+
+    stale = MagicMock(spec=CorePlusSession)
+    stale.is_alive = AsyncMock(return_value=False)
+    stale.close = never_closes
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(stale)
+    registry._timeouts = EnterpriseClientTimeouts.model_validate(
+        {"quick_operation_timeout_seconds": 0.05}
+    )
+    registry._web_client_data_session = stale
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    result = await asyncio.wait_for(registry.web_client_data_session(), timeout=5)
+
+    assert result is fresh
+
+
+@pytest.mark.asyncio
 async def test_web_client_data_session_requires_initialized_registry():
     registry = _make_registry()
     with pytest.raises(InternalError):
