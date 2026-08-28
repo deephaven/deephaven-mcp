@@ -5,6 +5,7 @@ Tests for deephaven_mcp.mcp_systems_server._tools.catalog.
 import asyncio
 import os
 import warnings
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -87,11 +88,32 @@ def _mock_catalog_arrow(entries, nbytes=1000, num_rows=None):
     return table
 
 
+def _wcd_yielding(session):
+    """Build a fresh async CM per call that yields ``session``."""
+
+    @asynccontextmanager
+    async def _cm():
+        yield session
+
+    return MagicMock(side_effect=lambda: _cm())
+
+
+def _wcd_failing(exc):
+    """Build a fresh async CM per call that raises ``exc`` on entry."""
+
+    @asynccontextmanager
+    async def _cm():
+        raise exc
+        yield  # pragma: no cover - unreachable, keeps this a generator
+
+    return MagicMock(side_effect=lambda: _cm())
+
+
 def _catalog_context(session, system="prod", operate_as="jdoe"):
     """Build a MockContext whose enterprise registry serves ``session`` as WebClientData."""
     registry = MagicMock(spec=EnterpriseSessionRegistry)
     registry.system_name = system
-    registry.web_client_data_session = AsyncMock(return_value=session)
+    registry.web_client_data_session = _wcd_yielding(session)
     registry.effective_user = AsyncMock(return_value=operate_as)
     return MockContext({"config_manager": MagicMock(), "registry": registry})
 
@@ -100,7 +122,7 @@ def _unavailable_catalog_context(exc, system="prod"):
     """Build a MockContext whose WebClientData connect fails with ``exc``."""
     registry = MagicMock(spec=EnterpriseSessionRegistry)
     registry.system_name = system
-    registry.web_client_data_session = AsyncMock(side_effect=exc)
+    registry.web_client_data_session = _wcd_failing(exc)
     registry.effective_user = AsyncMock(return_value="jdoe")
     return MockContext({"config_manager": MagicMock(), "registry": registry})
 

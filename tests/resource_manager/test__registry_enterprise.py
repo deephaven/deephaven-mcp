@@ -1462,12 +1462,19 @@ def _wcd_registry_with_session(session):
     return registry, factory_instance
 
 
+async def _borrow_wcd(registry):
+    """Borrow and immediately return the registry's WebClientData session."""
+    async with registry.web_client_data_session() as session:
+        return session
+
+
 @pytest.mark.asyncio
 async def test_web_client_data_session_connects_by_pq_name():
     session = MagicMock(spec=CorePlusSession)
     registry, factory_instance = _wcd_registry_with_session(session)
 
-    result = await registry.web_client_data_session()
+    async with registry.web_client_data_session() as result:
+        pass
 
     assert result is session
     factory_instance.connect_to_persistent_query.assert_awaited_once_with(
@@ -1481,8 +1488,10 @@ async def test_web_client_data_session_reuses_live_cached_session():
     session.is_alive = AsyncMock(return_value=True)
     registry, factory_instance = _wcd_registry_with_session(session)
 
-    first = await registry.web_client_data_session()
-    second = await registry.web_client_data_session()
+    async with registry.web_client_data_session() as first:
+        pass
+    async with registry.web_client_data_session() as second:
+        pass
 
     assert first is second
     # Only the first call connects; the second reuses the cache.
@@ -1500,7 +1509,8 @@ async def test_web_client_data_session_replaces_dead_cached_session():
     registry._web_client_data_session = dead
     factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
 
-    result = await registry.web_client_data_session()
+    async with registry.web_client_data_session() as result:
+        pass
 
     assert result is fresh
     dead.close.assert_awaited_once()
@@ -1517,7 +1527,8 @@ async def test_web_client_data_session_replaces_session_whose_liveness_check_rai
     registry._web_client_data_session = dead
     factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
 
-    result = await registry.web_client_data_session()
+    async with registry.web_client_data_session() as result:
+        pass
 
     assert result is fresh
 
@@ -1542,7 +1553,7 @@ async def test_web_client_data_session_replaces_session_whose_liveness_check_sta
     registry._web_client_data_session = stalled
     factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
 
-    result = await asyncio.wait_for(registry.web_client_data_session(), timeout=5)
+    result = await asyncio.wait_for(_borrow_wcd(registry), timeout=5)
 
     assert result is fresh
     stalled.close.assert_awaited_once()
@@ -1567,16 +1578,39 @@ async def test_web_client_data_session_replaces_session_whose_close_stalls():
     registry._web_client_data_session = stale
     factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
 
-    result = await asyncio.wait_for(registry.web_client_data_session(), timeout=5)
+    result = await asyncio.wait_for(_borrow_wcd(registry), timeout=5)
 
     assert result is fresh
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_serializes_concurrent_borrowers():
+    """CorePlusSession forbids overlapping use, and every borrower shares one."""
+    session = MagicMock(spec=CorePlusSession)
+    session.is_alive = AsyncMock(return_value=True)
+    registry, _ = _wcd_registry_with_session(session)
+    overlapping = False
+    borrowers = 0
+
+    async def borrow():
+        nonlocal overlapping, borrowers
+        async with registry.web_client_data_session():
+            borrowers += 1
+            overlapping = overlapping or borrowers > 1
+            await asyncio.sleep(0.01)
+            borrowers -= 1
+
+    await asyncio.gather(*(borrow() for _ in range(4)))
+
+    assert not overlapping, "two callers held the shared session at once"
 
 
 @pytest.mark.asyncio
 async def test_web_client_data_session_requires_initialized_registry():
     registry = _make_registry()
     with pytest.raises(InternalError):
-        await registry.web_client_data_session()
+        async with registry.web_client_data_session():
+            pass
 
 
 @pytest.mark.asyncio
@@ -1615,7 +1649,8 @@ async def test_web_client_data_session_after_close_does_not_connect():
     await registry.close()
 
     with pytest.raises(InternalError):
-        await registry.web_client_data_session()
+        async with registry.web_client_data_session():
+            pass
     factory_instance.connect_to_persistent_query.assert_not_awaited()
 
 
@@ -1637,7 +1672,7 @@ async def test_close_waits_for_an_in_flight_web_client_data_connect():
 
     factory_instance.connect_to_persistent_query = AsyncMock(side_effect=slow_connect)
 
-    connect_task = asyncio.create_task(registry.web_client_data_session())
+    connect_task = asyncio.create_task(_borrow_wcd(registry))
     await connect_started.wait()
 
     close_task = asyncio.create_task(registry.close())

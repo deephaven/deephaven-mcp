@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import NamedTuple, assert_never
 
 import pyarrow
@@ -570,16 +572,21 @@ async def get_enterprise_session(
     return session
 
 
+@asynccontextmanager
 async def get_wcd_system_session(
     function_name: str, context: Context, system: str
-) -> SystemAccess:
-    """Get the shared WebClientData session and operate-as identity for a system.
+) -> AsyncIterator[SystemAccess]:
+    """Borrow the shared WebClientData session and operate-as identity for a system.
 
-    Routes to the system's :class:`EnterpriseSessionRegistry` and returns its
+    Routes to the system's :class:`EnterpriseSessionRegistry` and yields its
     cached ``WebClientData`` session together with the identity that session
     authenticated as. Use this for system-scoped reads served by the
     ``WebClientData`` table-factory widget — the widget builds each table for
     a named user, so both halves are needed.
+
+    The session is borrowed for the duration of the ``async with`` body and is
+    shared by every caller on this system, so reads are serialized. Do only
+    the widget read inside the body; leave response shaping outside it.
 
     Args:
         function_name (str): Name of calling function for logging.
@@ -587,7 +594,7 @@ async def get_wcd_system_session(
         system (str): Enterprise system name (the ``system_name`` field in
             the system's config file).
 
-    Returns:
+    Yields:
         SystemAccess: The live ``WebClientData`` session and the operate-as
             identity to name in widget requests.
 
@@ -605,13 +612,13 @@ async def get_wcd_system_session(
         f"for system '{system}'"
     )
     registry = get_enterprise_registry(context, system)
-    session = await registry.web_client_data_session()
     operate_as = await registry.effective_user()
-    _LOGGER.info(
-        f"[mcp_systems_server:{function_name}] WebClientData session established "
-        f"for system '{system}' as user '{operate_as}'"
-    )
-    return SystemAccess(session=session, operate_as=operate_as)
+    async with registry.web_client_data_session() as session:
+        _LOGGER.info(
+            f"[mcp_systems_server:{function_name}] WebClientData session established "
+            f"for system '{system}' as user '{operate_as}'"
+        )
+        yield SystemAccess(session=session, operate_as=operate_as)
 
 
 # ---------------------------------------------------------------------------

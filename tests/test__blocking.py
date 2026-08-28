@@ -109,6 +109,46 @@ async def test_a_resource_opened_after_the_caller_gave_up_is_still_closed():
 
 
 @pytest.mark.asyncio
+async def test_abandonment_is_committed_before_cleanup_is_detached():
+    """run() must mark the resource abandoned itself, not leave it to cleanup.
+
+    The cleanup thread is gated here so it cannot set the flag, proving the
+    commit is synchronous. Otherwise a stalled opener could claim the resource
+    and run ``use`` after the caller had already timed out.
+    """
+    gate = threading.Event()
+    open_gate = threading.Event()
+    resource = DummyResource()
+    used = []
+
+    def stalled_open():
+        assert open_gate.wait(timeout=10)
+        return resource
+
+    blocking = BlockingResource(stalled_open, lambda r: r.close())
+    release_on_thread = blocking._release
+
+    def gated_release():
+        assert gate.wait(timeout=10)
+        release_on_thread()
+
+    blocking._release = gated_release
+
+    try:
+        with pytest.raises(TimeoutError):
+            await blocking.run(used.append, timeout_seconds=0.05)
+
+        assert blocking._released, "run() returned before committing abandonment"
+
+        open_gate.set()
+        assert resource.close_called.wait(timeout=10), "late resource was leaked"
+        assert used == [], "an abandoned resource must not be used"
+    finally:
+        gate.set()
+        open_gate.set()
+
+
+@pytest.mark.asyncio
 async def test_a_close_failure_does_not_mask_the_result():
     resource = DummyResource(close_error=RuntimeError("already gone"))
 

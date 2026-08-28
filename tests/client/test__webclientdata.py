@@ -439,7 +439,7 @@ async def test_fetch_web_client_data_table_timeout_ends_a_lock_held_read():
             )
 
     assert plugin.resp_stream.reading.is_set(), "the read never started"
-    assert plugin.closed
+    assert plugin.close_called.wait(timeout=10), "the plugin was never closed"
 
 
 @pytest.mark.asyncio

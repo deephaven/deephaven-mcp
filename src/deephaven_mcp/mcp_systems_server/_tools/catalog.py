@@ -178,20 +178,22 @@ async def catalog_tables_list(
     )
 
     try:
-        access = await get_wcd_system_session("catalog_tables_list", context, system)
         settings = get_enterprise_settings(context)
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_tables_list] Retrieving catalog entries with filters: {filters}"
         )
-        arrow_table, is_complete = await queries.get_catalog_table(
-            access.session,
-            operate_as=access.operate_as,
-            timeout_seconds=settings.timeouts.client.web_client_data_timeout_seconds,
-            max_rows=max_rows,
-            filters=filters,
-            distinct_namespaces=False,
-        )
+        async with get_wcd_system_session(
+            "catalog_tables_list", context, system
+        ) as access:
+            arrow_table, is_complete = await queries.get_catalog_table(
+                access.session,
+                operate_as=access.operate_as,
+                timeout_seconds=settings.timeouts.client.web_client_data_timeout_seconds,
+                max_rows=max_rows,
+                filters=filters,
+                distinct_namespaces=False,
+            )
 
         # Only the identity columns survive; drop the rest before sizing.
         subset = arrow_table.select(["Namespace", "TableName"])
@@ -327,22 +329,22 @@ async def catalog_namespaces_list(
     )
 
     try:
-        access = await get_wcd_system_session(
-            "catalog_namespaces_list", context, system
-        )
         settings = get_enterprise_settings(context)
 
         _LOGGER.debug(
             f"[mcp_systems_server:catalog_namespaces_list] Retrieving namespaces with filters: {filters}"
         )
-        arrow_table, is_complete = await queries.get_catalog_table(
-            access.session,
-            operate_as=access.operate_as,
-            timeout_seconds=settings.timeouts.client.web_client_data_timeout_seconds,
-            max_rows=max_rows,
-            filters=filters,
-            distinct_namespaces=True,
-        )
+        async with get_wcd_system_session(
+            "catalog_namespaces_list", context, system
+        ) as access:
+            arrow_table, is_complete = await queries.get_catalog_table(
+                access.session,
+                operate_as=access.operate_as,
+                timeout_seconds=settings.timeouts.client.web_client_data_timeout_seconds,
+                max_rows=max_rows,
+                filters=filters,
+                distinct_namespaces=True,
+            )
 
         # Reject an over-limit response before materializing it as Python objects.
         estimated_size = arrow_table.nbytes

@@ -137,6 +137,11 @@ class BlockingResource[R]:
                 timeout_seconds,
             )
         finally:
+            # Committed here, not on the cleanup thread: that thread may never
+            # be scheduled before this returns, and until _released is set a
+            # late opener could still claim the resource and run ``use``.
+            with self._lock:
+                self._released = True
             # Only what the operation left over, so a stalled close cannot
             # stretch the call to twice the advertised budget.
             remaining = max(0.0, deadline - loop.time())

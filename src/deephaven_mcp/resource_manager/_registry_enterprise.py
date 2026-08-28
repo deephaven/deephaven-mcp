@@ -52,6 +52,8 @@ Enterprise refresh is a four-phase operation:
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import override
 
@@ -357,17 +359,23 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
     # WebClientData session
     # ------------------------------------------------------------------
 
-    async def web_client_data_session(self) -> CorePlusSession:
-        """Return a live session connected to this system's WebClientData PQ.
+    @asynccontextmanager
+    async def web_client_data_session(self) -> AsyncIterator[CorePlusSession]:
+        """Borrow this system's WebClientData session for the duration of a read.
 
         The session is created on first use and cached. A cached session is
-        returned only after a liveness check passes; a dead session is
+        yielded only after a liveness check passes; a dead session is
         discarded and replaced. Because the registry owns exactly one factory
-        manager, and therefore one credential set, the returned session is
+        manager, and therefore one credential set, the yielded session is
         authenticated as this system's configured principal without the caller
         supplying credentials.
 
-        Returns:
+        The cache lock is held for the whole ``async with`` body, not just the
+        acquisition: :class:`CorePlusSession` is documented as single-threaded
+        with non-overlapping calls, and every borrower shares this one
+        instance. Concurrent reads on a system are therefore serialized.
+
+        Yields:
             CorePlusSession: A live session on the ``WebClientData`` persistent
                 query, usable for any system-scoped read such as the catalog.
 
@@ -379,44 +387,58 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 system where that PQ is not running cannot serve these tables.
         """
         async with self._web_client_data_lock:
-            # Resolved inside the lock: a close() that lands while this call
-            # waits clears the manager, and this then fails rather than
-            # connecting a session nothing will ever close.
-            factory_manager = self.factory_manager
+            yield await self._connect_web_client_data()
 
-            cached = self._web_client_data_session
-            if cached is not None:
-                try:
-                    # Bounded: an unbounded probe would hold the lock and stall
-                    # every catalog request for this system.
-                    if await asyncio.wait_for(
-                        cached.is_alive(),
-                        timeout=self._timeouts.quick_operation_timeout_seconds,
-                    ):
-                        return cached
-                    raise RuntimeError("is_alive() returned False")
-                except Exception as e:
-                    _LOGGER.warning(
-                        f"[{self.__class__.__name__}] cached '{WEB_CLIENT_DATA_PQ}' session "
-                        f"failed liveness check ({exception_summary(e)}); reconnecting"
-                    )
-                    self._web_client_data_session = None
-                    await self._close_web_client_data_session(cached)
+    async def _connect_web_client_data(self) -> CorePlusSession:
+        """Return the cached WebClientData session, reconnecting if it is dead.
 
-            _LOGGER.debug(
-                f"[{self.__class__.__name__}] connecting to '{WEB_CLIENT_DATA_PQ}' "
-                f"for system '{self._system_name}'"
-            )
-            factory_instance = await factory_manager.get()
-            session = await factory_instance.connect_to_persistent_query(
-                name=WEB_CLIENT_DATA_PQ
-            )
-            self._web_client_data_session = session
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] connected to '{WEB_CLIENT_DATA_PQ}' "
-                f"for system '{self._system_name}'"
-            )
-            return session
+        Caller must hold ``_web_client_data_lock``.
+
+        Returns:
+            CorePlusSession: A live session on the ``WebClientData`` PQ.
+
+        Raises:
+            InternalError: If the registry has been closed.
+            Exception: Any failure connecting to the persistent query.
+        """
+        # Resolved inside the lock: a close() that lands while this call
+        # waits clears the manager, and this then fails rather than
+        # connecting a session nothing will ever close.
+        factory_manager = self.factory_manager
+
+        cached = self._web_client_data_session
+        if cached is not None:
+            try:
+                # Bounded: an unbounded probe would hold the lock and stall
+                # every catalog request for this system.
+                if await asyncio.wait_for(
+                    cached.is_alive(),
+                    timeout=self._timeouts.quick_operation_timeout_seconds,
+                ):
+                    return cached
+                raise RuntimeError("is_alive() returned False")
+            except Exception as e:
+                _LOGGER.warning(
+                    f"[{self.__class__.__name__}] cached '{WEB_CLIENT_DATA_PQ}' session "
+                    f"failed liveness check ({exception_summary(e)}); reconnecting"
+                )
+                self._web_client_data_session = None
+                await self._close_web_client_data_session(cached)
+
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] connecting to '{WEB_CLIENT_DATA_PQ}' "
+            f"for system '{self._system_name}'"
+        )
+        factory_instance = await factory_manager.get()
+        session = await factory_instance.connect_to_persistent_query(
+            name=WEB_CLIENT_DATA_PQ
+        )
+        self._web_client_data_session = session
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] connected to '{WEB_CLIENT_DATA_PQ}' "
+            f"for system '{self._system_name}'"
+        )
+        return session
 
     async def effective_user(self) -> str:
         """Return the identity this system's factory authenticated as.
