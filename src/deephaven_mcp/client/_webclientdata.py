@@ -49,7 +49,10 @@ from ._session import CorePlusSession
 _LOGGER = logging.getLogger(__name__)
 
 WEB_CLIENT_DATA_PQ = "WebClientData"
-"""Name of the Enterprise persistent query that serves web-client state."""
+"""Name of the Enterprise persistent query that serves web-client state.
+
+Every Enterprise system runs it under this name, so system-scoped reads can
+reach a worker without the caller naming a persistent query of their own."""
 
 _TABLE_FACTORY_FIELD = "WebClientTableFactory"
 """Scope field the WebClientData worker exports the table-factory widget under."""

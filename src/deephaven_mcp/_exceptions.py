@@ -340,11 +340,12 @@ class QueryError(McpError):
 class WebClientDataError(McpError):
     """Exception raised when a WebClientData system table cannot be obtained.
 
-    Raised by the ``WebClientData`` table-factory widget protocol when that
-    persistent query is reachable but the requested per-user table cannot be
-    produced.
+    Raised by the ``WebClientData`` table-factory widget protocol for any
+    failure to obtain the requested per-user table, including failing to open
+    the widget stream and exceeding the configured timeout.
 
     Examples:
+        - The widget stream could not be opened
         - The table-factory widget is not exported under the expected scope field
         - The widget refused the request (unknown table name, or the caller may
           not request tables for the named user)

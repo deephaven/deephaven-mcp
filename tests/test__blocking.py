@@ -24,7 +24,7 @@ class DummyResource:
             raise self.close_error
 
 
-def _resource_for(resource, close_error=None):
+def _resource_for(resource):
     """Build a BlockingResource that opens ``resource`` and closes it."""
     return BlockingResource(lambda: resource, lambda r: r.close())
 

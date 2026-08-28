@@ -62,6 +62,7 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp._taxonomy import SessionOrigin
 from deephaven_mcp.client import (
+    WEB_CLIENT_DATA_PQ,
     CorePlusControllerClient,
     CorePlusQuerySerial,
     CorePlusSession,
@@ -84,12 +85,6 @@ from ._registry import (
 from ._session_id import QualifiedSessionId, SessionId
 
 _LOGGER = logging.getLogger(__name__)
-
-WEB_CLIENT_DATA_PQ = "WebClientData"
-"""Name of the Enterprise persistent query that serves web-client state.
-
-Every Enterprise system runs it under this name, so system-scoped reads can
-reach a worker without the caller naming a persistent query of their own."""
 
 
 # ---------------------------------------------------------------------------
