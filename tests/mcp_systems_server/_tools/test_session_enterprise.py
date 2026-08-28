@@ -12,6 +12,7 @@ import pytest
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
+    EnterpriseNotConfiguredError,
     RegistryItemNotFoundError,
     SessionCreationError,
 )
@@ -24,6 +25,7 @@ from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _generate_session_name_if_none,
     _resolve_session_parameters,
     _short_reason,
+    enterprise_controller_reconnect,
     enterprise_systems_status,
     register_tools,
     session_enterprise_create,
@@ -2805,9 +2807,91 @@ def test_register_tools_registers_all_enterprise_tools():
     tools = server._tool_manager._tools
     assert set(tools) == {
         "enterprise_systems_status",
+        "enterprise_controller_reconnect",
         "session_enterprise_create",
         "session_enterprise_delete",
     }
+
+
+# ---------------------------------------------------------------------------
+# enterprise_controller_reconnect
+# ---------------------------------------------------------------------------
+
+
+def _make_reconnect_context(request_reconnect: AsyncMock) -> MockContext:
+    """Return a context whose enterprise registry exposes ``request_reconnect``."""
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.request_reconnect = request_reconnect
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
+    return MockContext(
+        {
+            "registry": mock_session_registry,
+            "config_manager": AsyncMock(),
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_success():
+    """A reconnect request is signaled and reported without waiting for it."""
+    request_reconnect = AsyncMock(return_value=True)
+    context = _make_reconnect_context(request_reconnect)
+
+    result = await enterprise_controller_reconnect(context, _TEST_SYSTEM_NAME)
+
+    assert result["success"] is True
+    assert result["system"] == _TEST_SYSTEM_NAME
+    assert result["reconnect_requested"] is True
+    assert "background" in result["detail"]
+    assert "isError" not in result
+    request_reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_reports_no_running_healer():
+    """When no healer is running the request is still accepted, flagged False."""
+    context = _make_reconnect_context(AsyncMock(return_value=False))
+
+    result = await enterprise_controller_reconnect(context, _TEST_SYSTEM_NAME)
+
+    assert result["success"] is True
+    assert result["reconnect_requested"] is False
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_unknown_system_errors():
+    """An unconfigured system name returns a structured error, not a raise."""
+    context = MockContext(
+        {
+            "registry": MagicMock(spec=EnterpriseSessionRegistry),
+            "config_manager": AsyncMock(),
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_enterprise.get_enterprise_registry",
+        side_effect=EnterpriseNotConfiguredError("no such system"),
+    ):
+        result = await enterprise_controller_reconnect(context, "nope")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "nope" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_signal_failure_errors():
+    """A failure while signaling the healer is reported as a structured error."""
+    context = _make_reconnect_context(AsyncMock(side_effect=RuntimeError("boom")))
+
+    result = await enterprise_controller_reconnect(context, _TEST_SYSTEM_NAME)
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "boom" in result["error"]
 
 
 @pytest.mark.asyncio

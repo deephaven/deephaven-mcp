@@ -984,6 +984,9 @@ class TestCorePlusSessionFactoryManager:
         msg = str(exc_info.value)
         assert CONTROLLER_SUBSCRIBING_ERROR_CODE in msg
         assert "recreate attempt" in msg
+        # The message names the escape hatch and the system to pass to it.
+        assert "enterprise_controller_reconnect" in msg
+        assert "system='test_factory'" in msg
         # get_controller_client no longer recreates inline; the healer owns that.
         manager.close.assert_not_called()
         # The outage start was recorded for the status message.
@@ -1052,12 +1055,26 @@ class TestCorePlusSessionFactoryManager:
         manager.close = AsyncMock()
         manager.get = AsyncMock()
 
-        await manager._heal_once(interval=30.0)
+        await manager._heal_once()
 
         assert manager._subscribing_since is None
         assert manager._recreate_attempts == 0
         manager.close.assert_not_called()
         manager.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_heal_once_idle_with_no_cache_does_nothing(self):
+        """No cached factory and no episode in progress is idle, not an outage."""
+        manager = self._make_factory_manager()
+        assert manager._item_cache is None
+        manager.close = AsyncMock()
+        manager.get = AsyncMock()
+
+        await manager._heal_once()
+
+        manager.close.assert_not_called()
+        manager.get.assert_not_called()
+        assert manager._recreate_attempts == 0
 
     @pytest.mark.asyncio
     async def test_heal_once_poisoned_recreates(self):
@@ -1068,13 +1085,12 @@ class TestCorePlusSessionFactoryManager:
         manager.close = AsyncMock()
         manager.get = AsyncMock()
 
-        await manager._heal_once(interval=30.0)
+        await manager._heal_once()
 
         manager.close.assert_awaited_once()
         manager.get.assert_awaited_once()
         assert manager._recreate_attempts == 1
         assert manager._subscribing_since is not None
-        assert manager._next_recreate_monotonic is not None
 
     @pytest.mark.asyncio
     async def test_heal_once_recreate_failure_is_swallowed(self):
@@ -1085,11 +1101,131 @@ class TestCorePlusSessionFactoryManager:
         manager.close = AsyncMock()
         manager.get = AsyncMock(side_effect=RuntimeError("boom"))
 
-        await manager._heal_once(interval=30.0)
+        await manager._heal_once()
 
         manager.close.assert_awaited_once()
         assert manager._recreate_attempts == 1
-        assert manager._next_recreate_monotonic is not None
+
+    @pytest.mark.asyncio
+    async def test_heal_once_empty_cache_mid_episode_keeps_escalating(self):
+        """A recreate that left the cache empty keeps the episode and keeps retrying.
+
+        Regression guard: treating the empty cache as "idle" would reset the
+        attempt counter every pass, so the backoff could never escalate in the
+        exact case it exists for — a controller that is entirely unreachable.
+        """
+        manager = self._make_factory_manager()
+        # Mid-episode with a failed recreate: nothing cached, outage ongoing.
+        manager._item_cache = None
+        manager._subscribing_since = time.monotonic()
+        manager._recreate_attempts = 2
+        manager.close = AsyncMock()
+        manager.get = AsyncMock(side_effect=RuntimeError("still down"))
+
+        await manager._heal_once()
+
+        manager.close.assert_awaited_once()
+        assert manager._recreate_attempts == 3
+        assert manager._subscribing_since is not None
+
+    @pytest.mark.asyncio
+    async def test_backoff_doubles_and_caps(self):
+        """The delay doubles per attempt and is capped at the configured maximum."""
+        manager = self._make_factory_manager()
+        manager._timeouts = EnterpriseClientTimeouts.model_validate(
+            {
+                "controller_resubscribe_backoff_initial_seconds": 10.0,
+                "controller_resubscribe_backoff_max_seconds": 60.0,
+            }
+        )
+
+        manager._recreate_attempts = 0
+        assert manager._backoff_seconds_locked() == 10.0
+        manager._recreate_attempts = 1
+        assert manager._backoff_seconds_locked() == 20.0
+        manager._recreate_attempts = 2
+        assert manager._backoff_seconds_locked() == 40.0
+        # Doubling would give 80.0; the cap wins.
+        manager._recreate_attempts = 3
+        assert manager._backoff_seconds_locked() == 60.0
+        # A very long outage stays at the cap without overflowing.
+        manager._recreate_attempts = 10_000
+        assert manager._backoff_seconds_locked() == 60.0
+
+    @pytest.mark.asyncio
+    async def test_backoff_max_below_initial_clamps(self):
+        """A maximum below the initial delay pins every delay to the maximum."""
+        manager = self._make_factory_manager()
+        manager._timeouts = EnterpriseClientTimeouts.model_validate(
+            {
+                "controller_resubscribe_backoff_initial_seconds": 30.0,
+                "controller_resubscribe_backoff_max_seconds": 5.0,
+            }
+        )
+
+        assert manager._backoff_seconds_locked() == 5.0
+
+    @pytest.mark.asyncio
+    async def test_request_reconnect_reports_healer_running(self):
+        """request_reconnect sets the nudge and reports whether a healer will serve it."""
+        manager = self._make_factory_manager()
+
+        # No healer running yet: request is recorded but nothing services it.
+        assert await manager.request_reconnect() is False
+        assert manager._reconnect_requested.is_set()
+
+        manager._reconnect_requested.clear()
+        manager._heal_once = AsyncMock()
+        await manager.start_healer()
+        try:
+            assert await manager.request_reconnect() is True
+        finally:
+            await manager.stop_healer()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_next_pass_returns_false_on_timeout(self):
+        """The full delay elapsing is reported as a non-forced pass."""
+        manager = self._make_factory_manager()
+        assert await manager._wait_for_next_pass(0.01) is False
+
+    @pytest.mark.asyncio
+    async def test_wait_for_next_pass_short_circuits_on_request(self):
+        """A pending reconnect request cuts the wait short and is consumed."""
+        manager = self._make_factory_manager()
+        manager._reconnect_requested.set()
+
+        # Would block for an hour if the request were not honored.
+        assert await manager._wait_for_next_pass(3600) is True
+        assert not manager._reconnect_requested.is_set()
+
+    @pytest.mark.asyncio
+    async def test_request_reconnect_wakes_healer_immediately(self):
+        """A reconnect request runs a pass without waiting out the backoff."""
+        manager = self._make_factory_manager()
+        # A long backoff so only the nudge can trigger a pass in time.
+        manager._timeouts = EnterpriseClientTimeouts.model_validate(
+            {
+                "controller_resubscribe_backoff_initial_seconds": 3600.0,
+                "controller_resubscribe_backoff_max_seconds": 3600.0,
+            }
+        )
+        forced_calls = []
+        healed = asyncio.Event()
+
+        async def _record_heal_once(forced=False):
+            forced_calls.append(forced)
+            healed.set()
+
+        manager._heal_once = _record_heal_once
+
+        await manager.start_healer()
+        try:
+            await manager.request_reconnect()
+            await asyncio.wait_for(healed.wait(), timeout=1.0)
+        finally:
+            await manager.stop_healer()
+
+        assert forced_calls == [True]
 
     @pytest.mark.asyncio
     async def test_start_and_stop_healer_idempotent(self):
@@ -1115,13 +1251,16 @@ class TestCorePlusSessionFactoryManager:
     async def test_healer_loop_invokes_heal_once(self):
         """The loop calls _heal_once each pass until canceled."""
         manager = self._make_factory_manager()
-        # Zero interval so the loop spins immediately.
+        # Tiny backoff so the loop spins immediately.
         manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {"controller_resubscribe_recreate_interval_seconds": 0.001}
+            {
+                "controller_resubscribe_backoff_initial_seconds": 0.001,
+                "controller_resubscribe_backoff_max_seconds": 0.001,
+            }
         )
         called = asyncio.Event()
 
-        async def _fake_heal_once(interval):
+        async def _fake_heal_once(forced=False):
             called.set()
 
         manager._heal_once = _fake_heal_once
@@ -1131,16 +1270,39 @@ class TestCorePlusSessionFactoryManager:
         await manager.stop_healer()
 
     @pytest.mark.asyncio
+    async def test_healer_loop_publishes_next_recreate_deadline(self):
+        """The loop publishes the next-recreate deadline before waiting."""
+        manager = self._make_factory_manager()
+        manager._timeouts = EnterpriseClientTimeouts.model_validate(
+            {
+                "controller_resubscribe_backoff_initial_seconds": 3600.0,
+                "controller_resubscribe_backoff_max_seconds": 3600.0,
+            }
+        )
+        manager._heal_once = AsyncMock()
+
+        await manager.start_healer()
+        try:
+            # Yield so the loop body runs up to its wait.
+            await asyncio.sleep(0)
+            assert manager._next_recreate_monotonic is not None
+        finally:
+            await manager.stop_healer()
+
+    @pytest.mark.asyncio
     async def test_healer_loop_continues_after_heal_once_error(self):
         """An exception in one pass is logged and the loop keeps running."""
         manager = self._make_factory_manager()
         manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {"controller_resubscribe_recreate_interval_seconds": 0.001}
+            {
+                "controller_resubscribe_backoff_initial_seconds": 0.001,
+                "controller_resubscribe_backoff_max_seconds": 0.001,
+            }
         )
         calls = []
         second_call = asyncio.Event()
 
-        async def _flaky_heal_once(interval):
+        async def _flaky_heal_once(forced=False):
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("transient")
@@ -1158,11 +1320,14 @@ class TestCorePlusSessionFactoryManager:
         """Canceling while _heal_once runs propagates through the inner guard."""
         manager = self._make_factory_manager()
         manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {"controller_resubscribe_recreate_interval_seconds": 0.001}
+            {
+                "controller_resubscribe_backoff_initial_seconds": 0.001,
+                "controller_resubscribe_backoff_max_seconds": 0.001,
+            }
         )
         in_heal = asyncio.Event()
 
-        async def _blocking_heal_once(interval):
+        async def _blocking_heal_once(forced=False):
             in_heal.set()
             await asyncio.sleep(3600)
 

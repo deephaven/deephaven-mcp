@@ -439,6 +439,7 @@ tools encode the system in the PQ id (form
 
 - **System Discovery**: List every configured Community session and Enterprise system (`list_systems`)
 - **Enterprise System Status**: Check status of any configured DHE system (`enterprise_systems_status(system)`)
+- **Controller Recovery**: Force an immediate controller reconnect for one system (`enterprise_controller_reconnect(system)`)
 - **Enterprise Session Management**: Create and delete enterprise worker sessions per system
 - **Persistent Query Management**: Full lifecycle management of enterprise PQs across systems — create, start, stop, restart, modify, delete
 - **Catalog Discovery**: Browse the enterprise catalog at table and namespace levels
@@ -471,6 +472,7 @@ in the PQ id (form `enterprise:<system>:<serial>`).
 
 - `list_systems` - List every configured Community session and Enterprise system as `(name, type)` pairs
 - `enterprise_systems_status(system)` - Report a configured DHE system's health (liveness) and any discovery errors
+- `enterprise_controller_reconnect(system)` - Force an immediate reconnect attempt for one DHE system's wedged controller subscription; returns instantly without waiting for the attempt
 
 *Community sessions:*
 

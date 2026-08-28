@@ -2,6 +2,7 @@
 
 Provides MCP tools for managing Deephaven Enterprise (Core+) sessions:
 - enterprise_systems_status: Get status of configured Enterprise systems
+- enterprise_controller_reconnect: Force an immediate controller reconnect attempt
 - session_enterprise_create: Create new Enterprise sessions on configured systems
 - session_enterprise_delete: Delete Enterprise sessions
 
@@ -320,6 +321,103 @@ async def enterprise_systems_status(
             exc_info=True,
         )
         return error_response(str(e))
+
+
+async def enterprise_controller_reconnect(
+    context: Context,
+    system: str,
+) -> dict[str, Any]:
+    """Force an immediate reconnect attempt for one Enterprise system's controller.
+
+    Use this when a controller-backed call (``pq_list``, ``pq_details``,
+    ``session_enterprise_create``, ...) fails with an error containing
+    ``[CONTROLLER_SUBSCRIBING]``. That error means the system's controller
+    subscription is wedged and a background healer is already retrying on an
+    exponential backoff; this tool skips the remaining wait and triggers the
+    next attempt now.
+
+    Terminology Note:
+        "Controller" is the Deephaven Enterprise Persistent Query Controller —
+        the service that owns persistent-query state. A wedged *subscription*
+        to it makes persistent-query reads fail fast; it does not mean
+        individual sessions or workers have stopped.
+
+    Behavior:
+        - Returns immediately. It signals the background healer rather than
+          rebuilding the connection inline, so it never blocks for the
+          (potentially minutes-long) reconnect.
+        - Does not report whether the reconnect succeeded. Check
+          ``enterprise_systems_status`` or retry the original call.
+        - Safe to call repeatedly; concurrent requests collapse into a single
+          attempt.
+        - A no-op when the controller is already healthy — it never tears down
+          a working connection.
+
+    Args:
+        context (Context): MCP context carrying the server lifespan state.
+        system (str): Name of the Enterprise system whose controller should
+            reconnect. Required — only this system is affected. Must match a
+            configured system name (see ``enterprise_systems_status``).
+
+    Returns:
+        dict[str, Any]: Response with the following fields:
+            - success (bool): True if the reconnect request was accepted.
+            - system (str): The system the request targeted. Present on success.
+            - reconnect_requested (bool): True when a running healer will
+              service the request; False when no healer is running, in which
+              case the request is recorded for a healer that starts later.
+              Present on success.
+            - detail (str): Human-readable next step. Present on success.
+            - error (str): Error message. Present only on failure.
+            - isError (bool): True. Present only on failure.
+
+    Format Accuracy for AI Agents:
+        Report only what the response contains. ``success: true`` means the
+        request was *accepted*, NOT that the controller reconnected. Do not
+        tell the user the system is back online based on this response — verify
+        with ``enterprise_systems_status`` or by retrying the original call.
+
+    Example Success Response:
+        {
+            'success': True,
+            'system': 'prod',
+            'reconnect_requested': True,
+            'detail': "Reconnect requested for enterprise system 'prod'. The attempt runs in the background; retry your original call shortly or check enterprise_systems_status.",
+        }
+
+    Example Error Response:
+        {'success': False, 'error': "Enterprise system 'prod' is not configured", 'isError': True}
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:enterprise_controller_reconnect] Invoked: system={system!r}"
+    )
+    try:
+        session_registry = get_enterprise_registry(context, system)
+        requested = await session_registry.factory_manager.request_reconnect()
+        _LOGGER.info(
+            f"[mcp_systems_server:enterprise_controller_reconnect] Reconnect signaled "
+            f"for system '{system}' (healer_running={requested})"
+        )
+        return {
+            "success": True,
+            "system": system,
+            "reconnect_requested": requested,
+            "detail": (
+                f"Reconnect requested for enterprise system '{system}'. The "
+                f"attempt runs in the background; retry your original call "
+                f"shortly or check enterprise_systems_status."
+            ),
+        }
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:enterprise_controller_reconnect] Failed for "
+            f"system {system!r}: {e!r}",
+            exc_info=True,
+        )
+        return error_response(
+            f"Failed to request controller reconnect for system '{system}': "
+            f"{exception_summary(e)}"
+        )
 
 
 def _env_vars_to_list(env_vars: dict[str, str] | None) -> list[str] | None:
@@ -1140,7 +1238,8 @@ def register_tools(server: FastMCP) -> None:
     """Register all Enterprise session tools with the given FastMCP server.
 
     Registers ``enterprise_systems_status`` (which returns an empty system
-    list when no Enterprise system is configured) plus the Enterprise session
+    list when no Enterprise system is configured) plus
+    ``enterprise_controller_reconnect`` and the Enterprise session
     create/delete tools (which return a clean "not configured" error in that
     case). Every tool module registers unconditionally; tools self-report
     applicability rather than being gated by configuration.
@@ -1149,5 +1248,6 @@ def register_tools(server: FastMCP) -> None:
         server (FastMCP): The server to register tools with.
     """
     server.tool()(enterprise_systems_status)
+    server.tool()(enterprise_controller_reconnect)
     server.tool()(session_enterprise_create)
     server.tool()(session_enterprise_delete)

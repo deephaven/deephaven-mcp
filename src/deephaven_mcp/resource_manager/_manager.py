@@ -2953,12 +2953,33 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         self._subscribing_since: float | None = None
         self._recreate_attempts: int = 0
         self._next_recreate_monotonic: float | None = None
+        self._reconnect_requested = asyncio.Event()
 
     def _reset_episode_locked(self) -> None:
         """Clear all poison-episode state. Caller must hold ``_healer_lock``."""
         self._subscribing_since = None
         self._recreate_attempts = 0
         self._next_recreate_monotonic = None
+
+    def _backoff_seconds_locked(self) -> float:
+        """Return the delay before the next recreate. Caller holds ``_healer_lock``.
+
+        Doubles ``controller_resubscribe_backoff_initial_seconds`` once per
+        recreate attempt already made in the current episode, capped at
+        ``controller_resubscribe_backoff_max_seconds``. With zero attempts the
+        delay is the initial value, so the first recreate of an episode waits
+        exactly that long.
+
+        Returns:
+            float: Seconds to wait before the next recreate attempt. Never
+                exceeds the configured maximum, which also means a maximum
+                below the initial value pins every delay to the maximum.
+        """
+        initial = self._timeouts.controller_resubscribe_backoff_initial_seconds
+        maximum = self._timeouts.controller_resubscribe_backoff_max_seconds
+        # Bound the exponent so a long outage cannot overflow the shift.
+        exponent = min(self._recreate_attempts, 32)
+        return min(initial * float(2**exponent), maximum)
 
     def _subscribing_status_message_locked(self, now: float) -> str:
         """Build the "still subscribing" status message. Caller holds ``_healer_lock``.
@@ -2970,20 +2991,22 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             str: A message prefixed with
                 :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE` describing how long
                 the subscription has been wedged, how many recreate attempts
-                the healer has made, and the countdown to the next recreate.
+                the healer has made, the countdown to the next recreate, and
+                how to force an immediate reconnect.
         """
         waited = now - (self._subscribing_since if self._subscribing_since else now)
-        interval = self._timeouts.controller_resubscribe_recreate_interval_seconds
         if self._next_recreate_monotonic is not None:
             next_in = max(0.0, self._next_recreate_monotonic - now)
         else:
-            next_in = interval
+            next_in = self._backoff_seconds_locked()
         return (
             f"[{CONTROLLER_SUBSCRIBING_ERROR_CODE}] Controller subscription for "
             f"'{self.qualified_session_id}' is still initializing "
             f"(waited {waited:.0f}s, {self._recreate_attempts} recreate "
             f"attempt(s) so far); the next automatic recreate is in "
-            f"~{next_in:.0f}s. Retry this call shortly."
+            f"~{next_in:.0f}s. Retry this call shortly, or call the "
+            f"enterprise_controller_reconnect tool with system='{self.system}' "
+            f"to force an immediate reconnect."
         )
 
     async def get_controller_client(self) -> CorePlusControllerClient:
@@ -2995,15 +3018,16 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         When the subscription is wedged (see
         :attr:`CorePlusControllerClient.is_poisoned`), this does **not** block or
         recreate inline. Recreation is owned by the always-on background healer
-        (:meth:`start_healer`), which recreates the factory on the
-        ``controller_resubscribe_recreate_interval_seconds`` cadence until a
-        fresh controller subscribes cleanly. This method instead records the
-        start of the outage (if not already recorded) and raises immediately with
-        a status message carrying :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE`,
-        reporting how long the subscription has been initializing, how many
-        recreate attempts the healer has made, and the countdown to the next
-        recreate — so callers get an instant, informative response instead of
-        blocking on the vendor subscription timeout.
+        (:meth:`start_healer`), which recreates the factory on a capped
+        exponential backoff until a fresh controller subscribes cleanly. This
+        method instead records the start of the outage (if not already recorded)
+        and raises immediately with a status message carrying
+        :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE`, reporting how long the
+        subscription has been initializing, how many recreate attempts the healer
+        has made, the countdown to the next recreate, and the
+        ``enterprise_controller_reconnect`` tool that forces one now — so callers
+        get an instant, informative response instead of blocking on the vendor
+        subscription timeout.
 
         Returns:
             CorePlusControllerClient: A healthy controller client.
@@ -3032,6 +3056,31 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         _LOGGER.warning(f"[{self.__class__.__name__}:get_controller_client] {msg}")
         raise DeephavenConnectionError(msg)
 
+    async def request_reconnect(self) -> bool:
+        """Ask the background healer to run a recreate pass immediately.
+
+        Signals the healer rather than recreating inline, so this returns
+        without waiting for the (potentially minutes-long) factory rebuild and
+        concurrent requests collapse into a single attempt. The healer wakes,
+        skips the remaining backoff delay, and runs one pass; that pass is a
+        no-op when the controller is already healthy.
+
+        Backing the ``enterprise_controller_reconnect`` MCP tool.
+
+        Returns:
+            bool: ``True`` when a running healer will service the request;
+                ``False`` when no healer is running (the request is recorded
+                and will be consumed if one starts later).
+        """
+        async with self._healer_lock:
+            running = self._healer_task is not None and not self._healer_task.done()
+            self._reconnect_requested.set()
+        _LOGGER.info(
+            f"[{self.__class__.__name__}:request_reconnect] Reconnect requested for "
+            f"'{self.qualified_session_id}' (healer_running={running})"
+        )
+        return running
+
     async def start_healer(self) -> None:
         """Launch the background subscription-healing loop.
 
@@ -3040,8 +3089,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         right after it constructs this manager, and stopped by
         :meth:`stop_healer` during registry shutdown. While the cached
         controller is wedged in ``SUBSCRIBING``, the loop recreates the factory
-        every ``controller_resubscribe_recreate_interval_seconds`` until a fresh
-        controller subscribes cleanly.
+        on a capped exponential backoff until a fresh controller subscribes
+        cleanly.
         """
         async with self._healer_lock:
             if self._healer_task is not None and not self._healer_task.done():
@@ -3081,36 +3130,58 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         """Report the cached controller's poison state without forcing creation.
 
         Returns:
-            bool | None: ``None`` when no factory is cached (nothing to heal);
-                otherwise whether the cached factory's controller subscription
-                is wedged in ``SUBSCRIBING``.
+            bool | None: ``None`` when no factory is cached; otherwise whether
+                the cached factory's controller subscription is wedged in
+                ``SUBSCRIBING``. ``None`` is ambiguous on its own — it means
+                either "idle, nothing to heal" or "the last recreate failed
+                mid-episode"; :meth:`_heal_once` disambiguates using the
+                episode state.
         """
         async with self._lock:
             if self._item_cache is None:
                 return None
             return self._item_cache.controller_client.is_poisoned
 
-    async def _healer_loop(self) -> None:
-        """Recreate the factory on an interval while its subscription is wedged.
+    async def _wait_for_next_pass(self, delay: float) -> bool:
+        """Wait ``delay`` seconds, returning early if a reconnect was requested.
 
-        Sleeps ``controller_resubscribe_recreate_interval_seconds`` between
-        passes. Each pass peeks the cached controller: if healthy or nothing is
-        cached, it clears any episode state; if wedged, it recreates the factory
-        (close + get) and advances the recreate-attempt counter and
-        next-recreate countdown that :meth:`get_controller_client` reports.
-        Recreation failures are logged and retried on the next pass. Runs until
-        canceled by :meth:`stop_healer`.
+        Args:
+            delay (float): Seconds to wait before the next healing pass.
+
+        Returns:
+            bool: ``True`` when :meth:`request_reconnect` cut the wait short,
+                ``False`` when the full delay elapsed.
         """
-        interval = self._timeouts.controller_resubscribe_recreate_interval_seconds
+        try:
+            await asyncio.wait_for(self._reconnect_requested.wait(), timeout=delay)
+        except TimeoutError:
+            return False
+        self._reconnect_requested.clear()
+        return True
+
+    async def _healer_loop(self) -> None:
+        """Recreate the factory on a capped exponential backoff while wedged.
+
+        Each iteration computes the current backoff delay, publishes the
+        resulting next-recreate deadline (so
+        :meth:`get_controller_client` can report an accurate countdown), then
+        waits — either for the delay to elapse or for
+        :meth:`request_reconnect` to cut it short. Recreation failures are
+        logged by :meth:`_heal_once` and retried on the next pass with a longer
+        delay. Runs until canceled by :meth:`stop_healer`.
+        """
         _LOGGER.debug(
             f"[{self.__class__.__name__}:_healer_loop] entered for "
-            f"'{self.qualified_session_id}' (interval={interval}s)"
+            f"'{self.qualified_session_id}'"
         )
         try:
             while True:
-                await asyncio.sleep(interval)
+                async with self._healer_lock:
+                    delay = self._backoff_seconds_locked()
+                    self._next_recreate_monotonic = time.monotonic() + delay
+                forced = await self._wait_for_next_pass(delay)
                 try:
-                    await self._heal_once(interval)
+                    await self._heal_once(forced=forced)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -3125,20 +3196,31 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             )
             raise
 
-    async def _heal_once(self, interval: float) -> None:
+    async def _heal_once(self, forced: bool = False) -> None:
         """Run one healing pass: recreate the factory iff the subscription is wedged.
 
+        A pass recreates when the cached controller is wedged, or when nothing
+        is cached *while an episode is in progress* — the latter is how a
+        recreate that failed outright (leaving the cache empty) keeps the
+        episode, and therefore the backoff escalation, alive. With no episode
+        in progress an empty cache simply means idle, and the pass does
+        nothing; the next :meth:`get` creates the factory lazily.
+
         Args:
-            interval (float): The recreate cadence, used to schedule the
-                next-recreate countdown reported to callers.
+            forced (bool): Whether this pass was triggered by
+                :meth:`request_reconnect` rather than by the backoff elapsing.
+                Affects logging only — a forced pass applies the same rules, so
+                forcing a reconnect never tears down a healthy controller.
         """
         poisoned = await self._peek_controller_poisoned()
-        if not poisoned:
-            async with self._healer_lock:
-                self._reset_episode_locked()
-            return
 
         async with self._healer_lock:
+            episode_active = self._subscribing_since is not None
+            if poisoned is False:
+                self._reset_episode_locked()
+                return
+            if poisoned is None and not episode_active:
+                return
             if self._subscribing_since is None:
                 self._subscribing_since = time.monotonic()
             self._recreate_attempts += 1
@@ -3146,8 +3228,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         _LOGGER.warning(
             f"[{self.__class__.__name__}:_heal_once] Controller subscription for "
-            f"'{self.qualified_session_id}' wedged; recreating factory "
-            f"(attempt {attempt})"
+            f"'{self.qualified_session_id}' unavailable; recreating factory "
+            f"(attempt {attempt}, forced={forced})"
         )
         await self.close()
         try:
@@ -3157,8 +3239,6 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 f"[{self.__class__.__name__}:_heal_once] Factory recreate failed "
                 f"for '{self.qualified_session_id}': {e}"
             )
-        async with self._healer_lock:
-            self._next_recreate_monotonic = time.monotonic() + interval
 
     @override
     async def _create_item(self) -> CorePlusSessionFactory:
