@@ -30,11 +30,9 @@ __all__ = [
     "fetch_web_client_data_table",
 ]
 
-import asyncio
 import enum
 import json
 import logging
-import threading
 import time
 import uuid
 
@@ -42,6 +40,7 @@ from deephaven_enterprise.client.session_manager import DndSession
 from pydeephaven.experimental.plugin_client import PluginClient
 from pydeephaven.table import Table
 
+from deephaven_mcp._blocking import BlockingResource
 from deephaven_mcp._exceptions import WebClientDataError
 
 from ._base import describe_exception_chain
@@ -196,91 +195,6 @@ def _request_table(
     )
 
 
-class _PluginHandoff:
-    """Thread-safe ownership transfer of a plugin from the worker thread.
-
-    The worker can finish opening the stream after ``asyncio.wait_for`` has
-    given up, so whoever gets there second closes it. Without this the caller
-    would have no handle to a plugin created by an abandoned worker.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._plugin: PluginClient | None = None
-        self._released = False
-
-    def offer(self, plugin: PluginClient) -> bool:
-        """Hand ``plugin`` to the caller; False if the caller already gave up."""
-        with self._lock:
-            if self._released:
-                return False
-            self._plugin = plugin
-            return True
-
-    def release(self) -> PluginClient | None:
-        """Take the plugin, if any, and refuse all later offers."""
-        with self._lock:
-            self._released = True
-            plugin, self._plugin = self._plugin, None
-            return plugin
-
-
-def _open_and_request(
-    handoff: _PluginHandoff,
-    session: DndSession,
-    table: WebClientDataTable,
-    operate_as: str,
-    deadline_seconds: float,
-) -> Table:
-    """Open the widget stream and read the requested table, in one thread.
-
-    Args:
-        handoff (_PluginHandoff): Receives the plugin as soon as it exists.
-        session (DndSession): A session connected to the ``WebClientData``
-            persistent query.
-        table (WebClientDataTable): The per-user table to request.
-        operate_as (str): Identity whose ACLs the table is built with.
-        deadline_seconds (float): Wall-clock budget for a table to arrive on
-            the response stream.
-
-    Returns:
-        Table: The requested table on the ``WebClientData`` worker.
-
-    Raises:
-        WebClientDataError: If the widget is unavailable, refuses the request,
-            returns a non-table object, produces no table in time, or the
-            caller abandoned this request while the stream was opening.
-    """
-    plugin = _open_plugin(session)
-    if not handoff.offer(plugin):
-        plugin.close()
-        raise WebClientDataError(
-            f"The request for '{table}' was abandoned while the "
-            f"'{_TABLE_FACTORY_FIELD}' stream was opening."
-        )
-    return _request_table(plugin, table, operate_as, deadline_seconds)
-
-
-def _release_plugin(handoff: _PluginHandoff) -> None:
-    """Close the handed-off plugin, if any, without raising.
-
-    A close failure must not replace the call's real result or error.
-
-    Args:
-        handoff (_PluginHandoff): The handoff to drain.
-    """
-    plugin = handoff.release()
-    if plugin is None:
-        return
-    try:
-        plugin.close()
-    except Exception as e:
-        _LOGGER.warning(
-            f"[fetch_web_client_data_table] Failed to close the "
-            f"'{_TABLE_FACTORY_FIELD}' stream: {e!r}"
-        )
-
-
 async def fetch_web_client_data_table(
     session: CorePlusSession,
     table: WebClientDataTable,
@@ -312,25 +226,21 @@ async def fetch_web_client_data_table(
         f"[fetch_web_client_data_table] Requesting table: table={str(table)!r}, "
         f"operate_as={operate_as!r}, timeout_seconds={timeout_seconds}"
     )
-    handoff = _PluginHandoff()
+    widget = BlockingResource(
+        lambda: _open_plugin(session.wrapped),
+        lambda plugin: plugin.close(),
+    )
 
     try:
         # Opening the stream is inside the deadline: a stalled widget connect
         # must fail on the same budget as a stalled read.
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                _open_and_request,
-                handoff,
-                session.wrapped,
-                table,
-                operate_as,
-                timeout_seconds,
-            ),
-            timeout=timeout_seconds,
+        result = await widget.run(
+            lambda plugin: _request_table(plugin, table, operate_as, timeout_seconds),
+            timeout_seconds=timeout_seconds,
         )
     except TimeoutError:
-        # wait_for abandons the worker thread mid-read; only the plugin close
-        # in the finally below ends that read, so the thread is not stranded.
+        # The abandoned worker is blocked on the response stream; the close
+        # BlockingResource performs is what ends that read.
         _LOGGER.error(
             f"[fetch_web_client_data_table] Timed out after {timeout_seconds}s "
             f"waiting for table {str(table)!r}"
@@ -351,8 +261,6 @@ async def fetch_web_client_data_table(
             f"Failed to fetch '{table}' from '{WEB_CLIENT_DATA_PQ}': "
             f"{describe_exception_chain(e)}"
         ) from e
-    finally:
-        await asyncio.to_thread(_release_plugin, handoff)
 
     _LOGGER.debug(f"[fetch_web_client_data_table] Received table: table={str(table)!r}")
     return result
