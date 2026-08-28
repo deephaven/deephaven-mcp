@@ -411,7 +411,7 @@ Java API requires it. Every field must be greater than zero except
 | `pq_connection_timeout_seconds`    | float | `60.0`  | Client-to-worker session handshake against a running persistent query     |
 | `auth_timeout_seconds`             | float | `60.0`  | Non-SAML authentication: password, private key, service token             |
 | `saml_auth_timeout_seconds`        | float | `120.0` | SAML authentication, including the browser redirect                       |
-| `quick_operation_timeout_seconds`  | float | `5.0`   | Round-trips that must fail fast: ping, public-key upload/delete           |
+| `quick_operation_timeout_seconds`  | float | `5.0`   | Fast round-trips: ping, public-key upload/delete, and cached `WebClientData` session liveness/close |
 | `subscribe_timeout_seconds`        | float | `30.0`  | Initial snapshot of a controller state subscription                       |
 | `pq_management_timeout_seconds`    | float | `60.0`  | Persistent-query management RPCs: add, delete, modify                     |
 | `pq_state_change_timeout_seconds`  | int   | `120`   | Waiting for a persistent query to reach a target lifecycle state          |
