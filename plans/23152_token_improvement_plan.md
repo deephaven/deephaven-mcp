@@ -109,8 +109,12 @@ and does not fall through to Click's integer parsing: omission causes the wrappe
 to omit `max_rows` (selecting the tool's default), `all` explicitly forwards
 `{"max_rows": null}`, and a positive integer forwards that integer. Zero,
 negatives, and any other value raise `CliError` with `arg_parse_error` (exit
-`2`) rather than Click's unstructured `UsageError`. Every wrapper that exposes
-`max_rows` carries the flag with matching help and a test for each path.
+`2`) rather than Click's unstructured `UsageError`. The `arg_parse_error`
+registry text in `_errors.py` must be updated to cover invalid `--max-rows`
+values alongside its existing cases (malformed `key=value` tokens and
+`--history` JSON), so `dhcli agents errors` gives accurate guidance. Every
+wrapper that exposes `max_rows` carries the flag with matching help and a test
+for each path.
 
 ## Match grammar
 
@@ -397,9 +401,14 @@ dictionaries, so they take the full output-shaping layer (`match`, `fields`,
 keeps its existing `type` / `system` / `origin` scoping arguments; those select
 *which* sessions to enumerate, while `match` narrows the enumerated rows.
 `pip list` is the one that materializes a transient Deephaven table
-(`_pip_packages_table`): it stays output-layer (no `filters`), but its
-`max_rows` is passed into the `get_table` fetch rather than fetching every row
-and capping afterward.
+(`_pip_packages_table`): it stays output-layer (no `filters`). Because `match`
+runs in the output layer, the `max_rows` cap must also be applied there — after
+`match` — rather than being pushed into the `get_table` fetch. Pushing the cap
+into the fetch would discard source rows before matching, so a package that
+would have matched after the first `max_rows` source rows would be silently
+omitted and `is_complete` would describe the unfiltered table rather than the
+matched result. `pip list` therefore fetches all rows from `_pip_packages_table`
+and applies `match` followed by `max_rows` entirely in the output layer.
 
 The catalog listings already carry engine-side `filters` and `max_rows`; this
 pass adds the output-side capabilities on top — `match`, `fields`, and
@@ -450,6 +459,14 @@ beside it.
    before returning — a row cap alone does not bound serialized size, since wide
    string fields or diagnostics can make even a capped result oversized —
    mirroring the existing catalog guard (`mcp_systems_server/_tools/catalog.py`).
+   Because `get_response_limits` requires a fully qualified session id
+   (`shared.py:566-598`), tools that span multiple sessions or have no single
+   session id use the following rule: `list_systems` uses the community limit
+   when a community section is configured, otherwise the enterprise limit;
+   `sessions_list` and `enterprise_systems_status` use the enterprise limit.
+   `pq_details` has no variable-sized list to reduce, so its error message omits
+   the "reduce max_rows" advice and instead tells the caller to use a narrower
+   `fields` selection or `prune_empty`.
 3. For table-backed tools, combine compiled `match` with existing `filters`.
    `get_catalog_table` already applies filters before `_apply_row_limit`;
    preserve that order. For `distinct_namespaces=True`, move combined filtering

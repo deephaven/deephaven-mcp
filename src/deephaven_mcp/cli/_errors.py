@@ -147,7 +147,8 @@ class ErrorCode(StrEnum):
     ARG_PARSE_ERROR = (
         "arg_parse_error",
         "An option value could not be parsed: a malformed key=value token "
-        "(--arg, --env, --session-arg) or malformed JSON (--history).",
+        "(--arg, --env, --session-arg), malformed JSON (--history), or an "
+        "invalid --max-rows value (must be a positive integer or 'all').",
     )
     COMMAND_NOT_FOUND = (
         "command_not_found",
