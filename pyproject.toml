@@ -154,7 +154,9 @@ skip = "./.venv,./.git,./.claude,./.mypy_cache,./.ruff_cache,./.pytest_cache,./n
 # "unparseable"/"UNPARSEABLE" is an intentional wire-format payload value
 # (see mcp_systems_server/_tools/shared.py); renaming it would be a
 # breaking vocabulary change, and the spelling is valid English.
-ignore-words-list = "unparseable"
+# "owenr" is an intentional misspelling of "owner" used as a typo example
+# in plans/23152_token_improvement_plan.md (match-vocabulary repairability).
+ignore-words-list = "unparseable,owenr"
 
 # Pytest configuration for testing
 [tool.pytest.ini_options]

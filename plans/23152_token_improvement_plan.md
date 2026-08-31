@@ -60,7 +60,7 @@ readable inputs and explicit feedback make results inspectable.
 | `match` | array of strings | `[]` | Row predicates. Separate entries are ANDed. Available on every collection tool; compiled to engine-side `filters` and run on the server when the tool is table-backed, else evaluated in the output layer. |
 | `filters` | array of strings | `[]` | Engine-side Deephaven Query Language where-clauses. Offered only by tools whose rows come from a live Deephaven table (e.g. `catalog_tables_list`); absent otherwise. |
 | `fields` | array of strings | `[]` | Fields to retain from each returned row. Empty (the default) applies no projection: every field is preserved. Omission and an explicit `[]` are identical. |
-| `max_rows` | positive integer or null | per-tool default | Maximum returned rows; must be a positive integer (zero or negative is rejected). Each tool's default is given in [First-pass scope](#first-pass-scope); pass `null` for an uncapped response. |
+| `max_rows` | positive integer or null | per-tool default | Maximum returned rows; must be a positive integer (zero or negative is rejected). Each tool's default is a conservative positive integer (see [First-pass scope](#first-pass-scope)); uncapped output is an explicit opt-in via `null`. |
 | `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
 
 `match` is universal; `filters` is conditional on a Deephaven backing and so is
@@ -150,8 +150,10 @@ Every tool documents a closed match vocabulary — the field names it accepts on
 the left of a predicate. A predicate naming a field outside that vocabulary
 (`owenr=user`) is rejected with an error that echoes the allowed field names; it
 is never silently treated as a no-match. This keeps a typo distinguishable from
-a valid empty result and satisfies the repairability goal. The vocabulary is the
-same set of names a tool exposes to `fields`.
+a valid empty result and satisfies the repairability goal. For a tool that also
+supports `fields`, the match vocabulary is the same set of names it exposes
+there; the two scalar lists (`catalog_namespaces_list`, `session_tables_list`)
+expose only the synthetic `name` to `match` and offer no `fields`.
 
 ### Typed fields and operator validity
 
@@ -194,14 +196,19 @@ cheaper API for the common case — narrowing a table-backed result to a handful
 of rows without composing a Deephaven Query Language expression.
 
 `filters` is the powerful layer, and it lives lower down. A tool exposes it only
-when its rows come from a live Deephaven table, because the where-clauses are
+when its rows come from a persistent, queryable Deephaven table large enough that
+pushing predicates to the engine avoids transferring a big result — the catalog
+tables today, the PQ `QueryInfo` table later — because the where-clauses are
 Deephaven Query Language evaluated by the engine before the rows are ever
 serialized — as `catalog_tables_list` already does, pushing `Namespace` /
 `TableName` predicates (`contains`, `startsWith`, `matches`, `in`) to the
 worker. That reach is the payoff: full DQL, applied at the source, over data
 that may be far larger than any response. The cost is that it is more complex to
 write, requires knowing the backing column names, and is simply unavailable on
-any tool with no table behind it.
+any tool with no such table behind it. A tool that materializes a small,
+transient table on demand (`session_pip_list` builds `_pip_packages_table` from
+the installed packages) is treated as output-layer: it exposes no `filters`,
+though it still pushes `max_rows` into the fetch so the cap bounds transfer.
 
 `match` is not confined to the output layer when a table is available. Where a
 tool is table-backed, its predicates are first parsed into validated
@@ -232,7 +239,7 @@ output-side capabilities on top.
 ## Scope and prior art
 
 This layer reduces a payload; it does not transform it. Field selection follows
-`google.protobuf.FieldMask` semantics (name a parent, keep its subtree), and
+`google.protobuf.FieldMask`-style semantics (name a parent, keep its subtree), and
 `match` is a compact filter string in the RSQL / Google AIP-160 family, kept
 deliberately distinct from engine-side `filters` (Deephaven Query Language).
 
@@ -260,7 +267,12 @@ that demand is real.
 
 ## Field grammar
 
-`fields` uses dotted paths with protobuf `FieldMask`-style semantics.
+`fields` uses dotted paths with protobuf `FieldMask`-style semantics — name a
+parent to keep its subtree. Two behaviors below are project-specific extensions,
+not part of `FieldMask`, so implementers should not assume protobuf
+compatibility: a repeated field may appear before the final segment (a path
+through an array applies to every element), and a literal dot in a key can be
+escaped (`weird\.key`).
 
 | Form | Result |
 | --- | --- |
@@ -315,7 +327,7 @@ synthetic field, a nested-projection design review, or an engine refactor wait.
 | `pq_list` | collection | dict rows (`id`, `serial`, `name`, `status`, `status_category`, `owner`, `enabled`) | `match`, `fields`, `max_rows`, `prune_empty` | No `filters` yet — see the refactor note below. |
 | `sessions_list` | collection | dict rows (session identity, `type`, `system`, `origin`) | `match`, `fields`, `max_rows`, `prune_empty` | Keeps its existing `type` / `system` / `origin` scoping arguments. |
 | `list_systems` | collection | `{name, type}` | `match`, `fields`, `max_rows`, `prune_empty` | In-memory; no Deephaven backing. |
-| `session_pip_list` | collection | `{package, version}` | `match`, `fields`, `max_rows`, `prune_empty` | In-memory; no Deephaven backing. |
+| `session_pip_list` | collection | `{package, version}` | `match`, `fields`, `max_rows`, `prune_empty` | Rows come from a small, transient Deephaven table (`_pip_packages_table`); treated as output-layer (no `filters`), but `max_rows` is pushed into the `get_table` fetch. |
 | `catalog_tables_list` | collection | `{namespace, table_name}` | add `match`, `fields`, `prune_empty` | Retains its existing engine-side `filters` and `max_rows`. |
 | `catalog_namespaces_list` | scalar collection | namespace strings | add `match` via synthetic `name` | Retains its existing `filters` and `max_rows`. |
 | `session_tables_list` | scalar collection | table-name strings | `match`, `max_rows` via synthetic `name` | Scalar list; single documented `name` field. |
@@ -326,17 +338,19 @@ Detail and table-data tools with a deeper output shape — `session_details`, th
 schema tools, `session_table_data`, `catalog_table_sample` — stay out of the
 first pass; they are the [follow-on candidates](#follow-on-candidates).
 
-Every first-pass collection accepts `max_rows` (a positive integer) and always
-reports `is_complete`, but the *default* is chosen to avoid a silent breaking
-change. The tools that are already bounded keep their current numeric defaults:
-`catalog_tables_list` 10,000 and `catalog_namespaces_list` 1,000. The tools that
-are unbounded today (`pq_list`, `sessions_list`, `list_systems`,
-`session_pip_list`, `session_tables_list`, `enterprise_systems_status`) keep an
-uncapped default (`max_rows: null`), so existing callers still receive the
-complete list; on those, `max_rows` is an opt-in cap and `is_complete: false`
-signals truncation when it is used. Introducing a bounded default for them would
-change a shipped contract for callers that never inspect `is_complete`, so it is
-deferred to a future major version rather than taken in this pass.
+Every first-pass collection has a conservative numeric `max_rows` default and
+always reports `is_complete`, per the repository's bounded-output contract (e.g.
+`table.py`, `catalog.py`): a default discovery call must never build an unbounded
+payload that only fails at the size guard. `catalog_tables_list` keeps 10,000 and
+`catalog_namespaces_list` 1,000; the others (`pq_list`, `sessions_list`,
+`list_systems`, `session_pip_list`, `session_tables_list`,
+`enterprise_systems_status`) default to 1,000. Uncapped output is an explicit
+opt-in — MCP `max_rows: null`, CLI `--max-rows all` — never the default. For the
+tools that are unbounded today this changes their default: a caller that needs
+the complete list must now pass the opt-in, and `is_complete: false` flags any
+truncation. That is a deliberate breaking change, documented in the changelog
+with the opt-in as the migration path, and preferred over an uncapped default
+that conflicts with the bounded-output contract.
 
 ### `pq list`
 
@@ -379,15 +393,22 @@ dictionaries, so they take the full output-shaping layer (`match`, `fields`,
 `max_rows`, `prune_empty`) with the same helpers as `pq list`. `sessions list`
 keeps its existing `type` / `system` / `origin` scoping arguments; those select
 *which* sessions to enumerate, while `match` narrows the enumerated rows.
+`pip list` is the one that materializes a transient Deephaven table
+(`_pip_packages_table`): it stays output-layer (no `filters`), but its
+`max_rows` is passed into the `get_table` fetch rather than fetching every row
+and capping afterward.
 
 The catalog listings already carry engine-side `filters` and `max_rows`; this
 pass adds the output-side capabilities on top — `match`, `fields`, and
 `prune_empty` for `catalog_tables_list`, and `match` for the scalar
 `catalog_namespaces_list`. Because these tools apply `max_rows` at the engine
 before converting rows to Arrow, their `match` predicates must compile to
-engine-side `filters` and be applied *before* that row limit; otherwise the
-limit could discard rows that a later `match` would have kept, and `is_complete`
-would no longer describe the matched result. The two scalar lists
+engine-side `filters` and be combined with any existing `filters` *before* that
+row limit; otherwise the limit could discard rows that a later `match` would
+have kept, and `is_complete` would no longer describe the matched result. For
+`catalog_namespaces_list` the combined filters must additionally run before
+`select_distinct("Namespace")`, since distinct extraction drops the `TableName`
+column that documented `TableName` filters reference. The two scalar lists
 (`catalog_namespaces_list` and `session_tables_list`) expose `match` through one
 documented synthetic field, `name`, matched against each string element.
 
@@ -426,16 +447,17 @@ beside it.
    before returning — a row cap alone does not bound serialized size, since wide
    string fields or diagnostics can make even a capped result oversized —
    mirroring the existing catalog guard (`mcp_systems_server/_tools/catalog.py`).
-3. For table-backed tools, compile `match` to engine-side `filters` and apply it
-   before the engine's `max_rows` row limit, so the bound and `is_complete`
-   describe the matched result. `catalog_tables_list` currently limits rows
-   before Arrow conversion (`queries.get_catalog_table` → `_apply_row_limit`);
-   reorder so the compiled `match` reaches the table ahead of that limit.
-4. Set `max_rows` defaults without breaking a shipped contract: the
-   already-bounded catalog tools keep 10,000 / 1,000, and the currently-unbounded
-   tools keep an uncapped default (`null`) with `max_rows` as an opt-in positive
-   cap. Validate `max_rows` as a positive integer, and expose the CLI no-cap form
-   (`--max-rows all`).
+3. For table-backed tools, combine compiled `match` with existing `filters`.
+   `get_catalog_table` already applies filters before `_apply_row_limit`;
+   preserve that order. For `distinct_namespaces=True`, move combined filtering
+   before `select_distinct("Namespace")` so existing `TableName` filters remain
+   valid and filtering precedes both distinct extraction and the row limit.
+4. Give every first-pass collection a conservative numeric `max_rows` default per
+   the bounded-output contract — catalog tools keep 10,000 / 1,000, the others
+   default to 1,000 — and reserve uncapped output for an explicit opt-in (MCP
+   `max_rows: null`, CLI `--max-rows all`). Validate `max_rows` as a positive
+   integer. For the currently-unbounded tools this changes the default; document
+   it as a breaking change with the opt-in as the migration path.
 5. Apply the layer to the first-pass collections — `pq list`, `sessions list`,
    `list systems`, `pip list`, `session_tables_list`,
    `enterprise_systems_status`, and the catalog listings (`match` / `fields` /
@@ -445,7 +467,8 @@ beside it.
    *non-empty* `fields` selection. An omitted or explicitly empty `fields` is the
    no-projection case and adds no `unmatched_fields`, keeping the two identical.
    Populate it after pruning and projection; preserve requested-path order.
-7. Update CLI help, machine-readable command metadata, and user documentation
+7. Update every affected MCP tool docstring (the tool-reference source of truth),
+   the CLI `HelpSpec` / agents manifest, and `docs/CLI.md` (CLI surface only)
    with the grammar tables and canonical examples.
 8. Apply the same layer to the follow-on candidates only after their field
    vocabularies and output contracts are reviewed.
@@ -471,9 +494,10 @@ Tests cover:
   `fields` both preserve the full result and emit no `unmatched_fields`).
 - `prune_empty` removing exactly `null` / `""` / `[]` / `{}` recursively while
   preserving `false` and numeric `0`.
-- `max_rows` defaults: catalog 10,000 / 1,000, the currently-unbounded tools
-  uncapped; rejection of a zero or negative `max_rows`; the CLI `--max-rows all`
-  no-cap form; and `is_complete: false` when an opt-in cap truncates.
+- `max_rows` defaults: catalog 10,000 / 1,000 and the other first-pass tools
+  1,000; rejection of a zero or negative `max_rows`; the explicit uncapped opt-in
+  (MCP `null`, CLI `--max-rows all`); and `is_complete: false` when a default or
+  explicit cap truncates.
 - The shared shaping path calling `check_response_size`, so a capped-but-wide
   result still errors when it would exceed the serialized-response limit.
 - `unmatched_fields` for absent paths, partially present paths, and values
