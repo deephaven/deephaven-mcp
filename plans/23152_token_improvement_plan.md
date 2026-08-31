@@ -193,14 +193,14 @@ write, requires knowing the backing column names, and is simply unavailable on
 any tool with no table behind it.
 
 `match` is not confined to the output layer when a table is available. Where a
-tool is table-backed, its `match` predicates are compiled to the equivalent
-engine-side `filters` and pushed to the server, so the matching runs on the
-worker before the rows are read — the same place `filters` runs, at the same
-cost. The output-layer evaluation is the fallback for tools with no table
-behind them; the simple grammar is chosen so this compilation is always
-possible. An agent therefore gets server-side narrowing from the simple `match`
-API without writing DQL, and `filters` remains available for the predicates the
-grammar cannot express.
+tool is table-backed, its predicates are first parsed into validated
+field/operator/value nodes. Field names come only from the tool's closed
+vocabulary, and values are rendered through a dedicated DQL literal encoder;
+raw user text is never interpolated into a where-clause. The resulting
+engine-side `filters` are pushed to the server, so matching runs on the worker
+before rows are read. Output-layer evaluation remains the fallback for tools
+with no table behind them, and both evaluators implement the same parsed
+semantics.
 
 | | `match` | `filters` |
 | --- | --- | --- |
