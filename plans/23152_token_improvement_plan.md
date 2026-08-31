@@ -60,7 +60,7 @@ readable inputs and explicit feedback make results inspectable.
 | `match` | array of strings | `[]` | Row predicates. Separate entries are ANDed. Available on every collection tool; compiled to engine-side `filters` and run on the server when the tool is table-backed, else evaluated in the output layer. |
 | `filters` | array of strings | `[]` | Engine-side Deephaven Query Language where-clauses. Offered only by tools whose rows come from a live Deephaven table (e.g. `catalog_tables_list`); absent otherwise. |
 | `fields` | array of strings | `[]` | Fields to retain from each returned row. Empty (the default) applies no projection: every field is preserved. Omission and an explicit `[]` are identical. |
-| `max_rows` | integer or null | per-tool default | Maximum returned rows. Each tool sets a conservative numeric default (see [First-pass scope](#first-pass-scope)); pass `null` to opt into an uncapped response. |
+| `max_rows` | positive integer or null | per-tool default | Maximum returned rows; must be a positive integer (zero or negative is rejected). Each tool's default is given in [First-pass scope](#first-pass-scope); pass `null` for an uncapped response. |
 | `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
 
 `match` is universal; `filters` is conditional on a Deephaven backing and so is
@@ -69,10 +69,12 @@ compose without ambiguity: `match` compiles to `filters`, so both run at the
 source before `max_rows` bounds the result, and only then does the
 output-shaping layer (`fields`, `prune_empty`) trim whatever came back —
 detailed under [Why both `match` and `filters`](#why-both-match-and-filters). A
-successful projected collection response includes `unmatched_fields: []` when
-all requested paths matched at least one delivered row. It lists any requested
-path that matches no delivered row. `is_complete: false` means `max_rows`
-truncated the matched result.
+successful collection response that received a non-empty `fields` selection
+includes `unmatched_fields: []` when all requested paths matched at least one
+delivered row, and lists any requested path that matched none; an omitted or
+explicitly empty `fields` is the no-projection case and carries no
+`unmatched_fields`. `is_complete: false` means `max_rows` truncated the matched
+result.
 
 ### Detail tools
 
@@ -81,10 +83,12 @@ truncated the matched result.
 | `fields` | array of strings | `[]` | Fields to retain from the detail object. Empty (the default) applies no projection: the whole object is preserved. Omission and an explicit `[]` are identical. |
 | `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
 
-A successful projected detail response always retains `success` and the tool's
-existing identity path (`pq_details` retains top-level `id`) and includes
-`unmatched_fields`. An empty list confirms every requested path was found in
-the delivered result; a non-empty list identifies paths that produced no output.
+A successful detail response always retains `success` and the tool's existing
+identity path (`pq_details` retains top-level `id`). When a non-empty `fields`
+selection was supplied it also includes `unmatched_fields`: an empty list
+confirms every requested path was found in the delivered result, a non-empty
+list identifies paths that produced no output. An omitted or explicitly empty
+`fields` is the no-projection case and carries no `unmatched_fields`.
 
 `dhcli` exposes array arguments as repeatable flags. `--fields` additionally
 accepts comma-separated names:
@@ -97,6 +101,13 @@ dhcli pq details enterprise:prod:123 --fields config.owner,state_details.status
 The CLI writes an `unmatched_fields` warning to stderr when the list is
 non-empty. Structured tool output remains the source of truth; warnings do not
 change the normal stdout payload.
+
+`--max-rows` takes a positive integer to cap the result, or the literal `all`
+for the tool's uncapped mode — the CLI spelling of the MCP `max_rows: null`,
+mirroring `docker logs --tail all`. Omitting the flag uses the tool's default.
+The value is validated client-side: a zero, a negative, or a non-`all`
+non-integer exits `2` (`arg_parse_error`). Every wrapper that exposes `max_rows`
+carries the flag with matching help and a test for the `all` no-cap path.
 
 ## Match grammar
 
@@ -113,7 +124,7 @@ Language where-clauses that are evaluated by the engine.
 | `field>value`, `field>=value` | Greater than (or equal); numeric fields only | `serial>=1000` |
 | `field<value`, `field<=value` | Less than (or equal); numeric fields only | `serial<50` |
 | `*` in `=` or `!=` | Zero-or-more-character wildcard | `name=*Query` |
-| `null` | Empty field | `owner=null` |
+| `null` | Null field | `owner=null` |
 | `\` | Escape the next character | `name=\null` |
 | `or` | OR terms in one entry | `owner=user or owner=user2` |
 
@@ -233,9 +244,10 @@ beyond selection and narrowing is out of scope: a caller who needs exact
 reshaping runs a downstream transform such as `jq` on the CLI. The server does
 not grow an expression language.
 
-`match` is intended to stay small permanently. Its scope may grow slightly —
-basic numeric comparisons are a plausible future addition — but never toward
-arbitrary reshaping. The compilable, one-spelling-per-intent character that lets
+`match` is intended to stay small permanently. Its proposed scope — equality,
+contains, wildcard, numeric comparison, and the `null` sentinel — is essentially
+complete; it may gain a small operator at most, but never move toward arbitrary
+reshaping. The compilable, one-spelling-per-intent character that lets
 it push down to the engine and be verified at a glance is the whole point;
 expanding it past that would forfeit both. If customers do need a general query
 language, the answer is a *separate* argument (something like JMESPath), never a
@@ -307,20 +319,24 @@ synthetic field, a nested-projection design review, or an engine refactor wait.
 | `catalog_tables_list` | collection | `{namespace, table_name}` | add `match`, `fields`, `prune_empty` | Retains its existing engine-side `filters` and `max_rows`. |
 | `catalog_namespaces_list` | scalar collection | namespace strings | add `match` via synthetic `name` | Retains its existing `filters` and `max_rows`. |
 | `session_tables_list` | scalar collection | table-name strings | `match`, `max_rows` via synthetic `name` | Scalar list; single documented `name` field. |
-| `enterprise_systems_status` | collection | per-system records with optional diagnostics | `match`, `prune_empty`, `fields` | `prune_empty` drops absent diagnostic fields. |
+| `enterprise_systems_status` | collection | per-system records with optional diagnostics | `match`, `fields`, `max_rows`, `prune_empty` | `prune_empty` drops absent diagnostic fields. |
 | `pq_details` | detail | envelope with nested `config`, `state_details`, `replicas`, `spares` | `fields`, `prune_empty` | `prune_empty` already exists. |
 
 Detail and table-data tools with a deeper output shape — `session_details`, the
 schema tools, `session_table_data`, `catalog_table_sample` — stay out of the
 first pass; they are the [follow-on candidates](#follow-on-candidates).
 
-Every first-pass collection sets a conservative numeric `max_rows` default rather
-than returning an unbounded list, and reports `is_complete: false` when it
-truncates. `catalog_tables_list` keeps its existing default of 10,000 and
-`catalog_namespaces_list` its 1,000; the remaining lists (`pq_list`,
-`sessions_list`, `list_systems`, `session_pip_list`, `session_tables_list`,
-`enterprise_systems_status`) default to 1,000. A caller passes `max_rows: null`
-to opt into an uncapped response.
+Every first-pass collection accepts `max_rows` (a positive integer) and always
+reports `is_complete`, but the *default* is chosen to avoid a silent breaking
+change. The tools that are already bounded keep their current numeric defaults:
+`catalog_tables_list` 10,000 and `catalog_namespaces_list` 1,000. The tools that
+are unbounded today (`pq_list`, `sessions_list`, `list_systems`,
+`session_pip_list`, `session_tables_list`, `enterprise_systems_status`) keep an
+uncapped default (`max_rows: null`), so existing callers still receive the
+complete list; on those, `max_rows` is an opt-in cap and `is_complete: false`
+signals truncation when it is used. Introducing a bounded default for them would
+change a shipped contract for callers that never inspect `is_complete`, so it is
+deferred to a future major version rather than taken in this pass.
 
 ### `pq list`
 
@@ -405,21 +421,29 @@ beside it.
    field, a literal that will not coerce to the field's declared type, and an
    operator not valid for that type — with an error that lists the allowed names
    and operators. Coercion and comparison are driven by the one per-field type
-   table so the output matcher and the DQL compiler cannot disagree.
+   table so the output matcher and the DQL compiler cannot disagree. The shared
+   shaping path also estimates the emitted payload and calls `check_response_size`
+   before returning — a row cap alone does not bound serialized size, since wide
+   string fields or diagnostics can make even a capped result oversized —
+   mirroring the existing catalog guard (`mcp_systems_server/_tools/catalog.py`).
 3. For table-backed tools, compile `match` to engine-side `filters` and apply it
    before the engine's `max_rows` row limit, so the bound and `is_complete`
    describe the matched result. `catalog_tables_list` currently limits rows
    before Arrow conversion (`queries.get_catalog_table` → `_apply_row_limit`);
    reorder so the compiled `match` reaches the table ahead of that limit.
-4. Give every first-pass collection a conservative numeric `max_rows` default
-   (catalog tools keep 10,000 / 1,000), reserving `null` for an explicit uncapped
-   response.
+4. Set `max_rows` defaults without breaking a shipped contract: the
+   already-bounded catalog tools keep 10,000 / 1,000, and the currently-unbounded
+   tools keep an uncapped default (`null`) with `max_rows` as an opt-in positive
+   cap. Validate `max_rows` as a positive integer, and expose the CLI no-cap form
+   (`--max-rows all`).
 5. Apply the layer to the first-pass collections — `pq list`, `sessions list`,
    `list systems`, `pip list`, `session_tables_list`,
    `enterprise_systems_status`, and the catalog listings (`match` / `fields` /
    `prune_empty` atop their existing `filters`) — and add nested `fields` to
    `pq details`.
-6. Add `unmatched_fields` to every successful response that received `fields`.
+6. Add `unmatched_fields` to every successful response that received a
+   *non-empty* `fields` selection. An omitted or explicitly empty `fields` is the
+   no-projection case and adds no `unmatched_fields`, keeping the two identical.
    Populate it after pruning and projection; preserve requested-path order.
 7. Update CLI help, machine-readable command metadata, and user documentation
    with the grammar tables and canonical examples.
@@ -444,11 +468,14 @@ Tests cover:
   vocabulary (the `owenr=user` typo case).
 - Flat and nested projection, parent/descendant precedence, arrays,
   escaped-dot keys, and empty projection (an omitted and an explicit `[]`
-  `fields` both preserve the full result).
+  `fields` both preserve the full result and emit no `unmatched_fields`).
 - `prune_empty` removing exactly `null` / `""` / `[]` / `{}` recursively while
   preserving `false` and numeric `0`.
-- Per-tool `max_rows` defaults (including the catalog 10,000 / 1,000) and the
-  `null` uncapped opt-in.
+- `max_rows` defaults: catalog 10,000 / 1,000, the currently-unbounded tools
+  uncapped; rejection of a zero or negative `max_rows`; the CLI `--max-rows all`
+  no-cap form; and `is_complete: false` when an opt-in cap truncates.
+- The shared shaping path calling `check_response_size`, so a capped-but-wide
+  result still errors when it would exceed the serialized-response limit.
 - `unmatched_fields` for absent paths, partially present paths, and values
   removed by `prune_empty`.
 - `pq list` ordering: match, bound, prune, project; truncation and strict
