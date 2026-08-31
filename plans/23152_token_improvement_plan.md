@@ -391,9 +391,9 @@ here; `match` covers the common narrowing case in the meantime.
 
 ### `pq details`
 
-Adds `fields` alongside the existing `prune_empty` option. Projection applies to
-the detail envelope, including nested `config`, `state_details`, `replicas`, and
-`spares`; `success` and `id` are always retained.
+Adds both `fields` and `prune_empty` to the detail surface. Projection applies
+to the detail envelope, including nested `config`, `state_details`, `replicas`,
+and `spares`; `success` and `id` are always retained.
 
 ### Other first-pass collections
 
@@ -412,19 +412,21 @@ omitted and `is_complete` would describe the unfiltered table rather than the
 matched result. `pip list` therefore fetches all rows from `_pip_packages_table`
 and applies `match` followed by `max_rows` entirely in the output layer.
 
-The catalog listings already carry engine-side `filters` and `max_rows`; this
-pass adds the output-side capabilities on top — `match`, `fields`, and
-`prune_empty` for `catalog_tables_list`, and `match` for the scalar
-`catalog_namespaces_list`. Because these tools apply `max_rows` at the engine
-before converting rows to Arrow, their `match` predicates must compile to
-engine-side `filters` and be combined with any existing `filters` *before* that
-row limit; otherwise the limit could discard rows that a later `match` would
-have kept, and `is_complete` would no longer describe the matched result. For
-`catalog_namespaces_list` the combined filters must additionally run before
+The persistent/queryable catalog listings already carry engine-side `filters`
+and `max_rows`; this pass adds the output-side capabilities on top — `match`,
+`fields`, and `prune_empty` for `catalog_tables_list`, and `match` for the
+scalar `catalog_namespaces_list`. Because these tools apply `max_rows` at the
+engine before converting rows to Arrow, their `match` predicates must compile
+to engine-side `filters` and be combined with any existing `filters` *before*
+that row limit; otherwise the limit could discard rows that a later `match`
+would have kept, and `is_complete` would no longer describe the matched result.
+For `catalog_namespaces_list` the combined filters must additionally run before
 `select_distinct("Namespace")`, since distinct extraction drops the `TableName`
-column that documented `TableName` filters reference. The two scalar lists
-(`catalog_namespaces_list` and `session_tables_list`) expose `match` through one
-documented synthetic field, `name`, matched against each string element.
+column that documented `TableName` filters reference. Transient table-backed
+tools (for example `pip list`) remain output-layer for `match`. The two scalar
+lists (`catalog_namespaces_list` and `session_tables_list`) expose `match`
+through one documented synthetic field, `name`, matched against each string
+element.
 
 `enterprise_systems_status` returns one record per system with several optional
 diagnostic fields; it takes `match` (e.g. narrow to unhealthy systems) and
