@@ -110,6 +110,8 @@ Language where-clauses that are evaluated by the engine.
 | `field!=value` | Value does not equal | `status!=STOPPED` |
 | `field~value` | Value contains | `name~report` |
 | `field!~value` | Value does not contain | `name!~archived` |
+| `field>value`, `field>=value` | Greater than (or equal); numeric fields only | `serial>=1000` |
+| `field<value`, `field<=value` | Less than (or equal); numeric fields only | `serial<50` |
 | `*` in `=` or `!=` | Zero-or-more-character wildcard | `name=*Query` |
 | `null` | Empty field | `owner=null` |
 | `\` | Escape the next character | `name=\null` |
@@ -118,12 +120,54 @@ Language where-clauses that are evaluated by the engine.
 Separate `match` entries are ANDed. For example, `--match 'owner=user or
 owner=user2' --match status=RUNNING` retains running PQs owned by either user.
 
+This shape is **conjunctive normal form (CNF)** — an AND of OR-clauses, where
+each `--match` entry is one OR-clause and separate entries are ANDed. CNF is the
+general form for any boolean filter written as a flat AND of ORs with no nesting.
+Restricting the language to it is what makes it robust: there is exactly one
+shape and one precedence, so no parentheses, no ambiguity, and every predicate
+parses and compiles the same way.
+
+A closed numeric range is therefore two ANDed predicates (`--match serial>10
+--match serial<50`), and a union is `or` (`serial<10 or serial>90`). `match`
+does not adopt Deephaven quick filters' `&&` / `||`: AND is the repetition of
+`--match` and OR is the `or` keyword, so `&&` / `||` would be redundant second
+spellings, and mixing `&&` with `or` in one entry would demand the precedence
+and grouping this grammar omits. Reach for `filters` when you need engine-native
+`&&` / `||` or grouping.
+
 Every tool documents a closed match vocabulary — the field names it accepts on
 the left of a predicate. A predicate naming a field outside that vocabulary
 (`owenr=user`) is rejected with an error that echoes the allowed field names; it
 is never silently treated as a no-match. This keeps a typo distinguishable from
 a valid empty result and satisfies the repairability goal. The vocabulary is the
 same set of names a tool exposes to `fields`.
+
+### Typed fields and operator validity
+
+Each matchable field carries a declared type in the tool's vocabulary — string,
+integer, or boolean (an enum is a string). That one type table drives both the
+output-layer matcher and the DQL compiler, so the two cannot disagree about a
+predicate.
+
+- **Coercion, not stringification.** The literal on the right is parsed to the
+  field's declared type: an integer field parses `serial=12345` as an integer, a
+  boolean field accepts `enabled=true` / `enabled=false` (case-insensitive), and
+  a string field takes the literal verbatim and compares case-insensitively.
+  Comparison then happens in the native type — the matcher never stringifies a
+  typed field. A literal that will not parse to the field's type (`serial=abc`,
+  `enabled=maybe`) is rejected with the same shape of repair error as an unknown
+  field.
+- **One literal, both layers.** From that coerced value the compiler emits the
+  matching DQL literal — a backtick string, a bare integer, `true` / `false`, or
+  `isNull(Field)` for `null` — and the output-layer matcher applies the identical
+  typed comparison. Neither side stringifies.
+- **Operator validity is per type.** Equality (`=`, `!=`) and the `null` sentinel
+  apply to every type. Contains and wildcard (`~`, `!~`, and `*` inside `=` /
+  `!=`) apply only to string fields: a substring test on an integer or boolean
+  has no well-defined, compilable meaning, so a predicate such as `serial~5` or
+  `enabled=*e` is rejected with an error naming the field's type and the
+  operators it accepts. Ordering comparisons (`>`, `>=`, `<`, `<=`) apply only to
+  numeric fields.
 
 ### Why both `match` and `filters`
 
@@ -286,15 +330,15 @@ below), so `match` runs in the MCP server's output layer; the result is then
 bounded by `max_rows`, pruned, and projected, in that order. Its closed match
 and projection vocabulary is:
 
-| Field | Meaning |
-| --- | --- |
-| `id` | Fully qualified PQ identifier. |
-| `serial` | Controller serial number. |
-| `name` | PQ name. |
-| `status` | Current PQ state. |
-| `status_category` | Stable state category. |
-| `owner` | Owning user. |
-| `enabled` | Whether the PQ is enabled. |
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Fully qualified PQ identifier. |
+| `serial` | integer | Controller serial number. |
+| `name` | string | PQ name. |
+| `status` | string | Current PQ state. |
+| `status_category` | string | Stable state category. |
+| `owner` | string | Owning user. |
+| `enabled` | boolean | Whether the PQ is enabled. |
 
 `pq list` gains no `filters` in this pass. It reads the controller's PQ snapshot
 (`controller.map()`), an in-memory map with no engine behind it, so only the
@@ -357,8 +401,11 @@ beside it.
    `--match`; reserve `filters` for Deephaven engine filters.
 2. Extract reusable helpers with one set of semantics: match compilation,
    nested projection, recursive pruning, and row shaping. The matcher validates
-   each predicate against the tool's documented vocabulary and rejects an unknown
-   field with an error that lists the allowed names.
+   each predicate against the tool's documented vocabulary — rejecting an unknown
+   field, a literal that will not coerce to the field's declared type, and an
+   operator not valid for that type — with an error that lists the allowed names
+   and operators. Coercion and comparison are driven by the one per-field type
+   table so the output matcher and the DQL compiler cannot disagree.
 3. For table-backed tools, compile `match` to engine-side `filters` and apply it
    before the engine's `max_rows` row limit, so the bound and `is_complete`
    describe the matched result. `catalog_tables_list` currently limits rows
@@ -384,7 +431,15 @@ beside it.
 Tests cover:
 
 - Every match operator, wildcard, escape, `null`, case-insensitivity, OR, and
-  AND behavior.
+  AND behavior, including the numeric comparisons (`>`, `>=`, `<`, `<=`), a
+  closed range as two ANDed `--match` entries, and a union via `or`.
+- Typed-field coercion: an integer field parsing `serial=12345`, a boolean field
+  parsing `enabled=true`/`false`, and an unparseable literal (`serial=abc`)
+  rejected; the output matcher and the compiled DQL agreeing on the same typed
+  comparison rather than a stringified one.
+- Operator-validity rejection per type: `~` / `!~` / `*` on a non-string field
+  (`serial~5`, `enabled=*e`) and a comparison on a non-numeric field, each
+  erroring with the field's type and its allowed operators.
 - Rejection of an unknown match field, asserting the error echoes the allowed
   vocabulary (the `owenr=user` typo case).
 - Flat and nested projection, parent/descendant precedence, arrays,
@@ -416,8 +471,8 @@ the complete test suite. Smoke checks include a multi-owner `--match`, a nested
 
 ## Non-goals
 
-Numeric comparison operators (a plausible later extension, but not this pass);
-matching detail objects; field-path wildcards or array indexes; grouping syntax;
+Matching detail objects; field-path wildcards or array indexes; grouping syntax;
+`&&` / `||` combinators (AND is a repeated `--match`, OR is the `or` keyword);
 server-side output transformation or expression languages (a JMESPath-style
 capability, if ever needed, would be a separate argument, not a bigger
 `match`); replacing Deephaven engine `filters`; new configuration or environment
