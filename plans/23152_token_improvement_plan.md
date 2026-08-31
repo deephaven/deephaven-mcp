@@ -45,7 +45,7 @@ readable inputs and explicit feedback make results inspectable.
 | Goal | Design response |
 | --- | --- |
 | One obvious spelling per intent | Repeated `--match` means AND; `or` within one expression means OR. No aliases such as `AND` or `&&`. |
-| Reliable structured calls | Repeated strings use a non-null JSON array schema, avoiding inspector-specific union editors. |
+| Reliable structured calls | The new repeated-string args (`match`, `fields`) use a non-null JSON array schema, avoiding inspector-specific union editors; the pre-existing `filters` keeps its established nullable schema. |
 | Discoverability | Each tool documents its matchable and selectable fields, operators, examples, and parse errors. |
 | Repairability | Invalid input returns the expected form and a concrete example. |
 | Verifiability | Source order is preserved; projection changes only which fields are present; response metadata reports truncation and unmatched field paths. |
@@ -58,7 +58,7 @@ readable inputs and explicit feedback make results inspectable.
 | Argument | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `match` | array of strings | `[]` | Row predicates. Separate entries are ANDed. Available on every collection tool; compiled to engine-side `filters` and run on the server when the tool is table-backed, else evaluated in the output layer. |
-| `filters` | array of strings | `[]` | Engine-side Deephaven Query Language where-clauses. Offered only by tools whose rows come from a live Deephaven table (e.g. `catalog_tables_list`); absent otherwise. |
+| `filters` | array of strings or null | `null` | Engine-side Deephaven Query Language where-clauses. Offered only by tools whose rows come from a live Deephaven table (e.g. `catalog_tables_list`); absent otherwise. Keeps the existing catalog signature (`list[str] \| None`, default `null`) unchanged — the non-null-array convention below applies only to the new `match` / `fields`. |
 | `fields` | array of strings | `[]` | Fields to retain from each returned row. Empty (the default) applies no projection: every field is preserved. Omission and an explicit `[]` are identical. |
 | `max_rows` | positive integer or null | per-tool default | Maximum returned rows; must be a positive integer (zero or negative is rejected). Each tool's default is a conservative positive integer (see [First-pass scope](#first-pass-scope)); uncapped output is an explicit opt-in via `null`. |
 | `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
@@ -104,10 +104,13 @@ change the normal stdout payload.
 
 `--max-rows` takes a positive integer to cap the result, or the literal `all`
 for the tool's uncapped mode — the CLI spelling of the MCP `max_rows: null`,
-mirroring `docker logs --tail all`. Omitting the flag uses the tool's default.
-The value is validated client-side: a zero, a negative, or a non-`all`
-non-integer exits `2` (`arg_parse_error`). Every wrapper that exposes `max_rows`
-carries the flag with matching help and a test for the `all` no-cap path.
+mirroring `docker logs --tail all`. A shared parser preserves all three states
+and does not fall through to Click's integer parsing: omission causes the wrapper
+to omit `max_rows` (selecting the tool's default), `all` explicitly forwards
+`{"max_rows": null}`, and a positive integer forwards that integer. Zero,
+negatives, and any other value raise `CliError` with `arg_parse_error` (exit
+`2`) rather than Click's unstructured `UsageError`. Every wrapper that exposes
+`max_rows` carries the flag with matching help and a test for each path.
 
 ## Match grammar
 
@@ -148,7 +151,7 @@ and grouping this grammar omits. Reach for `filters` when you need engine-native
 
 Every tool documents a closed match vocabulary — the field names it accepts on
 the left of a predicate. A predicate naming a field outside that vocabulary
-(`owenr=user`) is rejected with an error that echoes the allowed field names; it
+(`owenr=user`) is rejected with an error that echoes the allowed field names; it <!-- codespell:ignore owenr -->
 is never silently treated as a no-match. This keeps a typo distinguishable from
 a valid empty result and satisfies the repairability goal. For a tool that also
 supports `fields`, the match vocabulary is the same set of names it exposes
@@ -488,16 +491,17 @@ Tests cover:
   (`serial~5`, `enabled=*e`) and a comparison on a non-numeric field, each
   erroring with the field's type and its allowed operators.
 - Rejection of an unknown match field, asserting the error echoes the allowed
-  vocabulary (the `owenr=user` typo case).
+  vocabulary (the `owenr=user` typo case). <!-- codespell:ignore owenr -->
 - Flat and nested projection, parent/descendant precedence, arrays,
   escaped-dot keys, and empty projection (an omitted and an explicit `[]`
   `fields` both preserve the full result and emit no `unmatched_fields`).
 - `prune_empty` removing exactly `null` / `""` / `[]` / `{}` recursively while
   preserving `false` and numeric `0`.
 - `max_rows` defaults: catalog 10,000 / 1,000 and the other first-pass tools
-  1,000; rejection of a zero or negative `max_rows`; the explicit uncapped opt-in
-  (MCP `null`, CLI `--max-rows all`); and `is_complete: false` when a default or
-  explicit cap truncates.
+  1,000; the CLI parser's three states (omit → tool default, `all` → MCP `null`,
+  positive integer → cap) with zero / negative / other raising `CliError`
+  (`arg_parse_error`, exit `2`) not Click's `UsageError`; and `is_complete:
+  false` when a default or explicit cap truncates.
 - The shared shaping path calling `check_response_size`, so a capped-but-wide
   result still errors when it would exceed the serialized-response limit.
 - `unmatched_fields` for absent paths, partially present paths, and values
