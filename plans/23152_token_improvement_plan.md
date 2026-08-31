@@ -215,7 +215,8 @@ write, requires knowing the backing column names, and is simply unavailable on
 any tool with no such table behind it. A tool that materializes a small,
 transient table on demand (`session_pip_list` builds `_pip_packages_table` from
 the installed packages) is treated as output-layer: it exposes no `filters`,
-though it still pushes `max_rows` into the fetch so the cap bounds transfer.
+fetches all rows from the transient table, then applies `match` and `max_rows`
+in the output layer so the cap describes the matched result.
 
 `match` is not confined to the output layer when a table is available. Where a
 tool is table-backed, its predicates are first parsed into validated
@@ -326,15 +327,16 @@ otherwise empty.
 A survey of the systems server's collection and detail tools decides which get
 the layer now and which wait. The dividing line is cost: every tool that already
 builds an in-memory list of dictionaries can adopt the output-shaping layer
-cheaply, so all of them are in the first pass. Tools whose shaping needs a
-synthetic field, a nested-projection design review, or an engine refactor wait.
+cheaply, as can scalar-list tools whose first pass only adds a single synthetic
+`name` field for matching. Tools that need deeper synthetic shaping, a
+nested-projection design review, or an engine refactor wait.
 
 | Tool | Kind | Row / shape | First pass | Notes |
 | --- | --- | --- | --- | --- |
 | `pq_list` | collection | dict rows (`id`, `serial`, `name`, `status`, `status_category`, `owner`, `enabled`) | `match`, `fields`, `max_rows`, `prune_empty` | No `filters` yet — see the refactor note below. |
 | `sessions_list` | collection | dict rows (session identity, `type`, `system`, `origin`) | `match`, `fields`, `max_rows`, `prune_empty` | Keeps its existing `type` / `system` / `origin` scoping arguments. |
 | `list_systems` | collection | `{name, type}` | `match`, `fields`, `max_rows`, `prune_empty` | In-memory; no Deephaven backing. |
-| `session_pip_list` | collection | `{package, version}` | `match`, `fields`, `max_rows`, `prune_empty` | Rows come from a small, transient Deephaven table (`_pip_packages_table`); treated as output-layer (no `filters`), but `max_rows` is pushed into the `get_table` fetch. |
+| `session_pip_list` | collection | `{package, version}` | `match`, `fields`, `max_rows`, `prune_empty` | Rows come from a small, transient Deephaven table (`_pip_packages_table`); treated as output-layer (no `filters`), so the fetch is uncapped and `max_rows` is applied after `match` in the output layer. |
 | `catalog_tables_list` | collection | `{namespace, table_name}` | add `match`, `fields`, `prune_empty` | Retains its existing engine-side `filters` and `max_rows`. |
 | `catalog_namespaces_list` | scalar collection | namespace strings | add `match` via synthetic `name` | Retains its existing `filters` and `max_rows`. |
 | `session_tables_list` | scalar collection | table-name strings | `match`, `max_rows` via synthetic `name` | Scalar list; single documented `name` field. |
@@ -461,9 +463,10 @@ beside it.
    mirroring the existing catalog guard (`mcp_systems_server/_tools/catalog.py`).
    Because `get_response_limits` requires a fully qualified session id
    (`shared.py:566-598`), tools that span multiple sessions or have no single
-   session id use the following rule: `list_systems` uses the community limit
-   when a community section is configured, otherwise the enterprise limit;
-   `sessions_list` and `enterprise_systems_status` use the enterprise limit.
+   session id use strictest configured limits across every section the request
+   can span (community and/or enterprise). If no relevant section is configured
+   and the tool's success path is necessarily empty, skip the size check for
+   that empty result.
    `pq_details` has no variable-sized list to reduce, so its error message omits
    the "reduce max_rows" advice and instead tells the caller to use a narrower
    `fields` selection or `prune_empty`.
