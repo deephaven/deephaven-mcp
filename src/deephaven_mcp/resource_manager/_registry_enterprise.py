@@ -384,7 +384,6 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             self._creds,
             timeouts=self._timeouts,
         )
-        await self._factory_manager.start_healer()
         self._phase = InitializationPhase.PARTIAL
         self._discovery_task = asyncio.create_task(self._discover_enterprise_sessions())
         _LOGGER.info(
@@ -437,15 +436,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             )
 
         # Step 4: close factory manager via local ref captured under the lock.
+        # Its close() stops the subscription healer before dropping the
+        # factory, so nothing recreates one mid-shutdown.
         if factory is not None:
-            # Stop the subscription healer before closing so it cannot recreate
-            # the factory mid-shutdown.
-            try:
-                await factory.stop_healer()
-            except Exception as e:
-                _LOGGER.error(
-                    f"[{self.__class__.__name__}] error stopping subscription healer: {e}"
-                )
             try:
                 await factory.close()
             except Exception as e:

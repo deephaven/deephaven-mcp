@@ -309,7 +309,6 @@ async def _run(args: argparse.Namespace, manager: CorePlusSessionFactoryManager)
     wedge = _flag_factory if args.poison == "flag" else _wedge_factory
     stop_watcher = asyncio.Event()
     watcher: asyncio.Task[int] | None = None
-    await manager.start_healer()
 
     try:
         _step(f"Working subscription on {args.system!r}")
@@ -368,7 +367,6 @@ async def _run(args: argparse.Namespace, manager: CorePlusSessionFactoryManager)
             # wait_for cancels the watcher on timeout, so awaiting it can raise.
             with contextlib.suppress(asyncio.CancelledError):
                 await watcher
-        await manager.stop_healer()
         await manager.close()
 
 

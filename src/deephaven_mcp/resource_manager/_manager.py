@@ -2955,9 +2955,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         When the subscription is wedged (see
         :attr:`CorePlusControllerClient.is_poisoned`), this does **not** block or
-        recreate inline. Recreation is owned by the always-on
-        :class:`~deephaven_mcp.resource_manager._healer.ControllerHealer`
-        (:meth:`start_healer`), which recreates the factory on a capped
+        recreate inline. Recreation is owned by the
+        :class:`~deephaven_mcp.resource_manager._healer.ControllerHealer` that
+        runs for as long as a factory exists, recreating it on a capped
         exponential backoff until a fresh controller subscribes cleanly. This
         method instead records the outage and raises immediately with the
         healer's status message, carrying
@@ -3022,26 +3022,18 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         """
         return await self._healer.request_reconnect()
 
-    async def start_healer(self) -> None:
-        """Launch the background subscription-healing loop.
+    @override
+    async def close(self) -> None:
+        """Stop the subscription healer, then close the cached factory.
 
-        Idempotent: a no-op when the loop is already running. Started by the
-        owning :class:`~deephaven_mcp.resource_manager.EnterpriseSessionRegistry`
-        right after it constructs this manager, and stopped by
-        :meth:`stop_healer` during registry shutdown. While the cached
-        controller is wedged in ``SUBSCRIBING``, the loop recreates the factory
-        on a capped exponential backoff until a fresh controller subscribes
-        cleanly.
-        """
-        self._healer.start()
+        The healer is stopped before the factory is dropped so it cannot
+        recreate one mid-shutdown. A subsequent :meth:`get` creates a new
+        factory and restarts the healer alongside it.
 
-    async def stop_healer(self) -> None:
-        """Cancel and await the background healing loop.
-
-        Idempotent: safe to call when the healer was never started or already
-        stopped. Never raises.
+        Idempotent: safe to call multiple times. Never raises.
         """
         await self._healer.stop()
+        await super().close()
 
     async def peek_controller_poisoned(self) -> bool | None:
         """Report the cached controller's poison state without forcing creation.
@@ -3116,7 +3108,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                the value).
             2. Calls ``CorePlusSessionFactory.from_credentials(system_config, creds)`` with a timeout wrapper.
             3. Logs creation progress (DEBUG) and completion (INFO).
-            4. Handles timeout errors with appropriate logging and exception.
+            4. Starts the subscription healer, which watches this factory's
+               controller for as long as the factory exists.
+            5. Handles timeout errors with appropriate logging and exception.
 
         Timeout Behavior:
             The configurable timeout prevents indefinite hanging when connecting to
@@ -3172,6 +3166,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Successfully created enterprise factory for '{self.qualified_session_id}'"
             )
+            # Idempotent: a rebuild by the running healer re-enters here.
+            self._healer.start()
             return factory
         except TimeoutError as e:
             _LOGGER.error(

@@ -1169,19 +1169,97 @@ class TestCorePlusSessionFactoryManager:
         assert await manager._detach_poisoned_item() is None
 
     @pytest.mark.asyncio
-    async def test_healer_lifecycle_is_delegated(self):
-        """start_healer and stop_healer drive the manager's ControllerHealer."""
+    async def test_creating_a_factory_starts_the_healer(self):
+        """The healer runs as soon as there is a factory to watch."""
         manager = self._make_factory_manager()
-        # Keep the loop from doing real work by stubbing the pass.
+        factory, _ = self._make_factory_with_controller(poisoned=False)
         manager._healer.heal_once = AsyncMock()
 
-        await manager.start_healer()
-        task = manager._healer._task
-        assert task is not None and not task.done()
-
-        await manager.stop_healer()
         assert manager._healer._task is None
-        assert task.done()
+        with patch(
+            "deephaven_mcp.client.CorePlusSessionFactory.from_credentials",
+            new_callable=AsyncMock,
+            return_value=factory,
+        ):
+            await manager.get()
+        try:
+            task = manager._healer._task
+            assert task is not None and not task.done()
+        finally:
+            await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_repeated_creation_does_not_start_a_second_healer(self):
+        """A rebuild re-enters _create_item; the healer start stays idempotent."""
+        manager = self._make_factory_manager()
+        factory, _ = self._make_factory_with_controller(poisoned=False)
+        manager._healer.heal_once = AsyncMock()
+
+        with patch(
+            "deephaven_mcp.client.CorePlusSessionFactory.from_credentials",
+            new_callable=AsyncMock,
+            return_value=factory,
+        ):
+            await manager.get()
+            task = manager._healer._task
+            manager._item_cache = None
+            await manager.get()
+        try:
+            assert manager._healer._task is task
+        finally:
+            await manager.close()
+
+    @pytest.mark.asyncio
+    async def test_close_stops_the_healer_before_dropping_the_factory(self):
+        """The healer cannot recreate a factory mid-shutdown."""
+        manager = self._make_factory_manager()
+        factory, _ = self._make_factory_with_controller(poisoned=False)
+        manager._item_cache = factory
+        manager._healer.heal_once = AsyncMock()
+        manager._healer.start()
+        task = manager._healer._task
+        order = []
+
+        async def _record_stop():
+            order.append("stop")
+
+        manager._healer.stop = _record_stop
+        original_close = BaseItemManager.close
+
+        async def _record_close(self):
+            order.append("close")
+            await original_close(self)
+
+        with patch.object(BaseItemManager, "close", _record_close):
+            await manager.close()
+
+        assert order == ["stop", "close"]
+        assert manager._item_cache is None
+        # Clean up the task the stubbed stop() left running.
+        task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_close_then_get_restarts_the_healer(self):
+        """A manager reused after close gets a healer again with its new factory."""
+        manager = self._make_factory_manager()
+        factory, _ = self._make_factory_with_controller(poisoned=False)
+        manager._healer.heal_once = AsyncMock()
+
+        with patch(
+            "deephaven_mcp.client.CorePlusSessionFactory.from_credentials",
+            new_callable=AsyncMock,
+            return_value=factory,
+        ):
+            await manager.get()
+            await manager.close()
+            assert manager._healer._task is None
+
+            await manager.get()
+        try:
+            task = manager._healer._task
+            assert task is not None and not task.done()
+        finally:
+            await manager.close()
 
     @pytest.mark.asyncio
     async def test_request_reconnect_is_delegated(self):
@@ -1194,11 +1272,11 @@ class TestCorePlusSessionFactoryManager:
         # No healer running yet: nothing to nudge.
         assert await manager.request_reconnect() is False
 
-        await manager.start_healer()
+        manager._healer.start()
         try:
             assert await manager.request_reconnect() is True
         finally:
-            await manager.stop_healer()
+            await manager.close()
 
     @pytest.mark.asyncio
     async def test_healer_replaces_a_wedged_factory_end_to_end(self):
