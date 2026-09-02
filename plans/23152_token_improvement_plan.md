@@ -154,7 +154,7 @@ Operator precedence is AIP-160's: `NOT` binds tighter than `AND`, which binds
 tighter than `OR`. Parentheses override it. A closed numeric range is
 `serial > 10 AND serial < 50`; a union is `serial < 10 OR serial > 90`.
 
-Two points where AIP-160 leaves latitude, pinned here so both evaluators agree:
+Two points where AIP-160 leaves latitude:
 
 - **`:` is case-insensitive substring containment** on string fields. AIP-160
   calls it the "has" operator and permits prefix or substring readings; this
@@ -165,7 +165,7 @@ Two points where AIP-160 leaves latitude, pinned here so both evaluators agree:
   documented divergence from the specification.
 
 There is no wildcard operator: `name : Query` covers the substring case that a
-`*` would otherwise express.
+`*` would otherwise express in Deephaven's quick filters.
 
 Every tool documents a closed filter vocabulary — the field names it accepts on
 the left of a comparison. A predicate naming a field outside that vocabulary
@@ -225,7 +225,7 @@ where-clauses, where `filter` is one expression.
 
 **The asymmetry is deliberate and load-bearing.** An unqualified name marks the
 default; a qualified name marks a specialization. An agent scanning schemas sees
-`filter` on every collection tool and `engine_filters` on only two or three, and
+`filter` on every collection tool and `engine_filters` on only specific ones, and
 reads the hierarchy without any prose telling it which to prefer. Parallel names
 (`field_filter` / `engine_filters`) would imply the two are peers, which is the
 opposite of the intended relationship. This also avoids the `filter` / `filters`
@@ -235,7 +235,7 @@ describes shape.
 
 **What agents get concretely.** One filter concept, identically spelled and
 identically behaved on every collection tool, expressible zero-shot from prior
-knowledge; a second, clearly-marked parameter for the rare case needing full
+knowledge; a second, clearly-marked parameter for the table case needing full
 DQL. Both tool docstrings state the vocabulary contrast side by side, because
 that — not the parameter name — is what prevents a wrong-syntax call:
 
@@ -245,8 +245,7 @@ engine_filters:  ["Owner = `jsmith`"]  # Deephaven Query Language; backing colum
 ```
 
 `limit` follows the same reasoning at smaller stakes: it is the widely known
-SQL/`jq` spelling for a row cap, shorter than `max_rows` and instantly legible
-without documentation.
+SQL/`jq` spelling for a row cap, instantly legible without documentation.
 
 ### Why both `filter` and `engine_filters`
 
@@ -300,7 +299,7 @@ Offering both on a table-backed tool is not ambiguous, and the order is fixed:
 `engine_filters` and the compiled `filter` are applied together at the source,
 *before* the engine-side `limit` bounds the result, so `limit` and
 `is_complete` describe the filtered result rather than a pre-filter slice. The
-output-side layer (`fields`, `prune_empty`) then trims whatever came back.
+output-side layer (`prune_empty`) then trims whatever came back.
 `catalog_tables_list` keeps its engine-side where-clauses unchanged apart from
 the rename, and gains the output-side capabilities on top.
 
@@ -341,24 +340,6 @@ compared two tools.
 | Null ordering | Nulls sort as the smallest value: first ascending, last descending. | Deephaven's convention. AIP-132 is silent, and Python's `sorted` raises on `None` vs `str`, so the output-layer evaluator must implement this explicitly rather than inherit it. |
 | Ties | Stable — rows that compare equal retain their prior relative order. | Both Deephaven's sort and Python's `sorted` are stable, so multi-key sorting can be implemented as successive stable single-key sorts and still agree with the engine. |
 | Case | Case-sensitive, code-point order. | Deephaven's string comparison. This is deliberately *not* symmetric with `filter`, whose `=` and `:` are case-insensitive: matching is about finding a row, whereas ordering must reproduce what the engine would emit, and a case-insensitive sort would require a computed column on the worker. Both behaviors are documented on their respective parameters. |
-
-### Cost, and why it is opt-in
-
-Sorting is `O(n log n)` over the whole filtered set, where filtering is a single
-streaming pass. On the in-memory collections that is immaterial — a few thousand
-dictionaries sort in milliseconds, invisible beside the RPC that produced them.
-
-The real cost is on table-backed tools, where the sort must reach the engine
-*before* the row cap: a large catalog gets fully sorted on a shared worker to
-return the first thousand rows, where today `_apply_row_limit` caps early and
-cheaply. That work is opt-in and only opt-in — with `order_by` omitted, the
-existing early-cap behavior is unchanged. The parameter's help says so, and the
-same note appears in `docs/CLI.md`.
-
-Sorting is nevertheless universal rather than table-only, for the reason
-`filter` is: `limit` is on every collection tool, and without an explicit order
-its truncation keeps whatever order the source happened to produce. `order_by`
-is what makes a bounded response deterministic and reproducible.
 
 ## Scope and prior art
 
