@@ -57,6 +57,7 @@ Requirements:
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import sys
 import threading
@@ -340,12 +341,21 @@ async def _run(args: argparse.Namespace, manager: CorePlusSessionFactoryManager)
             _info(f"waiting out the first backoff (~{args.backoff_initial:.0f}s)")
 
         started = time.monotonic()
+        if watcher is not None:
+            # Let every forced re-poison land before watching for recovery.
+            # Both poll the same cache slot, so overlapping them races: the
+            # recovery poll can catch a rebuild in the gap before the next
+            # wedge and declare success after a single attempt.
+            try:
+                await asyncio.wait_for(watcher, timeout=args.recovery_timeout)
+            except TimeoutError:
+                _fail("healer stopped retrying before the forced attempts finished")
+                return 1
         if not await _await_state(
             manager, poisoned=False, timeout=args.recovery_timeout
         ):
             _fail(f"still wedged after {args.recovery_timeout:.0f}s")
             return 1
-        stop_watcher.set()
         _ok(f"controller reconnected after {time.monotonic() - started:.1f}s")
 
         _step("Confirm the reconnect")
@@ -355,7 +365,9 @@ async def _run(args: argparse.Namespace, manager: CorePlusSessionFactoryManager)
     finally:
         stop_watcher.set()
         if watcher is not None:
-            await watcher
+            # wait_for cancels the watcher on timeout, so awaiting it can raise.
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
         await manager.stop_healer()
         await manager.close()
 

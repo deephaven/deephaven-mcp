@@ -223,9 +223,9 @@ _OUTPUT_RECONNECT = OutputSpec(
         OutputField(
             "reconnect_requested",
             "boolean",
-            "True when a background attempt will be made now; false when there "
-            "is nothing to reconnect (no connection established and no outage "
-            "in progress), in which case the request is recorded for later.",
+            "True when a background attempt was started; false when nothing is "
+            "currently wedged (including an already-healthy controller), so "
+            "there was nothing to reconnect.",
         ),
         OutputField("detail", "string", "Human-readable next step."),
     ),

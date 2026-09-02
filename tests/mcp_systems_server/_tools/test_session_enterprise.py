@@ -2918,10 +2918,11 @@ async def test_enterprise_controller_reconnect_reports_no_running_healer():
 
     assert result["success"] is True
     assert result["reconnect_requested"] is False
-    # Must not claim an attempt is in flight when none has started.
+    # Must not claim an attempt is in flight, nor that one is queued for later.
     detail = result["detail"]
-    assert "No reconnect attempt has started" in detail
+    assert "No reconnect attempt was started" in detail
     assert "runs in the background" not in detail
+    assert "recorded" not in detail
 
 
 @pytest.mark.asyncio

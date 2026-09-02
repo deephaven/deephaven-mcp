@@ -3039,6 +3039,12 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         get an instant, informative response instead of blocking on the vendor
         subscription timeout.
 
+        The same instant response is given while an episode is in progress and
+        the cache is momentarily empty (between the healer's detach and its
+        rebuild): the healer owns creation for the duration of the episode, so
+        this does not start a competing inline creation that would block the
+        caller for ``session_connect_timeout_seconds``.
+
         Returns:
             CorePlusControllerClient: A healthy controller client.
 
@@ -3050,6 +3056,24 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             AuthenticationError: If authentication fails while creating the factory.
             Exception: Any other error raised by factory creation.
         """
+        # During an episode the healer owns factory creation, and between its
+        # detach and its rebuild the cache is empty. Falling through to get()
+        # then would start an inline creation and block the caller for
+        # session_connect_timeout_seconds -- the exact wait this fails fast to
+        # avoid. Read the cache before taking _healer_lock; the two locks are
+        # never nested in this class.
+        if await self._peek_controller_poisoned() is None:
+            async with self._healer_lock:
+                if self._subscribing_since is not None:
+                    msg = self._subscribing_status_message_locked(time.monotonic())
+                else:
+                    msg = None
+            if msg is not None:
+                _LOGGER.warning(
+                    f"[{self.__class__.__name__}:get_controller_client] {msg}"
+                )
+                raise DeephavenConnectionError(msg)
+
         factory = await self.get()
         controller = factory.controller_client
         now = time.monotonic()
@@ -3071,33 +3095,35 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         Signals the healer rather than recreating inline, so this returns
         without waiting for the (potentially minutes-long) factory rebuild and
-        concurrent requests collapse into a single attempt. The healer wakes,
-        skips the remaining backoff delay, and runs one pass; that pass is a
-        no-op when the controller is already healthy.
+        concurrent requests collapse into a single attempt.
 
-        The request is always recorded, so a healer that starts later still
-        consumes it. The return value reports only whether it will be acted on
-        *now*: with no factory cached and no outage in progress there is
-        nothing to reconnect, and the next ordinary call creates the factory
-        lazily instead.
+        The nudge is sent only when a pass would actually do something: the
+        cached controller is wedged, or an episode is in progress with the
+        cache momentarily empty. A healthy controller is left alone (a pass
+        would return without recreating), and a manager with nothing cached and
+        no outage has nothing to reconnect — the next ordinary call creates the
+        factory lazily. Nothing is queued for later in those cases; the healer
+        polls often enough to notice a wedge on its own.
 
         Backing the ``enterprise_controller_reconnect`` MCP tool.
 
         Returns:
-            bool: ``True`` when a running healer has something to act on.
-                ``False`` when no healer is running, or when nothing is cached
-                and no episode is in progress -- in both cases the request is
-                recorded but no attempt starts.
+            bool: ``True`` when a running healer was nudged and its next pass
+                will attempt a recreate; ``False`` when no attempt was started,
+                because nothing is wedged or no healer is running.
         """
         # Read the cache before taking _healer_lock; this class never nests the
-        # two locks. ``None`` means nothing is cached -- the poison value itself
-        # does not matter here, only whether there is a factory to act on.
-        has_item = await self._peek_controller_poisoned() is not None
+        # two locks.
+        poisoned = await self._peek_controller_poisoned()
         async with self._healer_lock:
             running = self._healer_task is not None and not self._healer_task.done()
             episode_active = self._subscribing_since is not None
-            self._reconnect_requested.set()
-        actionable = running and (has_item or episode_active)
+            # ``None`` (nothing cached) is only actionable mid-episode, when the
+            # healer is between detaching a wedged factory and rebuilding it.
+            heal_would_act = poisoned is True or (poisoned is None and episode_active)
+            actionable = running and heal_would_act
+            if actionable:
+                self._reconnect_requested.set()
         _LOGGER.info(
             f"[{self.__class__.__name__}:request_reconnect] Reconnect requested "
             f"for '{self.qualified_session_id}' (healer_running={running}, "

@@ -960,6 +960,7 @@ class TestCorePlusSessionFactoryManager:
         """A healthy call clears any recorded poison-episode state."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=False)
+        manager._item_cache = factory
         manager.get = AsyncMock(return_value=factory)
         # Simulate a stale episode left over from a prior outage.
         manager._subscribing_since = 123.0
@@ -971,6 +972,41 @@ class TestCorePlusSessionFactoryManager:
         assert manager._subscribing_since is None
         assert manager._recreate_attempts == 0
         assert manager._next_recreate_monotonic is None
+
+    @pytest.mark.asyncio
+    async def test_get_controller_client_fails_fast_mid_episode_empty_cache(self):
+        """An in-flight recreate does not drag callers into an inline creation.
+
+        Between the healer's detach and its rebuild the cache is empty. Falling
+        through to ``get()`` there would start a competing creation and block
+        the caller for ``session_connect_timeout_seconds`` -- the very wait this
+        whole path exists to avoid.
+        """
+        manager = self._make_factory_manager()
+        manager._item_cache = None
+        manager._subscribing_since = time.monotonic()
+        manager._recreate_attempts = 2
+        manager.get = AsyncMock()
+
+        with pytest.raises(DeephavenConnectionError) as exc_info:
+            await manager.get_controller_client()
+
+        assert CONTROLLER_SUBSCRIBING_ERROR_CODE in str(exc_info.value)
+        # The blocking creation must never have been attempted.
+        manager.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_controller_client_creates_when_idle_and_empty(self):
+        """With no episode in progress an empty cache still creates normally."""
+        manager = self._make_factory_manager()
+        factory, _ = self._make_factory_with_controller(poisoned=False)
+        manager._item_cache = None
+        manager.get = AsyncMock(return_value=factory)
+
+        result = await manager.get_controller_client()
+
+        assert result is factory.controller_client
+        manager.get.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_get_controller_client_poisoned_raises_with_code(self):
@@ -1262,16 +1298,15 @@ class TestCorePlusSessionFactoryManager:
 
     @pytest.mark.asyncio
     async def test_request_reconnect_reports_healer_running(self):
-        """request_reconnect sets the nudge and reports whether it will be acted on."""
+        """request_reconnect nudges the healer only when a pass would act."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=True)
         manager._item_cache = factory
 
-        # No healer running yet: request is recorded but nothing services it.
+        # No healer running yet: nothing to nudge.
         assert await manager.request_reconnect() is False
-        assert manager._reconnect_requested.is_set()
+        assert not manager._reconnect_requested.is_set()
 
-        manager._reconnect_requested.clear()
         manager._heal_once = AsyncMock()
         await manager.start_healer()
         try:
@@ -1293,8 +1328,28 @@ class TestCorePlusSessionFactoryManager:
             assert manager._item_cache is None
             assert manager._subscribing_since is None
             assert await manager.request_reconnect() is False
-            # Still recorded, so a later wedge consumes it.
-            assert manager._reconnect_requested.is_set()
+            # Nothing is queued: the claim of deferred recording would be a lie,
+            # since _wait_for_next_pass consumes the event on the very next tick.
+            assert not manager._reconnect_requested.is_set()
+        finally:
+            await manager.stop_healer()
+
+    @pytest.mark.asyncio
+    async def test_request_reconnect_healthy_controller_is_not_actionable(self):
+        """A healthy controller is left alone rather than reported as reconnecting.
+
+        ``_heal_once`` returns without recreating for a healthy controller, so
+        claiming an attempt started would contradict the documented
+        no-op-on-healthy behavior.
+        """
+        manager = self._make_factory_manager()
+        factory, _ = self._make_factory_with_controller(poisoned=False)
+        manager._item_cache = factory
+        manager._heal_once = AsyncMock()
+        await manager.start_healer()
+        try:
+            assert await manager.request_reconnect() is False
+            assert not manager._reconnect_requested.is_set()
         finally:
             await manager.stop_healer()
 
@@ -1331,6 +1386,11 @@ class TestCorePlusSessionFactoryManager:
     async def test_request_reconnect_wakes_healer_immediately(self):
         """A reconnect request runs a pass without waiting out the backoff."""
         manager = self._make_factory_manager()
+        # A wedged factory plus an open episode, so the nudge is actionable and
+        # the loop is waiting on the backoff rather than the healthy poll.
+        factory, _ = self._make_factory_with_controller(poisoned=True)
+        manager._item_cache = factory
+        manager._subscribing_since = time.monotonic()
         # A long backoff so only the nudge can trigger a pass in time.
         manager._timeouts = EnterpriseClientTimeouts.model_validate(
             {
@@ -1492,6 +1552,8 @@ class TestCorePlusSessionFactoryManager:
             await manager.stop_healer()
         assert manager._healer_task is None
 
+
+class TestDynamicCommunitySessionManager:
     """Tests for DynamicCommunitySessionManager class."""
 
     def test_init_stores_launched_session(self):
