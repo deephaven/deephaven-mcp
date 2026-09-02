@@ -12,6 +12,7 @@ import pytest
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
+    DeephavenConnectionError,
     EnterpriseNotConfiguredError,
     RegistryItemNotFoundError,
     SessionCreationError,
@@ -1321,6 +1322,64 @@ async def test_session_enterprise_create_success_with_defaults():
     session_manager = call_args[0][0]  # Manager is the only argument
     assert str(session_manager.qualified_session_id) == "enterprise:system:1"
     assert session_manager.origin is SessionOrigin.DYNAMIC
+
+
+@pytest.mark.asyncio
+async def test_session_enterprise_create_fast_fails_on_wedged_controller():
+    """Worker creation fails fast instead of blocking on a wedged subscription.
+
+    ``connect_to_new_worker`` waits on the controller subscription map, so a
+    poisoned controller would otherwise block for the vendor's subscription
+    timeout. The tool must surface the healer's status message instead.
+    """
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
+            "connection_json_url": "https://prod.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "admin",
+            "password": "secret",
+            "session_creation": {
+                "max_concurrent_sessions": 5,
+                "defaults": {"heap_size_gb": 8.0},
+            },
+        }
+    )
+
+    mock_factory = MagicMock()
+    mock_factory.connect_to_new_worker = AsyncMock()
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=DeephavenConnectionError(
+            "[CONTROLLER_SUBSCRIBING] Controller subscription is still initializing"
+        )
+    )
+    mock_registry.factory_manager = mock_factory_manager
+    mock_registry.get_all = AsyncMock(return_value={})
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
+    mock_registry.add_session = AsyncMock()
+    mock_registry.count_added_sessions = AsyncMock(return_value=0)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_registry,
+        }
+    )
+
+    result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "test-worker")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "CONTROLLER_SUBSCRIBING" in result["error"]
+    # The blocking call must never have been reached.
+    mock_factory.connect_to_new_worker.assert_not_called()
+    mock_registry.add_session.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2852,13 +2911,17 @@ async def test_enterprise_controller_reconnect_success():
 
 @pytest.mark.asyncio
 async def test_enterprise_controller_reconnect_reports_no_running_healer():
-    """When no healer is running the request is still accepted, flagged False."""
+    """When nothing will be acted on, the request is accepted but flagged False."""
     context = _make_reconnect_context(AsyncMock(return_value=False))
 
     result = await enterprise_controller_reconnect(context, _TEST_SYSTEM_NAME)
 
     assert result["success"] is True
     assert result["reconnect_requested"] is False
+    # Must not claim an attempt is in flight when none has started.
+    detail = result["detail"]
+    assert "No reconnect attempt has started" in detail
+    assert "runs in the background" not in detail
 
 
 @pytest.mark.asyncio

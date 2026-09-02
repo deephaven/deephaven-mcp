@@ -1,6 +1,6 @@
 """``dhcli system`` noun group: inspect the configured Deephaven systems.
 
-Verbs: ``list``, ``status``, ``url``, ``open``.
+Verbs: ``list``, ``status``, ``reconnect``, ``url``, ``open``.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._browser import launch_browser
 from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
+    call_and_echo,
     call_and_echo_field,
     wrapper_error_codes,
 )
@@ -48,7 +49,9 @@ def system() -> None:
     'community') plus every configured Enterprise (Core+) system.
     'list' and 'status' speak MCP to the daemon (auto-starting it
     unless --no-auto-start is set): 'list' enumerates the configured
-    systems; 'status' reports Enterprise system health. 'url' and
+    systems; 'status' reports Enterprise system health. 'reconnect'
+    also speaks MCP: it forces a wedged Enterprise controller to
+    retry connecting now. 'url' and
     'open' are computed locally from configuration and never contact
     the daemon: they surface an Enterprise system's web console.
     """
@@ -206,6 +209,84 @@ async def system_status(
         # warn with the full `errors` map, since the row shows only the short
         # reason and the full message would otherwise be unreachable.
         reasons_in_rows=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# reconnect
+# ---------------------------------------------------------------------------
+
+_OUTPUT_RECONNECT = OutputSpec(
+    "object",
+    (
+        OutputField("system", "string", "The Enterprise system the request targeted."),
+        OutputField(
+            "reconnect_requested",
+            "boolean",
+            "True when a background attempt will be made now; false when there "
+            "is nothing to reconnect (no connection established and no outage "
+            "in progress), in which case the request is recorded for later.",
+        ),
+        OutputField("detail", "string", "Human-readable next step."),
+    ),
+    note=(
+        "Acknowledgment only. Success means the request was accepted, NOT "
+        "that the controller reconnected — verify with 'dhcli system status "
+        "--connect' or by retrying the original command."
+    ),
+)
+
+
+@system.command(
+    "reconnect",
+    wraps_tool="enterprise_controller_reconnect",
+    help_spec=HelpSpec(
+        summary="Force an Enterprise system's controller to reconnect now.",
+        description=(
+            "Enterprise (Core+) only. Use this when a command fails with an "
+            "error containing '[CONTROLLER_SUBSCRIBING]', which means the "
+            "system's controller subscription is wedged and a background "
+            "healer is already retrying on an exponential backoff. This skips "
+            "the remaining wait and triggers the next attempt immediately. "
+            "Returns as soon as the request is accepted: it never blocks for "
+            "the reconnect, and it does not report whether the reconnect "
+            "succeeded. Safe to repeat — concurrent requests collapse into a "
+            "single attempt — and a no-op when the controller is already "
+            "healthy, so it never tears down a working connection."
+        ),
+        arguments=(
+            HelpEntry(
+                "SYSTEM",
+                "Enterprise system name. Run 'system list'. Defaults to the "
+                f"sticky context system if omitted. {CONTEXT_HINT}",
+            ),
+        ),
+        output=_OUTPUT_RECONNECT,
+        examples=(
+            "$ dhcli system reconnect prod",
+            "$ dhcli -o json system reconnect prod | jq '.reconnect_requested'",
+            "$ dhcli system reconnect prod && dhcli system status --system prod --connect",
+        ),
+        see_also=(
+            "dhcli system status",
+            "dhcli system list",
+            "dhcli context show",
+        ),
+        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
+        error_codes=(ErrorCode.CONTEXT_NOT_SET, *wrapper_error_codes()),
+    ),
+)
+@click.argument("system", required=False)
+@click.pass_obj
+@run_async
+async def system_reconnect(runtime: Runtime, system: str | None) -> None:
+    """Force an Enterprise system's controller to reconnect now."""
+    system = require_context_value(runtime, ContextKey.SYSTEM, system)
+    await call_and_echo(
+        runtime,
+        "enterprise_controller_reconnect",
+        retry_command="dhcli system reconnect",
+        arguments={"system": system},
     )
 
 

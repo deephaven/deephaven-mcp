@@ -363,9 +363,10 @@ async def enterprise_controller_reconnect(
         dict[str, Any]: Response with the following fields:
             - success (bool): True if the reconnect request was accepted.
             - system (str): The system the request targeted. Present on success.
-            - reconnect_requested (bool): True when a running healer will
-              service the request; False when no healer is running, in which
-              case the request is recorded for a healer that starts later.
+            - reconnect_requested (bool): True when a background attempt will
+              be made now. False when there is nothing to reconnect (no
+              connection has been established and no outage is in progress) or
+              no healer is running; the request is still recorded for later.
               Present on success.
             - detail (str): Human-readable next step. Present on success.
             - error (str): Error message. Present only on failure.
@@ -403,9 +404,18 @@ async def enterprise_controller_reconnect(
             "system": system,
             "reconnect_requested": requested,
             "detail": (
-                f"Reconnect requested for enterprise system '{system}'. The "
-                f"attempt runs in the background; retry your original call "
-                f"shortly or check enterprise_systems_status."
+                (
+                    f"Reconnect requested for enterprise system '{system}'. The "
+                    f"attempt runs in the background; retry your original call "
+                    f"shortly or check enterprise_systems_status."
+                )
+                if requested
+                else (
+                    f"No reconnect attempt has started for enterprise system "
+                    f"'{system}': there is nothing to reconnect right now. The "
+                    f"request is recorded and will be consumed if a reconnect "
+                    f"becomes possible; check enterprise_systems_status."
+                )
             ),
         }
     except Exception as e:
@@ -752,6 +762,11 @@ async def session_enterprise_create(
 
         # Get the factory manager directly and create session
         factory_manager = session_registry.factory_manager
+        # Worker creation waits on the controller subscription map
+        # (connect_to_new_worker -> __wait_for_ready -> map_and_version), so a
+        # wedged subscription would block for the vendor timeout. Gate on the
+        # controller first to fail fast with the healer's status message.
+        await factory_manager.get_controller_client()
         factory = await factory_manager.get()
 
         # Create configuration transformer based on programming language

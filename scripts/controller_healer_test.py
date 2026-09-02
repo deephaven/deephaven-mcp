@@ -65,6 +65,7 @@ from pathlib import Path
 
 import grpc
 from deephaven_enterprise.client.controller import SubState
+from pydantic import ValidationError
 
 from deephaven_mcp._exceptions import DeephavenConnectionError
 from deephaven_mcp.config.tree import ConfigTreeLoader
@@ -242,12 +243,20 @@ async def _build_manager(
         sys.exit(f"Unknown system {args.system!r}. Configured systems: {available}")
 
     system_config = enterprise.systems[args.system]
-    timeouts = enterprise.settings.timeouts.client.model_copy(
-        update={
-            "controller_resubscribe_backoff_initial_seconds": args.backoff_initial,
-            "controller_resubscribe_backoff_max_seconds": args.backoff_max,
-        }
-    )
+    base_timeouts = enterprise.settings.timeouts.client
+    # argparse values are untrusted, so re-validate rather than model_copy --
+    # otherwise --backoff-initial 0 would bypass the schema's Field(gt=0) and
+    # make the healer spin.
+    try:
+        timeouts = type(base_timeouts).model_validate(
+            base_timeouts.model_dump()
+            | {
+                "controller_resubscribe_backoff_initial_seconds": args.backoff_initial,
+                "controller_resubscribe_backoff_max_seconds": args.backoff_max,
+            }
+        )
+    except ValidationError as exc:
+        sys.exit(f"Invalid backoff values: {exc}")
     return CorePlusSessionFactoryManager(
         system_config.name,
         system_config,
@@ -376,7 +385,7 @@ def _silence_vendor_thread_tracebacks() -> None:
     """Stop dead vendor response threads from printing gRPC tracebacks.
 
     Wedging the controller cancels its subscription stream, so the vendor
-    response thread dies with a CANCELLED ``RpcError``. Python prints that
+    response thread dies with a CANCELED ``RpcError``. Python prints that
     through ``threading.excepthook`` rather than logging, so it has to be
     suppressed here rather than by setting a log level.
     """

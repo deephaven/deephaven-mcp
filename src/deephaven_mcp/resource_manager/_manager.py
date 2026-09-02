@@ -115,6 +115,16 @@ from ._session_id import QualifiedSessionId, SessionId
 
 _LOGGER = logging.getLogger(__name__)
 
+_HEALTHY_POLL_SECONDS = 5.0
+"""Cadence at which the controller healer checks a healthy factory for a wedge.
+
+Deliberately not configurable: it only bounds how quickly a wedge is noticed,
+and the check is a lock-guarded attribute read with no I/O. Keeping it separate
+from ``controller_resubscribe_backoff_initial_seconds`` is what gives that
+tunable phase-independent meaning -- the backoff clock starts when the episode
+is detected, not when the poll loop happens to tick.
+"""
+
 
 class AsyncClosable(Protocol):
     """Protocol defining the async close() interface for managed resources.
@@ -3065,21 +3075,35 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         skips the remaining backoff delay, and runs one pass; that pass is a
         no-op when the controller is already healthy.
 
+        The request is always recorded, so a healer that starts later still
+        consumes it. The return value reports only whether it will be acted on
+        *now*: with no factory cached and no outage in progress there is
+        nothing to reconnect, and the next ordinary call creates the factory
+        lazily instead.
+
         Backing the ``enterprise_controller_reconnect`` MCP tool.
 
         Returns:
-            bool: ``True`` when a running healer will service the request;
-                ``False`` when no healer is running (the request is recorded
-                and will be consumed if one starts later).
+            bool: ``True`` when a running healer has something to act on.
+                ``False`` when no healer is running, or when nothing is cached
+                and no episode is in progress -- in both cases the request is
+                recorded but no attempt starts.
         """
+        # Read the cache before taking _healer_lock; this class never nests the
+        # two locks. ``None`` means nothing is cached -- the poison value itself
+        # does not matter here, only whether there is a factory to act on.
+        has_item = await self._peek_controller_poisoned() is not None
         async with self._healer_lock:
             running = self._healer_task is not None and not self._healer_task.done()
+            episode_active = self._subscribing_since is not None
             self._reconnect_requested.set()
+        actionable = running and (has_item or episode_active)
         _LOGGER.info(
-            f"[{self.__class__.__name__}:request_reconnect] Reconnect requested for "
-            f"'{self.qualified_session_id}' (healer_running={running})"
+            f"[{self.__class__.__name__}:request_reconnect] Reconnect requested "
+            f"for '{self.qualified_session_id}' (healer_running={running}, "
+            f"actionable={actionable})"
         )
-        return running
+        return actionable
 
     async def start_healer(self) -> None:
         """Launch the background subscription-healing loop.
@@ -3162,13 +3186,21 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
     async def _healer_loop(self) -> None:
         """Recreate the factory on a capped exponential backoff while wedged.
 
-        Each iteration computes the current backoff delay, publishes the
-        resulting next-recreate deadline (so
-        :meth:`get_controller_client` can report an accurate countdown), then
-        waits — either for the delay to elapse or for
-        :meth:`request_reconnect` to cut it short. Recreation failures are
-        logged by :meth:`_heal_once` and retried on the next pass with a longer
-        delay. Runs until canceled by :meth:`stop_healer`.
+        Two cadences, so the configured backoff has phase-independent meaning:
+
+        - **No episode in progress**: poll every
+          :data:`_HEALTHY_POLL_SECONDS` purely to notice a wedge. No
+          next-recreate deadline is published, because none is scheduled.
+        - **Episode in progress**: wait the current backoff delay and publish
+          the resulting deadline, so :meth:`get_controller_client` can report
+          an accurate countdown.
+
+        Because the backoff clock starts when the episode is detected rather
+        than when the loop happens to tick, the first recreate lands
+        ``controller_resubscribe_backoff_initial_seconds`` after detection
+        regardless of where in the poll cycle the wedge occurred.
+        :meth:`request_reconnect` still cuts any wait short. Runs until
+        canceled by :meth:`stop_healer`.
         """
         _LOGGER.debug(
             f"[{self.__class__.__name__}:_healer_loop] entered for "
@@ -3177,8 +3209,12 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         try:
             while True:
                 async with self._healer_lock:
-                    delay = self._backoff_seconds_locked()
-                    self._next_recreate_monotonic = time.monotonic() + delay
+                    if self._subscribing_since is None:
+                        delay = _HEALTHY_POLL_SECONDS
+                        self._next_recreate_monotonic = None
+                    else:
+                        delay = self._backoff_seconds_locked()
+                        self._next_recreate_monotonic = time.monotonic() + delay
                 forced = await self._wait_for_next_pass(delay)
                 try:
                     await self._heal_once(forced=forced)
@@ -3196,6 +3232,26 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             )
             raise
 
+    async def _detach_poisoned_item(self) -> CorePlusSessionFactory | None:
+        """Atomically remove the cached factory, but only if still wedged.
+
+        Re-checks identity and poison state inside the same ``self._lock``
+        acquisition that clears the cache, so a factory that was replaced or
+        that recovered after the healer's earlier peek is never torn down.
+
+        Returns:
+            CorePlusSessionFactory | None: The detached factory, which the
+                caller must close outside the lock; ``None`` when nothing was
+                cached or the cached factory is healthy.
+        """
+        async with self._lock:
+            item = self._item_cache
+            if item is None or not item.controller_client.is_poisoned:
+                return None
+            self._item_cache = None
+            self._last_accessed = None
+            return item
+
     async def _heal_once(self, forced: bool = False) -> None:
         """Run one healing pass: recreate the factory iff the subscription is wedged.
 
@@ -3206,11 +3262,20 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         in progress an empty cache simply means idle, and the pass does
         nothing; the next :meth:`get` creates the factory lazily.
 
+        The pass that first *detects* a wedge only opens the episode; the
+        recreate itself waits for the backoff the loop then schedules, so the
+        configured initial delay is honored. A forced pass skips that wait.
+
+        Teardown detaches the wedged factory under ``self._lock`` via
+        :meth:`_detach_poisoned_item` and closes only that captured instance,
+        so a controller that recovered or was replaced in the meantime is left
+        alone.
+
         Args:
             forced (bool): Whether this pass was triggered by
                 :meth:`request_reconnect` rather than by the backoff elapsing.
-                Affects logging only — a forced pass applies the same rules, so
-                forcing a reconnect never tears down a healthy controller.
+                A forced pass recreates on detection instead of waiting out the
+                initial delay; it still never tears down a healthy controller.
         """
         poisoned = await self._peek_controller_poisoned()
 
@@ -3221,8 +3286,12 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 return
             if poisoned is None and not episode_active:
                 return
-            if self._subscribing_since is None:
+            if not episode_active:
+                # Open the episode; the loop schedules the first recreate one
+                # full initial backoff from here.
                 self._subscribing_since = time.monotonic()
+                if not forced:
+                    return
             self._recreate_attempts += 1
             attempt = self._recreate_attempts
 
@@ -3231,7 +3300,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             f"'{self.qualified_session_id}' unavailable; recreating factory "
             f"(attempt {attempt}, forced={forced})"
         )
-        await self.close()
+        detached = await self._detach_poisoned_item()
+        if detached is not None:
+            await self._close_captured_item(detached)
         try:
             await self.get()
         except Exception as e:
