@@ -35,7 +35,7 @@ This proposal adds a consistent output-shaping API:
 
 The first pass covers every in-memory list the servers already return — `pq
 list`, `sessions list`, `list systems`, `pip list`, and the catalog listings —
-plus `pq details`. The API is designed for later adoption by the remaining
+plus `pq details`. The API is designed for latexhr adoption by the remaining
 detail and table-backed tools.
 
 ## Design goals
@@ -46,9 +46,9 @@ readable inputs and explicit feedback make results inspectable.
 
 | Goal | Design response |
 | --- | --- |
-| No invented language | Every surface is borrowed: `filter` is [AIP-160](https://google.aip.dev/160), `order_by` is [AIP-132](https://google.aip.dev/132), `fields` is an [AIP-157](https://google.aip.dev/157) partial response carrying `google.protobuf.FieldMask` paths. Each is implemented as specified rather than as a subset. |
+| No invented language | Nothing here is a new syntax. `filter` implements [AIP-160](https://google.aip.dev/160) and `order_by` implements [AIP-132](https://google.aip.dev/132) as written. `fields` follows [AIP-157](https://google.aip.dev/157) and borrows `google.protobuf.FieldMask`'s wire shape, but its path grammar is FieldMask-*shaped* rather than FieldMask; the differences are enumerated in [Field grammar](#differences-from-fieldmask--aip-157). |
 | One obvious spelling per intent | Applies to what this project chooses, not to a borrowed grammar: where AIP-160 defines two spellings (`NOT` and `-`), both are accepted, because a caller's prior knowledge is only worth borrowing if it transfers intact. |
-| Reliable structured calls | `filter`, `order_by`, and `fields` are each a single string, matching their specifications exactly (`fields` is a `FieldMask` in its canonical JSON encoding) and priming models that already know them; only the pre-existing `engine_filters` is an array, keeping its established nullable-array schema. |
+| Reliable structured calls | `filter`, `order_by`, and `fields` are each a single string — `filter` and `order_by` exactly as their specifications define, `fields` in FieldMask's canonical comma-separated JSON encoding — priming models that already know them; only the pre-existing `engine_filters` is an array, keeping its established nullable-array schema. |
 | Discoverability | Each tool documents its filterable, sortable, and selectable fields, operators, examples, and parse errors. |
 | Repairability | Invalid input returns the expected form and a concrete example. |
 | Verifiability | Ordering is explicit and stable; projection changes only which fields are present; response metadata reports truncation and unmatched field paths. |
@@ -110,6 +110,42 @@ dhcli pq list prod --order-by 'status, serial desc' --limit 10
 dhcli pq details enterprise:prod:123 --fields config.owner,state_details.status
 ```
 
+#### `--filter` changes meaning on the catalog commands
+
+This is the plan's sharpest breaking change and needs its own migration note.
+`catalog tables`, `catalog namespaces`, and `catalog sample` already have a
+`--filter` flag: it is **repeatable** and forwards Deephaven expressions to the
+tool's `filters` argument (`cli/_commands/catalog.py`). Under this plan
+`--filter` becomes a single AIP-160 expression over response field names, so an
+existing invocation such as
+
+```bash
+dhcli catalog tables enterprise:prod:42 --filter 'Namespace = `market_data`'
+```
+
+would silently change meaning — the same string, a different language, against a
+different vocabulary. It must not be left to fail at parse time by accident, and
+DQL filtering must not disappear from the CLI.
+
+The split is therefore explicit:
+
+| Flag | Value | Forwards to |
+| --- | --- | --- |
+| `--filter` | Single AIP-160 expression over response field names | `filter` |
+| `--engine-filter` | Repeatable Deephaven Query Language where-clause over backing table columns | `engine_filters` |
+
+`--engine-filter` is added wherever `engine_filters` exists, so every DQL
+expression usable today remains usable, and the flag name mirrors the parameter
+exactly as `--filter` mirrors `filter`. For one release the old spelling is
+detected rather than silently reinterpreted: a `--filter` value that fails to
+parse as AIP-160 *and* contains a backtick or a known backing column name exits
+`2` with `arg_parse_error` and a message naming `--engine-filter` as the
+replacement. `catalog sample` keeps partition filtering on `--engine-filter`
+too, so `--filter` means the same thing on every command that has it.
+
+The rename is recorded in the changelog beside `engine_filters` and `limit`, and
+`docs/CLI.md` carries the before/after invocation.
+
 The CLI writes an `unmatched_fields` warning to stderr when the list is
 non-empty. Structured tool output remains the source of truth; warnings do not
 change the normal stdout payload.
@@ -148,7 +184,7 @@ reserved for Deephaven Query Language where-clauses evaluated by the engine.
 | `expr AND expr` | Conjunction | `enabled = true AND serial > 10` |
 | `expr OR expr` | Disjunction | `owner = "a" OR owner = "b"` |
 | `( expr )` | Grouping | `(owner = "a" OR owner = "b") AND enabled = true` |
-| `NULL` | Null field | `owner = NULL` |
+| `NULL` | Null field (`null` is accepted equivalently) | `owner = NULL` |
 | `"..."` | Quoted string literal (required when the value has spaces or operators) | `name = "my daily query"` |
 
 ### Precedence
@@ -175,6 +211,12 @@ A closed numeric range is `serial > 10 AND serial < 50`; a union is
 `serial < 10 OR serial > 90`.
 
 ### Restrictions
+
+AIP-160 defines a grammar and leaves the *value vocabulary* — which literals a
+field accepts — to the implementing API. The null sentinel is therefore
+documented here rather than inherited: both `NULL` and `null` are accepted, and
+both compile to `isNull(Field)`. Typed literals follow the field's declared type
+(see [Typed fields](#typed-fields-and-operator-validity)).
 
 AIP-160 is a grammar for filtering arbitrary protobuf messages; these tools
 return flat records of scalars. The rows below are constructs a conforming
@@ -371,16 +413,18 @@ compared two tools.
 
 ## Scope and prior art
 
-This layer reduces a payload; it does not transform it. Every surface is
-borrowed rather than invented: `filter` is
-[AIP-160](https://google.aip.dev/160) — the filter language Google Cloud APIs
-expose on List methods — kept deliberately distinct from `engine_filters`
-(Deephaven Query Language); `order_by` is [AIP-132](https://google.aip.dev/132);
-and `fields` is an [AIP-157](https://google.aip.dev/157) partial response whose
-paths are `google.protobuf.FieldMask` paths (name a parent, keep its subtree).
-Adopting published specifications rather than a bespoke grammar is a deliberate
-reversal: a hand-rolled syntax has to be specified, documented, and defended
-from scratch, and gives a caller nothing they already know.
+This layer reduces a payload; it does not transform it. Nothing here is a new
+syntax: `filter` is [AIP-160](https://google.aip.dev/160) — the filter language
+Google Cloud APIs expose on List methods — kept deliberately distinct from
+`engine_filters` (Deephaven Query Language); `order_by` is
+[AIP-132](https://google.aip.dev/132); and `fields` follows
+[AIP-157](https://google.aip.dev/157) with `google.protobuf.FieldMask`'s wire
+shape. The first two are implemented as their specifications are written; the
+third borrows the wire form and the parent-keeps-subtree semantic but extends
+the path grammar, and those extensions are enumerated rather than implied.
+Borrowing published specifications rather than hand-rolling a grammar is a
+deliberate reversal: an invented syntax has to be specified, documented, and
+defended from scratch, and gives a caller nothing they already know.
 
 `filter` implements AIP-160 as specified — operators, precedence, and negation
 all behave as a conforming processor behaves — and the only rejections are the
@@ -415,25 +459,36 @@ rely on. It stays out of scope unless and until that demand is real.
 
 ## Field grammar
 
-`fields` is the [AIP-157](https://google.aip.dev/157) partial-response pattern:
-a caller names the parts of the result it wants and the server omits the rest.
-AIP-157's proto spelling is a `read_mask` field of type
-`google.protobuf.FieldMask`; the name `fields` follows the equivalent spelling
-in Google's JSON/HTTP surface, where `?fields=` carries the same mask, and it
-sits naturally beside `filter` and `order_by`. Path semantics are `FieldMask`'s
-— name a parent to keep its subtree.
+`fields` follows the [AIP-157](https://google.aip.dev/157) partial-response
+pattern — a caller names the parts of the result it wants and the server omits
+the rest — and borrows `google.protobuf.FieldMask`'s wire shape. Unlike `filter`
+and `order_by`, which implement their specifications as written, **the path
+grammar is a project grammar**: it is FieldMask-*shaped*, not FieldMask, and the
+differences are enumerated below. Prior knowledge transfers for the common cases
+and stops at the table.
 
-The value is a **single comma-separated string**, not an array, because that is
-`FieldMask`'s canonical JSON encoding (`"config.owner,state_details.status"`).
-Taking the specification's own wire form rather than an array of paths keeps the
-argument byte-identical to what a caller would send to any other `FieldMask`
-API, and makes all three shaping arguments — `filter`, `order_by`, `fields` —
-single strings with one spelling each.
+What is taken directly: the parameter name `fields`, which matches the spelling
+in Google's JSON/HTTP surface where `?fields=` carries the mask (AIP-157's proto
+spelling is `read_mask`); the value as a **single comma-separated string**,
+which is FieldMask's canonical JSON encoding
+(`"config.owner,state_details.status"`); and the core semantic that naming a
+parent keeps its subtree. Taking the comma-separated wire form rather than an
+array also makes all three shaping arguments — `filter`, `order_by`, `fields` —
+single strings.
 
-Two behaviors below are project-specific extensions, not part of `FieldMask`, so
-implementers should not assume protobuf compatibility: a repeated field may
-appear before the final segment (a path through an array applies to every
-element), and a literal dot in a key can be escaped (`weird\.key`).
+### Differences from `FieldMask` / AIP-157
+
+| Behavior | Here | Specification |
+| --- | --- | --- |
+| Field naming | Response field names verbatim, which are `snake_case` (`table_name`, `state_details.status`) | FieldMask's JSON encoding converts proto names to `lowerCamelCase`. These tools are not proto-derived and their JSON is snake_case, so paths name what the response actually contains. |
+| Repeated field before the final segment | Allowed — `replicas.status` applies to every element | FieldMask forbids a repeated field anywhere but the final segment. |
+| Escaped dot in a key (`weird\.key`) | Supported | Not defined by FieldMask, which assumes proto field names and therefore never needs it. |
+| `*` | Accepted as "all fields," equivalent to omitting the argument | AIP-157 / the `fields` system parameter define `*`; supported here so a caller writing it gets what they expect. |
+| Array indices, wildcard path segments (`a.*.b`) | Rejected | Not defined by FieldMask either; listed so the boundary is explicit. |
+
+The first three exist because the data being masked is not a protobuf message.
+They are additions to what FieldMask can express, not reinterpretations of it: a
+path that is valid FieldMask means here what it means there.
 
 | Form | Result |
 | --- | --- |
@@ -442,6 +497,7 @@ element), and a literal dot in a key can be escaped (`weird\.key`).
 | `config,config.owner` | Same as `config`; a parent supersedes descendants. |
 | `replicas.status` | Keep `status` from every replica. |
 | `weird\.key` | Match a literal dot in a key. |
+| `*` | Keep everything; identical to omitting `fields`. |
 
 Paths through arrays apply to every element. Array indexing and wildcard paths
 are not supported. A bare field such as `name` is the flat projection case.
@@ -626,8 +682,12 @@ adds the output-side layer beside it.
 
 1. Add `filter` (AIP-160) and `order_by` (AIP-132) as the universal output-side
    surfaces, rename the existing catalog `filters` to `engine_filters`, and
-   rename `max_rows` to `limit`. Both renames are breaking and are recorded in
-   the changelog.
+   rename `max_rows` to `limit`. On the CLI, `--filter` is redefined as the
+   AIP-160 expression and a repeatable `--engine-filter` is added wherever
+   `engine_filters` exists — including `catalog sample`, so `--filter` means the
+   same thing on every command that has it — with the one-release detection of
+   DQL passed to `--filter` described above. All of these are breaking and are
+   recorded in the changelog with before/after invocations.
 2. Build the AIP-160 front end: a tokenizer and recursive-descent parser
    producing a validated AST. The grammar is AIP-160's as written — an `AND` of
    `OR`-clauses, so negation binds tightest, then `OR`, then `AND`, with both
@@ -730,8 +790,16 @@ Tests cover:
 - Rejection of an unknown filter field, asserting the error echoes the allowed
   vocabulary (the `owenr = "x"` typo case). <!-- codespell:ignore owenr -->
 - Flat and nested projection, parent/descendant precedence, arrays,
-  escaped-dot keys, and empty projection (an omitted and an empty-string
+  escaped-dot keys, `*` as an explicit all-fields selection, and empty
+  projection (an omitted and an empty-string
   `fields` both preserve the full result and emit no `unmatched_fields`).
+- Rejection of array indices and wildcard path segments (`a.*.b`), the two
+  path forms outside the documented grammar.
+- The CLI flag split: `--filter` forwarding to `filter` and repeatable
+  `--engine-filter` forwarding to `engine_filters` on every command that has
+  both, plus the transitional detection that a DQL expression passed to
+  `--filter` exits `2` naming `--engine-filter` rather than failing as an
+  opaque parse error.
 - `prune_empty` removing exactly `null` / `""` / `[]` / `{}` recursively while
   preserving `false` and numeric `0`.
 - `limit` defaults: catalog 10,000 / 1,000 and the other first-pass tools
