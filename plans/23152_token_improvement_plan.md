@@ -46,8 +46,8 @@ readable inputs and explicit feedback make results inspectable.
 
 | Goal | Design response |
 | --- | --- |
-| No invented language | Every surface is borrowed: `filter` is [AIP-160](https://google.aip.dev/160), `order_by` is [AIP-132](https://google.aip.dev/132), `fields` is a [AIP-157](https://google.aip.dev/157) partial response carrying `google.protobuf.FieldMask` paths. Each is implemented as specified rather than as a subset. |
-| One obvious spelling per intent | Explicit `AND` is required (AIP-160's implicit-conjunction shorthand `a b` is rejected); ascending sort is the bare field name, with no accepted `asc` synonym. |
+| No invented language | Every surface is borrowed: `filter` is [AIP-160](https://google.aip.dev/160), `order_by` is [AIP-132](https://google.aip.dev/132), `fields` is an [AIP-157](https://google.aip.dev/157) partial response carrying `google.protobuf.FieldMask` paths. Each is implemented as specified rather than as a subset. |
+| One obvious spelling per intent | Applies to what this project chooses, not to a borrowed grammar: where AIP-160 defines two spellings (`NOT` and `-`), both are accepted, because a caller's prior knowledge is only worth borrowing if it transfers intact. |
 | Reliable structured calls | `filter`, `order_by`, and `fields` are each a single string, matching their specifications exactly (`fields` is a `FieldMask` in its canonical JSON encoding) and priming models that already know them; only the pre-existing `engine_filters` is an array, keeping its established nullable-array schema. |
 | Discoverability | Each tool documents its filterable, sortable, and selectable fields, operators, examples, and parse errors. |
 | Repairability | Invalid input returns the expected form and a concrete example. |
@@ -131,41 +131,69 @@ for each path.
 ## Filter syntax
 
 `filter` is an [AIP-160](https://google.aip.dev/160) filter expression — the
-same syntax Google Cloud APIs accept on their List methods. It is implemented
-**as specified, in full**, not as a subset: every operator below works, including
-grouping and negation. `engine_filters` remains reserved for Deephaven Query
-Language where-clauses evaluated by the engine.
+same syntax Google Cloud APIs accept on their List methods — implemented as the
+specification defines it. Operators, precedence, and negation all behave the way
+a conforming processor behaves; the only things not accepted are constructs with
+no referent in this data model, tabulated below. `engine_filters` remains
+reserved for Deephaven Query Language where-clauses evaluated by the engine.
 
 | Form | Meaning | Example |
 | --- | --- | --- |
 | `field = value` | Equals | `owner = "jsmith"` |
 | `field != value` | Not equals | `status != "STOPPED"` |
-| `field : value` | Has / contains (case-insensitive substring; string fields only) | `name : report` |
+| `field : value` | Has, string case: case-insensitive substring (string fields only) | `name : report` |
 | `field > value`, `field >= value` | Greater than (or equal); numeric fields only | `serial >= 1000` |
 | `field < value`, `field <= value` | Less than (or equal); numeric fields only | `serial < 50` |
-| `NOT expr` | Negation | `NOT name : archived` |
+| `NOT expr`, `-expr` | Negation (AIP-160 defines both spellings) | `NOT name : archived`, `-name : archived` |
 | `expr AND expr` | Conjunction | `enabled = true AND serial > 10` |
 | `expr OR expr` | Disjunction | `owner = "a" OR owner = "b"` |
 | `( expr )` | Grouping | `(owner = "a" OR owner = "b") AND enabled = true` |
 | `NULL` | Null field | `owner = NULL` |
 | `"..."` | Quoted string literal (required when the value has spaces or operators) | `name = "my daily query"` |
 
-Operator precedence is AIP-160's: `NOT` binds tighter than `AND`, which binds
-tighter than `OR`. Parentheses override it. A closed numeric range is
-`serial > 10 AND serial < 50`; a union is `serial < 10 OR serial > 90`.
+### Precedence
 
-Two points where AIP-160 leaves latitude:
+AIP-160's grammar is an **AND of OR-clauses**: `expression` is a series of
+`sequence`s joined by `AND`, and `factor` — a series of `term`s joined by `OR` —
+nests inside it. So negation binds tightest, then `OR`, then `AND`, and
+`a AND b OR c` reads as `a AND (b OR c)`.
 
-- **`:` is case-insensitive substring containment** on string fields. AIP-160
-  calls it the "has" operator and permits prefix or substring readings; this
-  project uses substring.
-- **Explicit `AND` is required.** AIP-160 permits implicit conjunction by
-  juxtaposition (`a b` meaning `a AND b`); that is rejected here, because two
-  spellings for one intent raises generation error rates. This is the only
-  documented divergence from the specification.
+That is conjunctive normal form, and it is the shape filters naturally take: a
+query is a set of independent conditions that must all hold, where any single
+condition may accept several alternatives. `status = "RUNNING" AND owner = "a"
+OR owner = "b"` means running queries belonging to either owner, which is
+almost always what someone writing that line intends. Parentheses are available
+whenever a different grouping is wanted.
 
-There is no wildcard operator: `name : Query` covers the substring case that a
-`*` would otherwise express in Deephaven's quick filters.
+The precedence is implemented exactly as specified, with no project-specific
+reinterpretation and no requirement to parenthesize a mixed expression. Adopting
+a published grammar and then bending it is what would raise error rates: a
+caller's prior knowledge of AIP-160 — including a model's — is only worth
+borrowing if it transfers intact.
+
+A closed numeric range is `serial > 10 AND serial < 50`; a union is
+`serial < 10 OR serial > 90`.
+
+### Restrictions
+
+AIP-160 is a grammar for filtering arbitrary protobuf messages; these tools
+return flat records of scalars. The rows below are constructs a conforming
+processor accepts that have no meaning against that row shape, so they are
+rejected at parse time with an actionable message. None is reinterpreted, and
+none is a stylistic preference — each is an absence of anything to evaluate
+against.
+
+| AIP-160 construct | Behavior | Reason |
+| --- | --- | --- |
+| `:` beyond the string case — `field:*` presence, map-key, and repeated-contains forms | Rejected; error names the field's type and its valid operators | Rows are flat records of scalars, so there is no map, no repeated field, and no unset-vs-set distinction for `has` to test. The string case is implemented as case-insensitive substring. |
+| Bare terms with no field reference (`foo` alone as a restriction) | Rejected; error echoes the allowed field names | Every comparison must name a field from the tool's closed vocabulary, which is what makes a typo distinguishable from a valid empty result. |
+| Functions and other extensions a host API may layer on | Rejected as unknown syntax | Use `engine_filters` for anything needing regex, functions, or `in` lists. |
+
+Implicit conjunction (`a = 1 b = 2`, meaning `a = 1 AND b = 2`) is accepted, as
+the specification defines it. It cannot silently mis-parse here: a bare word in
+that position must resolve to a documented field, so an unquoted multi-word
+value such as `name = my daily query` fails on `daily` with the vocabulary
+error rather than quietly becoming a conjunction.
 
 Every tool documents a closed filter vocabulary — the field names it accepts on
 the left of a comparison. A predicate naming a field outside that vocabulary
@@ -339,7 +367,7 @@ compared two tools.
 | --- | --- | --- |
 | Null ordering | Nulls sort as the smallest value: first ascending, last descending. | Deephaven's convention. AIP-132 is silent, and Python's `sorted` raises on `None` vs `str`, so the output-layer evaluator must implement this explicitly rather than inherit it. |
 | Ties | Stable — rows that compare equal retain their prior relative order. | Both Deephaven's sort and Python's `sorted` are stable, so multi-key sorting can be implemented as successive stable single-key sorts and still agree with the engine. |
-| Case | Case-sensitive, code-point order. | Deephaven's string comparison. This is deliberately *not* symmetric with `filter`, whose `=` and `:` are case-insensitive: matching is about finding a row, whereas ordering must reproduce what the engine would emit, and a case-insensitive sort would require a computed column on the worker. Both behaviors are documented on their respective parameters. |
+| Case | Case-sensitive, Java/UTF-16 lexicographic order. | Deephaven sorts strings by Java's natural order. Python compares Unicode code points instead, so the output-layer evaluator must compare UTF-16 code units explicitly to reproduce engine ordering, including for non-BMP characters. This is deliberately *not* symmetric with `filter`, whose `=` and `:` are case-insensitive. |
 
 ## Scope and prior art
 
@@ -354,13 +382,18 @@ Adopting published specifications rather than a bespoke grammar is a deliberate
 reversal: a hand-rolled syntax has to be specified, documented, and defended
 from scratch, and gives a caller nothing they already know.
 
-AIP-160 is implemented in full rather than as a subset. That distinction
-matters: advertising a familiar language and then rejecting most of it is worse
-than either extreme, because the rejection lands at runtime after the caller has
-already composed the wrong thing. AIP-160 is small enough that "we support all
-of it" is achievable and honest — which is exactly why it is preferred here to
-a subset of Deephaven Query Language, whose Java-expression surface is
-open-ended and whose boundary could not be documented.
+`filter` implements AIP-160 as specified — operators, precedence, and negation
+all behave as a conforming processor behaves — and the only rejections are the
+[restrictions](#restrictions) forced by the data model: constructs that assume a
+protobuf message with maps, repeated fields, or unset-vs-set distinctions, where
+these tools return flat records of scalars. That is the whole point of borrowing
+a specification. Its value is that a caller's prior knowledge transfers, and
+that value survives an absence of anything to evaluate against; it would not
+survive bending the grammar to taste, which is how a borrowed language quietly
+becomes an invented one. AIP-160 is also small enough that the unsupported set
+is short and enumerable — exactly why it is preferred here to a subset of
+Deephaven Query Language, whose Java-expression surface is open-ended and whose
+boundary could not be enumerated at all.
 
 The filter layer's job is to cut down the data the MCP server sends — and to do
 so cheaply on the server, since filtering a large result to a size a model can
@@ -596,10 +629,12 @@ adds the output-side layer beside it.
    rename `max_rows` to `limit`. Both renames are breaking and are recorded in
    the changelog.
 2. Build the AIP-160 front end: a tokenizer and recursive-descent parser
-   producing a validated AST, with AIP-160 precedence (`NOT` > `AND` > `OR`) and
-   parentheses, plus the two documented decisions (substring `:`, explicit `AND`
-   required). Two backends consume the AST — a DQL compiler and an in-memory
-   evaluator — so both layers share one semantics.
+   producing a validated AST. The grammar is AIP-160's as written — an `AND` of
+   `OR`-clauses, so negation binds tightest, then `OR`, then `AND`, with both
+   `NOT` and `-` accepted and implicit conjunction supported. Each construct in
+   the restrictions table raises a distinct, actionable message rather than a
+   generic syntax error. Two backends consume the AST — a DQL compiler and an
+   in-memory evaluator — so both layers share one semantics.
 3. Build the AIP-132 `order_by` parser over the same vocabulary: comma-separated
    keys, an optional `desc` suffix, no `asc` synonym. Two backends again — an engine
    `sort()` and an in-memory stable multi-key sort — which must agree on null
@@ -662,12 +697,18 @@ adds the output-side layer beside it.
 
 Tests cover:
 
-- Every AIP-160 operator (`=`, `!=`, `:`, `>`, `>=`, `<`, `<=`), `NOT`, `AND`,
-  `OR`, parentheses, `NULL`, and quoted string literals; precedence
-  (`NOT` > `AND` > `OR`) and parenthesized override; a closed numeric range and
-  a union.
-- Rejection of AIP-160 implicit conjunction (`owner = "a" enabled = true`), the
-  one documented divergence from the specification.
+- Every supported operator (`=`, `!=`, `:`, `>`, `>=`, `<`, `<=`), both negation
+  spellings (`NOT`, `-`), `AND`, `OR`, parentheses, `NULL`, quoted string
+  literals, and implicit conjunction; a closed numeric range and a union.
+- AIP-160 precedence: `a = 1 AND b = 2 OR c = 3` evaluates as
+  `a = 1 AND (b = 2 OR c = 3)`, with parenthesized forms confirming the
+  alternative grouping — asserted against the reading a conforming processor
+  produces, on both the engine and in-memory paths.
+- Every row of the restrictions table, each asserting a *distinct* actionable
+  error rather than a generic parse failure: the non-string `:` forms
+  (`field:*`), a bare term with no field reference, and unknown function syntax.
+- That an unquoted multi-word value (`name = my daily query`) fails with the
+  vocabulary error on `daily` rather than silently becoming a conjunction.
 - `order_by`: single and multi-key ordering, the `desc` suffix, keys applied left to right,
   rejection of `asc` and of an unknown sort field; null ordering (nulls first
   ascending, last descending), stable ties, and case-sensitive comparison — each
@@ -727,8 +768,9 @@ produces an `unmatched_fields` report.
 ## Non-goals
 
 Filtering or sorting detail objects; field-path wildcards or array indexes;
-extending `filter` beyond AIP-160 or `order_by` beyond AIP-132 (both are
-implemented in full, and adding operators to either is not on the roadmap);
+extending `filter` or `order_by` past their specifications — both implement
+AIP-160 and AIP-132 as written, and widening either beyond what its
+specification defines is not on the roadmap;
 sorting by an expression rather than a documented field; server-side output
 transformation or reshaping languages (a JMESPath-style capability, if ever
 needed, would be a separate argument, not a bigger `filter`); replacing
