@@ -35,7 +35,7 @@ This proposal adds a consistent output-shaping API:
 
 The first pass covers every in-memory list the servers already return — `pq
 list`, `sessions list`, `list systems`, `pip list`, and the catalog listings —
-plus `pq details`. The API is designed for latexhr adoption by the remaining
+plus `pq details`. The API is designed for later adoption by the remaining
 detail and table-backed tools.
 
 ## Design goals
@@ -140,8 +140,9 @@ exactly as `--filter` mirrors `filter`. For one release the old spelling is
 detected rather than silently reinterpreted: a `--filter` value that fails to
 parse as AIP-160 *and* contains a backtick or a known backing column name exits
 `2` with `arg_parse_error` and a message naming `--engine-filter` as the
-replacement. `catalog sample` keeps partition filtering on `--engine-filter`
-too, so `--filter` means the same thing on every command that has it.
+replacement. `catalog sample` does **not** gain AIP-160 `--filter` in this
+pass; it keeps partition filtering on `--engine-filter` only (with legacy
+`--filter` rejected as an `arg_parse_error` that names the replacement).
 
 The rename is recorded in the changelog beside `engine_filters` and `limit`, and
 `docs/CLI.md` carries the before/after invocation.
@@ -536,7 +537,10 @@ Validation is intentionally per-tool:
 ## Pruning
 
 `prune_empty` removes only values that carry no information, applied recursively
-to nested objects and arrays. The exact set pruned is:
+to nested objects and arrays. On collection tools, pruning is scoped to each row
+object; the response envelope and its domain array key (`pqs`, `sessions`,
+`systems`, etc.) are always retained even when the array is empty. The exact set
+pruned is:
 
 - JSON `null`.
 - Empty strings (`""`).
@@ -684,10 +688,11 @@ adds the output-side layer beside it.
    surfaces, rename the existing catalog `filters` to `engine_filters`, and
    rename `max_rows` to `limit`. On the CLI, `--filter` is redefined as the
    AIP-160 expression and a repeatable `--engine-filter` is added wherever
-   `engine_filters` exists — including `catalog sample`, so `--filter` means the
-   same thing on every command that has it — with the one-release detection of
-   DQL passed to `--filter` described above. All of these are breaking and are
-   recorded in the changelog with before/after invocations.
+   `engine_filters` exists. `catalog sample` is excluded from the first-pass
+   AIP-160 surface and keeps only partition DQL on `--engine-filter`, with
+   one-release rejection of the legacy `--filter` spelling as described above.
+   All of these are breaking and are recorded in the changelog with before/after
+   invocations.
 2. Build the AIP-160 front end: a tokenizer and recursive-descent parser
    producing a validated AST. The grammar is AIP-160's as written — an `AND` of
    `OR`-clauses, so negation binds tightest, then `OR`, then `AND`, with both
