@@ -957,21 +957,21 @@ class TestCorePlusSessionFactoryManager:
 
     @pytest.mark.asyncio
     async def test_get_controller_client_healthy_resets_episode(self):
-        """A healthy call clears any recorded poison-episode state."""
+        """A healthy call clears any recorded outage state."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=False)
         manager._item_cache = factory
         manager.get = AsyncMock(return_value=factory)
-        # Simulate a stale episode left over from a prior outage.
-        manager._subscribing_since = 123.0
-        manager._recreate_attempts = 4
-        manager._next_recreate_monotonic = 456.0
+        # Simulate a stale outage left over from a prior wedge.
+        manager._healer.note_wedged(time.monotonic())
+        manager._healer._attempts = 4
+        manager._healer._next_recreate_monotonic = 456.0
 
         await manager.get_controller_client()
 
-        assert manager._subscribing_since is None
-        assert manager._recreate_attempts == 0
-        assert manager._next_recreate_monotonic is None
+        assert manager._healer.outage_active is False
+        assert manager._healer._attempts == 0
+        assert manager._healer._next_recreate_monotonic is None
 
     @pytest.mark.asyncio
     async def test_get_controller_client_fails_fast_mid_episode_empty_cache(self):
@@ -984,8 +984,8 @@ class TestCorePlusSessionFactoryManager:
         """
         manager = self._make_factory_manager()
         manager._item_cache = None
-        manager._subscribing_since = time.monotonic()
-        manager._recreate_attempts = 2
+        manager._healer.note_wedged(time.monotonic())
+        manager._healer._attempts = 2
         manager.get = AsyncMock()
 
         with pytest.raises(DeephavenConnectionError) as exc_info:
@@ -1028,7 +1028,7 @@ class TestCorePlusSessionFactoryManager:
         # get_controller_client no longer recreates inline; the healer owns that.
         manager.close.assert_not_called()
         # The outage start was recorded for the status message.
-        assert manager._subscribing_since is not None
+        assert manager._healer.outage_active is True
 
     @pytest.mark.asyncio
     async def test_get_controller_client_poisoned_preserves_subscribing_since(self):
@@ -1039,12 +1039,12 @@ class TestCorePlusSessionFactoryManager:
 
         with pytest.raises(DeephavenConnectionError):
             await manager.get_controller_client()
-        first_since = manager._subscribing_since
+        first_since = manager._healer._subscribing_since
 
         with pytest.raises(DeephavenConnectionError):
             await manager.get_controller_client()
 
-        assert manager._subscribing_since == first_since
+        assert manager._healer._subscribing_since == first_since
 
     @pytest.mark.asyncio
     async def test_get_controller_client_poisoned_reports_countdown(self):
@@ -1052,9 +1052,9 @@ class TestCorePlusSessionFactoryManager:
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=True)
         manager.get = AsyncMock(return_value=factory)
-        manager._subscribing_since = time.monotonic()
-        manager._recreate_attempts = 2
-        manager._next_recreate_monotonic = time.monotonic() + 25.0
+        manager._healer.note_wedged(time.monotonic())
+        manager._healer._attempts = 2
+        manager._healer._next_recreate_monotonic = time.monotonic() + 25.0
 
         with pytest.raises(DeephavenConnectionError) as exc_info:
             await manager.get_controller_client()
@@ -1068,7 +1068,7 @@ class TestCorePlusSessionFactoryManager:
         """With no cached factory there is nothing to heal."""
         manager = self._make_factory_manager()
         assert manager._item_cache is None
-        assert await manager._peek_controller_poisoned() is None
+        assert await manager.peek_controller_poisoned() is None
 
     @pytest.mark.asyncio
     async def test_peek_controller_poisoned_reflects_cached_controller(self):
@@ -1077,156 +1077,65 @@ class TestCorePlusSessionFactoryManager:
         factory, _ = self._make_factory_with_controller(poisoned=True)
         manager._item_cache = factory
 
-        assert await manager._peek_controller_poisoned() is True
+        assert await manager.peek_controller_poisoned() is True
 
         factory.controller_client.is_poisoned = False
-        assert await manager._peek_controller_poisoned() is False
+        assert await manager.peek_controller_poisoned() is False
 
     @pytest.mark.asyncio
-    async def test_heal_once_healthy_resets_episode(self):
-        """A healthy peek clears episode state and does not recreate."""
+    async def test_rebuild_factory_replaces_a_wedged_factory(self):
+        """The wedged factory is discarded and closed, then a replacement created."""
         manager = self._make_factory_manager()
-        healthy_factory, _ = self._make_factory_with_controller(poisoned=False)
-        manager._item_cache = healthy_factory
-        manager._subscribing_since = 1.0
-        manager._recreate_attempts = 3
-        manager.close = AsyncMock()
+        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
+        manager._item_cache = poisoned_factory
         manager.get = AsyncMock()
 
-        await manager._heal_once()
+        await manager.rebuild_factory()
 
-        assert manager._subscribing_since is None
-        assert manager._recreate_attempts == 0
-        manager.close.assert_not_called()
-        manager.get.assert_not_called()
+        poisoned_factory.close.assert_awaited_once()
+        manager.get.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_heal_once_idle_with_no_cache_does_nothing(self):
-        """No cached factory and no episode in progress is idle, not an outage."""
+    async def test_rebuild_factory_creates_when_cache_is_empty(self):
+        """A rebuild following a failed attempt still repopulates the cache."""
         manager = self._make_factory_manager()
         assert manager._item_cache is None
-        manager.close = AsyncMock()
         manager.get = AsyncMock()
 
-        await manager._heal_once()
-
-        manager.close.assert_not_called()
-        manager.get.assert_not_called()
-        assert manager._recreate_attempts == 0
-
-    @pytest.mark.asyncio
-    async def test_heal_once_detection_opens_episode_without_recreating(self):
-        """The pass that first sees a wedge only opens the episode.
-
-        The recreate waits for the backoff the loop then schedules, so
-        ``controller_resubscribe_backoff_initial_seconds`` is honored
-        regardless of where in the poll cycle the wedge was noticed.
-        """
-        manager = self._make_factory_manager()
-        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
-        manager._item_cache = poisoned_factory
-        manager.get = AsyncMock()
-
-        await manager._heal_once()
-
-        assert manager._subscribing_since is not None
-        assert manager._recreate_attempts == 0
-        manager.get.assert_not_called()
-        # The wedged factory is left in place until the recreate actually runs.
-        assert manager._item_cache is poisoned_factory
-
-    @pytest.mark.asyncio
-    async def test_heal_once_forced_recreates_on_detection(self):
-        """A forced pass recreates immediately instead of waiting out the backoff."""
-        manager = self._make_factory_manager()
-        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
-        manager._item_cache = poisoned_factory
-        manager.get = AsyncMock()
-
-        await manager._heal_once(forced=True)
+        await manager.rebuild_factory()
 
         manager.get.assert_awaited_once()
-        assert manager._recreate_attempts == 1
-        assert manager._subscribing_since is not None
-        poisoned_factory.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_heal_once_poisoned_recreates(self):
-        """With an episode open, a wedged peek recreates and counts the attempt."""
+    async def test_rebuild_factory_swallows_creation_failure(self):
+        """A failed recreate is logged rather than raised, leaving the cache empty."""
         manager = self._make_factory_manager()
         poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
         manager._item_cache = poisoned_factory
-        manager._subscribing_since = time.monotonic()
-        manager.get = AsyncMock()
-
-        await manager._heal_once()
-
-        manager.get.assert_awaited_once()
-        assert manager._recreate_attempts == 1
-        # The wedged factory was detached and closed.
-        poisoned_factory.close.assert_awaited_once()
-        assert manager._item_cache is None
-
-    @pytest.mark.asyncio
-    async def test_heal_once_recreate_failure_is_swallowed(self):
-        """A failed recreate is logged but does not propagate, and still counts."""
-        manager = self._make_factory_manager()
-        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
-        manager._item_cache = poisoned_factory
-        manager._subscribing_since = time.monotonic()
-        manager.get = AsyncMock(side_effect=RuntimeError("boom"))
-
-        await manager._heal_once()
-
-        poisoned_factory.close.assert_awaited_once()
-        assert manager._recreate_attempts == 1
-
-    @pytest.mark.asyncio
-    async def test_heal_once_empty_cache_mid_episode_keeps_escalating(self):
-        """A recreate that left the cache empty keeps the episode and keeps retrying.
-
-        Regression guard: treating the empty cache as "idle" would reset the
-        attempt counter every pass, so the backoff could never escalate in the
-        exact case it exists for — a controller that is entirely unreachable.
-        """
-        manager = self._make_factory_manager()
-        # Mid-episode with a failed recreate: nothing cached, outage ongoing.
-        manager._item_cache = None
-        manager._subscribing_since = time.monotonic()
-        manager._recreate_attempts = 2
         manager.get = AsyncMock(side_effect=RuntimeError("still down"))
 
-        await manager._heal_once()
+        await manager.rebuild_factory()
 
-        manager.get.assert_awaited_once()
-        assert manager._recreate_attempts == 3
-        assert manager._subscribing_since is not None
+        poisoned_factory.close.assert_awaited_once()
+        assert manager._item_cache is None
 
     @pytest.mark.asyncio
-    async def test_heal_once_does_not_close_a_factory_that_healed(self):
+    async def test_rebuild_factory_does_not_close_a_factory_that_healed(self):
         """A controller that recovers before teardown is never torn down.
 
         Regression guard for the check-then-close race: the poison check and
         the close used to take ``_lock`` separately, so a factory that healed
-        (or was replaced) in between could be closed anyway.
+        (or was replaced) between the healer's peek and the rebuild could be
+        closed anyway.
         """
         manager = self._make_factory_manager()
         poisoned_factory, controller = self._make_factory_with_controller(poisoned=True)
         manager._item_cache = poisoned_factory
-        manager._subscribing_since = time.monotonic()
         manager.get = AsyncMock()
+        # The controller recovers between the healer's peek and the rebuild.
+        controller.is_poisoned = False
 
-        original_peek = manager._peek_controller_poisoned
-
-        async def _peek_then_heal():
-            result = await original_peek()
-            # The controller recovers between the peek and the detach.
-            controller.is_poisoned = False
-            return result
-
-        manager._peek_controller_poisoned = _peek_then_heal
-
-        await manager._heal_once()
+        await manager.rebuild_factory()
 
         poisoned_factory.close.assert_not_called()
         assert manager._item_cache is poisoned_factory
@@ -1260,54 +1169,31 @@ class TestCorePlusSessionFactoryManager:
         assert await manager._detach_poisoned_item() is None
 
     @pytest.mark.asyncio
-    async def test_backoff_doubles_and_caps(self):
-        """The delay doubles per attempt and is capped at the configured maximum."""
+    async def test_healer_lifecycle_is_delegated(self):
+        """start_healer and stop_healer drive the manager's ControllerHealer."""
         manager = self._make_factory_manager()
-        manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {
-                "controller_resubscribe_backoff_initial_seconds": 10.0,
-                "controller_resubscribe_backoff_max_seconds": 60.0,
-            }
-        )
+        # Keep the loop from doing real work by stubbing the pass.
+        manager._healer.heal_once = AsyncMock()
 
-        manager._recreate_attempts = 0
-        assert manager._backoff_seconds_locked() == 10.0
-        manager._recreate_attempts = 1
-        assert manager._backoff_seconds_locked() == 20.0
-        manager._recreate_attempts = 2
-        assert manager._backoff_seconds_locked() == 40.0
-        # Doubling would give 80.0; the cap wins.
-        manager._recreate_attempts = 3
-        assert manager._backoff_seconds_locked() == 60.0
-        # A very long outage stays at the cap without overflowing.
-        manager._recreate_attempts = 10_000
-        assert manager._backoff_seconds_locked() == 60.0
+        await manager.start_healer()
+        task = manager._healer._task
+        assert task is not None and not task.done()
+
+        await manager.stop_healer()
+        assert manager._healer._task is None
+        assert task.done()
 
     @pytest.mark.asyncio
-    async def test_backoff_max_below_initial_clamps(self):
-        """A maximum below the initial delay pins every delay to the maximum."""
-        manager = self._make_factory_manager()
-        manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {
-                "controller_resubscribe_backoff_initial_seconds": 30.0,
-                "controller_resubscribe_backoff_max_seconds": 5.0,
-            }
-        )
-
-        assert manager._backoff_seconds_locked() == 5.0
-
-    @pytest.mark.asyncio
-    async def test_request_reconnect_reports_healer_running(self):
-        """request_reconnect nudges the healer only when a pass would act."""
+    async def test_request_reconnect_is_delegated(self):
+        """request_reconnect reports the healer's actionability decision."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=True)
         manager._item_cache = factory
+        manager._healer.heal_once = AsyncMock()
 
         # No healer running yet: nothing to nudge.
         assert await manager.request_reconnect() is False
-        assert not manager._reconnect_requested.is_set()
 
-        manager._heal_once = AsyncMock()
         await manager.start_healer()
         try:
             assert await manager.request_reconnect() is True
@@ -1315,242 +1201,19 @@ class TestCorePlusSessionFactoryManager:
             await manager.stop_healer()
 
     @pytest.mark.asyncio
-    async def test_request_reconnect_reports_nothing_to_reconnect(self):
-        """With no factory and no outage there is nothing for the healer to do.
-
-        Reporting True here would tell the caller an attempt is under way when
-        the healer's next pass is a guaranteed no-op.
-        """
+    async def test_healer_replaces_a_wedged_factory_end_to_end(self):
+        """Manager and healer together discard a wedged factory and rebuild it."""
         manager = self._make_factory_manager()
-        manager._heal_once = AsyncMock()
-        await manager.start_healer()
-        try:
-            assert manager._item_cache is None
-            assert manager._subscribing_since is None
-            assert await manager.request_reconnect() is False
-            # Nothing is queued: the claim of deferred recording would be a lie,
-            # since _wait_for_next_pass consumes the event on the very next tick.
-            assert not manager._reconnect_requested.is_set()
-        finally:
-            await manager.stop_healer()
+        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
+        manager._item_cache = poisoned_factory
+        replacement, _ = self._make_factory_with_controller(poisoned=False)
+        manager.get = AsyncMock(return_value=replacement)
 
-    @pytest.mark.asyncio
-    async def test_request_reconnect_healthy_controller_is_not_actionable(self):
-        """A healthy controller is left alone rather than reported as reconnecting.
+        # Forced, so the pass skips the backoff wait and rebuilds on detection.
+        await manager._healer.heal_once(forced=True)
 
-        ``_heal_once`` returns without recreating for a healthy controller, so
-        claiming an attempt started would contradict the documented
-        no-op-on-healthy behavior.
-        """
-        manager = self._make_factory_manager()
-        factory, _ = self._make_factory_with_controller(poisoned=False)
-        manager._item_cache = factory
-        manager._heal_once = AsyncMock()
-        await manager.start_healer()
-        try:
-            assert await manager.request_reconnect() is False
-            assert not manager._reconnect_requested.is_set()
-        finally:
-            await manager.stop_healer()
-
-    @pytest.mark.asyncio
-    async def test_request_reconnect_actionable_mid_episode_without_cache(self):
-        """An outage whose last recreate failed is still actionable."""
-        manager = self._make_factory_manager()
-        manager._heal_once = AsyncMock()
-        manager._subscribing_since = time.monotonic()
-        await manager.start_healer()
-        try:
-            assert manager._item_cache is None
-            assert await manager.request_reconnect() is True
-        finally:
-            await manager.stop_healer()
-
-    @pytest.mark.asyncio
-    async def test_wait_for_next_pass_returns_false_on_timeout(self):
-        """The full delay elapsing is reported as a non-forced pass."""
-        manager = self._make_factory_manager()
-        assert await manager._wait_for_next_pass(0.01) is False
-
-    @pytest.mark.asyncio
-    async def test_wait_for_next_pass_short_circuits_on_request(self):
-        """A pending reconnect request cuts the wait short and is consumed."""
-        manager = self._make_factory_manager()
-        manager._reconnect_requested.set()
-
-        # Would block for an hour if the request were not honored.
-        assert await manager._wait_for_next_pass(3600) is True
-        assert not manager._reconnect_requested.is_set()
-
-    @pytest.mark.asyncio
-    async def test_request_reconnect_wakes_healer_immediately(self):
-        """A reconnect request runs a pass without waiting out the backoff."""
-        manager = self._make_factory_manager()
-        # A wedged factory plus an open episode, so the nudge is actionable and
-        # the loop is waiting on the backoff rather than the healthy poll.
-        factory, _ = self._make_factory_with_controller(poisoned=True)
-        manager._item_cache = factory
-        manager._subscribing_since = time.monotonic()
-        # A long backoff so only the nudge can trigger a pass in time.
-        manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {
-                "controller_resubscribe_backoff_initial_seconds": 3600.0,
-                "controller_resubscribe_backoff_max_seconds": 3600.0,
-            }
-        )
-        forced_calls = []
-        healed = asyncio.Event()
-
-        async def _record_heal_once(forced=False):
-            forced_calls.append(forced)
-            healed.set()
-
-        manager._heal_once = _record_heal_once
-
-        await manager.start_healer()
-        try:
-            await manager.request_reconnect()
-            await asyncio.wait_for(healed.wait(), timeout=1.0)
-        finally:
-            await manager.stop_healer()
-
-        assert forced_calls == [True]
-
-    @pytest.mark.asyncio
-    async def test_start_and_stop_healer_idempotent(self):
-        """start_healer launches one task; stop_healer cancels it; both idempotent."""
-        manager = self._make_factory_manager()
-        # Keep the loop from doing real work by stubbing the pass.
-        manager._heal_once = AsyncMock()
-
-        await manager.start_healer()
-        task = manager._healer_task
-        assert task is not None and not task.done()
-        # Second start is a no-op — same task.
-        await manager.start_healer()
-        assert manager._healer_task is task
-
-        await manager.stop_healer()
-        assert manager._healer_task is None
-        assert task.done()
-        # Second stop is a no-op.
-        await manager.stop_healer()
-
-    @pytest.mark.asyncio
-    async def test_healer_loop_invokes_heal_once(self):
-        """The loop calls _heal_once each pass until canceled."""
-        manager = self._make_factory_manager()
-        called = asyncio.Event()
-
-        async def _fake_heal_once(forced=False):
-            called.set()
-
-        manager._heal_once = _fake_heal_once
-
-        with patch(
-            "deephaven_mcp.resource_manager._manager._HEALTHY_POLL_SECONDS", 0.001
-        ):
-            await manager.start_healer()
-            await asyncio.wait_for(called.wait(), timeout=1.0)
-            await manager.stop_healer()
-
-    @pytest.mark.asyncio
-    async def test_healer_loop_polls_without_scheduling_while_healthy(self):
-        """With no episode open the loop polls and publishes no recreate deadline.
-
-        The countdown reported to callers must not advertise a recreate that
-        is not scheduled, and the healthy cadence must not consume the
-        configured backoff.
-        """
-        manager = self._make_factory_manager()
-        manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {
-                "controller_resubscribe_backoff_initial_seconds": 3600.0,
-                "controller_resubscribe_backoff_max_seconds": 3600.0,
-            }
-        )
-        polled = asyncio.Event()
-
-        async def _fake_heal_once(forced=False):
-            polled.set()
-
-        manager._heal_once = _fake_heal_once
-
-        with patch(
-            "deephaven_mcp.resource_manager._manager._HEALTHY_POLL_SECONDS", 0.001
-        ):
-            await manager.start_healer()
-            try:
-                # A 3600s backoff would never tick; the healthy cadence does.
-                await asyncio.wait_for(polled.wait(), timeout=1.0)
-                assert manager._next_recreate_monotonic is None
-            finally:
-                await manager.stop_healer()
-
-    @pytest.mark.asyncio
-    async def test_healer_loop_publishes_next_recreate_deadline(self):
-        """With an episode open the loop publishes the next-recreate deadline."""
-        manager = self._make_factory_manager()
-        manager._timeouts = EnterpriseClientTimeouts.model_validate(
-            {
-                "controller_resubscribe_backoff_initial_seconds": 3600.0,
-                "controller_resubscribe_backoff_max_seconds": 3600.0,
-            }
-        )
-        manager._subscribing_since = time.monotonic()
-        manager._heal_once = AsyncMock()
-
-        await manager.start_healer()
-        try:
-            # Yield so the loop body runs up to its wait.
-            await asyncio.sleep(0)
-            assert manager._next_recreate_monotonic is not None
-        finally:
-            await manager.stop_healer()
-
-    @pytest.mark.asyncio
-    async def test_healer_loop_continues_after_heal_once_error(self):
-        """An exception in one pass is logged and the loop keeps running."""
-        manager = self._make_factory_manager()
-        calls = []
-        second_call = asyncio.Event()
-
-        async def _flaky_heal_once(forced=False):
-            calls.append(1)
-            if len(calls) == 1:
-                raise RuntimeError("transient")
-            second_call.set()
-
-        manager._heal_once = _flaky_heal_once
-
-        with patch(
-            "deephaven_mcp.resource_manager._manager._HEALTHY_POLL_SECONDS", 0.001
-        ):
-            await manager.start_healer()
-            await asyncio.wait_for(second_call.wait(), timeout=1.0)
-            await manager.stop_healer()
-        assert len(calls) >= 2
-
-    @pytest.mark.asyncio
-    async def test_healer_loop_propagates_cancel_during_heal_once(self):
-        """Canceling while _heal_once runs propagates through the inner guard."""
-        manager = self._make_factory_manager()
-        in_heal = asyncio.Event()
-
-        async def _blocking_heal_once(forced=False):
-            in_heal.set()
-            await asyncio.sleep(3600)
-
-        manager._heal_once = _blocking_heal_once
-
-        with patch(
-            "deephaven_mcp.resource_manager._manager._HEALTHY_POLL_SECONDS", 0.001
-        ):
-            await manager.start_healer()
-            await asyncio.wait_for(in_heal.wait(), timeout=1.0)
-            # Cancels the task while it is suspended inside _heal_once.
-            await manager.stop_healer()
-        assert manager._healer_task is None
+        poisoned_factory.close.assert_awaited_once()
+        manager.get.assert_awaited_once()
 
 
 class TestDynamicCommunitySessionManager:
