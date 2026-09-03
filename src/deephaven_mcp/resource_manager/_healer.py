@@ -101,14 +101,16 @@ class ControllerHealer:
 
     - **No outage**: poll every :data:`_HEALTHY_POLL_SECONDS` purely to notice a
       wedge, publishing no next-recreate deadline because none is scheduled.
-    - **Outage in progress**: wait the current backoff delay and publish the
-      resulting deadline, so :meth:`healing_status_message` can report an
-      accurate countdown.
+    - **Outage in progress**: wait until the outage's next-recreate deadline,
+      which :meth:`healing_status_message` reports as an accurate countdown.
 
-    Because the backoff clock starts when the outage is detected rather than
-    when the loop happens to tick, the first recreate lands
+    That deadline is armed the moment the outage opens -- by the loop's own
+    poll or by a foreground caller reporting a wedge through
+    :meth:`note_wedged` -- and a non-forced pass recreates only once it has
+    arrived. The first recreate therefore lands
     ``controller_resubscribe_backoff_initial_seconds`` after detection
-    regardless of where in the poll cycle the wedge occurred.
+    regardless of where in the poll cycle the wedge occurred, and regardless of
+    who detected it.
     """
 
     def __init__(
@@ -167,6 +169,32 @@ class ControllerHealer:
         exponent = min(self._attempts, 32)
         return min(initial * float(2**exponent), maximum)
 
+    def _arm_backoff(self, now: float) -> float:
+        """Schedule the outage's next recreate one backoff delay from ``now``.
+
+        Args:
+            now (float): A ``time.monotonic()`` reading taken by the caller.
+
+        Returns:
+            float: The monotonic deadline that was published.
+        """
+        deadline = now + self._backoff_seconds()
+        self._next_recreate_monotonic = deadline
+        return deadline
+
+    def _recreate_due(self, now: float) -> bool:
+        """Whether the current outage's scheduled recreate deadline has arrived.
+
+        Args:
+            now (float): A ``time.monotonic()`` reading taken by the caller.
+
+        Returns:
+            bool: ``True`` once the published deadline has passed; ``False``
+                while it is still pending or when none is scheduled.
+        """
+        deadline = self._next_recreate_monotonic
+        return deadline is not None and now >= deadline
+
     def _status_message(self, now: float) -> str:
         """Build the "still subscribing" status message for the current outage.
 
@@ -202,8 +230,11 @@ class ControllerHealer:
     def note_wedged(self, now: float) -> str:
         """Record that the controller subscription is wedged and describe the outage.
 
-        Opens an outage if none is in progress; an outage already in progress
-        keeps its original start time so the reported wait keeps growing.
+        Opens an outage if none is in progress, arming its first recreate one
+        full ``controller_resubscribe_backoff_initial_seconds`` from ``now`` so
+        the delay the returned message advertises is the delay the loop
+        actually waits. An outage already in progress keeps its original start
+        time and deadline, so the reported wait keeps growing.
 
         Args:
             now (float): A ``time.monotonic()`` reading taken by the caller.
@@ -213,6 +244,7 @@ class ControllerHealer:
         """
         if self._subscribing_since is None:
             self._subscribing_since = now
+            self._arm_backoff(now)
         return self._status_message(now)
 
     def healing_status_message(self, now: float) -> str | None:
@@ -250,24 +282,28 @@ class ControllerHealer:
         )
 
     async def stop(self) -> None:
-        """Cancel and await the background healing loop.
+        """Cancel and await the background healing loop, then clear outage state.
+
+        The outage is cleared because nothing is left to act on it: a stale
+        outage surviving into a restarted healer would make the source keep
+        failing fast against a cache the stopped loop never refilled.
 
         Idempotent: safe to call when the loop was never started or already
         stopped. Never raises.
         """
         task = self._task
         self._task = None
-        if task is None or task.done():
-            return
-        _LOGGER.info(
-            f"[ControllerHealer:stop] Stopping subscription healer for "
-            f"'{self._source.qualified_session_id}'"
-        )
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        if task is not None and not task.done():
+            _LOGGER.info(
+                f"[ControllerHealer:stop] Stopping subscription healer for "
+                f"'{self._source.qualified_session_id}'"
+            )
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._reset_outage()
 
     async def request_reconnect(self) -> bool:
         """Ask the loop to run a recreate pass immediately.
@@ -334,12 +370,18 @@ class ControllerHealer:
         )
         try:
             while True:
+                now = time.monotonic()
                 if self._subscribing_since is None:
                     delay = _HEALTHY_POLL_SECONDS
                     self._next_recreate_monotonic = None
                 else:
-                    delay = self._backoff_seconds()
-                    self._next_recreate_monotonic = time.monotonic() + delay
+                    # An outage opened by a foreground caller mid-wait already
+                    # armed its deadline; honor it instead of restarting the
+                    # clock from this tick.
+                    deadline = self._next_recreate_monotonic
+                    if deadline is None:
+                        deadline = self._arm_backoff(now)
+                    delay = max(0.0, deadline - now)
                 forced = await self._wait_for_next_pass(delay)
                 try:
                     await self.heal_once(forced=forced)
@@ -366,15 +408,17 @@ class ControllerHealer:
         outage, and therefore the backoff escalation, alive. With no outage in
         progress an empty cache simply means idle, and the pass does nothing.
 
-        The pass that first *detects* a wedge only opens the outage; the
-        recreate itself waits for the backoff the loop then schedules, so the
-        configured initial delay is honored. A forced pass skips that wait.
+        The pass that first *detects* a wedge only opens the outage and arms
+        its backoff; a non-forced pass then recreates only once that deadline
+        has arrived, so the configured initial delay is honored whether the
+        outage was opened by this loop or by a foreground caller through
+        :meth:`note_wedged` mid-wait. A forced pass skips the wait entirely.
 
         Args:
             forced (bool): Whether this pass was triggered by
                 :meth:`request_reconnect` rather than by the backoff elapsing.
                 A forced pass recreates on detection instead of waiting out the
-                initial delay; it still never tears down a healthy controller.
+                backoff; it still never tears down a healthy controller.
         """
         poisoned = await self._source.peek_controller_poisoned()
 
@@ -383,13 +427,20 @@ class ControllerHealer:
             return
         if poisoned is None and not self.outage_active:
             return
+
+        now = time.monotonic()
         if not self.outage_active:
-            # Open the outage; the loop schedules the first recreate one full
-            # initial backoff from here.
-            self._subscribing_since = time.monotonic()
+            self._subscribing_since = now
+            self._arm_backoff(now)
             if not forced:
                 return
+        elif not forced and not self._recreate_due(now):
+            return
+
         self._attempts += 1
+        # Re-armed by the loop once the rebuild returns, so the escalated
+        # backoff is measured from the end of this attempt.
+        self._next_recreate_monotonic = None
 
         _LOGGER.warning(
             f"[ControllerHealer:heal_once] Controller subscription for "

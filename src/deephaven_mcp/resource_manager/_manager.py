@@ -3027,8 +3027,10 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         """Stop the subscription healer, then close the cached factory.
 
         The healer is stopped before the factory is dropped so it cannot
-        recreate one mid-shutdown. A subsequent :meth:`get` creates a new
-        factory and restarts the healer alongside it.
+        recreate one mid-shutdown. Stopping also clears any outage it was
+        tracking, so a manager closed while wedged is reusable: a subsequent
+        :meth:`get` or :meth:`get_controller_client` creates a new factory
+        rather than failing fast forever against the stale outage.
 
         Idempotent: safe to call multiple times. Never raises.
         """

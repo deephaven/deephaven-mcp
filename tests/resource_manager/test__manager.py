@@ -1262,6 +1262,29 @@ class TestCorePlusSessionFactoryManager:
             await manager.close()
 
     @pytest.mark.asyncio
+    async def test_close_while_wedged_leaves_the_manager_reusable(self):
+        """Closing mid-outage clears it, so a reused manager creates normally.
+
+        Regression guard: a surviving outage plus the empty cache close leaves
+        behind would make ``get_controller_client`` fail fast forever, since
+        the stopped healer is no longer there to rebuild.
+        """
+        manager = self._make_factory_manager()
+        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
+        manager._item_cache = poisoned_factory
+        manager._healer.heal_once = AsyncMock()
+        manager._healer.start()
+        manager._healer.note_wedged(time.monotonic())
+
+        await manager.close()
+        assert manager._healer.outage_active is False
+
+        healthy_factory, controller = self._make_factory_with_controller(poisoned=False)
+        manager.get = AsyncMock(return_value=healthy_factory)
+
+        assert await manager.get_controller_client() is controller
+
+    @pytest.mark.asyncio
     async def test_request_reconnect_is_delegated(self):
         """request_reconnect reports the healer's actionability decision."""
         manager = self._make_factory_manager()

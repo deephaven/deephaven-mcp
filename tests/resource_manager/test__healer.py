@@ -83,15 +83,32 @@ class TestOutageState:
         assert "enterprise_controller_reconnect" in msg
         assert "system='test_factory'" in msg
 
+    def test_note_wedged_arms_the_first_recreate(self):
+        """Opening an outage starts the backoff clock at detection.
+
+        Regression guard: a foreground caller can open the outage while the
+        loop is mid-wait on its healthy cadence. Arming here is what keeps the
+        first recreate one full initial backoff away from *detection* rather
+        than from the loop's next tick.
+        """
+        healer, _ = _healer(initial=30.0)
+        now = time.monotonic()
+
+        healer.note_wedged(now)
+
+        assert healer._next_recreate_monotonic == now + 30.0
+
     def test_note_wedged_preserves_original_start(self):
         """A second wedged report keeps the original outage-start timestamp."""
         healer, _ = _healer()
 
         healer.note_wedged(time.monotonic())
         first_since = healer._subscribing_since
+        first_deadline = healer._next_recreate_monotonic
         healer.note_wedged(time.monotonic())
 
         assert healer._subscribing_since == first_since
+        assert healer._next_recreate_monotonic == first_deadline
 
     def test_note_wedged_reports_growing_wait(self):
         """The reported wait grows with the time since the outage opened."""
@@ -128,12 +145,16 @@ class TestOutageState:
         assert "2 recreate attempt" in msg
 
     def test_healing_status_message_falls_back_to_backoff(self):
-        """With no deadline published the countdown falls back to the backoff."""
+        """With no deadline published the countdown falls back to the backoff.
+
+        The deadline is momentarily unpublished between an attempt starting and
+        the loop re-arming it after the rebuild returns.
+        """
         healer, _ = _healer(initial=30.0)
         now = time.monotonic()
         healer.note_wedged(now)
+        healer._next_recreate_monotonic = None
 
-        assert healer._next_recreate_monotonic is None
         assert "next automatic recreate is in ~30s" in healer.healing_status_message(
             now
         )
@@ -199,7 +220,7 @@ class TestHealOnce:
     async def test_detection_opens_outage_without_rebuilding(self):
         """The pass that first sees a wedge only opens the outage.
 
-        The rebuild waits for the backoff the loop then schedules, so
+        The rebuild waits for the backoff armed at detection, so
         ``controller_resubscribe_backoff_initial_seconds`` is honored
         regardless of where in the poll cycle the wedge was noticed.
         """
@@ -209,7 +230,35 @@ class TestHealOnce:
 
         assert healer.outage_active is True
         assert healer._attempts == 0
+        assert healer._next_recreate_monotonic is not None
         assert source.rebuild_calls == 0
+
+    async def test_pending_backoff_defers_the_rebuild(self):
+        """A non-forced pass waits out the deadline armed when the outage opened.
+
+        Regression guard: a foreground caller opens the outage through
+        ``note_wedged`` while the loop is mid-wait on its 5s healthy cadence.
+        Rebuilding on the very next tick would make the first attempt land
+        within that poll rather than after the configured initial backoff.
+        """
+        healer, source = _healer(poisoned=True, initial=3600.0, maximum=3600.0)
+        healer.note_wedged(time.monotonic())
+
+        await healer.heal_once()
+
+        assert source.rebuild_calls == 0
+        assert healer._attempts == 0
+        assert healer.outage_active is True
+
+    async def test_forced_pass_ignores_a_pending_backoff(self):
+        """A reconnect request rebuilds without waiting out the armed deadline."""
+        healer, source = _healer(poisoned=True, initial=3600.0, maximum=3600.0)
+        healer.note_wedged(time.monotonic())
+
+        await healer.heal_once(forced=True)
+
+        assert source.rebuild_calls == 1
+        assert healer._attempts == 1
 
     async def test_forced_rebuilds_on_detection(self):
         """A forced pass rebuilds immediately instead of waiting out the backoff."""
@@ -222,14 +271,17 @@ class TestHealOnce:
         assert healer.outage_active is True
 
     async def test_wedged_mid_outage_rebuilds_and_counts(self):
-        """With an outage open, a wedged peek rebuilds and counts the attempt."""
+        """With the armed deadline elapsed, a wedged peek rebuilds and counts it."""
         healer, source = _healer(poisoned=True)
         healer.note_wedged(time.monotonic())
+        healer._next_recreate_monotonic = time.monotonic() - 1.0
 
         await healer.heal_once()
 
         assert source.rebuild_calls == 1
         assert healer._attempts == 1
+        # Cleared so the loop re-arms the escalated backoff from the attempt's end.
+        assert healer._next_recreate_monotonic is None
 
     async def test_empty_cache_mid_outage_keeps_escalating(self):
         """A rebuild that left the cache empty keeps the outage and keeps retrying.
@@ -241,6 +293,7 @@ class TestHealOnce:
         healer, source = _healer(poisoned=None)
         healer.note_wedged(time.monotonic())
         healer._attempts = 2
+        healer._next_recreate_monotonic = time.monotonic() - 1.0
 
         await healer.heal_once()
 
@@ -436,19 +489,67 @@ class TestLoopLifecycle:
             finally:
                 await healer.stop()
 
-    async def test_loop_publishes_next_recreate_deadline(self):
-        """With an outage open the loop publishes the next-recreate deadline."""
+    async def test_loop_honors_the_deadline_armed_at_detection(self):
+        """The loop waits out the deadline the outage armed, not a fresh one.
+
+        Restarting the clock from the loop's own tick would push the first
+        recreate a full backoff past the tick that noticed the wedge, on top of
+        the wait already served since detection.
+        """
         healer, _ = _healer(initial=3600.0, maximum=3600.0)
         healer.note_wedged(time.monotonic())
+        armed = healer._next_recreate_monotonic
         healer.heal_once = AsyncMock()
 
         healer.start()
         try:
             # Yield so the loop body runs up to its wait.
             await asyncio.sleep(0)
+            assert healer._next_recreate_monotonic == armed
+        finally:
+            await healer.stop()
+
+    async def test_loop_arms_a_deadline_for_an_unscheduled_outage(self):
+        """An outage with no deadline (mid-rebuild) gets one on the next tick."""
+        healer, _ = _healer(initial=3600.0, maximum=3600.0)
+        healer.note_wedged(time.monotonic())
+        healer._next_recreate_monotonic = None
+        healer.heal_once = AsyncMock()
+
+        healer.start()
+        try:
+            await asyncio.sleep(0)
             assert healer._next_recreate_monotonic is not None
         finally:
             await healer.stop()
+
+    async def test_stop_clears_outage_state(self):
+        """Stopping clears the outage so a restarted healer starts clean.
+
+        Regression guard: nothing is left to act on a stale outage, so a source
+        reused after ``stop`` would otherwise keep failing fast against a cache
+        the stopped loop never refilled.
+        """
+        healer, _ = _healer(poisoned=True)
+        healer.heal_once = AsyncMock()
+        healer.start()
+        healer.note_wedged(time.monotonic())
+        healer._attempts = 3
+
+        await healer.stop()
+
+        assert healer.outage_active is False
+        assert healer._attempts == 0
+        assert healer._next_recreate_monotonic is None
+
+    async def test_stop_without_start_clears_outage_state(self):
+        """The no-task path clears the outage too."""
+        healer, _ = _healer()
+        healer.note_wedged(time.monotonic())
+
+        await healer.stop()
+
+        assert healer.outage_active is False
 
     async def test_loop_continues_after_a_failed_pass(self):
         """An exception in one pass is logged and the loop keeps running."""

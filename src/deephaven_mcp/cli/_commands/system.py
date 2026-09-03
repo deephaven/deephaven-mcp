@@ -223,9 +223,10 @@ _OUTPUT_RECONNECT = OutputSpec(
         OutputField(
             "reconnect_requested",
             "boolean",
-            "True when a background attempt was started; false when nothing is "
-            "currently wedged (including an already-healthy controller), so "
-            "there was nothing to reconnect.",
+            "True when the background healer was asked to run its next "
+            "attempt immediately; the attempt starts after this command "
+            "returns. False when nothing is currently wedged (including an "
+            "already-healthy controller), so there was nothing to reconnect.",
         ),
         OutputField("detail", "string", "Human-readable next step."),
     ),

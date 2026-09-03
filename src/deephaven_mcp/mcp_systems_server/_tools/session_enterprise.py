@@ -363,10 +363,11 @@ async def enterprise_controller_reconnect(
         dict[str, Any]: Response with the following fields:
             - success (bool): True if the reconnect request was accepted.
             - system (str): The system the request targeted. Present on success.
-            - reconnect_requested (bool): True when a background attempt was
-              started. False when no attempt was started because nothing is
-              currently wedged (including an already-healthy controller) or no
-              healer is running. Present on success.
+            - reconnect_requested (bool): True when the background healer was
+              asked to run its next attempt immediately; the attempt starts
+              after this call returns. False when no attempt was requested
+              because nothing is currently wedged (including an already-healthy
+              controller) or no healer is running. Present on success.
             - detail (str): Human-readable next step. Present on success.
             - error (str): Error message. Present only on failure.
             - isError (bool): True. Present only on failure.
