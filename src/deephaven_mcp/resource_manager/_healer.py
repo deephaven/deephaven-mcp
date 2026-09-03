@@ -150,7 +150,7 @@ class ControllerHealer:
         """Return the delay before the next recreate attempt.
 
         Doubles ``controller_resubscribe_backoff_initial_seconds`` once per
-        recreate attempt already made in the current outage, capped at
+        recreate attempt already made in the current outage, saturating at
         ``controller_resubscribe_backoff_max_seconds``.
 
         Args:
@@ -162,11 +162,15 @@ class ControllerHealer:
                 also means a maximum below the initial value pins every delay to
                 the maximum.
         """
-        initial = self._timeouts.controller_resubscribe_backoff_initial_seconds
         maximum = self._timeouts.controller_resubscribe_backoff_max_seconds
-        # Bound the exponent so a long outage cannot overflow the shift.
-        exponent = min(attempts, 32)
-        return min(initial * float(2**exponent), maximum)
+        delay = self._timeouts.controller_resubscribe_backoff_initial_seconds
+        # Saturating rather than exponent-capped: reaching the maximum is what
+        # bounds the doubling, so a tiny initial value still gets there.
+        for _ in range(attempts):
+            if delay >= maximum:
+                break
+            delay *= 2.0
+        return min(delay, maximum)
 
     def _open_outage(self, now: float) -> _Outage:
         """Start tracking an outage, scheduling its first recreate.

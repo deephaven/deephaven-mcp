@@ -2970,7 +2970,10 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         the cache is momentarily empty (between the healer's discard and its
         rebuild): the healer owns creation for the duration of the outage, so
         this does not start a competing inline creation that would block the
-        caller for ``session_connect_timeout_seconds``.
+        caller for ``session_connect_timeout_seconds``. Inspecting the cache and
+        obtaining the factory happen under one acquisition of the manager lock,
+        the same one the healer's discard takes, so that decision cannot be
+        invalidated between the two.
 
         Returns:
             CorePlusControllerClient: A healthy controller client.
@@ -2984,29 +2987,27 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             AuthenticationError: If authentication fails while creating the factory.
             Exception: Any other error raised by factory creation.
         """
-        # While the healer owns creation, the cache is empty between its
-        # discard and its rebuild. Falling through to get() then would start a
-        # competing inline creation and block the caller for
-        # session_connect_timeout_seconds -- the exact wait this fails fast to
-        # avoid.
-        if await self.peek_controller_poisoned() is None:
-            msg = self._healer.healing_status_message(time.monotonic())
-            if msg is not None:
+        async with self._lock:
+            if self._item_cache is None:
+                msg = self._healer.healing_status_message(time.monotonic())
+                if msg is not None:
+                    _LOGGER.warning(
+                        f"[{self.__class__.__name__}:get_controller_client] {msg}"
+                    )
+                    raise DeephavenConnectionError(msg)
+
+            factory = await self._get_unlocked()
+            controller = factory.controller_client
+
+            if controller.is_poisoned:
+                msg = self._healer.note_wedged(time.monotonic())
                 _LOGGER.warning(
                     f"[{self.__class__.__name__}:get_controller_client] {msg}"
                 )
                 raise DeephavenConnectionError(msg)
 
-        factory = await self.get()
-        controller = factory.controller_client
-
-        if not controller.is_poisoned:
             self._healer.note_healthy()
             return controller
-
-        msg = self._healer.note_wedged(time.monotonic())
-        _LOGGER.warning(f"[{self.__class__.__name__}:get_controller_client] {msg}")
-        raise DeephavenConnectionError(msg)
 
     async def request_reconnect(self) -> bool:
         """Ask the background healer to run a recreate pass immediately.

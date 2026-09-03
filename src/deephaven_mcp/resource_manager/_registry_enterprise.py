@@ -205,12 +205,15 @@ async def _fetch_factory_pqs(
                     f"({type(ping_err).__name__}: {ping_err}); discarding and recreating"
                 )
                 t0 = time.monotonic()
-                # get_controller_client() hands back the cached factory's own
-                # controller whenever it is not poisoned, and a ping failure
-                # does not poison it. Evict the factory first or the "recreate"
-                # would return the very client that just failed.
-                await snapshot.factory_manager.close()
+                dead_client = client
                 client = await snapshot.factory_manager.get_controller_client()
+                if client is dead_client:
+                    # A ping failure does not poison the factory, so the manager
+                    # keeps handing back the same client until it is evicted.
+                    # Only evict when it really is the dead one; the healer may
+                    # already have replaced the factory this snapshot captured.
+                    await snapshot.factory_manager.close()
+                    client = await snapshot.factory_manager.get_controller_client()
                 new_client = client
                 _LOGGER.debug(
                     f"[_fetch_factory_pqs] client recreated in {time.monotonic()-t0:.2f}s"

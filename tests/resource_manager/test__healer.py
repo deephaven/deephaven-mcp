@@ -170,6 +170,16 @@ class TestOutageState:
         healer, _ = _healer(initial=30.0, maximum=5.0)
         assert healer._backoff_seconds(0) == 5.0
 
+    def test_backoff_reaches_the_maximum_from_a_tiny_initial(self):
+        """A very small initial delay still saturates at the configured maximum.
+
+        Regression guard: a fixed exponent cap pinned the delay to
+        ``initial * 2**32`` whenever that fell short of the maximum, so valid
+        settings recreated the factory far more often than configured.
+        """
+        healer, _ = _healer(initial=1e-9, maximum=300.0)
+        assert healer._backoff_seconds(100) == 300.0
+
 
 @pytest.mark.asyncio
 class TestHealOnce:

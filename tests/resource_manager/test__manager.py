@@ -946,13 +946,14 @@ class TestCorePlusSessionFactoryManager:
         """A healthy controller is returned without recreating the factory."""
         manager = self._make_factory_manager()
         factory, controller = self._make_factory_with_controller(poisoned=False)
-        manager.get = AsyncMock(return_value=factory)
+        manager._item_cache = factory
+        manager._get_unlocked = AsyncMock(return_value=factory)
         manager.close = AsyncMock()
 
         result = await manager.get_controller_client()
 
         assert result is controller
-        manager.get.assert_awaited_once()
+        manager._get_unlocked.assert_awaited_once()
         manager.close.assert_not_called()
 
     @pytest.mark.asyncio
@@ -961,7 +962,7 @@ class TestCorePlusSessionFactoryManager:
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=False)
         manager._item_cache = factory
-        manager.get = AsyncMock(return_value=factory)
+        manager._get_unlocked = AsyncMock(return_value=factory)
         # Simulate a stale outage left over from a prior wedge.
         manager._healer.note_wedged(time.monotonic())
         manager._healer._outage.attempts = 4
@@ -983,14 +984,14 @@ class TestCorePlusSessionFactoryManager:
         manager._item_cache = None
         manager._healer.note_wedged(time.monotonic())
         manager._healer._outage.attempts = 2
-        manager.get = AsyncMock()
+        manager._get_unlocked = AsyncMock()
 
         with pytest.raises(DeephavenConnectionError) as exc_info:
             await manager.get_controller_client()
 
         assert CONTROLLER_SUBSCRIBING_ERROR_CODE in str(exc_info.value)
         # The blocking creation must never have been attempted.
-        manager.get.assert_not_called()
+        manager._get_unlocked.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_controller_client_creates_when_idle_and_empty(self):
@@ -998,19 +999,20 @@ class TestCorePlusSessionFactoryManager:
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=False)
         manager._item_cache = None
-        manager.get = AsyncMock(return_value=factory)
+        manager._get_unlocked = AsyncMock(return_value=factory)
 
         result = await manager.get_controller_client()
 
         assert result is factory.controller_client
-        manager.get.assert_awaited_once()
+        manager._get_unlocked.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_get_controller_client_poisoned_raises_with_code(self):
         """A wedged subscription fails fast with the CONTROLLER_SUBSCRIBING code."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=True)
-        manager.get = AsyncMock(return_value=factory)
+        manager._item_cache = factory
+        manager._get_unlocked = AsyncMock(return_value=factory)
         manager.close = AsyncMock()
 
         with pytest.raises(DeephavenConnectionError) as exc_info:
@@ -1032,7 +1034,8 @@ class TestCorePlusSessionFactoryManager:
         """A second poisoned call keeps the original outage-start timestamp."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=True)
-        manager.get = AsyncMock(return_value=factory)
+        manager._item_cache = factory
+        manager._get_unlocked = AsyncMock(return_value=factory)
 
         with pytest.raises(DeephavenConnectionError):
             await manager.get_controller_client()
@@ -1048,7 +1051,8 @@ class TestCorePlusSessionFactoryManager:
         """When a next-recreate time is scheduled, the message reports its countdown."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=True)
-        manager.get = AsyncMock(return_value=factory)
+        manager._item_cache = factory
+        manager._get_unlocked = AsyncMock(return_value=factory)
         manager._healer.note_wedged(time.monotonic())
         manager._healer._outage.attempts = 2
         manager._healer._outage.next_recreate = time.monotonic() + 25.0
@@ -1286,7 +1290,7 @@ class TestCorePlusSessionFactoryManager:
         assert manager._healer.outage_active is False
 
         healthy_factory, controller = self._make_factory_with_controller(poisoned=False)
-        manager.get = AsyncMock(return_value=healthy_factory)
+        manager._get_unlocked = AsyncMock(return_value=healthy_factory)
 
         assert await manager.get_controller_client() is controller
 
