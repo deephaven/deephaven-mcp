@@ -964,14 +964,11 @@ class TestCorePlusSessionFactoryManager:
         manager.get = AsyncMock(return_value=factory)
         # Simulate a stale outage left over from a prior wedge.
         manager._healer.note_wedged(time.monotonic())
-        manager._healer._attempts = 4
-        manager._healer._next_recreate_monotonic = 456.0
+        manager._healer._outage.attempts = 4
 
         await manager.get_controller_client()
 
         assert manager._healer.outage_active is False
-        assert manager._healer._attempts == 0
-        assert manager._healer._next_recreate_monotonic is None
 
     @pytest.mark.asyncio
     async def test_get_controller_client_fails_fast_mid_episode_empty_cache(self):
@@ -985,7 +982,7 @@ class TestCorePlusSessionFactoryManager:
         manager = self._make_factory_manager()
         manager._item_cache = None
         manager._healer.note_wedged(time.monotonic())
-        manager._healer._attempts = 2
+        manager._healer._outage.attempts = 2
         manager.get = AsyncMock()
 
         with pytest.raises(DeephavenConnectionError) as exc_info:
@@ -1039,12 +1036,12 @@ class TestCorePlusSessionFactoryManager:
 
         with pytest.raises(DeephavenConnectionError):
             await manager.get_controller_client()
-        first_since = manager._healer._subscribing_since
+        first_outage = manager._healer._outage
 
         with pytest.raises(DeephavenConnectionError):
             await manager.get_controller_client()
 
-        assert manager._healer._subscribing_since == first_since
+        assert manager._healer._outage is first_outage
 
     @pytest.mark.asyncio
     async def test_get_controller_client_poisoned_reports_countdown(self):
@@ -1053,8 +1050,8 @@ class TestCorePlusSessionFactoryManager:
         factory, _ = self._make_factory_with_controller(poisoned=True)
         manager.get = AsyncMock(return_value=factory)
         manager._healer.note_wedged(time.monotonic())
-        manager._healer._attempts = 2
-        manager._healer._next_recreate_monotonic = time.monotonic() + 25.0
+        manager._healer._outage.attempts = 2
+        manager._healer._outage.next_recreate = time.monotonic() + 25.0
 
         with pytest.raises(DeephavenConnectionError) as exc_info:
             await manager.get_controller_client()
@@ -1210,35 +1207,42 @@ class TestCorePlusSessionFactoryManager:
             await manager.close()
 
     @pytest.mark.asyncio
-    async def test_close_stops_the_healer_before_dropping_the_factory(self):
-        """The healer cannot recreate a factory mid-shutdown."""
+    async def test_close_stops_the_healer_and_closes_the_factory(self):
+        """Close leaves neither a running healer nor a cached factory."""
         manager = self._make_factory_manager()
         factory, _ = self._make_factory_with_controller(poisoned=False)
         manager._item_cache = factory
         manager._healer.heal_once = AsyncMock()
         manager._healer.start()
         task = manager._healer._task
-        order = []
 
-        async def _record_stop():
-            order.append("stop")
+        await manager.close()
 
-        manager._healer.stop = _record_stop
-        original_close = BaseItemManager.close
-
-        async def _record_close(self):
-            order.append("close")
-            await original_close(self)
-
-        with patch.object(BaseItemManager, "close", _record_close):
-            await manager.close()
-
-        assert order == ["stop", "close"]
         assert manager._item_cache is None
-        # Clean up the task the stubbed stop() left running.
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        assert manager._healer._task is None
+        assert task.done()
+        factory.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_serializes_against_factory_creation(self):
+        """Close holds the manager lock that ``_create_item`` starts healers under.
+
+        Regression guard: stopping the healer outside that lock let a
+        concurrent creation start one for a factory this close then dropped,
+        leaving an orphan loop polling forever.
+        """
+        manager = self._make_factory_manager()
+        manager._healer.heal_once = AsyncMock()
+        manager._healer.start()
+
+        async with manager._lock:
+            close_task = asyncio.create_task(manager.close())
+            await asyncio.sleep(0)
+            assert not close_task.done()
+            assert manager._healer._task is not None
+
+        await close_task
+        assert manager._healer._task is None
 
     @pytest.mark.asyncio
     async def test_close_then_get_restarts_the_healer(self):

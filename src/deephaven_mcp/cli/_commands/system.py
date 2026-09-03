@@ -251,9 +251,10 @@ _OUTPUT_RECONNECT = OutputSpec(
             "the remaining wait and triggers the next attempt immediately. "
             "Returns as soon as the request is accepted: it never blocks for "
             "the reconnect, and it does not report whether the reconnect "
-            "succeeded. Safe to repeat — concurrent requests collapse into a "
-            "single attempt — and a no-op when the controller is already "
-            "healthy, so it never tears down a working connection."
+            "succeeded. Safe to repeat — requests coalesce, so repeating "
+            "never queues a backlog of attempts — and a no-op when the "
+            "controller is already healthy, so it never tears down a working "
+            "connection."
         ),
         arguments=(
             HelpEntry(

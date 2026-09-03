@@ -3013,29 +3013,44 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
 
         Returns without waiting for the (potentially minutes-long) factory
         rebuild. Backs the ``enterprise_controller_reconnect`` MCP tool. See
-        :meth:`ControllerHealer.request_reconnect` for when a nudge is sent.
+        :meth:`ControllerHealer.request_reconnect` for when a signal is sent.
 
         Returns:
-            bool: ``True`` when a running healer was nudged and its next pass
-                will attempt a recreate; ``False`` when no attempt was started,
-                because nothing is wedged or no healer is running.
+            bool: ``True`` when a running healer was signaled and its next pass
+                will attempt a recreate; ``False`` when no attempt was
+                requested, because nothing is wedged or no healer is running.
         """
         return await self._healer.request_reconnect()
 
     @override
     async def close(self) -> None:
-        """Stop the subscription healer, then close the cached factory.
+        """Stop the subscription healer and close the cached factory.
 
-        The healer is stopped before the factory is dropped so it cannot
-        recreate one mid-shutdown. Stopping also clears any outage it was
-        tracking, so a manager closed while wedged is reusable: a subsequent
-        :meth:`get` or :meth:`get_controller_client` creates a new factory
-        rather than failing fast forever against the stale outage.
+        Both happen under one acquisition of the manager lock, which
+        :meth:`_create_item` also holds when it starts a healer. Stopping a
+        healer and starting one are therefore mutually exclusive: a concurrent
+        :meth:`get` either finishes before this runs, and has its factory
+        closed and its healer stopped here, or starts afterwards as an ordinary
+        reuse. Stopping also clears any outage the healer was tracking, so a
+        manager closed while wedged is reusable rather than failing fast
+        forever against an outage nothing is left to heal.
 
         Idempotent: safe to call multiple times. Never raises.
         """
-        await self._healer.stop()
-        await super().close()
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] Starting close operation for '{self.qualified_session_id}'"
+        )
+        async with self._lock:
+            await self._healer.stop()
+            factory = self._item_cache
+            self._item_cache = None
+            self._last_accessed = None
+
+        if factory is not None:
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Closing item for '{self.qualified_session_id}'"
+            )
+            await self._close_captured_item(factory)
 
     async def peek_controller_poisoned(self) -> bool | None:
         """Report the cached controller's poison state without forcing creation.

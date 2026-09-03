@@ -348,8 +348,8 @@ async def enterprise_controller_reconnect(
           (potentially minutes-long) reconnect.
         - Does not report whether the reconnect succeeded. Check
           ``enterprise_systems_status`` or retry the original call.
-        - Safe to call repeatedly; concurrent requests collapse into a single
-          attempt.
+        - Safe to call repeatedly; requests coalesce, so repeating never queues
+          a backlog of attempts.
         - A no-op when the controller is already healthy — it never tears down
           a working connection.
 
