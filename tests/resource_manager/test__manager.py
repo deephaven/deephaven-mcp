@@ -1061,17 +1061,14 @@ class TestCorePlusSessionFactoryManager:
         manager._item_cache = None
         manager._healer.note_wedged(time.monotonic())
         manager._healer._outage.attempts = 2
-        manager._get_unlocked = AsyncMock()
-        manager.get = AsyncMock()
+        manager._ensure_item = AsyncMock()
 
         with pytest.raises(DeephavenConnectionError) as exc_info:
             await manager.get_controller_client()
 
         assert CONTROLLER_SUBSCRIBING_ERROR_CODE in str(exc_info.value)
-        # The blocking creation must never have been attempted, and the gate
-        # must not have touched the lock a rebuild may be holding.
-        manager.get.assert_not_called()
-        manager._get_unlocked.assert_not_called()
+        # The gate must return before anything can queue on the creation lock.
+        manager._ensure_item.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_controller_client_creates_when_idle_and_empty(self):
@@ -1183,13 +1180,13 @@ class TestCorePlusSessionFactoryManager:
         manager = self._make_factory_manager()
         manager._item_cache = None
         manager._healer.note_wedged(time.monotonic())
-        manager._get_unlocked = AsyncMock()
+        manager._ensure_item = AsyncMock()
 
         status, detail = await manager.liveness_status(ensure_item=True)
 
         assert status is ResourceLivenessStatus.OFFLINE
         assert detail == "controller connection unavailable"
-        manager._get_unlocked.assert_not_called()
+        manager._ensure_item.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_liveness_status_probes_normally_when_no_outage(self):
