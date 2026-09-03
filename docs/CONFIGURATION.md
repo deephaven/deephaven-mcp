@@ -401,20 +401,22 @@ Timeouts the enterprise client layer (factory + controller) applies
 to outbound Deephaven calls and persistent-query state waits. All
 fields are optional. Most fields are floats (seconds);
 `pq_state_change_timeout_seconds` is an `int` because the upstream
-Java API requires it.
+Java API requires it. Every field must be greater than zero except
+`no_wait_seconds`, which must be zero or greater.
 
-| Field                             | Type  | Default |
-| --------------------------------- | ----- | ------- |
-| `session_connect_timeout_seconds` | float | `60.0`  |
-| `worker_creation_timeout_seconds` | float | `60.0`  |
-| `pq_connection_timeout_seconds`   | float | `60.0`  |
-| `auth_timeout_seconds`            | float | `60.0`  |
-| `saml_auth_timeout_seconds`       | float | `120.0` |
-| `quick_operation_timeout_seconds` | float | `5.0`   |
-| `subscribe_timeout_seconds`       | float | `30.0`  |
-| `pq_management_timeout_seconds`   | float | `60.0`  |
-| `pq_state_change_timeout_seconds` | int   | `120`   |
-| `no_wait_seconds`                 | float | `0.0`   |
+| Field                              | Type  | Default | Scope                                                                     |
+| ---------------------------------- | ----- | ------- | ------------------------------------------------------------------------- |
+| `session_connect_timeout_seconds`  | float | `60.0`  | Initial connection to an Enterprise server (TLS, DNS, cold start)         |
+| `worker_creation_timeout_seconds`  | float | `60.0`  | Provisioning and connecting to a new on-demand worker                     |
+| `pq_connection_timeout_seconds`    | float | `60.0`  | Client-to-worker session handshake against a running persistent query     |
+| `auth_timeout_seconds`             | float | `60.0`  | Non-SAML authentication: password, private key, service token             |
+| `saml_auth_timeout_seconds`        | float | `120.0` | SAML authentication, including the browser redirect                       |
+| `quick_operation_timeout_seconds`  | float | `5.0`   | Fast round-trips: ping, public-key upload/delete, and cached `WebClientData` session liveness/close |
+| `subscribe_timeout_seconds`        | float | `30.0`  | Initial snapshot of a controller state subscription                       |
+| `pq_management_timeout_seconds`    | float | `60.0`  | Persistent-query management RPCs: add, delete, modify                     |
+| `pq_state_change_timeout_seconds`  | int   | `120`   | Waiting for a persistent query to reach a target lifecycle state          |
+| `web_client_data_timeout_seconds`  | float | `30.0`  | One `WebClientData` widget round-trip (backs the catalog listing tools)    |
+| `no_wait_seconds`                  | float | `0.0`   | Wait window for controller subscription-map lookups                       |
 
 ### `enterprise/settings.json` `timeouts.eviction`
 

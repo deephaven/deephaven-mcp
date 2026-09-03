@@ -261,13 +261,13 @@ def test_read_local_script_expands_tilde(
 
 def test_read_local_script_dash_reads_stdin() -> None:
     stream = io.StringIO("print('stdin')\n")
-    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
+    with patch.object(_wrapping.sys, "stdin", stream):
         assert read_local_script("-") == "print('stdin')\n"
 
 
 def test_read_local_script_empty_stdin_raises_missing_argument() -> None:
     stream = io.StringIO("")
-    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
+    with patch.object(_wrapping.sys, "stdin", stream):
         with pytest.raises(CliError) as exc:
             read_local_script("-")
     assert exc.value.code is ErrorCode.MISSING_ARGUMENT
@@ -388,8 +388,8 @@ async def test_call_and_echo_table_drops_format_and_keeps_order_in_human_mode(
     with acq, call:
         await call_and_echo_table(
             rt,
-            "catalog_table_sample",
-            retry_command="dhcli catalog sample",
+            "session_table_data",
+            retry_command="dhcli table data",
             arguments={},
         )
     out = capsys.readouterr().out

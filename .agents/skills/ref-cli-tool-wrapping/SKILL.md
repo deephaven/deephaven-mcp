@@ -6,7 +6,7 @@ user-invocable: false
 
 # CLI tool-wrapping conventions
 
-Runtime `dhcli` commands (`session`, `system`, `table`, `catalog`, `pq`, `docs`) wrap MCP tools. This skill is the how; the *why* is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `ref-cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`ref-mcp-module-organization`).
+Runtime `dhcli` commands (`session`, `system`, `table`, `catalog`, `pq`, `docs`) wrap MCP tools. This skill is the how; the _why_ is [`docs/design/CLI_TOOL_WRAPPING.md`](../../../docs/design/CLI_TOOL_WRAPPING.md). `cli-command-add` loads it for any wrapper verb and supplies the general click/Pattern-B/error conventions; this skill adds the wrapper-specific concern. Apply `ref-cli-help-standards` for the help contract. It does **not** apply to `daemon`/`config` (not tool wrappers) or to MCP server tools themselves (`ref-mcp-module-organization`).
 
 ## The shared flow
 
@@ -28,7 +28,7 @@ await call_and_echo_field(
 )
 ```
 
-**What shaping may drop.** A shaping verb drops only what the exit code or the data itself already conveys: `success` (the exit code says it) and `count` (`length` says it). Anything the caller cannot reconstruct is preserved in stdout or re-surfaced on stderr — that is why `partial_result` and `is_complete: false` go to stderr rather than vanishing. Shaping may also drop the tool's **addressing echo** (`id`, `system`); never re-add it by wrapping a bare array, because the bare shape is the contract `-o human`'s table renderer and `jq '.[]'` consume. Why the echo is droppable at the CLI boundary but required in the payload is owned by `ref-output-serialization-conventions` *Payload shape is designed at the MCP layer* — the rule that the echo-back requirement governs the MCP layer, not the CLI projection.
+**What shaping may drop.** A shaping verb drops only what the exit code or the data itself already conveys: `success` (the exit code says it) and `count` (`length` says it). Anything the caller cannot reconstruct is preserved in stdout or re-surfaced on stderr — that is why `partial_result` and `is_complete: false` go to stderr rather than vanishing. Shaping may also drop the tool's **addressing echo** (`id`, `system`); never re-add it by wrapping a bare array, because the bare shape is the contract `-o human`'s table renderer and `jq '.[]'` consume. Why the echo is droppable at the CLI boundary but required in the payload is owned by `ref-output-serialization-conventions` _Payload shape is designed at the MCP layer_ — the rule that the echo-back requirement governs the MCP layer, not the CLI projection.
 
 Both build on the lower-level fetch/render pieces — `call_for_payload` (acquire → `call_tool` → `tool_payload` → `require_success`, which raises exit-3 `tool_returned_error` on `success=False`) and `echo_payload` (the one place that reads `runtime.config.cli.output.format` and prints via `format_output`). Reach for those directly only when a command builds a bespoke value (e.g. `session credentials` assembles a dict from several fields). Shape the payload per command — but never branch on output mode; that is `format_output`'s job. Payload shape itself (key names, array naming, truncation semantics) is designed at the MCP layer and governed by `ref-output-serialization-conventions` — fix shape problems in the tool, never in the wrapper.
 
@@ -38,7 +38,7 @@ Repeatable `KEY=VALUE` options parse their tokens with `parse_key_value(token, d
 
 ## Help error/exit codes (single-sourced)
 
-A wrapper's help error codes come from `wrapper_error_codes()` in `_wrapping.py`: `ErrorCode.TOOL_RETURNED_ERROR` plus the shared codes the `acquire` + `call_tool` flow raises. They are `ErrorCode` members, so `build_help` renders their text from the enum — never re-type a code's description (see `ref-cli-help-standards` *HelpSpec fields*).
+A wrapper's help error codes come from `wrapper_error_codes()` in `_wrapping.py`: `ErrorCode.TOOL_RETURNED_ERROR` plus the shared codes the `acquire` + `call_tool` flow raises. They are `ErrorCode` members, so `build_help` renders their text from the enum — never re-type a code's description (see `ref-cli-help-standards` _HelpSpec fields_).
 
 - Default: `error_codes=wrapper_error_codes()`.
 - Read-only tool that never reports failure (`system list`, `tool list`): `wrapper_error_codes(tool_error=False)` (drops `tool_returned_error`).
@@ -50,13 +50,13 @@ A wrapper's help error codes come from `wrapper_error_codes()` in `_wrapping.py`
 
 ## The five wrapper categories
 
-These describe how a verb *selects* its tool(s); the output shape (`call_and_echo` vs `call_and_echo_field`, from *The shared flow*) is chosen independently per command. A router picks its tool, then calls a helper with it — `tool = ...; await call_and_echo(runtime, tool, retry_command=..., arguments=...)`.
+These describe how a verb _selects_ its tool(s); the output shape (`call_and_echo` vs `call_and_echo_field`, from _The shared flow_) is chosen independently per command. A router picks its tool, then calls a helper with it — `tool = ...; await call_and_echo(runtime, tool, retry_command=..., arguments=...)`.
 
 1. **Passthrough** — one tool; flags → tool args. Set `wraps_tool="..."`. Example: `system list`.
 2. **Id-router** — one verb; the `id` prefix selects the tool. Set `wraps_tools=("...community...","...enterprise...")`. Parse the `type:system:name` prefix and dispatch.
 3. **System-router** — one verb; the `--system` value's type selects the tool. Set `wraps_tools=(...)` and `router_params=frozenset({"system"})` (`--system` steers dispatch and is forwarded only to the branch that declares it). Group flags by type in help; reject a wrong-type flag.
 4. **Client-side composite** — wrap a tool for data, then act locally (e.g. `session open` → `webbrowser.open`). Set `wraps_tool="..."`; surface only the input args. For browser/host actions, provide a `--print` (or headless/no-`DISPLAY`) fallback and raise a dedicated `ErrorCode` on failure — never hang.
-5. **Direct-URL** — one tool on a *remote* MCP server named by a `cli.json` URL, not the local daemon (no `acquire`, daemon never started). Build the client from config (URL + its own timeout key, passed as `McpClient`'s `timeout_setting` so the timeout hint names the right `cli.json` key), catch `McpRequestTimeoutError` → `mcp_request_timeout` and `McpClientError` → `mcp_request_failed` naming the URL, then reuse `tool_payload` + `require_success` + `echo_payload`. Set `wraps_tool="..."`; state "the local daemon is not involved" in the description. Canonical: `docs ask` (`cli/_commands/docs.py`, `docs_chat` at `docs.url`).
+5. **Direct-URL** — one tool on a _remote_ MCP server named by a `cli.json` URL, not the local daemon (no `acquire`, daemon never started). Build the client from config (URL + its own timeout key, passed as `McpClient`'s `timeout_setting` so the timeout hint names the right `cli.json` key), catch `McpRequestTimeoutError` → `mcp_request_timeout` and `McpClientError` → `mcp_request_failed` naming the URL, then reuse `tool_payload` + `require_success` + `echo_payload`. Set `wraps_tool="..."`; state "the local daemon is not involved" in the description. Canonical: `docs ask` (`cli/_commands/docs.py`, `docs_chat` at `docs.url`).
 
 ## Read-only verbs with a defaultable target
 
@@ -64,10 +64,10 @@ The default wiring, and the majority case. A verb whose target is a session id, 
 
 Two consequences to get right:
 
-- **A second required positional forces the id to stay mandatory.** click cannot parse an optional positional followed by a required one, so `table schema`, `table data`, `catalog schema`, `catalog sample`, and `pq name-to-id` keep a required id. `docs/CLI.md`'s verb tables encode the distinction as `[ID]` (context can supply it) versus `<id>` (you must pass it); match that convention when documenting a new verb.
-- **A defaultable target changes what the help must say.** Per `ref-cli-help-standards`, the argument's help states that the sticky context supplies it when omitted, and a verb whose wrong target has consequences carries the shared hazard wording (`CONTEXT_RISK_STATEFUL`, or `CONTEXT_RISK_DESTRUCTIVE` for the verbs in the next section) plus `TARGET_SELECTION_HINT` on the id argument. The two are different failures: the hazard wording covers an *omitted* id resolving to something unexpected, the selection hint covers an id that was typed deliberately but was never yours to act on.
+- **A second required positional forces the leading argument to stay mandatory.** click cannot parse an optional positional followed by a required one, so `table schema`, `table data`, and `pq name-to-id` keep a required leading argument. `docs/CLI.md`'s verb tables encode the distinction as `[ID]` (context can supply it) versus `<id>` (you must pass it); match that convention when documenting a new verb.
+- **A defaultable target changes what the help must say.** Per `ref-cli-help-standards`, the argument's help states that the sticky context supplies it when omitted, and a verb whose wrong target has consequences carries the shared hazard wording (`CONTEXT_RISK_STATEFUL`, or `CONTEXT_RISK_DESTRUCTIVE` for the verbs in the next section) plus `TARGET_SELECTION_HINT` on the id argument. The two are different failures: the hazard wording covers an _omitted_ id resolving to something unexpected, the selection hint covers an id that was typed deliberately but was never yours to act on.
 
-A verb that *creates* a resource writes the context on success instead of reading it: attach `--no-set-context`, declare it in `client_only_params`, and set the keys that describe the new resource (`AGENTS.md` *CLI* states the contract; `docs/CLI.md` *`dhcli context`* has the per-verb key table).
+A verb that _creates_ a resource writes the context on success instead of reading it: attach `--no-set-context`, declare it in `client_only_params`, and set the keys that describe the new resource (`AGENTS.md` _CLI_ states the contract; `docs/CLI.md` _`dhcli context`_ has the per-verb key table).
 
 ## Destructive verbs with a defaultable target
 
@@ -87,14 +87,14 @@ The `kubectl` comparison above is not decoration — interaction-model decisions
 
 ## Path locality: decide it per flag, say it in the name and help
 
-A path-valued flag resolves on exactly one of the CLI machine or the server — never the daemon (its cwd/filesystem view is not the user's; rationale in the design doc's *Path locality* section).
+A path-valued flag resolves on exactly one of the CLI machine or the server — never the daemon (its cwd/filesystem view is not the user's; rationale in the design doc's _Path locality_ section).
 
-- **Local file**: read it in the CLI with `read_local_script` from `_wrapping.py` (`-` = stdin, relative paths resolve against the shell cwd, unreadable file → `file_read_failed`, empty stdin → `missing_argument`) and forward the *contents* as the tool's inline param. A flag materialized into a different tool param this way (e.g. `script_body_path` → `script_body`) goes in `client_only_params`. Add `FILE_READ_FAILED` (and `MISSING_ARGUMENT` for the stdin case) to the help's `error_codes`. Canonical: `session exec --script-path`, `pq create --script-body-path`.
+- **Local file**: read it in the CLI with `read_local_script` from `_wrapping.py` (`-` = stdin, relative paths resolve against the shell cwd, unreadable file → `file_read_failed`, empty stdin → `missing_argument`) and forward the _contents_ as the tool's inline param. A flag materialized into a different tool param this way (e.g. `script_body_path` → `script_body`) goes in `client_only_params`. Add `FILE_READ_FAILED` (and `MISSING_ARGUMENT` for the stdin case) to the help's `error_codes`. Canonical: `session exec --script-path`, `pq create --script-body-path`.
 - **Server-side identifier**: forward verbatim and give the flag a self-documenting name — `--git-script-path`, not `--script-path` — plus help text naming the server-side namespace ("the Enterprise controller's Git-backed script repository"). Canonical: `pq --git-script-path`, `pq --python-venv`.
 
-Per `ref-cli-help-standards` *Help-content contract*, every path-valued option's help states where the path resolves.
+Per `ref-cli-help-standards` _Help-content contract_, every path-valued option's help states where the path resolves.
 
-A flag typed `click.Path` must use `NonBlankPath` (`cli/_params.py`) instead — `click.Path` turns `''` into `Path('.')`, so a blank silently becomes the current directory. `AGENTS.md` *CLI* owns the rule; `test_path_options_reject_a_blank_value` enforces it.
+A flag typed `click.Path` must use `NonBlankPath` (`cli/_params.py`) instead — `click.Path` turns `''` into `Path('.')`, so a blank silently becomes the current directory. `AGENTS.md` _CLI_ owns the rule; `test_path_options_reject_a_blank_value` enforces it.
 
 ## The drift contract (required)
 
@@ -102,8 +102,8 @@ Declare the tool binding on the command so `tests/cli/test_tool_wrapper_drift.py
 
 - `wraps_tool` / `wraps_tools` — the tool(s) fronted.
 - `intentionally_unsupported` — tool params you deliberately omit (allowlist; otherwise a required param you skip reads as drift).
-- `router_params` — dispatch-router flags that steer which tool runs but *are* a param of some wrapped tool (e.g. `--system` on `session create`). Exempt from the phantom check; the drift test still asserts they are real tool params.
-- `client_only_params` — flags that are *not* a param of any wrapped tool (e.g. `--print` on `session open`, which only controls local behavior). Use this — not `router_params` — for flags with no tool counterpart.
+- `router_params` — dispatch-router flags that steer which tool runs but _are_ a param of some wrapped tool (e.g. `--system` on `session create`). Exempt from the phantom check; the drift test still asserts they are real tool params.
+- `client_only_params` — flags that are _not_ a param of any wrapped tool (e.g. `--print` on `session open`, which only controls local behavior). Use this — not `router_params` — for flags with no tool counterpart.
 
 Name each click flag/argument exactly as the tool's parameter (snake_case) so the drift test joins them by name — e.g. the positional fully qualified id is `id`, and `--system` uses dest `system`. After adding or editing a wrapper, run the drift test:
 

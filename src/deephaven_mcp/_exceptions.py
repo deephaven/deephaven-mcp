@@ -50,6 +50,8 @@ __all__ = [
     "AuthenticationError",
     # Query exceptions
     "QueryError",
+    # Web client data exceptions
+    "WebClientDataError",
     # Connection exceptions
     "DeephavenConnectionError",
     # Resource exceptions
@@ -326,6 +328,38 @@ class QueryError(McpError):
         except QueryError as e:
             logger.error(f"Query failed: {e}")
             # Handle the query failure
+        ```
+    """
+
+    pass
+
+
+# Web Client Data Exceptions
+
+
+class WebClientDataError(McpError):
+    """Exception raised when a WebClientData system table cannot be obtained.
+
+    Raised by the ``WebClientData`` table-factory widget protocol for any
+    failure to obtain the requested per-user table, including failing to open
+    the widget stream and exceeding the configured timeout.
+
+    Examples:
+        - The widget stream could not be opened
+        - The table-factory widget is not exported under the expected scope field
+        - The widget refused the request (unknown table name, or the caller may
+          not request tables for the named user)
+        - The widget returned an object that is not a table
+        - No table arrived before the configured widget timeout elapsed
+
+    Usage:
+        ```python
+        try:
+            table = await fetch_web_client_data_table(
+                session, WebClientDataTable.CATALOG, operate_as="jdoe", timeout_seconds=30.0
+            )
+        except WebClientDataError as e:
+            logger.error(f"WebClientData fetch failed: {e}")
         ```
     """
 

@@ -52,6 +52,8 @@ Enterprise refresh is a four-phase operation:
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import override
 
@@ -62,6 +64,7 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp._taxonomy import SessionOrigin
 from deephaven_mcp.client import (
+    WEB_CLIENT_DATA_PQ,
     CorePlusControllerClient,
     CorePlusQuerySerial,
     CorePlusSession,
@@ -303,6 +306,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         self._timeouts = timeouts
         self._factory_manager: CorePlusSessionFactoryManager | None = None
         self._controller_client: CorePlusControllerClient | None = None
+        self._web_client_data_session: CorePlusSession | None = None
+        self._web_client_data_lock = asyncio.Lock()
         self._phase: InitializationPhase = InitializationPhase.NOT_STARTED
         self._error: str | None = None
         self._discovery_task: asyncio.Task[None] | None = None
@@ -351,6 +356,142 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         return self._factory_manager
 
     # ------------------------------------------------------------------
+    # WebClientData session
+    # ------------------------------------------------------------------
+
+    @asynccontextmanager
+    async def web_client_data_session(self) -> AsyncIterator[CorePlusSession]:
+        """Borrow this system's WebClientData session for the duration of a read.
+
+        The session is created on first use and cached. A cached session is
+        yielded only after a liveness check passes; a dead session is
+        discarded and replaced. Because the registry owns exactly one factory
+        manager, and therefore one credential set, the yielded session is
+        authenticated as this system's configured principal without the caller
+        supplying credentials.
+
+        The cache lock is held for the whole ``async with`` body, not just the
+        acquisition: :class:`CorePlusSession` is documented as single-threaded
+        with non-overlapping calls, and every borrower shares this one
+        instance. Concurrent reads on a system are therefore serialized.
+
+        Yields:
+            CorePlusSession: A live session on the ``WebClientData`` persistent
+                query, usable for any system-scoped read such as the catalog.
+
+        Raises:
+            InternalError: If the registry has not been initialized, or was
+                closed while this call waited for the cache lock.
+            Exception: Any exception raised while connecting to the
+                ``WebClientData`` persistent query propagates unchanged; a
+                system where that PQ is not running cannot serve these tables.
+        """
+        async with self._web_client_data_lock:
+            yield await self._connect_web_client_data()
+
+    async def _connect_web_client_data(self) -> CorePlusSession:
+        """Return the cached WebClientData session, reconnecting if it is dead.
+
+        Caller must hold ``_web_client_data_lock``.
+
+        Returns:
+            CorePlusSession: A live session on the ``WebClientData`` PQ.
+
+        Raises:
+            InternalError: If the registry has been closed.
+            Exception: Any failure connecting to the persistent query.
+        """
+        # Resolved inside the lock: a close() that lands while this call
+        # waits clears the manager, and this then fails rather than
+        # connecting a session nothing will ever close.
+        factory_manager = self.factory_manager
+
+        cached = self._web_client_data_session
+        if cached is not None:
+            try:
+                # Bounded: an unbounded probe would hold the lock and stall
+                # every catalog request for this system.
+                if await asyncio.wait_for(
+                    cached.is_alive(),
+                    timeout=self._timeouts.quick_operation_timeout_seconds,
+                ):
+                    return cached
+                raise RuntimeError("is_alive() returned False")
+            except Exception as e:
+                _LOGGER.warning(
+                    f"[{self.__class__.__name__}] cached '{WEB_CLIENT_DATA_PQ}' session "
+                    f"failed liveness check ({exception_summary(e)}); reconnecting"
+                )
+                self._web_client_data_session = None
+                await self._close_web_client_data_session(cached)
+
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] connecting to '{WEB_CLIENT_DATA_PQ}' "
+            f"for system '{self._system_name}'"
+        )
+        factory_instance = await factory_manager.get()
+        session = await factory_instance.connect_to_persistent_query(
+            name=WEB_CLIENT_DATA_PQ
+        )
+        self._web_client_data_session = session
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] connected to '{WEB_CLIENT_DATA_PQ}' "
+            f"for system '{self._system_name}'"
+        )
+        return session
+
+    async def effective_user(self) -> str:
+        """Return the identity this system's factory authenticated as.
+
+        Read from the authentication token, so it reflects the operate-as
+        identity for every credential kind. Per-user reads through the
+        ``WebClientData`` widget must name this identity.
+
+        Returns:
+            str: The effective user for this system.
+
+        Raises:
+            InternalError: If the registry has not been initialized, or if the
+                controller client has authenticated but reports no user.
+            Exception: Any exception raised while reaching the controller
+                propagates unchanged.
+        """
+        factory_instance = await self.factory_manager.get()
+        controller = factory_instance.controller_client
+        user = controller.effective_user
+        if user is None:
+            # The controller authenticates lazily; a ping forces the token.
+            await controller.ping()
+            user = controller.effective_user
+        if user is None:
+            raise InternalError(
+                f"Controller client for enterprise system "
+                f"'{self._system_name}' reports no effective user after "
+                f"authenticating; cannot perform a per-user read."
+            )
+        return user
+
+    async def _close_web_client_data_session(self, session: CorePlusSession) -> None:
+        """Close a WebClientData session, logging and swallowing any failure.
+
+        Bounded because this runs under ``_web_client_data_lock`` and again
+        during shutdown, where a stalled close would block every later request.
+
+        Args:
+            session (CorePlusSession): The session to close.
+        """
+        try:
+            await asyncio.wait_for(
+                session.close(),
+                timeout=self._timeouts.quick_operation_timeout_seconds,
+            )
+        except Exception as e:
+            _LOGGER.warning(
+                f"[{self.__class__.__name__}] error closing '{WEB_CLIENT_DATA_PQ}' "
+                f"session: {exception_summary(e)}"
+            )
+
+    # ------------------------------------------------------------------
     # BaseRegistry overrides — lifecycle
     # ------------------------------------------------------------------
 
@@ -390,7 +531,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         2. Acquire ``_refresh_lock`` as a barrier — waits for any in-flight
            ``_sync_enterprise_sessions`` to finish before proceeding.
         3. Cancel and await the background discovery task (outside lock).
-        4. Close the factory manager using the local ref captured in step 1.
+        4. Close the cached WebClientData session (drained in step 1b), then
+           the factory manager, using the local refs captured earlier.
         5. Under ``self._lock``: clear remaining mutable state and ``_items``.
         6. Close remaining session managers (outside lock) via ``_close_items``.
 
@@ -408,6 +550,13 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             factory = self._factory_manager
             self._factory_manager = None
 
+        # Step 1b: drain the WebClientData cache under its own lock, so an
+        # in-flight connect completes and is handed over here rather than
+        # storing a session after shutdown.
+        async with self._web_client_data_lock:
+            web_client_data = self._web_client_data_session
+            self._web_client_data_session = None
+
         # Step 2: barrier — wait for any in-flight _sync_enterprise_sessions.
         async with self._refresh_lock:
             pass
@@ -424,6 +573,9 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             )
 
         # Step 4: close factory manager via local ref captured under the lock.
+        if web_client_data is not None:
+            await self._close_web_client_data_session(web_client_data)
+
         if factory is not None:
             try:
                 await factory.close()

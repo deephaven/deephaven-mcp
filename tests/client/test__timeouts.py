@@ -84,6 +84,7 @@ def test_enterprise_client_default_values():
     assert cfg.pq_management_timeout_seconds == 60.0
     assert cfg.quick_operation_timeout_seconds == 5.0
     assert cfg.pq_state_change_timeout_seconds == 120
+    assert cfg.web_client_data_timeout_seconds == 30.0
     assert cfg.no_wait_seconds == 0.0
 
 
@@ -98,6 +99,7 @@ def test_enterprise_client_model_fields_set():
         "subscribe_timeout_seconds",
         "pq_management_timeout_seconds",
         "pq_state_change_timeout_seconds",
+        "web_client_data_timeout_seconds",
         "no_wait_seconds",
     }
 
@@ -114,16 +116,23 @@ def test_enterprise_client_validate_full_block():
             "pq_management_timeout_seconds": 7.0,
             "quick_operation_timeout_seconds": 8.0,
             "pq_state_change_timeout_seconds": 9,
+            "web_client_data_timeout_seconds": 10.0,
             "no_wait_seconds": 0.0,
         }
     )
     assert cfg.session_connect_timeout_seconds == 1.0
     assert cfg.pq_state_change_timeout_seconds == 9
+    assert cfg.web_client_data_timeout_seconds == 10.0
 
 
 def test_enterprise_client_rejects_zero_for_positive_timeouts():
     with pytest.raises(ValidationError):
         EnterpriseClientTimeouts.model_validate({"session_connect_timeout_seconds": 0})
+
+
+def test_enterprise_client_rejects_zero_web_client_data_timeout_seconds():
+    with pytest.raises(ValidationError):
+        EnterpriseClientTimeouts.model_validate({"web_client_data_timeout_seconds": 0})
 
 
 def test_enterprise_client_rejects_negative_no_wait_seconds():

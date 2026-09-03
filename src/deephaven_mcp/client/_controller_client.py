@@ -147,6 +147,22 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         self._timeouts = timeouts
         _LOGGER.debug("[CorePlusControllerClient] Initialized")
 
+    @property
+    def effective_user(self) -> str | None:
+        """Return the identity this client authenticated as, if known.
+
+        Read from the authentication token's user context, so it reflects the
+        operate-as identity regardless of which credential kind produced the
+        token.
+
+        Returns:
+            str | None: The effective user, or ``None`` when this client has
+                not authenticated yet. Authentication happens on first use, so
+                a caller that needs the value should exercise the client first
+                (:meth:`ping` suffices).
+        """
+        return self.wrapped.effective_user
+
     # ===========================================================================
     # Initialization & Connection Management
     # ===========================================================================

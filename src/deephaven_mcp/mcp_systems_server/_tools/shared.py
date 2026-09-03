@@ -10,7 +10,7 @@ Provides common helpers used across the MCP tool modules:
 - ID parsers and formatters: :func:`parse_pq_id`, :func:`make_pq_id`
   (use :meth:`QualifiedSessionId.from_str` directly for session ids).
 - Session retrieval: :func:`get_session_from_context`,
-  :func:`get_enterprise_session`.
+  :func:`get_enterprise_session`, :func:`get_wcd_system_session`.
 - Response helpers: :func:`error_response`, :func:`check_response_size`,
   :func:`build_table_data_response`, :func:`format_schema_result`.
 - Parameter guards: :func:`validate_programming_language`.
@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import NamedTuple, assert_never
 
 import pyarrow
@@ -65,6 +67,7 @@ from deephaven_mcp.sessions import VALID_PROGRAMMING_LANGUAGES
 
 __all__ = [
     "ParsedPqId",
+    "SystemAccess",
     "build_table_data_response",
     "check_response_size",
     "check_session_limit",
@@ -81,6 +84,7 @@ __all__ = [
     "get_registry",
     "get_response_limits",
     "get_session_from_context",
+    "get_wcd_system_session",
     "make_pq_id",
     "parse_pq_id",
     "redact_json_sensitive_fields",
@@ -462,6 +466,16 @@ def resolve_pq_ids_to_single_system(
 # ---------------------------------------------------------------------------
 
 
+class SystemAccess(NamedTuple):
+    """A system's shared WebClientData session and the identity it acts as."""
+
+    session: CorePlusSession
+    """Live session on the system's ``WebClientData`` persistent query."""
+
+    operate_as: str
+    """Identity whose ACLs per-user widget tables are built with."""
+
+
 async def get_session_from_context(
     function_name: str, context: Context, session_id: str
 ) -> BaseSession:
@@ -556,6 +570,55 @@ async def get_enterprise_session(
         raise UnsupportedOperationError(error_msg)
 
     return session
+
+
+@asynccontextmanager
+async def get_wcd_system_session(
+    function_name: str, context: Context, system: str
+) -> AsyncIterator[SystemAccess]:
+    """Borrow the shared WebClientData session and operate-as identity for a system.
+
+    Routes to the system's :class:`EnterpriseSessionRegistry` and yields its
+    cached ``WebClientData`` session together with the identity that session
+    authenticated as. Use this for system-scoped reads served by the
+    ``WebClientData`` table-factory widget — the widget builds each table for
+    a named user, so both halves are needed.
+
+    The session is borrowed for the duration of the ``async with`` body and is
+    shared by every caller on this system, so reads are serialized. Do only
+    the widget read inside the body; leave response shaping outside it.
+
+    Args:
+        function_name (str): Name of calling function for logging.
+        context (Context): The MCP context object.
+        system (str): Enterprise system name (the ``system_name`` field in
+            the system's config file).
+
+    Yields:
+        SystemAccess: The live ``WebClientData`` session and the operate-as
+            identity to name in widget requests.
+
+    Raises:
+        InvalidSessionNameError: If ``system`` is not a configured
+            enterprise system.
+        InternalError: If the registry is missing from the lifespan context,
+            or the controller reports no effective user.
+        Exception: Any exception raised while connecting to
+            ``WebClientData`` propagates unchanged; a system where that
+            persistent query is not running cannot serve these reads.
+    """
+    _LOGGER.debug(
+        f"[mcp_systems_server:{function_name}] Acquiring WebClientData session "
+        f"for system '{system}'"
+    )
+    registry = get_enterprise_registry(context, system)
+    operate_as = await registry.effective_user()
+    async with registry.web_client_data_session() as session:
+        _LOGGER.info(
+            f"[mcp_systems_server:{function_name}] WebClientData session established "
+            f"for system '{system}' as user '{operate_as}'"
+        )
+        yield SystemAccess(session=session, operate_as=operate_as)
 
 
 # ---------------------------------------------------------------------------

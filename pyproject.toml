@@ -37,7 +37,7 @@ dependencies = [
     # Docs/LLM and web server dependencies
     "fastapi>=0.116.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.35.0", # ASGI server for FastAPI
-    "openai>=1.0.0",            # OpenAI Python SDK for LLM Q&A
+    "openai>=1.0.0,<3",         # OpenAI Python SDK for LLM Q&A; 3.x replaced httpx with httpx2 in its http_client contract
     "pydantic>=2.6.0",          # Data validation and settings (model_serializer context support)
     # Configuration file parsing
     "json5>=0.9.0",             # JSON5 format support (comments, trailing commas)

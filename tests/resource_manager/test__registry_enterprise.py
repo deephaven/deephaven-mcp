@@ -34,7 +34,7 @@ from deephaven_mcp._exceptions import (
 )
 from deephaven_mcp._taxonomy import SessionOrigin
 from deephaven_mcp.auth.credentials import PasswordCredentials
-from deephaven_mcp.client import EnterpriseClientTimeouts
+from deephaven_mcp.client import CorePlusSession, EnterpriseClientTimeouts
 from deephaven_mcp.resource_manager import (
     EnterpriseSessionRegistry,
     InitializationPhase,
@@ -1446,3 +1446,290 @@ async def test_sync_enterprise_sessions_controller_error_preserves_all_state():
     assert registry._items[controller_key] is controller_mgr
     assert registry._items[dynamic_key] is dynamic_mgr
     assert registry._error is not None
+
+
+# ---------------------------------------------------------------------------
+# web_client_data_session
+# ---------------------------------------------------------------------------
+
+
+def _wcd_registry_with_session(session):
+    """Return an initialized registry whose factory yields ``session`` for a PQ."""
+    registry = _make_initialized_registry()
+    factory_instance = MagicMock()
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=session)
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+    return registry, factory_instance
+
+
+async def _borrow_wcd(registry):
+    """Borrow and immediately return the registry's WebClientData session."""
+    async with registry.web_client_data_session() as session:
+        return session
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_connects_by_pq_name():
+    session = MagicMock(spec=CorePlusSession)
+    registry, factory_instance = _wcd_registry_with_session(session)
+
+    async with registry.web_client_data_session() as result:
+        pass
+
+    assert result is session
+    factory_instance.connect_to_persistent_query.assert_awaited_once_with(
+        name="WebClientData"
+    )
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_reuses_live_cached_session():
+    session = MagicMock(spec=CorePlusSession)
+    session.is_alive = AsyncMock(return_value=True)
+    registry, factory_instance = _wcd_registry_with_session(session)
+
+    async with registry.web_client_data_session() as first:
+        pass
+    async with registry.web_client_data_session() as second:
+        pass
+
+    assert first is second
+    # Only the first call connects; the second reuses the cache.
+    factory_instance.connect_to_persistent_query.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_replaces_dead_cached_session():
+    dead = MagicMock(spec=CorePlusSession)
+    dead.is_alive = AsyncMock(return_value=False)
+    dead.close = AsyncMock()
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(dead)
+    registry._web_client_data_session = dead
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    async with registry.web_client_data_session() as result:
+        pass
+
+    assert result is fresh
+    dead.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_replaces_session_whose_liveness_check_raises():
+    dead = MagicMock(spec=CorePlusSession)
+    dead.is_alive = AsyncMock(side_effect=RuntimeError("connection reset"))
+    dead.close = AsyncMock()
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(dead)
+    registry._web_client_data_session = dead
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    async with registry.web_client_data_session() as result:
+        pass
+
+    assert result is fresh
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_replaces_session_whose_liveness_check_stalls():
+    """A stalled probe must not hold the lock; it falls into the reconnect path."""
+
+    async def never_answers():
+        await asyncio.sleep(30)
+        return True
+
+    stalled = MagicMock(spec=CorePlusSession)
+    stalled.is_alive = never_answers
+    stalled.close = AsyncMock()
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(stalled)
+    registry._timeouts = EnterpriseClientTimeouts.model_validate(
+        {"quick_operation_timeout_seconds": 0.05}
+    )
+    registry._web_client_data_session = stalled
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    result = await asyncio.wait_for(_borrow_wcd(registry), timeout=5)
+
+    assert result is fresh
+    stalled.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_replaces_session_whose_close_stalls():
+    """A stalled close of a dead session must not hold the cache lock."""
+
+    async def never_closes():
+        await asyncio.sleep(30)
+
+    stale = MagicMock(spec=CorePlusSession)
+    stale.is_alive = AsyncMock(return_value=False)
+    stale.close = never_closes
+    fresh = MagicMock(spec=CorePlusSession)
+
+    registry, factory_instance = _wcd_registry_with_session(stale)
+    registry._timeouts = EnterpriseClientTimeouts.model_validate(
+        {"quick_operation_timeout_seconds": 0.05}
+    )
+    registry._web_client_data_session = stale
+    factory_instance.connect_to_persistent_query = AsyncMock(return_value=fresh)
+
+    result = await asyncio.wait_for(_borrow_wcd(registry), timeout=5)
+
+    assert result is fresh
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_serializes_concurrent_borrowers():
+    """CorePlusSession forbids overlapping use, and every borrower shares one."""
+    session = MagicMock(spec=CorePlusSession)
+    session.is_alive = AsyncMock(return_value=True)
+    registry, _ = _wcd_registry_with_session(session)
+    overlapping = False
+    borrowers = 0
+
+    async def borrow():
+        nonlocal overlapping, borrowers
+        async with registry.web_client_data_session():
+            borrowers += 1
+            overlapping = overlapping or borrowers > 1
+            await asyncio.sleep(0.01)
+            borrowers -= 1
+
+    await asyncio.gather(*(borrow() for _ in range(4)))
+
+    assert not overlapping, "two callers held the shared session at once"
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_requires_initialized_registry():
+    registry = _make_registry()
+    with pytest.raises(InternalError):
+        async with registry.web_client_data_session():
+            pass
+
+
+@pytest.mark.asyncio
+async def test_close_web_client_data_session_swallows_close_errors():
+    registry = _make_initialized_registry()
+    session = MagicMock(spec=CorePlusSession)
+    session.close = AsyncMock(side_effect=RuntimeError("already gone"))
+
+    await registry._close_web_client_data_session(session)
+
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_releases_cached_web_client_data_session():
+    registry = _make_initialized_registry()
+    session = MagicMock(spec=CorePlusSession)
+    session.close = AsyncMock()
+    registry._web_client_data_session = session
+    registry._factory_manager.close = AsyncMock()
+
+    await registry.close()
+
+    session.close.assert_awaited_once()
+    assert registry._web_client_data_session is None
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_after_close_does_not_connect():
+    """The factory is resolved inside the lock, so a post-close caller fails."""
+    registry, factory_instance = _wcd_registry_with_session(
+        MagicMock(spec=CorePlusSession)
+    )
+    registry._factory_manager.close = AsyncMock()
+
+    await registry.close()
+
+    with pytest.raises(InternalError):
+        async with registry.web_client_data_session():
+            pass
+    factory_instance.connect_to_persistent_query.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_an_in_flight_web_client_data_connect():
+    """A connect racing close() must not leave an unclosed session behind."""
+    session = MagicMock(spec=CorePlusSession)
+    session.close = AsyncMock()
+    registry, factory_instance = _wcd_registry_with_session(session)
+    registry._factory_manager.close = AsyncMock()
+
+    connect_started = asyncio.Event()
+    release_connect = asyncio.Event()
+
+    async def slow_connect(**_kwargs):
+        connect_started.set()
+        await release_connect.wait()
+        return session
+
+    factory_instance.connect_to_persistent_query = AsyncMock(side_effect=slow_connect)
+
+    connect_task = asyncio.create_task(_borrow_wcd(registry))
+    await connect_started.wait()
+
+    close_task = asyncio.create_task(registry.close())
+    # Let close() run up to the WebClientData lock the connect still holds.
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert not close_task.done()
+
+    release_connect.set()
+    assert await connect_task is session
+    await close_task
+
+    session.close.assert_awaited_once()
+    assert registry._web_client_data_session is None
+
+
+@pytest.mark.asyncio
+async def test_effective_user_returns_the_controller_identity():
+    registry = _make_initialized_registry()
+    controller = MagicMock()
+    controller.effective_user = "jdoe"
+    factory_instance = MagicMock()
+    factory_instance.controller_client = controller
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+
+    assert await registry.effective_user() == "jdoe"
+
+
+@pytest.mark.asyncio
+async def test_effective_user_pings_when_not_yet_authenticated():
+    """A controller that has not authenticated is pinged, then re-read."""
+    registry = _make_initialized_registry()
+    controller = MagicMock()
+    controller.effective_user = None
+
+    async def _ping():
+        controller.effective_user = "jdoe"
+        return True
+
+    controller.ping = AsyncMock(side_effect=_ping)
+    factory_instance = MagicMock()
+    factory_instance.controller_client = controller
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+
+    assert await registry.effective_user() == "jdoe"
+    controller.ping.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_effective_user_raises_when_still_unknown_after_ping():
+    registry = _make_initialized_registry()
+    controller = MagicMock()
+    controller.effective_user = None
+    controller.ping = AsyncMock(return_value=True)
+    factory_instance = MagicMock()
+    factory_instance.controller_client = controller
+    registry._factory_manager.get = AsyncMock(return_value=factory_instance)
+
+    with pytest.raises(InternalError, match="no effective user"):
+        await registry.effective_user()

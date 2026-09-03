@@ -1711,3 +1711,18 @@ async def test_make_pq_config_restart_users_enum_conversion(
         )
         mock_enum.Value.assert_called_once_with("RU_ADMIN")
         assert mock_config.restartUsers == 1
+
+
+def test_effective_user_reads_the_wrapped_client(
+    coreplus_controller_client, dummy_controller_client
+):
+    """The identity comes from the vendor client's token-derived attribute."""
+    dummy_controller_client.effective_user = "jdoe"
+    assert coreplus_controller_client.effective_user == "jdoe"
+
+
+def test_effective_user_is_none_before_authentication(
+    coreplus_controller_client, dummy_controller_client
+):
+    dummy_controller_client.effective_user = None
+    assert coreplus_controller_client.effective_user is None

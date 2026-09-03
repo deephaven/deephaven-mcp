@@ -6,11 +6,7 @@ This module provides coroutine-compatible utility functions for querying Deephav
 **Functions Provided:**
     - `get_table(session, table_name)`: Retrieve a Deephaven table as a pyarrow.Table snapshot.
     - `get_session_meta_table(session, table_name)`: Retrieve a session table's schema/meta table as a pyarrow.Table snapshot.
-    - `get_catalog_meta_table(session, namespace, table_name)`: Retrieve a catalog table's schema/meta table as a pyarrow.Table snapshot.
-    - `get_catalog_table_partition_columns(session, namespace, table_name)`: Return partition column definitions (name/type) for a catalog table.
-    - `get_catalog_table_partition_values(session, namespace, table_name, column)`: Return distinct values for a partition column, sorted descending.
-    - `find_catalog_table_recent_partition(session, namespace, table_name)`: Find DQL filter strings for the most recent partition slice with data.
-    - `get_catalog_table(session)`: Retrieve the catalog table from an enterprise session with optional filtering and namespace extraction.
+    - `get_catalog_table(session)`: Retrieve one user's catalog table via the WebClientData widget, with optional filtering and namespace extraction.
     - `get_pip_packages_table(session)`: Get a table of installed pip packages as a pyarrow.Table.
     - `get_programming_language_version_table(session)`: Get a table with Python version information as a pyarrow.Table.
     - `get_programming_language_version(session)`: Get the programming language version string from a Deephaven session.
@@ -26,13 +22,16 @@ This module provides coroutine-compatible utility functions for querying Deephav
 import asyncio
 import logging
 import textwrap
-from typing import Any, cast
 
 import pyarrow
 from pydeephaven.table import Table
 
 from deephaven_mcp._exceptions import InternalError, UnsupportedOperationError
-from deephaven_mcp.client import BaseSession, CorePlusSession
+from deephaven_mcp.client import (
+    BaseSession,
+    WebClientDataTable,
+    fetch_web_client_data_table,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -179,6 +178,51 @@ async def _apply_row_limit(
         return table, True
 
 
+async def _snapshot_filtered(
+    table: Table,
+    *,
+    filters: list[str] | None,
+    max_rows: int | None,
+    head: bool = True,
+    context_name: str,
+) -> tuple[pyarrow.Table, bool]:
+    """
+    Filter a Deephaven table, cap its rows, and snapshot it to Arrow.
+
+    This helper is the shared tail of every table-listing query: filters are
+    evaluated server-side, the row cap is applied, and the result is converted
+    to Arrow in one step.
+
+    Args:
+        table (Table): The Deephaven table to snapshot.
+        filters (list[str] | None): Deephaven where clause expressions, combined
+                                    with AND logic. None or empty means no filtering.
+        max_rows (int | None): Maximum number of rows to retrieve. None means the
+                               entire table (logs a warning).
+        head (bool): If True, take rows from the start; if False, from the end.
+                     Ignored when max_rows is None. Default is True.
+        context_name (str): Context description for logging (e.g., "catalog table").
+
+    Returns:
+        tuple[pyarrow.Table, bool]: A tuple containing:
+            - pyarrow.Table: The filtered, row-capped snapshot
+            - bool: True if the entire (filtered) table was retrieved, False if truncated
+
+    Note:
+        This is a private helper function for internal use only.
+    """
+    table = await _apply_filters(table, filters, context_name=context_name)
+    limited_table, is_complete = await _apply_row_limit(
+        table, max_rows, head=head, context_name=context_name
+    )
+    arrow_table = await asyncio.to_thread(limited_table.to_arrow)
+    _LOGGER.debug(
+        f"[queries:_snapshot_filtered] {context_name.capitalize()} converted to Arrow "
+        f"({arrow_table.num_rows} rows, is_complete={is_complete})"
+    )
+    return arrow_table, is_complete
+
+
 # ===== Public API Functions =====
 
 
@@ -272,7 +316,7 @@ async def _extract_meta_table(table: Table, context: str) -> pyarrow.Table:
         Exception: If the meta table cannot be accessed or converted to Arrow format.
 
     Note:
-        This is an internal helper function used by get_session_meta_table and get_catalog_meta_table.
+        This is an internal helper function used by get_session_meta_table.
     """
     meta_table = await asyncio.to_thread(lambda: table.meta_table)
     arrow_meta_table = await asyncio.to_thread(meta_table.to_arrow)
@@ -303,7 +347,6 @@ async def get_session_meta_table(
         Exception: If the table does not exist, the session is closed, or if meta table retrieval fails.
 
     Note:
-        - For catalog tables in Enterprise sessions, use get_catalog_meta_table instead
         - Logging is performed at DEBUG level for entry, exit, and error tracing
         - This function is intended for internal use only
     """
@@ -312,424 +355,6 @@ async def get_session_meta_table(
     )
     table = await session.open_table(table_name)
     return await _extract_meta_table(table, table_name)
-
-
-async def _load_catalog_table(
-    session: CorePlusSession,
-    namespace: str,
-    table_name: str,
-) -> Table:
-    """
-    Load a catalog table, trying historical_table first, then live_table as fallback.
-
-    This helper consolidates the common pattern of loading catalog tables with
-    historical/live fallback logic.
-
-    Args:
-        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
-        namespace (str): The catalog namespace containing the table.
-        table_name (str): The name of the table within the namespace.
-
-    Returns:
-        Table: The loaded Deephaven table.
-
-    Raises:
-        Exception: If the table cannot be accessed via either historical_table or live_table.
-
-    Note:
-        This is an internal helper function for use by other queries functions.
-    """
-    _LOGGER.debug(
-        f"[queries:_load_catalog_table] Loading catalog table '{namespace}.{table_name}'"
-    )
-
-    # Try historical_table first (immutable snapshot, preferred)
-    try:
-        _LOGGER.debug(
-            f"[queries:_load_catalog_table] Attempting historical_table for '{namespace}.{table_name}'"
-        )
-        table = await session.historical_table(namespace, table_name)
-        _LOGGER.debug(
-            f"[queries:_load_catalog_table] Successfully loaded '{namespace}.{table_name}' via historical_table"
-        )
-        return table
-    except Exception as hist_exc:
-        _LOGGER.debug(
-            f"[queries:_load_catalog_table] historical_table failed for '{namespace}.{table_name}', trying live_table: {hist_exc}"
-        )
-        # Fall back to live_table
-        try:
-            table = await session.live_table(namespace, table_name)
-            _LOGGER.debug(
-                f"[queries:_load_catalog_table] Successfully loaded '{namespace}.{table_name}' via live_table"
-            )
-            return table
-        except Exception as live_exc:
-            _LOGGER.error(
-                f"[queries:_load_catalog_table] Both historical_table and live_table failed for '{namespace}.{table_name}': "
-                f"historical={hist_exc}, live={live_exc}"
-            )
-            raise Exception(
-                f"Failed to load catalog table '{namespace}.{table_name}': "
-                f"historical_table error: {hist_exc}, live_table error: {live_exc}"
-            ) from live_exc
-
-
-_MAX_PARTITION_PROBES = 50
-"""Maximum number of partition values to probe when searching for a partition with data.
-
-Caps the number of round-trips to DHE during partition auto-detection. A table with
-many empty historical partitions (e.g. purged dates) may require probing several
-values before finding one with rows; raising this limit increases the search depth
-at the cost of more queries.
-"""
-
-
-async def _extract_partition_column_defs(table: Table) -> list[dict]:
-    """
-    Parse table.meta_table for IsPartitioning=True columns. Type-agnostic.
-
-    Propagates exceptions — callers decide how to handle failures.
-
-    Returns a list of {"name": str, "type": str} dicts for each partition column.
-    """
-    meta_arrow = await asyncio.to_thread(
-        lambda: table.meta_table.view(["Name", "IsPartitioning", "DataType"]).to_arrow()
-    )
-    d = meta_arrow.to_pydict()
-    return [
-        {"name": n, "type": t}
-        for n, is_p, t in zip(
-            d.get("Name", []),
-            d.get("IsPartitioning", []),
-            d.get("DataType", []),
-            strict=True,
-        )
-        if is_p
-    ]
-
-
-def _format_partition_filter(col: str, val: object) -> str:
-    """
-    Format a Deephaven DQL where-clause fragment for a partition column value.
-
-    Partition values are expected to be strings. Raises InternalError for other types.
-    """
-    if isinstance(val, str):
-        return f"{col} == `{val}`"
-    raise InternalError(
-        f"Unsupported partition value type for column '{col}': "
-        f"{type(val).__name__!r} (value={val!r}). Only string partition values are currently supported."
-    )
-
-
-async def _get_distinct_column_values(
-    table: Table, col: str, *, descending: bool
-) -> list[Any]:
-    """
-    Return distinct values for a column sorted ascending or descending.
-
-    Propagates exceptions — callers decide how to handle failures.
-    """
-    arrow = await asyncio.to_thread(
-        lambda: (
-            table.select_distinct(col).sort_descending(col)
-            if descending
-            else table.select_distinct(col).sort(col)
-        ).to_arrow()
-    )
-    return cast(list[Any], arrow[col].to_pylist())
-
-
-async def _find_recent_partition_filters(
-    table: Table, namespace: str, table_name: str
-) -> list[str] | None:
-    """
-    Find where-clause filters for the most recent partition slice that has data.
-
-    Only single-column partitioning is supported. Raises InternalError if the table
-    has more than one IsPartitioning column. Partition columns must be of string type;
-    non-string partition values raise InternalError. Enumerates distinct values of that
-    column sorted descending (most-recent-first for string-sorted columns), probes each
-    until finding one with rows. Returns a filter list or None if the
-    table has no partition columns or all probes find no data.
-
-    Propagates errors from meta_table / select_distinct. Per-probe failures (e.g.
-    access control on a specific partition) are logged at WARNING and skipped.
-    """
-    col_defs = await _extract_partition_column_defs(table)
-    if not col_defs:
-        return None
-
-    if len(col_defs) > 1:
-        raise InternalError(
-            f"Table '{namespace}.{table_name}' has {len(col_defs)} partition columns "
-            f"({[c['name'] for c in col_defs]}); only single-column partitioning is supported."
-        )
-
-    primary_col = col_defs[0]["name"]
-    values = await _get_distinct_column_values(table, primary_col, descending=True)
-    if not values:
-        _LOGGER.debug(
-            f"[queries:_find_recent_partition_filters] "
-            f"No distinct values for '{namespace}.{table_name}' col '{primary_col}'"
-        )
-        return None
-
-    for val in values[:_MAX_PARTITION_PROBES]:
-        if val is None:
-            continue
-        filter_str = _format_partition_filter(primary_col, val)
-        try:
-            probe_size = await asyncio.to_thread(
-                lambda fs=filter_str: table.where([fs]).size  # type: ignore[misc]
-            )
-        except Exception as e:
-            _LOGGER.warning(
-                f"[queries:_find_recent_partition_filters] "
-                f"Probe failed for '{namespace}.{table_name}' filter '{filter_str}': {e}"
-            )
-            continue
-        if probe_size is None:
-            raise InternalError(
-                f"[queries:_find_recent_partition_filters] Table .size returned None for '{namespace}.{table_name}'"
-            )
-        if probe_size > 0:
-            _LOGGER.debug(
-                f"[queries:_find_recent_partition_filters] "
-                f"Found partition with data for '{namespace}.{table_name}' "
-                f"(1 filter)"
-            )
-            return [filter_str]
-    return None
-
-
-async def get_catalog_table_partition_columns(
-    session: CorePlusSession, namespace: str, table_name: str
-) -> list[dict]:
-    """
-    Return partition column definitions for a catalog table.
-
-    Each dict has "name" (str) and "type" (str, Java class name) for columns
-    with IsPartitioning=True in the table's meta table.
-
-    Args:
-        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
-        namespace (str): The catalog namespace containing the table.
-        table_name (str): The name of the table within the namespace.
-
-    Returns:
-        list[dict]: List of {"name": str, "type": str} for each partition column.
-                    Empty list if the table has no partition columns.
-
-    Raises:
-        Exception: If the table cannot be loaded or the meta table cannot be accessed.
-    """
-    _LOGGER.debug(
-        f"[queries:get_catalog_table_partition_columns] Getting partition columns for '{namespace}.{table_name}'"
-    )
-    table = await _load_catalog_table(session, namespace, table_name)
-    return await _extract_partition_column_defs(table)
-
-
-async def get_catalog_table_partition_values(
-    session: CorePlusSession, namespace: str, table_name: str, column: str
-) -> list:
-    """
-    Return distinct partition column values, sorted descending (most-recent first).
-
-    Partition columns are expected to be of string type.
-
-    Args:
-        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
-        namespace (str): The catalog namespace containing the table.
-        table_name (str): The name of the table within the namespace.
-        column (str): The partition column name to enumerate values for.
-
-    Returns:
-        list: Distinct values for the column, sorted descending. Empty list if no values.
-
-    Raises:
-        Exception: If the table cannot be loaded or the column cannot be accessed.
-    """
-    _LOGGER.debug(
-        f"[queries:get_catalog_table_partition_values] Getting distinct values for "
-        f"'{namespace}.{table_name}' col '{column}'"
-    )
-    table = await _load_catalog_table(session, namespace, table_name)
-    return await _get_distinct_column_values(table, column, descending=True)
-
-
-async def find_catalog_table_recent_partition(
-    session: CorePlusSession, namespace: str, table_name: str
-) -> list[str] | None:
-    """
-    Find where-clause filters for the most recent partition slice with data.
-
-    Inspects the table's IsPartitioning columns, enumerates distinct values sorted
-    descending (most-recent first), and probes each until finding one that returns
-    rows. Returns a list of Deephaven DQL filter strings (e.g. ["Date == `2024-01-15`"])
-    or None if the table has no partition columns or no data is found.
-
-    Args:
-        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
-        namespace (str): The catalog namespace containing the table.
-        table_name (str): The name of the table within the namespace.
-
-    Returns:
-        list[str] | None: DQL filter strings for the most recent partition with data,
-                         or None if no partition columns or no data found.
-
-    Raises:
-        InternalError: If the table has more than one IsPartitioning column (only single-column
-                       partitioning is supported), or if a partition column contains non-string
-                       values (partition columns must be of string type).
-        Exception: If the table cannot be loaded or partition metadata cannot be accessed.
-    """
-    _LOGGER.debug(
-        f"[queries:find_catalog_table_recent_partition] Finding recent partition for '{namespace}.{table_name}'"
-    )
-    table = await _load_catalog_table(session, namespace, table_name)
-    return await _find_recent_partition_filters(table, namespace, table_name)
-
-
-async def get_catalog_table_data(
-    session: CorePlusSession,
-    namespace: str,
-    table_name: str,
-    *,
-    max_rows: int | None,
-    head: bool = True,
-    filters: list[str] | None = None,
-) -> tuple[pyarrow.Table, bool]:
-    """
-    Asynchronously retrieve data from a specific catalog table as a pyarrow.Table from a Deephaven Enterprise session.
-
-    This function loads a catalog table (trying historical_table first, then live_table as fallback)
-    and retrieves its data with optional row limiting and partition filtering. Use this for tables
-    in the Enterprise catalog system.
-
-    Args:
-        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
-        namespace (str): The catalog namespace containing the table.
-        table_name (str): The name of the table within the namespace.
-        max_rows (int | None): Maximum number of rows to retrieve. Must be specified as keyword argument.
-                               Set to None to retrieve entire table (use with caution for large tables).
-        head (bool): If True and max_rows is not None, retrieve rows from the beginning using head().
-                    If False and max_rows is not None, retrieve rows from the end using tail().
-                    Ignored when max_rows=None. Default is True.
-        filters (list[str] | None): Controls partition filtering behavior:
-                                    - None (default): auto-detect partition columns and apply the most
-                                      recent partition filter with data (see find_catalog_table_recent_partition).
-                                    - [] (empty list): no filter applied; skip auto-detection.
-                                    - ["expr", ...]: apply these explicit Deephaven DQL filters; skip auto-detection.
-
-    Returns:
-        tuple[pyarrow.Table, bool]: A tuple containing:
-            - pyarrow.Table: The requested table (or subset) as a pyarrow.Table snapshot
-            - bool: True if the entire table was retrieved, False if only a subset was returned
-
-    Raises:
-        Exception: If the table cannot be accessed via either historical_table or live_table,
-                  or if conversion to Arrow fails.
-
-    Note:
-        - Tries historical_table first (immutable snapshot, preferred for data sampling)
-        - Falls back to live_table if historical_table fails
-        - For session tables, use get_table instead
-        - Logging is performed at DEBUG level for entry, exit, and error tracing
-        - This function is intended for internal use only
-    """
-    _LOGGER.debug(
-        f"[queries:get_catalog_table_data] Retrieving catalog table data for '{namespace}.{table_name}' "
-        f"(max_rows={max_rows}, head={head}, filters={filters!r})"
-    )
-
-    # Load catalog table using helper
-    table = await _load_catalog_table(session, namespace, table_name)
-
-    # Determine effective filters: auto-detect when filters=None, skip when filters=[]
-    effective_filters = filters
-    if filters is None:
-        try:
-            effective_filters = await _find_recent_partition_filters(
-                table, namespace, table_name
-            )
-            if effective_filters:
-                _LOGGER.info(
-                    f"[queries:get_catalog_table_data] Auto-detected {len(effective_filters)} "
-                    f"partition filter(s) for '{namespace}.{table_name}'"
-                )
-        except Exception as e:
-            _LOGGER.warning(
-                f"[queries:get_catalog_table_data] Partition auto-detection failed for "
-                f"'{namespace}.{table_name}', proceeding without filter: {e}"
-            )
-            effective_filters = None
-
-    # Apply filters if any
-    table = await _apply_filters(
-        table,
-        effective_filters,
-        context_name=f"catalog table '{namespace}.{table_name}'",
-    )
-
-    # Apply row limiting using helper function
-    limited_table, is_complete = await _apply_row_limit(
-        table,
-        max_rows,
-        head=head,
-        context_name=f"catalog table '{namespace}.{table_name}'",
-    )
-
-    # Convert to Arrow format
-    arrow_table = await asyncio.to_thread(limited_table.to_arrow)
-
-    _LOGGER.debug(
-        f"[queries:get_catalog_table_data] Catalog table '{namespace}.{table_name}' converted to Arrow format successfully "
-        f"({arrow_table.num_rows} rows, is_complete={is_complete})"
-    )
-    return arrow_table, is_complete
-
-
-async def get_catalog_meta_table(
-    session: CorePlusSession, namespace: str, table_name: str
-) -> pyarrow.Table:
-    """
-    Asynchronously retrieve the meta table (schema/metadata) for a catalog table in a Deephaven Enterprise session.
-
-    This function loads a catalog table (trying historical_table first, then live_table as fallback)
-    and retrieves its meta table. Use this for tables in the Enterprise catalog system.
-
-    Args:
-        session (CorePlusSession): An active Deephaven Enterprise (Core+) session.
-        namespace (str): The catalog namespace containing the table.
-        table_name (str): The name of the table within the namespace.
-
-    Returns:
-        pyarrow.Table: The meta table containing schema/metadata information for the specified catalog table.
-                      Each row represents a column with fields like 'Name' and 'DataType'.
-
-    Raises:
-        Exception: If the table cannot be accessed via either historical_table or live_table,
-                  or if the meta table cannot be retrieved.
-
-    Note:
-        - Tries historical_table first (immutable snapshot, better for schema inspection)
-        - Falls back to live_table if historical_table fails
-        - For session tables, use get_session_meta_table instead
-        - Logging is performed at DEBUG level for entry, exit, and error tracing
-        - This function is intended for internal use only
-    """
-    _LOGGER.debug(
-        f"[queries:get_catalog_meta_table] Retrieving meta table for catalog table '{namespace}.{table_name}'..."
-    )
-
-    # Load catalog table using helper
-    table = await _load_catalog_table(session, namespace, table_name)
-
-    # Extract meta table using common helper
-    return await _extract_meta_table(table, f"{namespace}.{table_name}")
 
 
 async def get_programming_language_version_table(session: BaseSession) -> pyarrow.Table:
@@ -964,25 +589,35 @@ async def get_dh_versions(session: BaseSession) -> tuple[str | None, str | None]
 async def get_catalog_table(
     session: BaseSession,
     *,
+    operate_as: str,
+    timeout_seconds: float,
     max_rows: int | None,
     filters: list[str] | None = None,
     distinct_namespaces: bool,
 ) -> tuple[pyarrow.Table, bool]:
     """
-    Asynchronously retrieve the catalog table from a Deephaven Enterprise (Core+) session.
+    Asynchronously retrieve the catalog table for one user from a WebClientData session.
 
-    The catalog table contains metadata about tables accessible via the `deephaven_enterprise.database`
-    package (the `db` variable) in an enterprise session. This includes tables that can be accessed
-    using methods like `db.live_table(namespace, table_name)` or `db.historical_table(namespace, table_name)`.
-    The catalog includes table names, namespaces, schemas, and other descriptive information. This
-    function is only available for enterprise sessions (CorePlusSession).
+    The catalog table lists the tables accessible via the `deephaven_enterprise.database`
+    package (the `db` variable), e.g. `db.live_table(namespace, table_name)` or
+    `db.historical_table(namespace, table_name)`. It is fetched through the
+    ``WebClientData`` table-factory widget, which builds it with ``operate_as``'s
+    ACLs applied. That identity is the server's configured Enterprise principal
+    for the system, not the MCP caller, so every caller sees the same listing.
+    Fetching the
+    catalog directly off a shared worker instead would be refused for anyone who
+    does not administer that worker.
 
     For more information, see:
     - https://deephaven.io
     - https://docs.deephaven.io/pycoreplus/latest/worker/code/deephaven_enterprise.database.html
 
     Args:
-        session (BaseSession): An active Deephaven enterprise session. Must be a CorePlusSession.
+        session (BaseSession): An active session connected to the system's
+                               ``WebClientData`` persistent query. Must be a
+                               CorePlusSession.
+        operate_as (str): Identity whose ACLs the catalog is built with.
+        timeout_seconds (float): Budget for the widget request/response round-trip.
         max_rows (int | None): Maximum number of rows to retrieve. Must be specified as keyword argument.
                                Set to None to retrieve the entire catalog (use with caution for large catalogs).
                                Set to a positive integer to limit rows (recommended for production use).
@@ -990,7 +625,8 @@ async def get_catalog_table(
                                     Multiple filters are combined with AND logic. Filters use Deephaven query
                                     language syntax with backticks (`) for string literals.
         distinct_namespaces (bool): Required. If True, returns only distinct namespaces (sorted) instead of full catalog.
-                                   Filters are applied after selecting distinct namespaces. Must be explicitly specified.
+                                   Filters are applied to the full catalog before the namespaces are extracted, so a
+                                   filter may reference TableName. Must be explicitly specified.
 
     Returns:
         tuple[pyarrow.Table, bool]: A tuple containing:
@@ -999,7 +635,8 @@ async def get_catalog_table(
 
     Raises:
         UnsupportedOperationError: If the session is not an enterprise (Core+) session.
-        Exception: If the catalog cannot be retrieved, filters are invalid, or conversion to Arrow fails.
+        WebClientDataError: If the widget cannot produce the catalog table.
+        Exception: If filters are invalid or conversion to Arrow fails.
 
     Warning:
         Setting max_rows=None on large enterprise deployments with thousands of tables can cause
@@ -1008,41 +645,30 @@ async def get_catalog_table(
     Examples:
         # Get first 1000 catalog entries
         catalog, is_complete = await get_catalog_table(
-            session, max_rows=1000, distinct_namespaces=False
+            session,
+            operate_as="jdoe",
+            timeout_seconds=30.0,
+            max_rows=1000,
+            distinct_namespaces=False,
         )
 
         # Filter by namespace
         catalog, is_complete = await get_catalog_table(
             session,
+            operate_as="jdoe",
+            timeout_seconds=30.0,
             max_rows=1000,
             filters=["Namespace = `market_data`"],
             distinct_namespaces=False,
         )
 
-        # Filter by table name pattern (case-sensitive contains)
-        catalog, is_complete = await get_catalog_table(
-            session,
-            max_rows=1000,
-            filters=["TableName.contains(`price`)"],
-            distinct_namespaces=False,
-        )
-
-        # Multiple filters (AND logic)
-        catalog, is_complete = await get_catalog_table(
-            session,
-            max_rows=1000,
-            filters=["Namespace = `market_data`", "TableName.contains(`daily`)"],
-            distinct_namespaces=False,
-        )
-
         # Get distinct namespaces only
         namespaces, is_complete = await get_catalog_table(
-            session, max_rows=1000, distinct_namespaces=True
-        )
-
-        # Full catalog retrieval (dangerous for large deployments)
-        catalog, is_complete = await get_catalog_table(
-            session, max_rows=None, distinct_namespaces=False
+            session,
+            operate_as="jdoe",
+            timeout_seconds=30.0,
+            max_rows=1000,
+            distinct_namespaces=True,
         )
 
     Note:
@@ -1050,12 +676,13 @@ async def get_catalog_table(
         - Filters use Deephaven query language syntax (see https://deephaven.io/core/docs/how-to-guides/use-filters/)
         - String literals in filters must use backticks (`), not single or double quotes
         - This function is intended for internal use by MCP tools
-        - Only works with enterprise (Core+) sessions that have catalog_table() method
+        - Catalog columns are ``Namespace``, ``NamespaceSet``, and ``TableName``
     """
     from deephaven_mcp.client import CorePlusSession
 
     _LOGGER.debug(
-        f"[queries:get_catalog_table] Retrieving catalog table from enterprise session (max_rows={max_rows}, filters={filters})..."
+        f"[queries:get_catalog_table] Retrieving catalog table via WebClientData "
+        f"(operate_as={operate_as!r}, max_rows={max_rows}, filters={filters})..."
     )
 
     # Check if the session is an enterprise session
@@ -1068,43 +695,37 @@ async def get_catalog_table(
             f"but session is {type(session).__name__}."
         )
 
-    # Get the catalog table
-    catalog_table = await session.catalog_table()
+    catalog_table = await fetch_web_client_data_table(
+        session,
+        WebClientDataTable.CATALOG,
+        operate_as=operate_as,
+        timeout_seconds=timeout_seconds,
+    )
     _LOGGER.debug("[queries:get_catalog_table] Catalog table retrieved successfully.")
 
-    # Handle distinct namespaces case
+    # Determine table type for logging
+    table_type = "namespace table" if distinct_namespaces else "catalog table"
+
+    # Filters run before the namespace projection: documented expressions
+    # reference TableName, which select_distinct("Namespace") would drop.
+    catalog_table = await _apply_filters(
+        catalog_table, filters, context_name=table_type
+    )
+
     if distinct_namespaces:
         _LOGGER.debug("[queries:get_catalog_table] Extracting distinct namespaces...")
-        # Step 1: Select distinct namespaces
         catalog_table = await asyncio.to_thread(
             lambda: catalog_table.select_distinct("Namespace")
         )
-        # Step 2: Sort namespaces
         catalog_table = await asyncio.to_thread(lambda: catalog_table.sort("Namespace"))
         _LOGGER.debug(
             "[queries:get_catalog_table] Distinct namespaces extracted and sorted."
         )
 
-    # Determine table type for logging
-    table_type = "namespace table" if distinct_namespaces else "catalog table"
-
-    # Apply filters if provided (works for both full catalog and distinct namespaces)
-    catalog_table = await _apply_filters(
-        catalog_table, filters, context_name=table_type
-    )
-
-    # Apply row limiting using helper function (always from head for catalog tables)
-    catalog_table, is_complete = await _apply_row_limit(
+    return await _snapshot_filtered(
         catalog_table,
-        max_rows,
+        filters=None,
+        max_rows=max_rows,
         head=True,
         context_name=table_type,
     )
-
-    # Convert to Arrow format
-    arrow_table = await asyncio.to_thread(catalog_table.to_arrow)
-
-    _LOGGER.debug(
-        "[queries:get_catalog_table] Catalog table converted to Arrow format successfully."
-    )
-    return arrow_table, is_complete

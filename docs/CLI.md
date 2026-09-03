@@ -230,7 +230,7 @@ available:
 - **Fix it in place**: `dhcli config set` / `dhcli config unset`
   rewrite one field, `dhcli config edit <path>` opens the whole
   file in your editor (`$VISUAL`, else `$EDITOR`), and `dhcli config
-  get` reads raw on-disk contents even from a partial or invalid tree.
+get` reads raw on-disk contents even from a partial or invalid tree.
 - **Stuck daemon**: read `daemon.json` directly under
   `<runtime_dir>/daemon/`, then `kill <pid>`. Optionally `rm`
   the registry file once the process is gone.
@@ -244,22 +244,22 @@ slot in without a breaking schema change.
 
 #### `output.*` — presentation
 
-| Field                | Type    | Default | Notes                                                                       |
-|----------------------|---------|---------|-----------------------------------------------------------------------------|
-| `output.format`      | string  | `json` | One of `human`, `json`, `json-pretty`, `yaml`. Machine-first default (`json` is compact single-line); set `human` for interactive use or `json-pretty` for indented JSON. Override per invocation with `-o/--output`. |
+| Field           | Type   | Default | Notes                                                                                                                                                                                                                 |
+| --------------- | ------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `output.format` | string | `json`  | One of `human`, `json`, `json-pretty`, `yaml`. Machine-first default (`json` is compact single-line); set `human` for interactive use or `json-pretty` for indented JSON. Override per invocation with `-o/--output`. |
 
 #### `daemon.*` — CLI-side daemon lifecycle
 
-| Field                                       | Type    | Default | Notes                                                                          |
-|---------------------------------------------|---------|---------|--------------------------------------------------------------------------------|
-| `daemon.auto_start`                         | bool    | `true`  | When `false`, `dhcli` exits if no daemon is running.                          |
-| `daemon.reuse.version`                      | string  | `refuse`| Action when the running daemon's package version differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`. |
-| `daemon.reuse.venv`                         | string  | `refuse`| Action when the daemon's virtualenv (`sys.prefix`) differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`. |
-| `daemon.reuse.fingerprint`                  | string  | `warn`  | Action when only the source fingerprint differs (an in-place code edit at the same version + venv). One of `ignore`, `warn`, `restart`, `refuse`. |
-| `daemon.timeouts.startup_deadline_seconds`  | integer | `30`    | How long the CLI waits for a freshly-spawned daemon to publish its registry.   |
-| `daemon.timeouts.kill_after_seconds`        | integer | `10`    | How long `daemon stop`/`restart` waits after `SIGTERM` before escalating to `SIGKILL`. |
+| Field                                      | Type    | Default  | Notes                                                                                                                                             |
+| ------------------------------------------ | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daemon.auto_start`                        | bool    | `true`   | When `false`, `dhcli` exits if no daemon is running.                                                                                              |
+| `daemon.reuse.version`                     | string  | `refuse` | Action when the running daemon's package version differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`.                            |
+| `daemon.reuse.venv`                        | string  | `refuse` | Action when the daemon's virtualenv (`sys.prefix`) differs from the CLI's. One of `ignore`, `warn`, `restart`, `refuse`.                          |
+| `daemon.reuse.fingerprint`                 | string  | `warn`   | Action when only the source fingerprint differs (an in-place code edit at the same version + venv). One of `ignore`, `warn`, `restart`, `refuse`. |
+| `daemon.timeouts.startup_deadline_seconds` | integer | `30`     | How long the CLI waits for a freshly-spawned daemon to publish its registry.                                                                      |
+| `daemon.timeouts.kill_after_seconds`       | integer | `10`     | How long `daemon stop`/`restart` waits after `SIGTERM` before escalating to `SIGKILL`.                                                            |
 
-The CLI verifies a running daemon is the *same build* it ships from — not
+The CLI verifies a running daemon is the _same build_ it ships from — not
 merely alive — before reusing it, comparing three identity fields:
 package **version**, **venv** (`sys.prefix`), and a **source fingerprint**
 (a hash of the installed package's `*.py` files). Each differing field
@@ -272,25 +272,25 @@ restarting while end users are still protected.
 
 #### `request.*` — outbound MCP requests
 
-| Field                                  | Type    | Default | Notes                                            |
-|----------------------------------------|---------|---------|--------------------------------------------------|
-| `request.timeouts.default_seconds`     | integer | `60`    | Per-request timeout. Override with `--timeout`.  |
+| Field                              | Type    | Default | Notes                                           |
+| ---------------------------------- | ------- | ------- | ----------------------------------------------- |
+| `request.timeouts.default_seconds` | integer | `60`    | Per-request timeout. Override with `--timeout`. |
 
 #### `docs.*` — docs MCP server
 
-| Field                          | Type    | Default | Notes                                                                        |
-|--------------------------------|---------|---------|-------------------------------------------------------------------------------|
-| `docs.url`                     | string  | `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp` | Streamable-HTTP endpoint of the docs MCP server the `docs` commands query. Defaults to the Deephaven-hosted production docs server; point it at a self-hosted `dh-mcp-docs-server` to query that instead. Validated eagerly: must be `http://` or `https://` with a host and a well-formed port, and must not contain userinfo credentials (`user:password@`) — the URL is echoed in output and error messages. |
-| `docs.timeouts.request_seconds`| integer | `120`   | Per-request timeout for docs server calls. Higher than the daemon request default because docs queries are LLM-backed. Override with `--timeout`. |
+| Field                           | Type    | Default                                                     | Notes                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------- | ------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs.url`                      | string  | `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp` | Streamable-HTTP endpoint of the docs MCP server the `docs` commands query. Defaults to the Deephaven-hosted production docs server; point it at a self-hosted `dh-mcp-docs-server` to query that instead. Validated eagerly: must be `http://` or `https://` with a host and a well-formed port, and must not contain userinfo credentials (`user:password@`) — the URL is echoed in output and error messages. |
+| `docs.timeouts.request_seconds` | integer | `120`                                                       | Per-request timeout for docs server calls. Higher than the daemon request default because docs queries are LLM-backed. Override with `--timeout`.                                                                                                                                                                                                                                                               |
 
 #### `context.*` — sticky context
 
-| Field              | Type | Default | Notes                                                                                   |
-|--------------------|------|---------|------------------------------------------------------------------------------------------|
-| `context.enabled`  | bool | `true`  | Whether commands that take a session, system, or PQ id fall back to the sticky context in `context.json` when the argument is omitted. `false` disables the fallback; an omitted argument then fails with `context_not_set`. `context.json` is still readable and writable — `context show` reports each stored value with provenance `disabled` — so only the automatic fallback is affected. Override per invocation with `--no-context`. |
+| Field                         | Type | Default | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `context.enabled`             | bool | `true`  | Whether commands that take a session, system, or PQ id fall back to the sticky context in `context.json` when the argument is omitted. `false` disables the fallback; an omitted argument then fails with `context_not_set`. `context.json` is still readable and writable — `context show` reports each stored value with provenance `disabled` — so only the automatic fallback is affected. Override per invocation with `--no-context`.                                                   |
 | `context.confirm_destructive` | bool | `false` | Whether a verb that executes, destroys, or disrupts (`session exec`/`delete`, `pq delete`/`stop`/`restart`/`modify`) asks for confirmation before acting on a target that came from `context.json` rather than the command line. An explicitly named target is never confirmed. Skip per invocation with `--yes`; declining exits `2` (`operation_canceled`). Skipped silently when prompting is unavailable (no TTY, or `--no-input`), so enabling it never breaks a non-interactive caller. |
 
-The sticky context's *values* (the session/system/PQ ids themselves) are
+The sticky context's _values_ (the session/system/PQ ids themselves) are
 never stored here — they are ephemeral per-user state in
 `<runtime_dir>/context.json`, managed with `dhcli context set` /
 `dhcli context unset`. See the `dhcli context` command-tree entry below.
@@ -299,36 +299,36 @@ Example (JSON5; `//` comments are accepted):
 
 ```json5
 {
-  "output": {
-    "format": "json"
+  output: {
+    format: "json",
   },
-  "daemon": {
-    "auto_start": true,
-    "reuse": {
-      "version": "refuse",        // ignore | warn | restart | refuse
-      "venv": "refuse",
-      "fingerprint": "warn"
+  daemon: {
+    auto_start: true,
+    reuse: {
+      version: "refuse", // ignore | warn | restart | refuse
+      venv: "refuse",
+      fingerprint: "warn",
     },
-    "timeouts": {
-      "startup_deadline_seconds": 30,
-      "kill_after_seconds": 10
-    }
+    timeouts: {
+      startup_deadline_seconds: 30,
+      kill_after_seconds: 10,
+    },
   },
-  "request": {
-    "timeouts": {
-      "default_seconds": 30
-    }
+  request: {
+    timeouts: {
+      default_seconds: 30,
+    },
   },
-  "docs": {
-    "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-    "timeouts": {
-      "request_seconds": 120
-    }
+  docs: {
+    url: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    timeouts: {
+      request_seconds: 120,
+    },
   },
-  "context": {
-    "enabled": true,
-    "confirm_destructive": false  // ask before acting on a context-supplied target
-  }
+  context: {
+    enabled: true,
+    confirm_destructive: false, // ask before acting on a context-supplied target
+  },
 }
 ```
 
@@ -364,7 +364,7 @@ unusable anyway, looser modes are silently corrected):
 - `<runtime_dir>/daemon/daemon.json`: `0600` (re-applied on every
   registry write).
 
-The CLI does *not* refuse to operate when it observes looser
+The CLI does _not_ refuse to operate when it observes looser
 modes — it logs and corrects them. On Windows none of these mode
 changes apply; ACL hardening for the runtime tree is tracked
 under the Windows-support follow-up.
@@ -385,11 +385,11 @@ decide which id is legitimate, and they matter most for AI agents:
    to get something to work in.
 2. **A listing is discovery, not a menu.** `session list` and `pq list`
    span every user's resources on the configured systems, production
-   included. A returned id is a *candidate*, not a target: never run a
+   included. A returned id is a _candidate_, not a target: never run a
    script in, stop, restart, or delete one you did not create and were
    not pointed at. `session list --origin dynamic` narrows the listing
    to tool-created sessions. (`system list` is different — it reports
-   the systems *your* configuration declares.)
+   the systems _your_ configuration declares.)
 
 The [sticky context](#dhcli-context) interacts with both: a verb whose
 id is omitted acts on the persisted default, which is not visible on
@@ -411,22 +411,22 @@ uses.
 
 ### `dhcli daemon`
 
-| Verb       | Purpose                                                                                       |
-|------------|-----------------------------------------------------------------------------------------------|
-| `start`    | Idempotently spawn the daemon (or report the existing one). Returns the shared `{state, message, daemon, paths}` envelope with `state: "running"`. |
-| `stop`     | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                        |
-| `status`   | Reports the daemon's `state` (`running`/`stopped`/`crashed`) and a human `message`. Includes a `daemon` object — the running daemon's registry entry, redacted: `pid`, `create_time_ns`, `process_name`, `host`, `port`, redacted `psk`, `started_at`, `config_dir`, `server_name`, and a `build_identity` sub-object with `version`, `venv`, `fingerprint` — **only when running**, and always includes `paths` (config, runtime, registry, log). Read-only: a `crashed` entry is reported, not cleaned up — use `start` or `repair`. Exits 0 in all three states. |
-| `restart`  | `stop` then `start` in one shot; returns the same `{state, message, daemon, paths}` envelope as `start`. |
-| `repair`   | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`). |
-| `logs`     | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). Auto-generated session tokens appear in the output in plaintext (see [`docs/SECURITY.md`](SECURITY.md#secret-handling)). |
+| Verb      | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start`   | Idempotently spawn the daemon (or report the existing one). Returns the shared `{state, message, daemon, paths}` envelope with `state: "running"`.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `stop`    | Idempotent SIGTERM (escalating to SIGKILL); removes the registry file.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `status`  | Reports the daemon's `state` (`running`/`stopped`/`crashed`) and a human `message`. Includes a `daemon` object — the running daemon's registry entry, redacted: `pid`, `create_time_ns`, `process_name`, `host`, `port`, redacted `psk`, `started_at`, `config_dir`, `server_name`, and a `build_identity` sub-object with `version`, `venv`, `fingerprint` — **only when running**, and always includes `paths` (config, runtime, registry, log). Read-only: a `crashed` entry is reported, not cleaned up — use `start` or `repair`. Exits 0 in all three states. |
+| `restart` | `stop` then `start` in one shot; returns the same `{state, message, daemon, paths}` envelope as `start`.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `repair`  | Recovers from a corrupt `daemon.json` by moving it aside to `daemon.json.corrupt-<UTC>` so a fresh `start` can write a clean registry. Refuses while a live daemon is still registered (`daemon_registry_live`).                                                                                                                                                                                                                                                                                                                                                    |
+| `logs`    | Tails `daemon.log`. `-n/--lines N` controls the initial tail (default 100); `-f/--follow` follows the file (Ctrl-C to exit); `--path` prints the absolute log-file path and exits (works even if the daemon has never started). Auto-generated session tokens appear in the output in plaintext (see [`docs/SECURITY.md`](SECURITY.md#secret-handling)).                                                                                                                                                                                                            |
 
 ### `dhcli tool`
 
-| Verb               | Purpose                                                                                                 |
-|--------------------|---------------------------------------------------------------------------------------------------------|
-| `list`             | Lists registered tools. Internal tools (`_`-prefixed) are hidden unless `--all` is supplied.            |
-| `show <name>`      | Prints one tool's name, description, and JSON input schema.                                             |
-| `call <name>`      | Invokes a tool. Pass arguments as `--arg key=value` (repeatable); JSON-decoded when possible.           |
+| Verb          | Purpose                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| `list`        | Lists registered tools. Internal tools (`_`-prefixed) are hidden unless `--all` is supplied.  |
+| `show <name>` | Prints one tool's name, description, and JSON input schema.                                   |
+| `call <name>` | Invokes a tool. Pass arguments as `--arg key=value` (repeatable); JSON-decoded when possible. |
 
 `tool` is the escape hatch, not the main road. It reaches every tool,
 including ones no verb fronts, but `tool call` is a raw passthrough:
@@ -457,17 +457,17 @@ Sessions are addressed by a fully qualified id `type:system:name`
 the right backend by the id's prefix; `create` chooses the backend from
 `--system`. Type is never a subgroup.
 
-| Verb                          | Purpose                                                                                       |
-|-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list`                        | Lists sessions (both types) — every user's, not just yours; see [Choosing a target](#choosing-a-target). Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. The list can be incomplete while Enterprise discovery runs or a system is unreachable, in which case a warning naming the phase and failing systems goes to stderr. Wraps `sessions_list`. |
-| `show [ID]`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
-| `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
-| `delete [ID]`                 | Deletes a session, routing by the id prefix. Only a session `create` made (`origin: dynamic`) is eligible; others exit `3`. `--yes` skips the context confirmation. Wraps `session_community_delete` / `session_enterprise_delete`. |
-| `exec [ID]`                   | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. `--yes` skips the context confirmation. Wraps `session_script_run`. |
-| `pip-list [ID]`               | Lists the session's installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
-| `credentials [ID]`            | Prints a Community session's browser-login credentials (`id`, `auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
-| `url [ID]`                    | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly. |
-| `open [ID]`                   | Opens the authenticated URL in the default browser; `--print` prints it instead (headless-safe). |
+| Verb                         | Purpose                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`                       | Lists sessions (both types) — every user's, not just yours; see [Choosing a target](#choosing-a-target). Filters: `--type community\|enterprise`, `--system NAME`, `--origin static\|dynamic\|discovered`. The list can be incomplete while Enterprise discovery runs or a system is unreachable, in which case a warning naming the phase and failing systems goes to stderr. Wraps `sessions_list`. |
+| `show [ID]`                  | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`.                                                                                                                                                                                                                                                                                                   |
+| `create [NAME] --system SYS` | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`.                                                                                                |
+| `delete [ID]`                | Deletes a session, routing by the id prefix. Only a session `create` made (`origin: dynamic`) is eligible; others exit `3`. `--yes` skips the context confirmation. Wraps `session_community_delete` / `session_enterprise_delete`.                                                                                                                                                                   |
+| `exec [ID]`                  | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. `--yes` skips the context confirmation. Wraps `session_script_run`.                                                                                                                                                                                       |
+| `pip-list [ID]`              | Lists the session's installed pip packages as a `{package, version}` array. Wraps `session_pip_list`.                                                                                                                                                                                                                                                                                                 |
+| `credentials [ID]`           | Prints a Community session's browser-login credentials (`id`, `auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`.                                                                                                                                                                                                                        |
+| `url [ID]`                   | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly.                                                                                                                                                                                                                                                                                                               |
+| `open [ID]`                  | Opens the authenticated URL in the default browser; `--print` prints it instead (headless-safe).                                                                                                                                                                                                                                                                                                      |
 
 `create` options are split by type and mutually exclusive: Community
 takes `--launch-method`, `--auth-token`, `--docker-image`,
@@ -480,7 +480,7 @@ Shared: `--language` (`Python`/`Groovy`), `--heap-size-gb`, `--jvm-arg`
 (client-side; suppresses the automatic sticky-context set on success).
 Supplying a wrong-type option exits `2` (`option_not_applicable`).
 
-For an Enterprise system, `create` is *create-and-connect*: it provisions
+For an Enterprise system, `create` is _create-and-connect_: it provisions
 a Persistent Query and connects immediately, and `delete` also deletes
 that PQ. Because `delete` destroys the PQ, it accepts only a session
 `create` made; a session that already existed (`origin: static` or
@@ -528,16 +528,16 @@ dhcli session open community:community:dev --print --reveal-secrets
 
 ### `dhcli system`
 
-A *system* is the source dimension of every fully qualified session id
+A _system_ is the source dimension of every fully qualified session id
 (`type:system:name`): the single Community umbrella (named `community`)
 plus every configured Enterprise (Core+) system.
 
-| Verb         | Purpose                                                                                       |
-|--------------|-----------------------------------------------------------------------------------------------|
-| `list`       | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`. |
-| `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dhcli config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
-| `url [NAME]` | Prints an Enterprise system's web console URL — pipe-friendly. |
-| `open [NAME]`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
+| Verb          | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`        | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `status`      | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dhcli config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
+| `url [NAME]`  | Prints an Enterprise system's web console URL — pipe-friendly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `open [NAME]` | Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 `url` and `open` are Enterprise-only and computed locally from
 configuration — they do **not** contact the daemon. The URL is the
@@ -564,11 +564,11 @@ dhcli system open prod --print
 Inspects tables in a session. All verbs take a fully qualified
 session id; `list` falls back to the sticky context when it is omitted.
 
-| Verb                          | Purpose                                                                                       |
-|-------------------------------|-----------------------------------------------------------------------------------------------|
-| `list [ID]`                   | Lists the session's table names. Wraps `session_tables_list`. |
-| `schema <id> <table>`         | Column definitions for one table: name and type per column, plus `column_type` where meaningful. Wraps `session_table_schema`. |
-| `data <id> <table>`           | Row data as JSON objects keyed by column name: `--max-rows N` (default 1000), `--head/--tail` (default head). Wraps `session_table_data`. |
+| Verb                  | Purpose                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `list [ID]`           | Lists the session's table names. Wraps `session_tables_list`.                                                                             |
+| `schema <id> <table>` | Column definitions for one table: name and type per column, plus `column_type` where meaningful. Wraps `session_table_schema`.            |
+| `data <id> <table>`   | Row data as JSON objects keyed by column name: `--max-rows N` (default 1000), `--head/--tail` (default head). Wraps `session_table_data`. |
 
 `schema` and `data` require an explicit `ID`: a table name follows it,
 so a single argument would be ambiguous and they cannot fall back to
@@ -588,31 +588,25 @@ dhcli table data community:community:dev trades | jq '.row_count, .is_complete'
 
 ### `dhcli catalog`
 
-**Enterprise (Core+) only.** Queries an enterprise session's catalog
-(database); `ID` must name an enterprise session.
+**Enterprise (Core+) only.** Queries an enterprise data catalog (database).
 
-| Verb                                  | Purpose                                                                               |
-|---------------------------------------|---------------------------------------------------------------------------------------|
-| `tables [ID]`                         | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
-| `namespaces [ID]`                     | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
-| `schema <id> <namespace> <table>`     | Column definitions for one catalog table: name and type per column, plus `column_type` where meaningful. Wraps `catalog_table_schema`. |
-| `sample <id> <namespace> <table>`    | Sample rows. `--max-rows` (default 100), `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
+`tables` and `namespaces` take a `SYSTEM` and need no worker of your own: they
+read the listing through the system's shared `WebClientData` persistent query,
+which builds the catalog with the ACLs of the Enterprise principal the server
+is configured with for that system. That is not your CLI identity — every
+caller of a given system sees the same listing. `WebClientData` must be
+running on the system.
 
-As with `table`, `schema` and `sample` require an explicit `ID`
-(a namespace and table name follow it), while `tables` and
-`namespaces` fall back to the sticky context.
+| Verb                  | Purpose                                                                                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tables [SYSTEM]`     | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
+| `namespaces [SYSTEM]` | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`.              |
 
-`sample` is a preview, not a query. Partitioned tables would return
-nothing without a partition filter, so with no `--filter` the tool
-detects the table's partition columns and samples the most recent
-partition holding data; passing `--filter` replaces that with your own
-expressions. `catalog schema` marks partition columns with
-`column_type: Partitioning`.
+Both verbs fall back to the sticky context system when `SYSTEM` is omitted.
 
 ```bash
-dhcli catalog tables enterprise:prod:42
-dhcli catalog schema enterprise:prod:42 Market Trades
-dhcli catalog sample enterprise:prod:42 Market Trades --max-rows 20
+dhcli catalog tables prod
+dhcli catalog namespaces prod
 ```
 
 ### `dhcli pq`
@@ -628,17 +622,17 @@ interacts with a live worker (scripts, tables, credentials). Pass a
 running PQ's id to either noun's verbs verbatim. Community sessions have
 no PQ counterpart (local workers are ephemeral).
 
-| Verb                                  | Purpose                                                                               |
-|---------------------------------------|---------------------------------------------------------------------------------------|
-| `list [SYSTEM]`                       | Lists PQs configured on a system — every user's, including production; see [Choosing a target](#choosing-a-target). Wraps `pq_list`. |
-| `details [ID]`                        | Configuration + status for one PQ. Wraps `pq_details`. |
-| `name-to-id <system> <name>`          | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`. |
-| `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-body-path`/`--git-script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
-| `modify [ID]`                         | Updates only the fields passed; everything else is left unchanged. A repeatable option **replaces** the PQ's existing list rather than appending. `--restart` restarts the PQ after applying the change. `--yes` skips the context confirmation. Wraps `pq_modify`. |
-| `delete [ID...]`                      | Deletes one or more PQs. `--max-concurrent N`, `--yes`. Wraps `pq_delete`. |
-| `start [ID...]`                       | Starts one or more PQs. `--wait/--no-wait`, `--max-concurrent`. Wraps `pq_start`. |
-| `stop [ID...]`                        | Stops one or more PQs. Same options as `start`, plus `--yes`. Wraps `pq_stop`. |
-| `restart [ID...]`                     | Restarts one or more PQs. Same options as `stop`. Wraps `pq_restart`. |
+| Verb                                        | Purpose                                                                                                                                                                                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list [SYSTEM]`                             | Lists PQs configured on a system — every user's, including production; see [Choosing a target](#choosing-a-target). Wraps `pq_list`.                                                                                                                                |
+| `details [ID]`                              | Configuration + status for one PQ. Wraps `pq_details`.                                                                                                                                                                                                              |
+| `name-to-id <system> <name>`                | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`.                                                                                                                                                                                                |
+| `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-body-path`/`--git-script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`.                                                  |
+| `modify [ID]`                               | Updates only the fields passed; everything else is left unchanged. A repeatable option **replaces** the PQ's existing list rather than appending. `--restart` restarts the PQ after applying the change. `--yes` skips the context confirmation. Wraps `pq_modify`. |
+| `delete [ID...]`                            | Deletes one or more PQs. `--max-concurrent N`, `--yes`. Wraps `pq_delete`.                                                                                                                                                                                          |
+| `start [ID...]`                             | Starts one or more PQs. `--wait/--no-wait`, `--max-concurrent`. Wraps `pq_start`.                                                                                                                                                                                   |
+| `stop [ID...]`                              | Stops one or more PQs. Same options as `start`, plus `--yes`. Wraps `pq_stop`.                                                                                                                                                                                      |
+| `restart [ID...]`                           | Restarts one or more PQs. Same options as `stop`. Wraps `pq_restart`.                                                                                                                                                                                               |
 
 `create` and `modify` share a large optional config flag set; only the flags you
 pass take effect (on `modify`, everything else is left unchanged). `create`
@@ -679,14 +673,14 @@ None of these verbs report a settled state:
   `UNINITIALIZED` — the state at the instant the controller accepted the
   definition, not the live state. Poll `pq details` for what the PQ is
   actually doing.
-- `start` / `restart` succeed on *acceptance*, not readiness. Branch on
+- `start` / `restart` succeed on _acceptance_, not readiness. Branch on
   each `results[].state_category`: `TRANSITIONAL` (state `CONNECTING` or
   `INITIALIZING`) is a normal outcome with `--no-wait` or a short wait,
   and only `ACTIVE` means the id is usable with the `session`, `table`,
   and `catalog` verbs.
 - A `--wait` that runs out is reported as a per-item failure even though
   the controller keeps going in the background. Treat a timeout as
-  *unknown* rather than failed: re-read `pq details` instead of retrying
+  _unknown_ rather than failed: re-read `pq details` instead of retrying
   blindly. The wait duration is
   `timeouts.client.pq_state_change_timeout_seconds` in
   `enterprise/settings.json` (120 seconds unless set), and
@@ -714,18 +708,18 @@ explicit argument, then `context.json`. `session create` and
 `--no-set-context` to skip this). A command that falls through every
 step with the id still unset exits `2` (`context_not_set`).
 
-| Verb                  | Purpose                                                                               |
-|-----------------------|----------------------------------------------------------------------------------------|
-| `show`                | Reports the stored value and provenance (`file`, `unset`, or `disabled`) for each of `session`, `system`, `pq`. Never contacts the daemon. |
-| `set KEY VALUE`       | Persists `VALUE` as the sticky default for `KEY`. `session`/`pq` are confirmed to exist via the daemon; `system` is checked against `'community'` and the configured Enterprise systems, with no daemon contact. |
-| `unset [KEY...] [--all]` | Clears one or more keys, or every key with `--all`. Pass one or the other, never both — combining them exits `2` (`mutually_exclusive_options`). Idempotent. |
+| Verb                     | Purpose                                                                                                                                                                                                          |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `show`                   | Reports the stored value and provenance (`file`, `unset`, or `disabled`) for each of `session`, `system`, `pq`. Never contacts the daemon.                                                                       |
+| `set KEY VALUE`          | Persists `VALUE` as the sticky default for `KEY`. `session`/`pq` are confirmed to exist via the daemon; `system` is checked against `'community'` and the configured Enterprise systems, with no daemon contact. |
+| `unset [KEY...] [--all]` | Clears one or more keys, or every key with `--all`. Pass one or the other, never both — combining them exits `2` (`mutually_exclusive_options`). Idempotent.                                                     |
 
 The `source` each key reports is one of:
 
-| `source`   | Meaning                                                                              |
-|------------|--------------------------------------------------------------------------------------|
-| `file`     | The key holds a value in `context.json`, and the fallback is on, so an omitted argument will use it. |
-| `unset`    | The key holds no value; a command that omits the argument exits `2` (`context_not_set`). |
+| `source`   | Meaning                                                                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `file`     | The key holds a value in `context.json`, and the fallback is on, so an omitted argument will use it.                                                       |
+| `unset`    | The key holds no value; a command that omits the argument exits `2` (`context_not_set`).                                                                   |
 | `disabled` | The fallback is off (`--no-context`, or `cli.context.enabled` set to `false`), so no command will consult the context. `value` still shows what is stored. |
 
 `set` and `unset` write to `context.json` even when the fallback is off,
@@ -735,21 +729,21 @@ Set by hand, the three keys are independent: a PQ and its running session
 share an id, but setting one never changes another. The `create` and
 `delete` verbs write or clear several at once:
 
-| Verb                          | Keys written or cleared                        |
-|-------------------------------|-------------------------------------------------|
-| `session create` (Community)  | sets `session`                                  |
-| `session create` (Enterprise) | sets `session`, `system`, `pq` (the session id *is* its PQ id) |
-| `pq create`                   | sets `pq`, `system`                             |
-| `session delete` / `pq delete`| clears `session` and `pq` when either pointed at a deleted id |
+| Verb                           | Keys written or cleared                                        |
+| ------------------------------ | -------------------------------------------------------------- |
+| `session create` (Community)   | sets `session`                                                 |
+| `session create` (Enterprise)  | sets `session`, `system`, `pq` (the session id _is_ its PQ id) |
+| `pq create`                    | sets `pq`, `system`                                            |
+| `session delete` / `pq delete` | clears `session` and `pq` when either pointed at a deleted id  |
 
 Disable the fallback for one invocation with `--no-context`, or
 permanently via `cli.context.enabled` (see the `context.*`
 configuration table above).
 
 The two flags govern opposite directions and are easy to confuse:
-`--no-context` disables *reading* the context (an omitted id fails
+`--no-context` disables _reading_ the context (an omitted id fails
 instead of falling back), while `--no-set-context` on `session create` /
-`pq create` disables *writing* it. `--no-context` alone still lets a
+`pq create` disables _writing_ it. `--no-context` alone still lets a
 successful `create` record the new id; pass both to leave `context.json`
 untouched in either direction.
 
@@ -783,9 +777,9 @@ given — the command proceeds without asking rather than failing, so
 enabling the setting never breaks a script. In practice an interactive
 human gets the prompt and a non-interactive caller does not.
 
-Five verbs keep a **required** leading positional despite the fallback:
-`table schema`, `table data`, `catalog schema`, `catalog sample` (each an
-`ID`), and `pq name-to-id` (a `SYSTEM`). Each takes a further required
+Three verbs keep a **required** leading positional despite the fallback:
+`table schema`, `table data` (each an `ID`), and `pq name-to-id` (a
+`SYSTEM`). Each takes a further required
 positional after it, and a leading optional argument followed by a
 required one is ambiguous to parse, so the first stays mandatory. The
 verb tables above mark this difference: bracketed (`[ID]`) means the
@@ -809,9 +803,9 @@ Queries the Deephaven documentation MCP server. These verbs connect
 `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp`) — the local
 daemon is not involved and is never started.
 
-| Verb     | Purpose                                                                                       |
-|----------|-----------------------------------------------------------------------------------------------|
-| `ask`    | Sends a one-shot question (`PROMPT`) to the documentation assistant and prints its answer (an object with a `response` field). Wraps the docs server's `docs_chat` tool. |
+| Verb     | Purpose                                                                                                                                                                                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ask`    | Sends a one-shot question (`PROMPT`) to the documentation assistant and prints its answer (an object with a `response` field). Wraps the docs server's `docs_chat` tool.                                                                                                             |
 | `status` | Checks that the configured docs server is reachable: initializes an MCP session, lists its tools, and reports `{url, reachable, tools, latency_ms}`. Exits `2` with `mcp_request_failed` when unreachable, or with `mcp_request_timeout` when the probe exceeds the request timeout. |
 
 `ask` accepts `--language` (`python`/`groovy`) to tailor code examples,
@@ -850,23 +844,23 @@ double-quoted to contain literal dots (`defaults.session_arguments."my.key"`,
 TOML dotted-key style); session/system names themselves can never
 contain dots. File boundaries surface only in `config files`.
 
-| Verb        | Purpose                                                                                       |
-|-------------|-----------------------------------------------------------------------------------------------|
-| `show`      | Prints the resolved configuration with secrets redacted (requires a valid tree).             |
-| `validate`  | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. A zero-system tree is valid (the no-systems invariant is enforced only where a system is required, not by this check). Validation runs before every command body, so this is CI-friendly. |
-| `files`     | Lists every configuration file: logical path, absolute file path, exists, valid, first validation error, template-resolution warnings. Works even when the configuration is broken or empty — the first command to run when diagnosing configuration problems. |
-| `init`      | Creates a working configuration in one step: afterwards `dhcli session create dev` starts a local Deephaven worker, with no Docker and nothing further to install. Asks no questions and contacts no server, so it is safe to script or run from an agent. Will not touch a configuration that is already there — if `community/settings.json` exists it stops with `already_exists` and changes nothing, so use `config set` to adjust an existing file. To use a Deephaven server you already run, or an Enterprise system, use `session add` / `system add` instead. |
-| `get [PATH]` | Prints the raw on-disk value at `PATH` (or the whole tree when omitted): a JSON object for a subtree, the bare scalar for a leaf. Works on a broken or partial tree and shows raw values with templating refs unresolved — unlike `show`, which prints the validated, template-resolved view. Secrets are `[REDACTED]` unless `--reveal-secrets` is passed, which additionally warns on stderr naming how many values it disclosed. |
-| `set ASSIGNMENT...` | Sets one or more fields via `PATH=VALUE` tokens (VALUE parsed as JSON first, falling back to a plain string). Intermediate objects are created as needed; a `PATH` naming a whole file takes a JSON object that **replaces** the file's contents (assignment, not a merge). Assignments spanning multiple files are validated first, then each file is written atomically, with the already-written files rolled back if a later write fails (per-file atomic with batch rollback, not cross-file atomic: a concurrent reader may briefly see a partial multi-file update). Cannot create a new session/system (use `session/system add`); refuses to rewrite a file with JSON5-only syntax (`config_not_rewritable` — use `config edit` instead). |
-| `unset PATH...` | Removes one or more fields, reverting each to its schema default. Cannot unset a whole file (use `session/system remove`); same JSON5-rewrite refusal as `set`. |
-| `keys [PATH]` | Lists every settable logical path below `PATH` (or the whole tree), with type and description — the discovery companion to `get`/`set`. Not exhaustive by design: a discriminated union (e.g. `auth.credentials`) and an open/free-form object (e.g. `session_arguments`) each collapse to a single `object` entry, so their variant- or user-chosen children (such as `auth.credentials.token`) are not listed even though `config set` accepts them. A whole file (its logical path; run `config files`) is likewise omitted. |
-| `edit PATH` | Opens the whole file named by `PATH` in the editor from `$VISUAL`, else `$EDITOR`, else a platform default ([`docs/ENV.md`](ENV.md#visual-and-editor)) and writes back exactly what was saved, comments and formatting included — the only authoring verb that can touch a JSON5-only file. Parses and schema-validates before writing; a failure leaves the file untouched. Interactive only (`no_tty` without a TTY or with `--no-input`). |
-| `session add NAME` | Declares a community session file (`community/sessions/<NAME>.json`). Flags: `--host`, `--port`, `--language`, `--auth anonymous\|psk\|password\|custom` plus the matching credential flags (`--token`; `--username`/`--password`/`--effective-user`; `--auth-type`/`--auth-token`). Missing values are prompted for on a terminal (stderr); non-interactive runs fail with `missing_required_option`. Refuses to overwrite (`already_exists`). |
-| `session remove NAME` | Deletes the session file. Confirms on a terminal; requires `--yes` otherwise.       |
-| `session list` | Lists declared session files with per-file validity. Contrast: `dhcli session list` shows *live* sessions. |
-| `system add NAME` | Declares an enterprise system file (`enterprise/systems/<NAME>.json`). Flags: `--url` (connection.json URL), `--auth password\|private_key` plus the matching credential flags (`--username`/`--password`/`--effective-user`; `--key` — use `${file:/path/key.pem}`), optional `--max-sessions`, `--heap-gb`. `community` is a reserved name. |
-| `system remove NAME` | Deletes the system file. Confirms on a terminal; requires `--yes` otherwise.        |
-| `system list` | Lists declared system files with per-file validity. Contrast: `dhcli system list` shows what the daemon serves. |
+| Verb                  | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `show`                | Prints the resolved configuration with secrets redacted (requires a valid tree).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `validate`            | Confirms the configuration is valid; exits `0`, or `2` with `config_invalid` if any file is malformed. A zero-system tree is valid (the no-systems invariant is enforced only where a system is required, not by this check). Validation runs before every command body, so this is CI-friendly.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `files`               | Lists every configuration file: logical path, absolute file path, exists, valid, first validation error, template-resolution warnings. Works even when the configuration is broken or empty — the first command to run when diagnosing configuration problems.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `init`                | Creates a working configuration in one step: afterwards `dhcli session create dev` starts a local Deephaven worker, with no Docker and nothing further to install. Asks no questions and contacts no server, so it is safe to script or run from an agent. Will not touch a configuration that is already there — if `community/settings.json` exists it stops with `already_exists` and changes nothing, so use `config set` to adjust an existing file. To use a Deephaven server you already run, or an Enterprise system, use `session add` / `system add` instead.                                                                                                                                                                            |
+| `get [PATH]`          | Prints the raw on-disk value at `PATH` (or the whole tree when omitted): a JSON object for a subtree, the bare scalar for a leaf. Works on a broken or partial tree and shows raw values with templating refs unresolved — unlike `show`, which prints the validated, template-resolved view. Secrets are `[REDACTED]` unless `--reveal-secrets` is passed, which additionally warns on stderr naming how many values it disclosed.                                                                                                                                                                                                                                                                                                                |
+| `set ASSIGNMENT...`   | Sets one or more fields via `PATH=VALUE` tokens (VALUE parsed as JSON first, falling back to a plain string). Intermediate objects are created as needed; a `PATH` naming a whole file takes a JSON object that **replaces** the file's contents (assignment, not a merge). Assignments spanning multiple files are validated first, then each file is written atomically, with the already-written files rolled back if a later write fails (per-file atomic with batch rollback, not cross-file atomic: a concurrent reader may briefly see a partial multi-file update). Cannot create a new session/system (use `session/system add`); refuses to rewrite a file with JSON5-only syntax (`config_not_rewritable` — use `config edit` instead). |
+| `unset PATH...`       | Removes one or more fields, reverting each to its schema default. Cannot unset a whole file (use `session/system remove`); same JSON5-rewrite refusal as `set`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `keys [PATH]`         | Lists every settable logical path below `PATH` (or the whole tree), with type and description — the discovery companion to `get`/`set`. Not exhaustive by design: a discriminated union (e.g. `auth.credentials`) and an open/free-form object (e.g. `session_arguments`) each collapse to a single `object` entry, so their variant- or user-chosen children (such as `auth.credentials.token`) are not listed even though `config set` accepts them. A whole file (its logical path; run `config files`) is likewise omitted.                                                                                                                                                                                                                    |
+| `edit PATH`           | Opens the whole file named by `PATH` in the editor from `$VISUAL`, else `$EDITOR`, else a platform default ([`docs/ENV.md`](ENV.md#visual-and-editor)) and writes back exactly what was saved, comments and formatting included — the only authoring verb that can touch a JSON5-only file. Parses and schema-validates before writing; a failure leaves the file untouched. Interactive only (`no_tty` without a TTY or with `--no-input`).                                                                                                                                                                                                                                                                                                       |
+| `session add NAME`    | Declares a community session file (`community/sessions/<NAME>.json`). Flags: `--host`, `--port`, `--language`, `--auth anonymous\|psk\|password\|custom` plus the matching credential flags (`--token`; `--username`/`--password`/`--effective-user`; `--auth-type`/`--auth-token`). Missing values are prompted for on a terminal (stderr); non-interactive runs fail with `missing_required_option`. Refuses to overwrite (`already_exists`).                                                                                                                                                                                                                                                                                                    |
+| `session remove NAME` | Deletes the session file. Confirms on a terminal; requires `--yes` otherwise.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `session list`        | Lists declared session files with per-file validity. Contrast: `dhcli session list` shows _live_ sessions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `system add NAME`     | Declares an enterprise system file (`enterprise/systems/<NAME>.json`). Flags: `--url` (connection.json URL), `--auth password\|private_key` plus the matching credential flags (`--username`/`--password`/`--effective-user`; `--key` — use `${file:/path/key.pem}`), optional `--max-sessions`, `--heap-gb`. `community` is a reserved name.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `system remove NAME`  | Deletes the system file. Confirms on a terminal; requires `--yes` otherwise.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `system list`         | Lists declared system files with per-file validity. Contrast: `dhcli system list` shows what the daemon serves.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Secret-bearing flags (`--token`, `--password`, `--key`, `--auth-token`)
 accept templating refs — `${env:VAR}`, `${env:VAR:-default}`,
@@ -874,7 +868,7 @@ accept templating refs — `${env:VAR}`, `${env:VAR:-default}`,
 server loads it; a literal value is accepted with a stderr hint
 recommending a ref. Authoring verbs never write an invalid file: every
 change is schema-validated and written atomically, and a ref that does
-not resolve in *your* shell (e.g. an env var only the daemon has) is a
+not resolve in _your_ shell (e.g. an env var only the daemon has) is a
 warning, not an error — even on a typed field such as `port`, whose
 type is checked when the server resolves the ref.
 
@@ -917,16 +911,16 @@ dhcli --agents                 # the summary tree (== agents tree)
 ```
 
 Like click's own `--help`, the universal `--help` and `--agents` flags
-are *not* listed under any command's `params`; the complete manifest
+are _not_ listed under any command's `params`; the complete manifest
 discloses them once under `universal_options`.
 
 #### The `agents` group
 
-| Verb                 | Output                                                                                  |
-|----------------------|-----------------------------------------------------------------------------------------|
-| `tree`               | The **summary tree** by default — every command path with its one-line summary, plus the project-wide `conventions`. Identical to `dhcli --agents`. With `--full`, the complete manifest instead: full nodes for every command plus the project-wide metadata. Both field lists are under [Node schema](#node-schema). |
-| `command PATH...`    | One command's **full node**, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--agents` to that command. A group's node lists its subcommands as one-line summaries; `--full` expands them into full nested nodes. A path that does not resolve exits `2` with `command_not_found`. |
-| `errors`             | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree --full`. **The decoder for every node's `error_codes`**, which name codes without their meanings; fetch it once and cache it. |
+| Verb              | Output                                                                                                                                                                                                                                                                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tree`            | The **summary tree** by default — every command path with its one-line summary, plus the project-wide `conventions`. Identical to `dhcli --agents`. With `--full`, the complete manifest instead: full nodes for every command plus the project-wide metadata. Both field lists are under [Node schema](#node-schema).       |
+| `command PATH...` | One command's **full node**, resolved from `PATH` (one or more command-name tokens; required). Identical to appending `--agents` to that command. A group's node lists its subcommands as one-line summaries; `--full` expands them into full nested nodes. A path that does not resolve exits `2` with `command_not_found`. |
+| `errors`          | The stable `error_code` registry (`code` + `help`) — also the `error_codes` key of `tree --full`. **The decoder for every node's `error_codes`**, which name codes without their meanings; fetch it once and cache it.                                                                                                       |
 
 ```bash
 dhcli agents tree | jq '.commands | keys'
@@ -940,22 +934,22 @@ dhcli agents errors | jq '.[].code'
 A command's node carries, as **sparse keys** (an absent key means
 false, empty, or the default):
 
-| Key           | Content                                                                                     |
-|---------------|----------------------------------------------------------------------------------------------|
-| `name`        | The command's own name, e.g. `stop` (always present).                                        |
-| `path`        | The full invocation path, e.g. `dhcli pq stop` — what to actually run. Omitted inside `tree --full`, where a node's position in the nested map already gives its path. |
-| `usage`       | Usage line in click's own form, e.g. `dhcli pq stop [OPTIONS] [ID]...`, giving the positional order. Omitted inside `tree --full` (`params` gives the order). |
-| `summary`     | One-line summary (always present).                                                           |
-| `description` | What the command does and when to use it.                                                    |
+| Key           | Content                                                                                                                                                                                                                      |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | The command's own name, e.g. `stop` (always present).                                                                                                                                                                        |
+| `path`        | The full invocation path, e.g. `dhcli pq stop` — what to actually run. Omitted inside `tree --full`, where a node's position in the nested map already gives its path.                                                       |
+| `usage`       | Usage line in click's own form, e.g. `dhcli pq stop [OPTIONS] [ID]...`, giving the positional order. Omitted inside `tree --full` (`params` gives the order).                                                                |
+| `summary`     | One-line summary (always present).                                                                                                                                                                                           |
+| `description` | What the command does and when to use it.                                                                                                                                                                                    |
 | `params`      | Options **and** positional arguments: `name`, `kind` (`option`/`argument`), `type`, `help`, plus (sparse) `required`, `nargs` (when not 1), `choices`, `opts`, `secondary_opts`, `is_flag`, `multiple`, `envvar`, `default`. |
-| `output`      | The structured output shape: `mode` (`object`/`list`/`text`), `fields` (`{name, type, help}`), `note`. |
-| `examples`    | Shell snippets.                                                                              |
-| `see_also`    | Related commands.                                                                            |
-| `error_codes` | The stable codes the command can emit, as bare strings. Decode them with `dhcli agents errors` (or the root `error_codes` key of `tree --full`); a failure also carries its own message next to the code. |
-| `exit_codes`  | The process codes the command can return — `{code, help}`, or bare integers inside `tree --full` (see `default_exit_codes`). |
-| `environment` | Environment variables honored (`{name, help}`); inside `tree --full`, omitted when the command leaves it unset (it then inherits `default_environment`). |
-| `wraps`       | The wrapped MCP tool binding (`tools`, `intentionally_unsupported`, `router_params`, `client_only_params`). |
-| `subcommands` | Groups only: `{name: summary}` one level down, or full nested nodes with `--full` / inside `tree --full`. |
+| `output`      | The structured output shape: `mode` (`object`/`list`/`text`), `fields` (`{name, type, help}`), `note`.                                                                                                                       |
+| `examples`    | Shell snippets.                                                                                                                                                                                                              |
+| `see_also`    | Related commands.                                                                                                                                                                                                            |
+| `error_codes` | The stable codes the command can emit, as bare strings. Decode them with `dhcli agents errors` (or the root `error_codes` key of `tree --full`); a failure also carries its own message next to the code.                    |
+| `exit_codes`  | The process codes the command can return — `{code, help}`, or bare integers inside `tree --full` (see `default_exit_codes`).                                                                                                 |
+| `environment` | Environment variables honored (`{name, help}`); inside `tree --full`, omitted when the command leaves it unset (it then inherits `default_environment`).                                                                     |
+| `wraps`       | The wrapped MCP tool binding (`tools`, `intentionally_unsupported`, `router_params`, `client_only_params`).                                                                                                                  |
+| `subcommands` | Groups only: `{name: summary}` one level down, or full nested nodes with `--full` / inside `tree --full`.                                                                                                                    |
 
 A node requested on its own (`agents command PATH`, `<cmd> --agents` —
 the two are byte-identical) carries what the command's `--help` renders,
@@ -970,7 +964,7 @@ single command's node never carries any of them:
 - **Summary tree** (`agents tree`, `dhcli --agents`): `version`,
   `prog`, `summary`, `description`, `conventions`, `hint`, and a nested
   `{name: {summary, commands?}}` map under `commands`. `conventions`
-  states the rules that hold for *every* command — output mode and exit
+  states the rules that hold for _every_ command — output mode and exit
   codes, the sticky-context fallback, and target selection. Read it
   before your first consequential command; a hazard specific to one
   command is stated on that command instead.
@@ -994,13 +988,13 @@ Verbs that operate on the `dhcli` installation itself rather than on
 Deephaven resources (the `rustup self` / `uv self` pattern), and the
 intended home for future tool-self-management verbs.
 
-| Verb         | Purpose                                                        |
-|--------------|----------------------------------------------------------------|
+| Verb         | Purpose                                                             |
+| ------------ | ------------------------------------------------------------------- |
 | `completion` | Print the shell tab-completion script for `bash`, `zsh`, or `fish`. |
 
 `self completion SHELL` prints the tab-completion script for one
 supported shell — `bash` (>= 4.4), `zsh`, or `fish` — as raw shell
-source (not subject to `-o/--output`; the script *is* the output).
+source (not subject to `-o/--output`; the script _is_ the output).
 Evaluate it to enable completion in the current shell, or add the
 line to your shell startup file (see
 [Shell completion](#shell-completion)):
@@ -1022,20 +1016,20 @@ Environment variables listed here are the ones bound to a flag.
 [`ENV.md`](ENV.md) is the canonical inventory of every environment
 variable the project reads, with the reasoning for each.
 
-| Flag                | Envvar               | Purpose                                                                              |
-|---------------------|----------------------|--------------------------------------------------------------------------------------|
-| `--config-dir PATH` |                      | Override the configuration directory. No per-subdir env var; use `DH_AI_DATA_DIR` to move both `config/` and `runtime/` together. |
-| `--runtime-dir PATH`|                      | Override the runtime directory (where `daemon.json` lives). No per-subdir env var.   |
-|                     | `DH_AI_DATA_DIR`    | Override the **user-data root**; `config/` and `runtime/` resolve under it. |
-| `-o`, `--output`    | `DHCLI_OUTPUT`      | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.output.format`. |
-| `--timeout SECS`    |                      | Per-request timeout. Overrides `cli.request.timeouts.default_seconds` (and `cli.docs.timeouts.request_seconds` for the `docs` commands). |
-| `--agents`          |                      | Print the command's machine-readable description, tuned for AI agents, and exit (the machine twin of `--help`); available on every command. Honors the `-o`/`DHCLI_OUTPUT` mode, compact `json` by default. On the root, emits the summary tree; `dhcli agents tree` prints the whole surface. |
-| `-v`, `--verbose`   |                      | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.   |
-| `-q`, `--quiet`     |                      | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.     |
-| `--no-auto-start`   |                      | Fail rather than spawn a daemon when none is running.                                |
-| `--no-context`      |                      | Disable the sticky context for this invocation: when a session, system, or PQ id is omitted, the command fails with `context_not_set` instead of falling back to the stored context. Overrides `cli.context.enabled`. Governs only the read. See [`dhcli context`](#dhcli-context) below. |
-| `--no-input`        |                      | Never prompt interactively; a command missing a required value fails with a structured `missing_required_option` error naming the flag to supply. Prompting is already disabled when stdin is not a TTY. |
-| `--version`         |                      | Print the package version and exit.                                                  |
+| Flag                 | Envvar           | Purpose                                                                                                                                                                                                                                                                                        |
+| -------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--config-dir PATH`  |                  | Override the configuration directory. No per-subdir env var; use `DH_AI_DATA_DIR` to move both `config/` and `runtime/` together.                                                                                                                                                              |
+| `--runtime-dir PATH` |                  | Override the runtime directory (where `daemon.json` lives). No per-subdir env var.                                                                                                                                                                                                             |
+|                      | `DH_AI_DATA_DIR` | Override the **user-data root**; `config/` and `runtime/` resolve under it.                                                                                                                                                                                                                    |
+| `-o`, `--output`     | `DHCLI_OUTPUT`   | One of `human`, `json`, `json-pretty`, `yaml`. Overrides `cli.output.format`.                                                                                                                                                                                                                  |
+| `--timeout SECS`     |                  | Per-request timeout. Overrides `cli.request.timeouts.default_seconds` (and `cli.docs.timeouts.request_seconds` for the `docs` commands).                                                                                                                                                       |
+| `--agents`           |                  | Print the command's machine-readable description, tuned for AI agents, and exit (the machine twin of `--help`); available on every command. Honors the `-o`/`DHCLI_OUTPUT` mode, compact `json` by default. On the root, emits the summary tree; `dhcli agents tree` prints the whole surface. |
+| `-v`, `--verbose`    |                  | Increase logging verbosity (`-v`=INFO, `-vv`=DEBUG). Mutually exclusive with `-q`.                                                                                                                                                                                                             |
+| `-q`, `--quiet`      |                  | Suppress non-error logging (root logger at ERROR). Mutually exclusive with `-v`.                                                                                                                                                                                                               |
+| `--no-auto-start`    |                  | Fail rather than spawn a daemon when none is running.                                                                                                                                                                                                                                          |
+| `--no-context`       |                  | Disable the sticky context for this invocation: when a session, system, or PQ id is omitted, the command fails with `context_not_set` instead of falling back to the stored context. Overrides `cli.context.enabled`. Governs only the read. See [`dhcli context`](#dhcli-context) below.      |
+| `--no-input`         |                  | Never prompt interactively; a command missing a required value fails with a structured `missing_required_option` error naming the flag to supply. Prompting is already disabled when stdin is not a TTY.                                                                                       |
+| `--version`          |                  | Print the package version and exit.                                                                                                                                                                                                                                                            |
 
 These flags accept any position on the command line — before the
 noun group, between the noun and the verb, or after the verb.
@@ -1043,7 +1037,7 @@ For example `dhcli -o json config show`, `dhcli config -o json
 show`, and `dhcli config show -o json` are all equivalent. The
 CLI rewrites argv to lift recognized top-level options to the
 front before `click` parses it. `--help` and `--version` are
-*not* lifted: Click resolves them per-command, so `dhcli daemon
+_not_ lifted: Click resolves them per-command, so `dhcli daemon
 --help` correctly renders the `daemon` group's help (not the
 root's). Use the POSIX `--` sentinel to force a literal token
 later in the command line (everything after `--` is preserved
@@ -1067,7 +1061,7 @@ to get human output everywhere).
   indented form but costs the fewest tokens in an agent's context. Pipe
   through `jq .` to eyeball it, or use `json-pretty`.
 - `json-pretty` — the same document via `json.dumps(..., indent=2,
-  sort_keys=True)`: indented and key-sorted, for human reading and
+sort_keys=True)`: indented and key-sorted, for human reading and
   line-oriented diffs.
 - `human` — terminal-friendly. Row/tabular data and `tool list` render
   as aligned, header-topped tables (sized to the terminal width, falling back to
@@ -1085,14 +1079,14 @@ Errors and warnings always go to **stderr**, leaving stdout clean for piping. In
 
 ## Exit codes
 
-| Code  | Meaning                                                                  |
-|-------|--------------------------------------------------------------------------|
-| `0`   | Success.                                                                 |
-| `2`   | User-facing failure (CLI argument error, daemon-spawn timeout, etc.).    |
-| `3`   | The invoked MCP tool returned `isError=true`.                            |
+| Code | Meaning                                                               |
+| ---- | --------------------------------------------------------------------- |
+| `0`  | Success.                                                              |
+| `2`  | User-facing failure (CLI argument error, daemon-spawn timeout, etc.). |
+| `3`  | The invoked MCP tool returned `isError=true`.                         |
 
 For **batch / vector verbs** (e.g. `pq delete`, `pq start` / `stop` /
-`restart` given multiple ids) exit `0` means the operation *executed*, not
+`restart` given multiple ids) exit `0` means the operation _executed_, not
 that every item succeeded — these are best-effort. Read the payload's
 `summary` (`succeeded` / `failed`) and per-item `results` for individual
 outcomes; exit `3` is reserved for a tool that did not execute at all
@@ -1122,38 +1116,38 @@ The `error_code` values are stable across releases. Get the full
 registry programmatically via `dhcli agents errors` (or the
 `error_codes` key of `dhcli agents tree --full`). Current set:
 
-| `error_code`                  | Meaning                                                            |
-|-------------------------------|--------------------------------------------------------------------|
-| `daemon_startup_timeout`      | Daemon was spawned but did not publish a registry entry in time.   |
-| `daemon_not_running`          | No running daemon was found: either none is registered and `--no-auto-start` was specified, or a command that needs the daemon's files (e.g. `daemon logs`) found none yet. |
-| `daemon_client_error`         | A client-side daemon-management failure (signal denied, etc.).     |
-| `daemon_registry_corrupt`     | `daemon.json` exists but cannot be parsed. Recover with `dhcli daemon repair`. |
-| `daemon_registry_live`        | `dhcli daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dhcli daemon stop` first. |
-| `daemon_reuse_refused`        | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `cli.daemon.reuse` resolved to `refuse`. Run `dhcli daemon restart` to replace it, or adjust `cli.daemon.reuse`. |
-| `mcp_request_failed`          | The MCP transport reported an error (connect, parse, server failure). |
-| `mcp_request_timeout`         | The MCP request timed out. The server may still finish processing the request — if the operation changes state, verify the result before retrying. Allow more time with `--timeout`, or raise `cli.request.timeouts.default_seconds` (`cli.docs.timeouts.request_seconds` for the `docs` commands). |
-| `tool_not_found`              | `dhcli tool show/call` referenced an unknown tool name.           |
-| `tool_returned_error`         | The invoked tool returned `isError=true`. Exit code `3`.           |
-| `arg_parse_error`             | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed. |
-| `command_not_found`           | `dhcli agents command PATH` referenced a command path that does not exist. |
-| `missing_argument`            | A required positional argument or option was not provided, or one was supplied blank (an empty or whitespace-only string). |
-| `mutually_exclusive_options`  | Two or more options that cannot be combined were supplied together. |
-| `file_read_failed`            | A local file passed on the command line could not be read.          |
-| `option_not_applicable`       | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name). |
-| `browser_launch_failed`       | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. For `session open` that URL omits the auth token unless `--reveal-secrets` was passed — use `dhcli session url` for one that logs in. |
-| `system_not_found`            | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console). |
-| `context_not_set`             | A session/system/PQ id was omitted and no sticky context supplies one. Pass it explicitly, run `dhcli context set KEY VALUE`, or check `dhcli context show`. `--no-context` / `cli.context.enabled=false` disables the sticky-context fallback step, making this code more likely, not less. |
-| `config_invalid`              | The configuration tree failed validation.                          |
-| `no_systems_configured`       | A system-dependent verb (`system`, `session`, `table`, `catalog`, `pq`, `tool`) ran against a valid tree that declares no system (no community session file, no `session_creation` block, no enterprise system file); the daemon serves systems, so acquiring one is refused. (The systems server likewise refuses to start on a zero-system tree.) The discovery verbs `system list` / `session list` are exempt — they return an empty list with this guidance on stderr instead of exiting non-zero. Add one (`dhcli config session add`, `dhcli config system add`, or `dhcli config init`), or check that `--config-dir` / `DH_AI_DATA_DIR` points at the intended directory. |
-| `config_path_invalid`         | A configuration path argument is malformed or does not name a known location. Run `dhcli config files` to list files and `dhcli config keys` to list settable paths. |
-| `missing_required_option`     | A required option was not provided and interactive prompting is unavailable (stdin is not a TTY, or `--no-input` was given). The error message names the exact flag(s) to supply. |
-| `already_exists`              | The target configuration file already exists and the command refuses to overwrite it. For a session or system, remove it first with `dhcli config session/system remove`; for `config init` (which will not replace `community/settings.json`), edit the existing file with `dhcli config set` or `dhcli config edit`. |
-| `not_found`                   | The named configuration entity or file does not exist, or the addressed field has no value set. |
-| `config_not_rewritable`       | `config set`/`unset` refused to touch a file that uses JSON5-only syntax (comments, trailing commas) a programmatic rewrite would destroy; edit the file directly, or with `dhcli config edit`. |
-| `no_tty`                      | The command is interactive-only (`config edit`) but stdin is not a TTY or `--no-input` was given; use the non-interactive equivalents (`config set`, or `config session add` with flags). |
-| `config_locked`               | Another process holds the per-directory configuration write lock, so a `config` authoring verb (`add`/`set`/`unset`/`remove`/`edit`/`init`) could not acquire it before timing out. Retry once the other invocation finishes. |
-| `operation_canceled`         | The operator answered no to an interactive confirmation prompt, so a destructive action was not performed. A deliberate decline (exit `2`), distinct from a Ctrl-C interruption (exit `130`). |
-| `internal_error`              | An unexpected internal failure not attributable to a specific subsystem. |
+| `error_code`                 | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daemon_startup_timeout`     | Daemon was spawned but did not publish a registry entry in time.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `daemon_not_running`         | No running daemon was found: either none is registered and `--no-auto-start` was specified, or a command that needs the daemon's files (e.g. `daemon logs`) found none yet.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `daemon_client_error`        | A client-side daemon-management failure (signal denied, etc.).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `daemon_registry_corrupt`    | `daemon.json` exists but cannot be parsed. Recover with `dhcli daemon repair`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `daemon_registry_live`       | `dhcli daemon repair` refused to move `daemon.json` aside because a live daemon is still registered; run `dhcli daemon stop` first.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `daemon_reuse_refused`       | The running daemon is a different build than the CLI (version, venv, or source fingerprint differs) and `cli.daemon.reuse` resolved to `refuse`. Run `dhcli daemon restart` to replace it, or adjust `cli.daemon.reuse`.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `mcp_request_failed`         | The MCP transport reported an error (connect, parse, server failure).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `mcp_request_timeout`        | The MCP request timed out. The server may still finish processing the request — if the operation changes state, verify the result before retrying. Allow more time with `--timeout`, or raise `cli.request.timeouts.default_seconds` (`cli.docs.timeouts.request_seconds` for the `docs` commands).                                                                                                                                                                                                                                                                                                                                                                                |
+| `tool_not_found`             | `dhcli tool show/call` referenced an unknown tool name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `tool_returned_error`        | The invoked tool returned `isError=true`. Exit code `3`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `arg_parse_error`            | A `key=value` token (`--arg`, `--env`, `--session-arg`) was malformed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `command_not_found`          | `dhcli agents command PATH` referenced a command path that does not exist.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `missing_argument`           | A required positional argument or option was not provided, or one was supplied blank (an empty or whitespace-only string).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `mutually_exclusive_options` | Two or more options that cannot be combined were supplied together.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `file_read_failed`           | A local file passed on the command line could not be read.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `option_not_applicable`      | An option/argument is invalid for the selected `--system` type (an inapplicable option, or a missing required one such as a Community session name).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `browser_launch_failed`      | `dhcli session open` / `system open` could not launch a browser; the URL is included in the error message to open manually. For `session open` that URL omits the auth token unless `--reveal-secrets` was passed — use `dhcli session url` for one that logs in.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `system_not_found`           | `dhcli system url/open NAME` named an Enterprise system that is not configured (`community` included — it has no web console).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `context_not_set`            | A session/system/PQ id was omitted and no sticky context supplies one. Pass it explicitly, run `dhcli context set KEY VALUE`, or check `dhcli context show`. `--no-context` / `cli.context.enabled=false` disables the sticky-context fallback step, making this code more likely, not less.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `config_invalid`             | The configuration tree failed validation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `no_systems_configured`      | A system-dependent verb (`system`, `session`, `table`, `catalog`, `pq`, `tool`) ran against a valid tree that declares no system (no community session file, no `session_creation` block, no enterprise system file); the daemon serves systems, so acquiring one is refused. (The systems server likewise refuses to start on a zero-system tree.) The discovery verbs `system list` / `session list` are exempt — they return an empty list with this guidance on stderr instead of exiting non-zero. Add one (`dhcli config session add`, `dhcli config system add`, or `dhcli config init`), or check that `--config-dir` / `DH_AI_DATA_DIR` points at the intended directory. |
+| `config_path_invalid`        | A configuration path argument is malformed or does not name a known location. Run `dhcli config files` to list files and `dhcli config keys` to list settable paths.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `missing_required_option`    | A required option was not provided and interactive prompting is unavailable (stdin is not a TTY, or `--no-input` was given). The error message names the exact flag(s) to supply.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `already_exists`             | The target configuration file already exists and the command refuses to overwrite it. For a session or system, remove it first with `dhcli config session/system remove`; for `config init` (which will not replace `community/settings.json`), edit the existing file with `dhcli config set` or `dhcli config edit`.                                                                                                                                                                                                                                                                                                                                                             |
+| `not_found`                  | The named configuration entity or file does not exist, or the addressed field has no value set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `config_not_rewritable`      | `config set`/`unset` refused to touch a file that uses JSON5-only syntax (comments, trailing commas) a programmatic rewrite would destroy; edit the file directly, or with `dhcli config edit`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `no_tty`                     | The command is interactive-only (`config edit`) but stdin is not a TTY or `--no-input` was given; use the non-interactive equivalents (`config set`, or `config session add` with flags).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `config_locked`              | Another process holds the per-directory configuration write lock, so a `config` authoring verb (`add`/`set`/`unset`/`remove`/`edit`/`init`) could not acquire it before timing out. Retry once the other invocation finishes.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `operation_canceled`         | The operator answered no to an interactive confirmation prompt, so a destructive action was not performed. A deliberate decline (exit `2`), distinct from a Ctrl-C interruption (exit `130`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `internal_error`             | An unexpected internal failure not attributable to a specific subsystem.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## Troubleshooting
 
@@ -1197,7 +1191,7 @@ orphan a running process.
 The CLI auto-tightens `runtime_dir`, `daemon/`, and `daemon.json`
 on every invocation (see [Runtime directory](#runtime-directory)).
 If you still see `PermissionError`, the issue is almost always
-*ownership*, not mode — e.g., a daemon spawned by `sudo` left a
+_ownership_, not mode — e.g., a daemon spawned by `sudo` left a
 root-owned registry. Repair with:
 
 ```bash
@@ -1238,7 +1232,7 @@ tears down another's daemon.
 - On POSIX the CLI re-applies `0700` to `runtime_dir` and
   `daemon/`, and `0600` to `daemon.json`, on every invocation.
   Looser modes are silently corrected; the CLI does not refuse to
-  operate on the basis of mode alone. Ownership is *not* audited
+  operate on the basis of mode alone. Ownership is _not_ audited
   — keep the parent `runtime_dir` outside of any shared
   filesystem path.
 - The daemon is per-user: cross-user use is intentionally not
