@@ -31,6 +31,7 @@ __all__ = [
 ]
 
 import json
+import sys
 from collections.abc import Collection
 from pathlib import Path
 from typing import Any
@@ -360,7 +361,7 @@ def read_local_script(script_path: str) -> str:
             the file cannot be read or is not valid UTF-8.
     """
     if script_path == "-":
-        script = click.get_text_stream("stdin").read()
+        script = sys.stdin.read()
         if not script:
             raise CliError(
                 "Standard input was empty; provide the script on stdin "

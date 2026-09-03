@@ -2,6 +2,7 @@
 
 Provides MCP tools for managing Deephaven Enterprise (Core+) sessions:
 - enterprise_systems_status: Get status of configured Enterprise systems
+- enterprise_controller_reconnect: Force an immediate controller reconnect attempt
 - session_enterprise_create: Create new Enterprise sessions on configured systems
 - session_enterprise_delete: Delete Enterprise sessions
 
@@ -108,7 +109,10 @@ async def _collect_one_enterprise_system_status(
     status_enum, liveness_detail = await factory_manager.liveness_status(
         ensure_item=attempt_to_connect
     )
-    is_alive = await factory_manager.is_alive()
+    # Derived, not re-probed: is_alive() would take the manager lock a second
+    # time (blocking behind an in-progress factory creation) and would report
+    # the cached state even when --connect just probed a live one.
+    is_alive = status_enum is ResourceLivenessStatus.ONLINE
 
     init_errors = snapshot.initialization_errors
     probe_is_uninformative = (
@@ -320,6 +324,120 @@ async def enterprise_systems_status(
             exc_info=True,
         )
         return error_response(str(e))
+
+
+async def enterprise_controller_reconnect(
+    context: Context,
+    system: str,
+) -> dict[str, Any]:
+    """Force an immediate reconnect attempt for one Enterprise system's controller.
+
+    Use this when a controller-backed call (``pq_list``, ``pq_details``,
+    ``session_enterprise_create``, ...) fails with an error containing
+    ``[CONTROLLER_SUBSCRIBING]``. That error means the system's controller
+    subscription is wedged and a background healer is already retrying on an
+    exponential backoff; this tool skips the remaining wait and triggers the
+    next attempt now.
+
+    Terminology Note:
+        "Controller" is the Deephaven Enterprise Persistent Query Controller —
+        the service that owns persistent-query state. A wedged *subscription*
+        to it makes persistent-query reads fail fast; it does not mean
+        individual sessions or workers have stopped.
+
+    Behavior:
+        - Returns immediately. It signals the background healer rather than
+          rebuilding the connection inline, so it never blocks for the
+          (potentially minutes-long) reconnect.
+        - Does not report whether the reconnect succeeded. Check
+          ``enterprise_systems_status`` or retry the original call.
+        - Safe to call repeatedly; requests coalesce, so repeating never queues
+          a backlog of attempts.
+        - A no-op when the controller is already healthy — it never tears down
+          a working connection.
+
+    Args:
+        context (Context): MCP context carrying the server lifespan state.
+        system (str): Name of the Enterprise system whose controller should
+            reconnect. Required — only this system is affected. Must match a
+            configured system name (see ``enterprise_systems_status``).
+
+    Returns:
+        dict[str, Any]: Response with the following fields:
+            - success (bool): True when the request was *processed* — the system
+              was resolved and the healer consulted. It does NOT mean a
+              reconnect was requested; read ``reconnect_requested`` for that.
+            - system (str): The system the request targeted. Present on success.
+            - reconnect_requested (bool): True when the request was accepted by
+              a running healer, which either wakes it now or coalesces into an
+              attempt already under way — so it does not promise an *additional*
+              attempt. False when the request was not accepted, which means
+              either nothing is currently wedged (including an already-healthy
+              controller) or no healer is running; check
+              ``enterprise_systems_status`` to tell those apart. Present on
+              success.
+            - detail (str): Human-readable next step. Present on success.
+            - error (str): Error message. Present only on failure.
+            - isError (bool): True. Present only on failure.
+
+    Format Accuracy for AI Agents:
+        Report only what the response contains. ``success: true`` means the
+        request was *processed*, NOT that a reconnect was requested and NOT
+        that the controller reconnected. A response with ``success: true`` and
+        ``reconnect_requested: false`` means nothing was done. Never tell the
+        user the system is back online based on this response — verify with
+        ``enterprise_systems_status`` or by retrying the original call.
+
+    Example Success Response:
+        {
+            'success': True,
+            'system': 'prod',
+            'reconnect_requested': True,
+            'detail': "Reconnect requested for enterprise system 'prod'. The attempt runs in the background; retry your original call shortly or check enterprise_systems_status.",
+        }
+
+    Example Error Response:
+        {'success': False, 'error': "Enterprise system 'prod' is not configured", 'isError': True}
+    """
+    _LOGGER.info(
+        f"[mcp_systems_server:enterprise_controller_reconnect] Invoked: system={system!r}"
+    )
+    try:
+        session_registry = get_enterprise_registry(context, system)
+        requested = await session_registry.factory_manager.request_reconnect()
+        _LOGGER.info(
+            f"[mcp_systems_server:enterprise_controller_reconnect] Reconnect signaled "
+            f"for system '{system}' (reconnect_requested={requested})"
+        )
+        return {
+            "success": True,
+            "system": system,
+            "reconnect_requested": requested,
+            "detail": (
+                (
+                    f"Reconnect requested for enterprise system '{system}'. The "
+                    f"attempt runs in the background; retry your original call "
+                    f"shortly or check enterprise_systems_status."
+                )
+                if requested
+                else (
+                    f"No reconnect attempt was requested for enterprise system "
+                    f"'{system}': either nothing is currently wedged, or no "
+                    f"background healer is running for it. Check "
+                    f"enterprise_systems_status to confirm the system's health."
+                )
+            ),
+        }
+    except Exception as e:
+        _LOGGER.error(
+            f"[mcp_systems_server:enterprise_controller_reconnect] Failed for "
+            f"system {system!r}: {e!r}",
+            exc_info=True,
+        )
+        return error_response(
+            f"Failed to request controller reconnect for system '{system}': "
+            f"{exception_summary(e)}"
+        )
 
 
 def _env_vars_to_list(env_vars: dict[str, str] | None) -> list[str] | None:
@@ -654,6 +772,11 @@ async def session_enterprise_create(
 
         # Get the factory manager directly and create session
         factory_manager = session_registry.factory_manager
+        # Worker creation waits on the controller subscription map
+        # (connect_to_new_worker -> __wait_for_ready -> map_and_version), so a
+        # wedged subscription would block for the vendor timeout. Gate on the
+        # controller first to fail fast with the healer's status message.
+        await factory_manager.get_controller_client()
         factory = await factory_manager.get()
 
         # Create configuration transformer based on programming language
@@ -1079,8 +1202,7 @@ async def session_enterprise_delete(
         # caller can retry.
         try:
             serial = CorePlusQuerySerial(int(qsid.session_id))
-            factory = await session_registry.factory_manager.get()
-            controller = factory.controller_client
+            controller = await session_registry.factory_manager.get_controller_client()
             _LOGGER.debug(
                 f"[mcp_systems_server:session_enterprise_delete] Deleting persistent query "
                 f"(serial={serial}) for session '{id}'"
@@ -1141,7 +1263,8 @@ def register_tools(server: FastMCP) -> None:
     """Register all Enterprise session tools with the given FastMCP server.
 
     Registers ``enterprise_systems_status`` (which returns an empty system
-    list when no Enterprise system is configured) plus the Enterprise session
+    list when no Enterprise system is configured) plus
+    ``enterprise_controller_reconnect`` and the Enterprise session
     create/delete tools (which return a clean "not configured" error in that
     case). Every tool module registers unconditionally; tools self-report
     applicability rather than being gated by configuration.
@@ -1150,5 +1273,6 @@ def register_tools(server: FastMCP) -> None:
         server (FastMCP): The server to register tools with.
     """
     server.tool()(enterprise_systems_status)
+    server.tool()(enterprise_controller_reconnect)
     server.tool()(session_enterprise_create)
     server.tool()(session_enterprise_delete)

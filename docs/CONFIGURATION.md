@@ -412,6 +412,8 @@ Java API requires it.
 | `saml_auth_timeout_seconds`       | float | `120.0` |
 | `quick_operation_timeout_seconds` | float | `5.0`   |
 | `subscribe_timeout_seconds`       | float | `30.0`  |
+| `controller_resubscribe_backoff_initial_seconds` | float | `30.0`  |
+| `controller_resubscribe_backoff_max_seconds` | float | `300.0` |
 | `pq_management_timeout_seconds`   | float | `60.0`  |
 | `pq_state_change_timeout_seconds` | int   | `120`   |
 | `no_wait_seconds`                 | float | `0.0`   |

@@ -37,7 +37,10 @@ dependencies = [
     # Docs/LLM and web server dependencies
     "fastapi>=0.116.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.35.0", # ASGI server for FastAPI
-    "openai>=1.0.0",            # OpenAI Python SDK for LLM Q&A
+    # Capped below 3.0: openai 3.x takes an httpx2 client, while openai.py builds
+    # an httpx one. A published bound, not a resolution hint, because installs
+    # that resolve 3.x break at runtime. Lift it in a dedicated httpx2 migration.
+    "openai>=1.0.0,<3.0.0",     # OpenAI Python SDK for LLM Q&A
     "pydantic>=2.6.0",          # Data validation and settings (model_serializer context support)
     # Configuration file parsing
     "json5>=0.9.0",             # JSON5 format support (comments, trailing commas)
@@ -159,7 +162,13 @@ ignore-words-list = "unparseable"
 # Pytest configuration for testing
 [tool.pytest.ini_options]
 testpaths = ["tests"]  # Directory containing test files
-addopts = "-W error -W ignore::pytest.PytestUnraisableExceptionWarning --cov=deephaven_mcp --cov-report=term-missing --cov-report=xml -m 'not integration'"
+# These ignores live here, not in filterwarnings below, because command-line -W
+# filters outrank ini filterwarnings: -W error would otherwise re-promote them.
+#   - 'lifespan': FastMCP's Settings model emits it (a field with an unrebuilt
+#     forward reference); matched by message to hold across versions.
+#   - 'anyio.abc.BlockingPortal': starlette.testclient still imports the
+#     deprecated alias at module scope, so -W error fails collection outright.
+addopts = "-W error -W ignore::pytest.PytestUnraisableExceptionWarning -W \"ignore:Field 'lifespan' has an incomplete definition\" -W \"ignore:The anyio.abc.BlockingPortal alias is deprecated\" --cov=deephaven_mcp --cov-report=term-missing --cov-report=xml -m 'not integration'"
 python_files = ["test_*.py"]  # Test file naming pattern
 python_classes = ["Test"]  # Test class naming pattern
 python_functions = ["test_"]  # Test function naming pattern
@@ -169,7 +178,7 @@ markers = [
 ]
 asyncio_mode = "strict"
 filterwarnings = [
-    "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning"
+    "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning",
 ]
 asyncio_default_fixture_loop_scope = "function"
 

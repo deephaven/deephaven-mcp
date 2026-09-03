@@ -66,6 +66,29 @@ from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
+CONTROLLER_SUBSCRIBING_ERROR_CODE = "CONTROLLER_SUBSCRIBING"
+"""Machine-readable token embedded in the error message a controller-backed
+call returns while the subscription is still wedged in ``SUBSCRIBING``.
+
+Shared with :class:`~deephaven_mcp.resource_manager.CorePlusSessionFactoryManager`,
+which prefixes its richer "still initializing (waited Xs, N attempts, next
+recreate in ~Zs)" status message with the same token. Callers can key off the
+token to recognize the retryable wedged-subscription condition without parsing
+prose."""
+
+_CONTROLLER_UNAVAILABLE_MESSAGE = (
+    f"[{CONTROLLER_SUBSCRIBING_ERROR_CODE}] Unable to connect to the Deephaven "
+    "controller; the enterprise session subscription is still initializing. "
+    "Recovering requires a fresh session factory. Retry this call shortly."
+)
+"""Message for the client-level fast-fail, raised whether or not a healer exists.
+
+This client and :class:`CorePlusSessionFactory` are usable directly, with no
+manager behind them, so the message stays neutral about recovery: it names what
+recovery takes rather than promising a background retry. The manager's own
+status message adds the background-healer guidance for callers that have one.
+"""
+
 
 class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
     """Asynchronous wrapper around the ControllerClient for managing persistent queries.
@@ -150,6 +173,49 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
     # ===========================================================================
     # Initialization & Connection Management
     # ===========================================================================
+
+    @property
+    def is_poisoned(self) -> bool:
+        """Whether the underlying subscription is wedged and can never complete.
+
+        A poisoned client has its vendor ``sub_state`` stuck at ``SUBSCRIBING``
+        (e.g. after a subscribe timeout, or a failed background re-subscription
+        started by the vendor response thread). Every subscription-dependent
+        read (:meth:`map`, :meth:`map_and_version`, :meth:`get`,
+        :meth:`get_serial_for_name`) would otherwise block for the vendor's full
+        subscription timeout before failing. The client cannot heal itself in
+        place; recovery is driven by
+        :class:`~deephaven_mcp.resource_manager.CorePlusSessionFactoryManager`,
+        whose background healer recreates the owning factory on an interval until
+        a fresh controller subscribes cleanly.
+
+        Returns:
+            bool: True if the vendor subscription is wedged at ``SUBSCRIBING``.
+        """
+        return self.wrapped.sub_state is SubState.SUBSCRIBING
+
+    def _raise_if_poisoned(self, operation: str) -> None:
+        """Fast-fail a subscription-dependent read when the controller is unreachable.
+
+        Skips the vendor's multi-minute subscription wait when the subscription
+        is wedged at ``SUBSCRIBING``. This is the read-level secondary guard;
+        the primary gate is
+        :meth:`~deephaven_mcp.resource_manager.CorePlusSessionFactoryManager.get_controller_client`,
+        which callers invoke first and which raises a richer status message
+        (elapsed wait, recreate-attempt count, next-recreate countdown) carrying
+        the same :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE` token.
+
+        Args:
+            operation (str): Name of the calling method, for the log prefix.
+
+        Raises:
+            DeephavenConnectionError: If the controller subscription is wedged.
+        """
+        if self.is_poisoned:
+            _LOGGER.error(
+                f"[CorePlusControllerClient:{operation}] {_CONTROLLER_UNAVAILABLE_MESSAGE}"
+            )
+            raise DeephavenConnectionError(_CONTROLLER_UNAVAILABLE_MESSAGE)
 
     async def ping(self) -> bool:
         """Ping the controller and refresh the cookie asynchronously.
@@ -267,7 +333,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             # rather than opening a second stream — the controller server allows
             # one subscription stream per session, so a second stream starts an
             # infinite mutual kill/re-subscribe loop between response threads.
-            if self.wrapped.sub_state is not SubState.NOT_SUBSCRIBED:
+            if self.wrapped.sub_state is SubState.SUBSCRIBED:
                 self._subscribed = True
                 _LOGGER.debug(
                     "[CorePlusControllerClient:subscribe] Wrapped client already "
@@ -275,6 +341,15 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                     "subscription"
                 )
                 return
+
+            # Vendor is mid-subscribe. The subscription isn't ready to adopt,
+            # and falling through would open a second competing stream.
+            # Fail fast; the factory will be recreated to reconnect.
+            if self.wrapped.sub_state is SubState.SUBSCRIBING:
+                _LOGGER.error(
+                    f"[CorePlusControllerClient:subscribe] {_CONTROLLER_UNAVAILABLE_MESSAGE}"
+                )
+                raise DeephavenConnectionError(_CONTROLLER_UNAVAILABLE_MESSAGE)
 
             _LOGGER.debug(
                 f"[CorePlusControllerClient:subscribe] Subscribing to query state (timeout_seconds={timeout_seconds})"
@@ -356,6 +431,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 "subscribe() must be called before map(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
             )
+        self._raise_if_poisoned("map")
         _LOGGER.debug("[CorePlusControllerClient:map] Retrieving query map")
         try:
             # The map is from int to QueryInfo, but we need to cast the keys to QuerySerial
@@ -413,6 +489,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 "subscribe() must be called before map_and_version(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
             )
+        self._raise_if_poisoned("map_and_version")
         _LOGGER.debug(
             "[CorePlusControllerClient:map_and_version] Retrieving query map with version"
         )
@@ -483,6 +560,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 "subscribe() must be called before get_serial_for_name(). This indicates a programming bug - "
                 "the controller client was not properly initialized."
             )
+        self._raise_if_poisoned("get_serial_for_name")
         _LOGGER.debug(
             f"[CorePlusControllerClient:get_serial_for_name] Looking up serial for query name='{name}'"
         )
@@ -536,11 +614,14 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service due to
-                                    network issues or if the controller becomes unavailable.
+                                    network issues, if the controller becomes unavailable, or
+                                    if the subscription is wedged (message carries
+                                    :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE`).
             TimeoutError: Propagated unchanged when the underlying call raises one.
             QueryError: If there is an issue with the query state or subscription, such as if
                        the subscription was not properly established with subscribe().
         """
+        self._raise_if_poisoned("wait_for_change")
         _LOGGER.debug(
             f"[CorePlusControllerClient:wait_for_change] Waiting for query state change, timeout={timeout_seconds}"
         )
@@ -603,13 +684,16 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         Raises:
             ValueError: If ``timeout_seconds`` is not strictly positive.
-            DeephavenConnectionError: If unable to connect to controller service.
+            DeephavenConnectionError: If unable to connect to controller service, or if
+                the subscription is wedged (message carries
+                :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE`).
             QueryError: If subscription state is invalid.
         """
         if timeout_seconds <= 0:
             raise ValueError(
                 f"timeout_seconds must be a positive value, got {timeout_seconds!r}"
             )
+        self._raise_if_poisoned("wait_for_change_from_version")
         _LOGGER.debug(
             f"[CorePlusControllerClient:wait_for_change_from_version] "
             f"Waiting for version > {map_version}, timeout={timeout_seconds}s"
@@ -667,6 +751,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                        the subscription state is invalid (e.g., if subscribe() was not called).
         """
         timeout_seconds = self._timeouts.no_wait_seconds
+        self._raise_if_poisoned("get")
         _LOGGER.debug(
             f"[CorePlusControllerClient:get] Retrieving query info for serial={serial}, timeout={timeout_seconds}"
         )

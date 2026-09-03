@@ -621,14 +621,14 @@ async def _setup_batch_pq_operation(
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Connecting to enterprise factory"
     )
-    factory = await factory_manager.get()
+    controller = await factory_manager.get_controller_client()
     _LOGGER.debug(
         f"[mcp_systems_server:{function_name}] Connected to enterprise factory"
     )
 
     return _BatchPqSetup(
         parsed_pqs=parsed_pqs,
-        controller=factory.controller_client,
+        controller=controller,
         max_concurrent=validated_max_concurrent,
         system_name=system_name,
     )
@@ -785,13 +785,10 @@ async def pq_name_to_id(
         _LOGGER.debug(
             "[mcp_systems_server:pq_name_to_id] Connecting to enterprise factory"
         )
-        factory = await factory_manager.get()
+        controller = await factory_manager.get_controller_client()
         _LOGGER.debug(
             "[mcp_systems_server:pq_name_to_id] Connected to enterprise factory"
         )
-
-        # Get controller client
-        controller = factory.controller_client
 
         # Look up serial by name
         try:
@@ -912,11 +909,8 @@ async def pq_list(
         )
         factory_manager = session_registry.factory_manager
         _LOGGER.debug("[mcp_systems_server:pq_list] Connecting to enterprise factory")
-        factory = await factory_manager.get()
+        controller = await factory_manager.get_controller_client()
         _LOGGER.debug("[mcp_systems_server:pq_list] Connected to enterprise factory")
-
-        # Get controller client
-        controller = factory.controller_client
 
         # Get all PQs from controller
         _LOGGER.debug(
@@ -1193,11 +1187,8 @@ async def pq_details(
         _LOGGER.debug(
             "[mcp_systems_server:pq_details] Connecting to enterprise factory"
         )
-        factory = await factory_manager.get()
+        controller = await factory_manager.get_controller_client()
         _LOGGER.debug("[mcp_systems_server:pq_details] Connected to enterprise factory")
-
-        # Get controller client
-        controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial
@@ -1463,11 +1454,8 @@ async def pq_create(
         )
         factory_manager = session_registry.factory_manager
         _LOGGER.debug("[mcp_systems_server:pq_create] Connecting to enterprise factory")
-        factory = await factory_manager.get()
+        controller = await factory_manager.get_controller_client()
         _LOGGER.debug("[mcp_systems_server:pq_create] Connected to enterprise factory")
-
-        # Get controller client
-        controller = factory.controller_client
 
         # Create PQ configuration (the client normalizes programming_language)
         pq_config = await controller.make_pq_config(
@@ -1918,11 +1906,8 @@ async def pq_modify(
 
         factory_manager = session_registry.factory_manager
         _LOGGER.debug("[mcp_systems_server:pq_modify] Connecting to enterprise factory")
-        factory = await factory_manager.get()
+        controller = await factory_manager.get_controller_client()
         _LOGGER.debug("[mcp_systems_server:pq_modify] Connected to enterprise factory")
-
-        # Get controller client
-        controller = factory.controller_client
 
         # Get all PQs from controller (ensures subscription is ready)
         # Then extract the specific PQ by serial

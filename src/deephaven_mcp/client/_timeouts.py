@@ -106,6 +106,27 @@ class EnterpriseClientTimeouts(StrictSchema):
     """Timeout (seconds) for subscribing to controller state updates
     (the initial snapshot must arrive within this budget)."""
 
+    controller_resubscribe_backoff_initial_seconds: Annotated[float, Field(gt=0)] = 30.0
+    """Initial delay (seconds) before the first automatic recreate of a
+    wedged controller subscription. When the subscription is stuck
+    initializing, a background healer recreates the enterprise factory,
+    doubling this delay after each attempt up to
+    ``controller_resubscribe_backoff_max_seconds``; controller-backed
+    calls fail fast with a status message meanwhile instead of blocking
+    on the vendor subscription timeout. The delay resets to this value
+    once the subscription recovers."""
+
+    controller_resubscribe_backoff_max_seconds: Annotated[float, Field(gt=0)] = 300.0
+    """Ceiling (seconds) for the controller-resubscribe backoff delay.
+    Bounds how far apart automatic recreate attempts grow during a
+    prolonged outage; it does not affect how quickly a recovered
+    controller is noticed, which the healer polls for on a fixed
+    interval. A value below
+    ``controller_resubscribe_backoff_initial_seconds`` clamps every
+    delay to this ceiling, making the backoff effectively constant. The
+    ``enterprise_controller_reconnect`` MCP tool skips the remaining
+    wait when an operator does not want to wait out the backoff."""
+
     pq_management_timeout_seconds: Annotated[float, Field(gt=0)] = 60.0
     """Timeout (seconds) for persistent-query management RPCs (add,
     delete, modify). These mutate controller state without waiting

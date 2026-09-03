@@ -152,9 +152,17 @@ async def _fetch_factory_pqs(
     Pure I/O function — accesses no shared registry state.
 
     Algorithm:
-        1. If no cached client, create one via ``factory_manager.get()``.
-        2. If cached client exists, ping to verify liveness; recreate if dead.
-        3. Call ``map()`` to get the current PQ list.
+        1. If the cached client is poisoned (subscription wedged), discard it.
+        2. If no live cached client, obtain one via
+           ``factory_manager.get_controller_client()``. While the controller
+           subscription is wedged that call raises (the background healer owns
+           recreation); the raise is caught below and returned as a
+           ``_FactoryQueryError`` so discovery degrades gracefully until the
+           healer restores the connection.
+        3. Otherwise ping the cached client to verify liveness; if it is dead,
+           close the factory manager to evict it, then obtain a replacement via
+           ``get_controller_client()``.
+        4. Call ``map()`` to get the current PQ list.
 
     Args:
         snapshot (_FactorySnapshot): Factory state captured in Phase 1.
@@ -166,11 +174,17 @@ async def _fetch_factory_pqs(
     new_client: CorePlusControllerClient | None = None
 
     try:
+        if client is not None and client.is_poisoned:
+            _LOGGER.warning(
+                "[_fetch_factory_pqs] cached controller client is poisoned "
+                "(subscription wedged in SUBSCRIBING); recreating factory to recover"
+            )
+            client = None
+
         if client is None:
-            _LOGGER.debug("[_fetch_factory_pqs] no cached client, creating")
+            _LOGGER.debug("[_fetch_factory_pqs] no live cached client, creating")
             t0 = time.monotonic()
-            factory_instance = await snapshot.factory_manager.get()
-            client = factory_instance.controller_client
+            client = await snapshot.factory_manager.get_controller_client()
             new_client = client
             _LOGGER.debug(
                 f"[_fetch_factory_pqs] client created in {time.monotonic()-t0:.2f}s"
@@ -191,8 +205,15 @@ async def _fetch_factory_pqs(
                     f"({type(ping_err).__name__}: {ping_err}); discarding and recreating"
                 )
                 t0 = time.monotonic()
-                factory_instance = await snapshot.factory_manager.get()
-                client = factory_instance.controller_client
+                dead_client = client
+                client = await snapshot.factory_manager.get_controller_client()
+                if client is dead_client:
+                    # A ping failure does not poison the factory, so the manager
+                    # keeps handing back the same client until it is evicted.
+                    # Only evict when it really is the dead one; the healer may
+                    # already have replaced the factory this snapshot captured.
+                    await snapshot.factory_manager.close()
+                    client = await snapshot.factory_manager.get_controller_client()
                 new_client = client
                 _LOGGER.debug(
                     f"[_fetch_factory_pqs] client recreated in {time.monotonic()-t0:.2f}s"
@@ -424,6 +445,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             )
 
         # Step 4: close factory manager via local ref captured under the lock.
+        # Its close() stops the subscription healer before dropping the
+        # factory, so nothing recreates one mid-shutdown.
         if factory is not None:
             try:
                 await factory.close()
