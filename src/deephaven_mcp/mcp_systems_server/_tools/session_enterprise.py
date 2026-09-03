@@ -109,7 +109,10 @@ async def _collect_one_enterprise_system_status(
     status_enum, liveness_detail = await factory_manager.liveness_status(
         ensure_item=attempt_to_connect
     )
-    is_alive = await factory_manager.is_alive()
+    # Derived, not re-probed: is_alive() would take the manager lock a second
+    # time (blocking behind an in-progress factory creation) and would report
+    # the cached state even when --connect just probed a live one.
+    is_alive = status_enum is ResourceLivenessStatus.ONLINE
 
     init_errors = snapshot.initialization_errors
     probe_is_uninformative = (
@@ -361,7 +364,9 @@ async def enterprise_controller_reconnect(
 
     Returns:
         dict[str, Any]: Response with the following fields:
-            - success (bool): True if the reconnect request was accepted.
+            - success (bool): True when the request was *processed* — the system
+              was resolved and the healer consulted. It does NOT mean a
+              reconnect was requested; read ``reconnect_requested`` for that.
             - system (str): The system the request targeted. Present on success.
             - reconnect_requested (bool): True when the request was accepted by
               a running healer, which either wakes it now or coalesces into an
@@ -377,9 +382,11 @@ async def enterprise_controller_reconnect(
 
     Format Accuracy for AI Agents:
         Report only what the response contains. ``success: true`` means the
-        request was *accepted*, NOT that the controller reconnected. Do not
-        tell the user the system is back online based on this response — verify
-        with ``enterprise_systems_status`` or by retrying the original call.
+        request was *processed*, NOT that a reconnect was requested and NOT
+        that the controller reconnected. A response with ``success: true`` and
+        ``reconnect_requested: false`` means nothing was done. Never tell the
+        user the system is back online based on this response — verify with
+        ``enterprise_systems_status`` or by retrying the original call.
 
     Example Success Response:
         {

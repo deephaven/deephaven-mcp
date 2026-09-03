@@ -295,8 +295,85 @@ from deephaven_mcp._exceptions import AuthenticationError, ConfigurationError
 
 
 @pytest.mark.asyncio
-async def test_liveness_status_unlocked_exceptions(monkeypatch):
-    """Covers lines 961-962, 969-977: Exception handling in _liveness_status_unlocked."""
+async def test_slow_creation_does_not_block_unrelated_calls():
+    """A slow ``_create_item`` must not stall the rest of the manager's surface.
+
+    Regression guard: the manager lock used to be held across ``_create_item``,
+    so every method that takes it — ``is_alive``, ``liveness_status``,
+    ``close``, ``maybe_close_if_idle``, and a cache-hit ``get`` — queued behind
+    a connect that can run for minutes. Fail-fast callers then had to hand-roll
+    a bypass at each site, which is how the same defect kept resurfacing.
+    """
+
+    gate = asyncio.Event()
+    created = MockItem()
+
+    class SlowManager(BaseItemManager[MockItem]):
+        async def _create_item(self):
+            await gate.wait()
+            return created
+
+        async def _check_liveness(self, item):
+            return (ResourceLivenessStatus.ONLINE, None)
+
+    manager = SlowManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
+
+    get_task = asyncio.create_task(manager.get())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    # Every one of these would have blocked until the create finished.
+    assert await asyncio.wait_for(manager.is_alive(), timeout=1.0) is False
+    assert await asyncio.wait_for(manager.liveness_status(), timeout=1.0) == (
+        ResourceLivenessStatus.OFFLINE,
+        "No item cached",
+    )
+    assert (
+        await asyncio.wait_for(
+            manager.maybe_close_if_idle(timeout_seconds=0.0, now=1.0), timeout=1.0
+        )
+        is False
+    )
+
+    gate.set()
+    assert await get_task is created
+
+
+@pytest.mark.asyncio
+async def test_concurrent_get_creates_once():
+    """Concurrent cache misses share one creation and one cached item.
+
+    Single-flight now comes from the creation lock rather than from holding the
+    manager lock across the create, so it has to be asserted directly.
+    """
+    gate = asyncio.Event()
+    creates = 0
+    created = MockItem()
+
+    class SlowManager(BaseItemManager[MockItem]):
+        async def _create_item(self):
+            nonlocal creates
+            creates += 1
+            await gate.wait()
+            return created
+
+        async def _check_liveness(self, item):
+            return (ResourceLivenessStatus.ONLINE, None)
+
+    manager = SlowManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
+
+    tasks = [asyncio.create_task(manager.get()) for _ in range(5)]
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    gate.set()
+
+    assert await asyncio.gather(*tasks) == [created] * 5
+    assert creates == 1
+
+
+@pytest.mark.asyncio
+async def test_classify_liveness_exceptions(monkeypatch):
+    """Covers lines 961-962, 969-977: Exception handling in _classify_liveness."""
 
     class DummyManager(BaseItemManager[MockItem]):
         async def _create_item(self):
@@ -305,49 +382,49 @@ async def test_liveness_status_unlocked_exceptions(monkeypatch):
         async def _check_liveness(self, item):
             return (ResourceLivenessStatus.ONLINE, None)
 
-        async def _get_unlocked(self):
+        async def _ensure_item(self):
             return MockItem()
 
     manager = DummyManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
-    # Patch _get_unlocked to raise AuthenticationError
+    # Patch _ensure_item to raise AuthenticationError
     monkeypatch.setattr(
-        manager, "_get_unlocked", AsyncMock(side_effect=AuthenticationError("authfail"))
+        manager, "_ensure_item", AsyncMock(side_effect=AuthenticationError("authfail"))
     )
-    result = await manager._liveness_status_unlocked(ensure_item=True)
+    result = await manager._classify_liveness(ensure_item=True)
     assert result[0] == ResourceLivenessStatus.UNAUTHORIZED
     assert "authfail" in result[1]
 
-    # Patch _get_unlocked to raise ConfigurationError
+    # Patch _ensure_item to raise ConfigurationError
     monkeypatch.setattr(
-        manager, "_get_unlocked", AsyncMock(side_effect=ConfigurationError("cfgfail"))
+        manager, "_ensure_item", AsyncMock(side_effect=ConfigurationError("cfgfail"))
     )
-    result = await manager._liveness_status_unlocked(ensure_item=True)
+    result = await manager._classify_liveness(ensure_item=True)
     assert result[0] == ResourceLivenessStatus.MISCONFIGURED
     assert "cfgfail" in result[1]
 
-    # Patch _get_unlocked to raise SessionCreationError (configuration issue)
+    # Patch _ensure_item to raise SessionCreationError (configuration issue)
     monkeypatch.setattr(
-        manager, "_get_unlocked", AsyncMock(side_effect=SessionCreationError("scfail"))
+        manager, "_ensure_item", AsyncMock(side_effect=SessionCreationError("scfail"))
     )
-    result = await manager._liveness_status_unlocked(ensure_item=True)
+    result = await manager._classify_liveness(ensure_item=True)
     assert result[0] == ResourceLivenessStatus.MISCONFIGURED
     assert "scfail" in result[1]
 
-    # Patch _get_unlocked to raise SessionCreationError (connection failure)
+    # Patch _ensure_item to raise SessionCreationError (connection failure)
     monkeypatch.setattr(
         manager,
-        "_get_unlocked",
+        "_ensure_item",
         AsyncMock(side_effect=SessionCreationError("connection refused")),
     )
-    result = await manager._liveness_status_unlocked(ensure_item=True)
+    result = await manager._classify_liveness(ensure_item=True)
     assert result[0] == ResourceLivenessStatus.OFFLINE
     assert "connection refused" in result[1]
 
-    # Patch _get_unlocked to raise generic Exception
+    # Patch _ensure_item to raise generic Exception
     monkeypatch.setattr(
-        manager, "_get_unlocked", AsyncMock(side_effect=RuntimeError("boom!"))
+        manager, "_ensure_item", AsyncMock(side_effect=RuntimeError("boom!"))
     )
-    result = await manager._liveness_status_unlocked(ensure_item=True)
+    result = await manager._classify_liveness(ensure_item=True)
     assert result[0] == ResourceLivenessStatus.UNKNOWN
     assert "boom!" in result[1]
 
@@ -363,7 +440,7 @@ async def test_liveness_status_logs_and_modes(caplog):
         async def _check_liveness(self, item):
             return (ResourceLivenessStatus.ONLINE, "ok")
 
-        async def _get_unlocked(self):
+        async def _ensure_item(self):
             return MockItem()
 
     manager = DummyManager(SystemType.COMMUNITY, "src", SessionId.from_int(1), "nm")
@@ -1175,6 +1252,38 @@ class TestCorePlusSessionFactoryManager:
         manager.get.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_rebuild_factory_finishes_teardown_when_canceled(self):
+        """Canceling mid-teardown still closes the factory the cache released.
+
+        Regression guard: the detach drops the cache's only reference, so a
+        healer stop landing inside the close would otherwise strand the
+        factory's channels and threads with nothing left to release them.
+        """
+        manager = self._make_factory_manager()
+        poisoned_factory, _ = self._make_factory_with_controller(poisoned=True)
+        manager._item_cache = poisoned_factory
+        closing = asyncio.Event()
+        closed = asyncio.Event()
+
+        async def _slow_close(item):
+            closing.set()
+            await asyncio.sleep(0.05)
+            closed.set()
+
+        manager._close_captured_item = _slow_close
+        manager.get = AsyncMock()
+
+        task = asyncio.create_task(manager.rebuild_factory())
+        await asyncio.wait_for(closing.wait(), timeout=1.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert closed.is_set()
+        # Cancellation still won: no replacement was created.
+        manager.get.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_rebuild_factory_swallows_creation_failure(self):
         """A failed recreate is logged rather than raised, leaving the cache empty."""
         manager = self._make_factory_manager()
@@ -1296,7 +1405,7 @@ class TestCorePlusSessionFactoryManager:
 
     @pytest.mark.asyncio
     async def test_close_serializes_against_factory_creation(self):
-        """Close holds the manager lock that ``_create_item`` starts healers under.
+        """Close holds the creation lock that ``_create_item`` starts healers under.
 
         Regression guard: stopping the healer outside that lock let a
         concurrent creation start one for a factory this close then dropped,
@@ -1306,7 +1415,7 @@ class TestCorePlusSessionFactoryManager:
         manager._healer._heal_once = AsyncMock()
         manager._healer.start()
 
-        async with manager._lock:
+        async with manager._creation_lock:
             close_task = asyncio.create_task(manager.close())
             await asyncio.sleep(0)
             assert not close_task.done()
@@ -1779,9 +1888,12 @@ class TestDynamicCommunitySessionManager:
 
     @pytest.mark.asyncio
     async def test_get_in_flight_during_close_race(self):
-        """An in-flight ``get()`` that is mid ``_create_item`` when ``close()``
-        is called returns the just-created session; the close still tears it
-        down afterward. A *new* ``get()`` started after ``close()`` raises.
+        """``close()`` does not wait on an in-flight ``_create_item``.
+
+        Creation runs outside the manager lock, so the close completes
+        immediately. The session that creation then produces belongs to nobody:
+        it is discarded and closed rather than published into the cache the
+        close just emptied, and the retry hits the stopped-manager gate.
         """
         launched_session = DockerLaunchedSession(
             host="localhost",
@@ -1813,33 +1925,25 @@ class TestDynamicCommunitySessionManager:
             new=AsyncMock(side_effect=_slow_create),
         ):
             with patch.object(launched_session, "stop", new_callable=AsyncMock):
-                # Start get() — it enters _get_unlocked, holds the manager
-                # lock, and awaits _create_item.
                 get_task = asyncio.create_task(manager.get())
-                # Give get_task a chance to acquire the lock and start awaiting.
+                # Let get_task reach the await inside _create_item.
                 await asyncio.sleep(0)
                 await asyncio.sleep(0)
 
-                # Now call close() — it should wait for the manager lock.
-                close_task = asyncio.create_task(manager.close())
-                await asyncio.sleep(0)
+                # close() must not queue behind the creation.
+                await asyncio.wait_for(manager.close(), timeout=1.0)
+                assert manager._is_stopped is True
+                assert manager._item_cache is None
 
-                # Release _create_item so get_task can finish and release the lock.
                 gate.set()
+                with pytest.raises(SessionCreationError, match="has been stopped"):
+                    await get_task
 
-                # get_task returns the just-created session.
-                got = await get_task
-                assert got is created_session
-
-                # close_task then captures+closes that session.
-                await close_task
-
-        assert manager._is_stopped is True
-        assert manager._item_cache is None
-        # The session that get() returned has been closed by close().
+        # The orphaned session was released rather than leaked or cached.
         created_session.close.assert_awaited_once()
+        assert manager._item_cache is None
 
-        # A subsequent get() must raise.
+        # A subsequent get() must raise too.
         with pytest.raises(SessionCreationError, match="has been stopped"):
             await manager.get()
 

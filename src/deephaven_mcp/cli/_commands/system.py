@@ -232,8 +232,9 @@ _OUTPUT_RECONNECT = OutputSpec(
         OutputField("detail", "string", "Human-readable next step."),
     ),
     note=(
-        "Acknowledgment only. Success means the request was accepted, NOT "
-        "that the controller reconnected — verify with 'dhcli system status "
+        "Acknowledgment only. Exit 0 means the request was processed, NOT that "
+        "a reconnect was requested (read 'reconnect_requested') and NOT that "
+        "the controller reconnected — verify with 'dhcli system status "
         "--connect' or by retrying the original command."
     ),
 )

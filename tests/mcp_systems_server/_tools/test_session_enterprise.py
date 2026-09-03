@@ -86,6 +86,36 @@ async def test_collect_one_enterprise_system_status_returns_compact_health_recor
     }
 
 
+@pytest.mark.asyncio
+async def test_collect_one_enterprise_system_status_derives_is_alive():
+    """``is_alive`` comes from the probe already run, not a second call.
+
+    Regression guard: ``is_alive()`` takes the manager lock, so probing twice
+    queues the status call behind an in-progress factory creation — during
+    exactly the outage ``--connect`` is being run to diagnose. Deriving also
+    keeps the flag consistent with the status it sits next to.
+    """
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = "prod"
+    mock_registry.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
+    mock_registry.factory_manager.liveness_status = AsyncMock(
+        return_value=(
+            ResourceLivenessStatus.OFFLINE,
+            "controller connection unavailable",
+        )
+    )
+    # Would disagree with the probe if it were consulted.
+    mock_registry.factory_manager.is_alive = AsyncMock(return_value=True)
+
+    with patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry):
+        info, _, _ = await _collect_one_enterprise_system_status(
+            MagicMock(), "prod", True
+        )
+
+    assert info["is_alive"] is False
+    mock_registry.factory_manager.is_alive.assert_not_called()
+
+
 def test_short_reason_extracts_exception_type_prefix():
     """Init errors are recorded as 'Type: message'; ``_short_reason`` returns
     the type prefix — the kubectl-style code shown in ``liveness_detail``."""
