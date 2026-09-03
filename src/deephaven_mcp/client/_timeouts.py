@@ -118,8 +118,10 @@ class EnterpriseClientTimeouts(StrictSchema):
 
     controller_resubscribe_backoff_max_seconds: Annotated[float, Field(gt=0)] = 300.0
     """Ceiling (seconds) for the controller-resubscribe backoff delay.
-    Bounds how late a recovered controller is noticed during a prolonged
-    outage. A value below
+    Bounds how far apart automatic recreate attempts grow during a
+    prolonged outage; it does not affect how quickly a recovered
+    controller is noticed, which the healer polls for on a fixed
+    interval. A value below
     ``controller_resubscribe_backoff_initial_seconds`` clamps every
     delay to this ceiling, making the backoff effectively constant. The
     ``enterprise_controller_reconnect`` MCP tool skips the remaining

@@ -1306,6 +1306,8 @@ def test_is_poisoned_reflects_vendor_sub_state(
         ("map_and_version", ()),
         ("get", (12345,)),
         ("get_serial_for_name", ("some-pq",)),
+        ("wait_for_change", (5.0,)),
+        ("wait_for_change_from_version", (7, 5.0)),
     ],
 )
 async def test_reads_fast_fail_when_poisoned(
@@ -1315,6 +1317,7 @@ async def test_reads_fast_fail_when_poisoned(
 
     The vendor call would otherwise block for the full subscription timeout
     before failing; the fast-fail removes that wait and names the recovery step.
+    Covers every subscription-backed public read, the long-poll waits included.
     """
     from deephaven_enterprise.client.controller import SubState
 

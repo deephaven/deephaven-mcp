@@ -397,7 +397,7 @@ async def enterprise_controller_reconnect(
         requested = await session_registry.factory_manager.request_reconnect()
         _LOGGER.info(
             f"[mcp_systems_server:enterprise_controller_reconnect] Reconnect signaled "
-            f"for system '{system}' (healer_running={requested})"
+            f"for system '{system}' (reconnect_requested={requested})"
         )
         return {
             "success": True,

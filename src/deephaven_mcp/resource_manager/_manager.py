@@ -2970,10 +2970,11 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         the cache is momentarily empty (between the healer's discard and its
         rebuild): the healer owns creation for the duration of the outage, so
         this does not start a competing inline creation that would block the
-        caller for ``session_connect_timeout_seconds``. Inspecting the cache and
-        obtaining the factory happen under one acquisition of the manager lock,
-        the same one the healer's discard takes, so that decision cannot be
-        invalidated between the two.
+        caller for ``session_connect_timeout_seconds``. Both the cache
+        inspection and the outage check are lock-free, because :meth:`get`
+        holds the manager lock for the whole of a factory creation -- including
+        the healer's own rebuild, which is exactly when callers most need to
+        fail fast.
 
         Returns:
             CorePlusControllerClient: A healthy controller client.
@@ -2987,27 +2988,26 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             AuthenticationError: If authentication fails while creating the factory.
             Exception: Any other error raised by factory creation.
         """
-        async with self._lock:
-            if self._item_cache is None:
-                msg = self._healer.healing_status_message(time.monotonic())
-                if msg is not None:
-                    _LOGGER.warning(
-                        f"[{self.__class__.__name__}:get_controller_client] {msg}"
-                    )
-                    raise DeephavenConnectionError(msg)
-
-            factory = await self._get_unlocked()
-            controller = factory.controller_client
-
-            if controller.is_poisoned:
-                msg = self._healer.note_wedged(time.monotonic())
+        if self._item_cache is None:
+            msg = self._healer.healing_status_message(time.monotonic())
+            if msg is not None:
                 _LOGGER.warning(
                     f"[{self.__class__.__name__}:get_controller_client] {msg}"
                 )
                 raise DeephavenConnectionError(msg)
 
-            self._healer.note_healthy()
-            return controller
+        # A cached factory means get() is a cache hit, so this cannot block on
+        # a creation even when the cached controller turns out to be wedged.
+        factory = await self.get()
+        controller = factory.controller_client
+
+        if controller.is_poisoned:
+            msg = self._healer.note_wedged(time.monotonic())
+            _LOGGER.warning(f"[{self.__class__.__name__}:get_controller_client] {msg}")
+            raise DeephavenConnectionError(msg)
+
+        self._healer.note_healthy()
+        return controller
 
     async def request_reconnect(self) -> bool:
         """Ask the background healer to run a recreate pass immediately.
@@ -3053,10 +3053,15 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             )
             await self._close_captured_item(factory)
 
-    async def peek_controller_poisoned(self) -> bool | None:
+    def peek_controller_poisoned(self) -> bool | None:
         """Report the cached controller's poison state without forcing creation.
 
         Satisfies :class:`~deephaven_mcp.resource_manager._healer.HealableFactorySource`.
+
+        Takes no lock, and must not: :meth:`get` holds the manager lock for the
+        whole of a factory creation, so a locked peek would block behind the
+        very rebuild it is reporting on. Synchronous and single-statement, so
+        the event loop cannot interleave a cache swap into the read.
 
         Returns:
             bool | None: ``None`` when no factory is cached; otherwise whether
@@ -3065,10 +3070,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                 either "idle, nothing to heal" or "the last recreate failed
                 mid-outage" — and is disambiguated by the healer's outage state.
         """
-        async with self._lock:
-            if self._item_cache is None:
-                return None
-            return self._item_cache.controller_client.is_poisoned
+        item = self._item_cache
+        return None if item is None else item.controller_client.is_poisoned
 
     async def rebuild_factory(self) -> None:
         """Discard the cached factory if still wedged, then create a replacement.

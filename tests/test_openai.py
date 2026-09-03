@@ -2,7 +2,7 @@ import asyncio
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 
@@ -302,7 +302,7 @@ def test_openai_client_constructor_validation():
         OpenAIClient(api_key="x", base_url="y", model=123)
 
 
-@patch("deephaven_mcp.openai.httpx.AsyncClient")
+@patch("deephaven_mcp.openai.httpx2.AsyncClient")
 @patch("deephaven_mcp.openai.openai.AsyncOpenAI")
 def test_openai_client_constructor_with_advanced_config(mock_openai, mock_httpx):
     """Test that constructor properly configures HTTP client with advanced settings."""
@@ -324,13 +324,13 @@ def test_openai_client_constructor_with_advanced_config(mock_openai, mock_httpx)
         pool_timeout=8.0,
     )
 
-    # Verify httpx.AsyncClient was called with correct limits and timeout
+    # Verify httpx2.AsyncClient was called with correct limits and timeout
     mock_httpx.assert_called_once_with(
-        limits=httpx.Limits(
+        limits=httpx2.Limits(
             max_connections=20,
             max_keepalive_connections=10,
         ),
-        timeout=httpx.Timeout(connect=15.0, read=30.0, write=20.0, pool=8.0),
+        timeout=httpx2.Timeout(connect=15.0, read=30.0, write=20.0, pool=8.0),
     )
 
     # Verify OpenAI client was configured correctly
@@ -369,7 +369,7 @@ async def test_close_method_owned_client():
     mock_client = AsyncMock()
 
     with (
-        patch("deephaven_mcp.openai.httpx.AsyncClient"),
+        patch("deephaven_mcp.openai.httpx2.AsyncClient"),
         patch("deephaven_mcp.openai.openai.AsyncOpenAI", return_value=mock_client),
     ):
 
@@ -416,7 +416,7 @@ async def test_close_method_handles_exceptions():
     mock_client.close.side_effect = Exception("Close failed")
 
     with (
-        patch("deephaven_mcp.openai.httpx.AsyncClient"),
+        patch("deephaven_mcp.openai.httpx2.AsyncClient"),
         patch("deephaven_mcp.openai.openai.AsyncOpenAI", return_value=mock_client),
         patch("deephaven_mcp.openai._LOGGER") as mock_logger,
     ):

@@ -33,7 +33,7 @@ class _FakeSource:
         )
         self.rebuild_calls = 0
 
-    async def peek_controller_poisoned(self) -> bool | None:
+    def peek_controller_poisoned(self) -> bool | None:
         return self.poisoned
 
     async def rebuild_factory(self) -> None:
@@ -73,7 +73,7 @@ class TestOutageState:
     def test_new_healer_has_no_outage(self):
         """A freshly constructed healer is idle."""
         healer, _ = _healer()
-        assert healer.outage_active is False
+        assert healer._outage is None
         assert healer.healing_status_message(time.monotonic()) is None
 
     def test_note_wedged_opens_outage_and_returns_message(self):
@@ -82,7 +82,7 @@ class TestOutageState:
 
         msg = healer.note_wedged(time.monotonic())
 
-        assert healer.outage_active is True
+        assert healer._outage is not None
         assert CONTROLLER_SUBSCRIBING_ERROR_CODE in msg
         assert "0 recreate attempt" in msg
         # The message names the escape hatch and the system to pass to it.
@@ -128,7 +128,7 @@ class TestOutageState:
 
         healer.note_healthy()
 
-        assert healer.outage_active is False
+        assert healer._outage is None
         assert healer.healing_status_message(time.monotonic()) is None
 
     def test_healing_status_message_reports_scheduled_countdown(self):
@@ -190,19 +190,19 @@ class TestHealOnce:
         healer, source = _healer(poisoned=False)
         _wedge(healer, attempts=3, due=True)
 
-        await healer.heal_once()
+        await healer._heal_once()
 
-        assert healer.outage_active is False
+        assert healer._outage is None
         assert source.rebuild_calls == 0
 
     async def test_idle_with_no_cache_does_nothing(self):
         """Nothing cached and no outage is idle, not a wedge."""
         healer, source = _healer(poisoned=None)
 
-        await healer.heal_once()
+        await healer._heal_once()
 
         assert source.rebuild_calls == 0
-        assert healer.outage_active is False
+        assert healer._outage is None
 
     async def test_detection_opens_outage_without_rebuilding(self):
         """The pass that first sees a wedge only opens the outage.
@@ -213,48 +213,29 @@ class TestHealOnce:
         """
         healer, source = _healer(poisoned=True)
 
-        await healer.heal_once()
+        await healer._heal_once()
 
-        assert healer.outage_active is True
+        assert healer._outage is not None
         assert healer._outage.attempts == 0
         assert healer._outage.next_recreate > time.monotonic()
         assert source.rebuild_calls == 0
 
-    async def test_forced_rebuilds_on_detection(self):
-        """A forced pass rebuilds immediately instead of waiting out the backoff."""
-        healer, source = _healer(poisoned=True)
-
-        await healer.heal_once(forced=True)
-
-        assert source.rebuild_calls == 1
-        assert healer._outage.attempts == 1
-
     async def test_pending_backoff_defers_the_rebuild(self):
-        """A non-forced pass waits out the deadline armed when the outage opened."""
+        """A pass waits out the deadline armed when the outage opened."""
         healer, source = _healer(poisoned=True)
         _wedge(healer)
 
-        await healer.heal_once()
+        await healer._heal_once()
 
         assert source.rebuild_calls == 0
         assert healer._outage.attempts == 0
-
-    async def test_forced_pass_ignores_a_pending_backoff(self):
-        """A reconnect request rebuilds without waiting out the armed deadline."""
-        healer, source = _healer(poisoned=True)
-        _wedge(healer)
-
-        await healer.heal_once(forced=True)
-
-        assert source.rebuild_calls == 1
-        assert healer._outage.attempts == 1
 
     async def test_elapsed_backoff_rebuilds_and_escalates(self):
         """A due deadline rebuilds, counts the attempt, and re-arms escalated."""
         healer, source = _healer(poisoned=True, initial=10.0, maximum=1000.0)
         _wedge(healer, attempts=2, due=True)
 
-        await healer.heal_once()
+        await healer._heal_once()
 
         assert source.rebuild_calls == 1
         assert healer._outage.attempts == 3
@@ -273,11 +254,11 @@ class TestHealOnce:
         healer, source = _healer(poisoned=None)
         _wedge(healer, attempts=2, due=True)
 
-        await healer.heal_once()
+        await healer._heal_once()
 
         assert source.rebuild_calls == 1
         assert healer._outage.attempts == 3
-        assert healer.outage_active is True
+        assert healer._outage is not None
 
 
 @pytest.mark.asyncio
@@ -294,7 +275,7 @@ class TestRequestReconnect:
     async def test_actionable_when_wedged(self):
         """A wedged controller with a running loop is signaled."""
         healer, _ = _healer(poisoned=True)
-        healer.heal_once = AsyncMock()
+        healer._heal_once = AsyncMock()
         healer.start()
         try:
             assert await healer.request_reconnect() is True
@@ -309,7 +290,7 @@ class TestRequestReconnect:
         the next pass is a guaranteed no-op.
         """
         healer, _ = _healer(poisoned=None)
-        healer.heal_once = AsyncMock()
+        healer._heal_once = AsyncMock()
         healer.start()
         try:
             assert await healer.request_reconnect() is False
@@ -325,7 +306,7 @@ class TestRequestReconnect:
         no-op-on-healthy behavior.
         """
         healer, _ = _healer(poisoned=False)
-        healer.heal_once = AsyncMock()
+        healer._heal_once = AsyncMock()
         healer.start()
         try:
             assert await healer.request_reconnect() is False
@@ -336,7 +317,7 @@ class TestRequestReconnect:
     async def test_actionable_mid_outage_without_cache(self):
         """An outage whose last rebuild failed is still actionable."""
         healer, _ = _healer(poisoned=None)
-        healer.heal_once = AsyncMock()
+        healer._heal_once = AsyncMock()
         _wedge(healer)
         healer.start()
         try:
@@ -344,40 +325,72 @@ class TestRequestReconnect:
         finally:
             await healer.stop()
 
-    async def test_wait_for_next_pass_returns_false_on_timeout(self):
-        """The full interval elapsing is reported as a non-forced pass."""
+    async def test_wait_for_next_pass_waits_out_the_interval(self):
+        """With no request pending the wait runs the full poll interval."""
         healer, _ = _healer()
         with patch(f"{_HEALER_MODULE}._POLL_SECONDS", 0.01):
-            assert await healer._wait_for_next_pass() is False
+            await healer._wait_for_next_pass()
 
     async def test_wait_for_next_pass_short_circuits_on_request(self):
-        """A pending reconnect request cuts the wait short."""
+        """A pending reconnect request cuts the wait short and is consumed."""
         healer, _ = _healer()
         healer._requested.set()
 
         # Would block for the full poll interval if the request were ignored.
-        assert await healer._wait_for_next_pass() is True
+        await healer._wait_for_next_pass()
+
+        assert not healer._requested.is_set()
+
+    async def test_request_pulls_the_recreate_deadline_forward(self):
+        """A request makes the next recreate due now, backoff notwithstanding.
+
+        This is the whole of "skip the remaining wait" — there is no separate
+        forced-pass mode, only a deadline moved to now.
+        """
+        healer, _ = _healer(poisoned=True, initial=3600.0, maximum=3600.0)
+        _wedge(healer)
+        healer._heal_once = AsyncMock()
+        healer.start()
+        try:
+            assert healer._outage.next_recreate > time.monotonic()
+            assert await healer.request_reconnect() is True
+            assert healer._outage.next_recreate <= time.monotonic()
+        finally:
+            await healer.stop()
+
+    async def test_request_makes_the_next_pass_rebuild(self):
+        """End to end: a request turns the next pass into a real recreate.
+
+        The backoff is an hour, so only the pulled-forward deadline can let the
+        pass through.
+        """
+        healer, source = _healer(poisoned=True, initial=3600.0, maximum=3600.0)
+        _wedge(healer)
+        healer.start()
+        try:
+            assert await healer.request_reconnect() is True
+            await asyncio.sleep(0.05)
+        finally:
+            await healer.stop()
+
+        assert source.rebuild_calls == 1
 
     async def test_request_wakes_the_loop_immediately(self):
         """A reconnect request runs a pass without waiting out the poll interval."""
         healer, _ = _healer(poisoned=True)
         _wedge(healer)
-        forced_calls = []
         healed = asyncio.Event()
 
-        async def _record_heal_once(forced=False):
-            forced_calls.append(forced)
+        async def _record_heal_once():
             healed.set()
 
-        healer.heal_once = _record_heal_once
+        healer._heal_once = _record_heal_once
         healer.start()
         try:
             await healer.request_reconnect()
             await asyncio.wait_for(healed.wait(), timeout=1.0)
         finally:
             await healer.stop()
-
-        assert forced_calls == [True]
 
     async def test_repeated_requests_coalesce_into_one_pass(self):
         """Many requests raised before a pass starts produce exactly one pass.
@@ -387,14 +400,15 @@ class TestRequestReconnect:
         """
         healer, _ = _healer(poisoned=True)
         _wedge(healer)
-        forced_calls = []
+        passes = 0
         healed = asyncio.Event()
 
-        async def _record_heal_once(forced=False):
-            forced_calls.append(forced)
+        async def _record_heal_once():
+            nonlocal passes
+            passes += 1
             healed.set()
 
-        healer.heal_once = _record_heal_once
+        healer._heal_once = _record_heal_once
         healer.start()
         try:
             for _ in range(5):
@@ -403,7 +417,7 @@ class TestRequestReconnect:
             # Long enough for a queued second pass to have run, if one existed.
             await asyncio.sleep(0.05)
 
-            assert forced_calls == [True]
+            assert passes == 1
             assert not healer._requested.is_set()
         finally:
             await healer.stop()
@@ -416,7 +430,7 @@ class TestLoopLifecycle:
     async def test_start_and_stop_are_idempotent(self):
         """start launches one task; stop cancels it; both are idempotent."""
         healer, _ = _healer()
-        healer.heal_once = AsyncMock()
+        healer._heal_once = AsyncMock()
 
         healer.start()
         task = healer._task
@@ -465,7 +479,7 @@ class TestLoopLifecycle:
 
         await healer.stop()
 
-        assert healer.outage_active is False
+        assert healer._outage is None
         assert not healer._requested.is_set()
 
     async def test_loop_invokes_heal_once(self):
@@ -473,10 +487,10 @@ class TestLoopLifecycle:
         healer, _ = _healer()
         called = asyncio.Event()
 
-        async def _fake_heal_once(forced=False):
+        async def _fake_heal_once():
             called.set()
 
-        healer.heal_once = _fake_heal_once
+        healer._heal_once = _fake_heal_once
 
         with patch(f"{_HEALER_MODULE}._POLL_SECONDS", 0.001):
             healer.start()
@@ -495,10 +509,10 @@ class TestLoopLifecycle:
         _wedge(healer)
         polled = asyncio.Event()
 
-        async def _fake_heal_once(forced=False):
+        async def _fake_heal_once():
             polled.set()
 
-        healer.heal_once = _fake_heal_once
+        healer._heal_once = _fake_heal_once
 
         with patch(f"{_HEALER_MODULE}._POLL_SECONDS", 0.001):
             healer.start()
@@ -513,13 +527,13 @@ class TestLoopLifecycle:
         calls = []
         second_call = asyncio.Event()
 
-        async def _flaky_heal_once(forced=False):
+        async def _flaky_heal_once():
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("transient")
             second_call.set()
 
-        healer.heal_once = _flaky_heal_once
+        healer._heal_once = _flaky_heal_once
 
         with patch(f"{_HEALER_MODULE}._POLL_SECONDS", 0.001):
             healer.start()
@@ -532,11 +546,11 @@ class TestLoopLifecycle:
         healer, _ = _healer()
         in_heal = asyncio.Event()
 
-        async def _blocking_heal_once(forced=False):
+        async def _blocking_heal_once():
             in_heal.set()
             await asyncio.sleep(3600)
 
-        healer.heal_once = _blocking_heal_once
+        healer._heal_once = _blocking_heal_once
 
         with patch(f"{_HEALER_MODULE}._POLL_SECONDS", 0.001):
             healer.start()

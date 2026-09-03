@@ -1202,15 +1202,16 @@ def test_files_lists_unaddressable_filename_as_invalid(tmp_path: Path) -> None:
     assert _entry(payload, "cli")["exists"] is False
 
 
-def test_files_relative_config_dir_emits_absolute_paths() -> None:
+def test_files_relative_config_dir_emits_absolute_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A relative --config-dir is normalized so payload paths stay absolute."""
-    runner = CliRunner()
-    with runner.isolated_filesystem():
-        result = runner.invoke(
-            cli, ["--config-dir", "reldir", "-o", "json", "config", "files"]
-        )
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        cli, ["--config-dir", "reldir", "-o", "json", "config", "files"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
     assert Path(payload["config_dir"]).is_absolute()
     assert all(Path(f["file"]).is_absolute() for f in payload["files"])
 

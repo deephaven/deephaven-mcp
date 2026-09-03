@@ -74,6 +74,9 @@ from deephaven_mcp.resource_manager import CorePlusSessionFactoryManager
 
 _STEP = 0
 
+_CLOSED_CHANNEL_MESSAGE = "Cannot invoke RPC on closed channel!"
+"""Message grpc raises from a vendor thread that outlived its channel."""
+
 
 def _step(message: str) -> None:
     """Print a numbered progress banner."""
@@ -392,17 +395,24 @@ class _QuietHarnessNoise(logging.Filter):
 
 
 def _silence_vendor_thread_tracebacks() -> None:
-    """Stop dead vendor response threads from printing gRPC tracebacks.
+    """Stop dead vendor threads from printing gRPC tracebacks.
 
-    Wedging the controller cancels its subscription stream, so the vendor
-    response thread dies with a CANCELED ``RpcError``. Python prints that
-    through ``threading.excepthook`` rather than logging, so it has to be
-    suppressed here rather than by setting a log level.
+    Recreating the factory tears down the old controller's gRPC channel while
+    the vendor's own threads are still using it, so each recreate kills two of
+    them: the response thread dies with a CANCELED ``RpcError``, and the
+    keep-alive ping thread dies with ``ValueError("Cannot invoke RPC on closed
+    channel!")``. Python prints both through ``threading.excepthook`` rather
+    than logging, so they have to be suppressed here rather than by setting a
+    log level.
     """
     original = threading.excepthook
 
     def hook(args: threading.ExceptHookArgs) -> None:
         if args.exc_type is not None and issubclass(args.exc_type, grpc.RpcError):
+            return
+        if isinstance(args.exc_value, ValueError) and _CLOSED_CHANNEL_MESSAGE in str(
+            args.exc_value
+        ):
             return
         original(args)
 

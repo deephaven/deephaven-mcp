@@ -82,8 +82,11 @@ class HealableFactorySource(Protocol):
     def system(self) -> str:
         """Enterprise system name, named by the status message's remediation hint."""
 
-    async def peek_controller_poisoned(self) -> bool | None:
+    def peek_controller_poisoned(self) -> bool | None:
         """Report the cached controller's poison state without creating a factory.
+
+        Must not block: the implementation is called from the fail-fast paths
+        while a rebuild may be holding the source's creation lock.
 
         Returns:
             bool | None: ``None`` when no factory is cached; otherwise whether
@@ -109,13 +112,15 @@ class ControllerHealer:
     creation on behalf of the source; the outage also feeds the status message
     callers receive instead of blocking.
 
-    The background loop wakes every :data:`_POLL_SECONDS`, or immediately on
-    :meth:`request_reconnect`, and re-reads the current state before deciding
-    anything -- it never acts on a decision made before it slept. Recreates are
-    paced by ``_Outage.next_recreate``, armed when the outage opens and re-armed
-    after every attempt, so the configured backoff is honored no matter who
-    detected the wedge, and the countdown the status message reports is the one
-    the loop actually waits.
+    Pacing is one mechanism: ``_Outage.next_recreate``, armed when the outage
+    opens and re-armed after every attempt. A pass recreates once that deadline
+    has arrived, and :meth:`request_reconnect` skips the remaining wait by
+    pulling the deadline forward to now. The countdown the status message
+    reports is therefore always the one the loop is actually waiting on.
+
+    The background loop wakes every :data:`_POLL_SECONDS`, or immediately on a
+    reconnect request, and re-reads the current state before deciding anything
+    -- it never acts on a decision made before it slept.
     """
 
     def __init__(
@@ -140,11 +145,6 @@ class ControllerHealer:
         self._task: asyncio.Task[None] | None = None
         self._requested = asyncio.Event()
         self._outage: _Outage | None = None
-
-    @property
-    def outage_active(self) -> bool:
-        """Whether an outage is currently being tracked."""
-        return self._outage is not None
 
     def _backoff_seconds(self, attempts: int) -> float:
         """Return the delay before the next recreate attempt.
@@ -172,19 +172,35 @@ class ControllerHealer:
             delay *= 2.0
         return min(delay, maximum)
 
-    def _open_outage(self, now: float) -> _Outage:
-        """Start tracking an outage, scheduling its first recreate.
+    def _current_outage(self, now: float) -> _Outage:
+        """Return the outage in progress, opening one if none is.
 
         Args:
             now (float): A ``time.monotonic()`` reading taken by the caller.
 
         Returns:
-            _Outage: The newly opened outage, also stored on the healer.
+            _Outage: The outage being tracked. A newly opened one starts its
+                first recreate one full initial backoff from ``now``.
         """
-        self._outage = _Outage(
-            since=now, next_recreate=now + self._backoff_seconds(attempts=0)
-        )
+        if self._outage is None:
+            self._outage = _Outage(
+                since=now, next_recreate=now + self._backoff_seconds(attempts=0)
+            )
         return self._outage
+
+    def _rebuild_warranted(self, poisoned: bool | None) -> bool:
+        """Whether a poison peek calls for the factory to be recreated.
+
+        Args:
+            poisoned (bool | None): A
+                :meth:`HealableFactorySource.peek_controller_poisoned` result.
+
+        Returns:
+            bool: ``True`` when the cached controller is wedged, or when nothing
+                is cached during an outage -- where an empty cache means the
+                last recreate failed, not that the source is idle.
+        """
+        return poisoned is True or (poisoned is None and self._outage is not None)
 
     def _status_message(self, outage: _Outage, now: float) -> str:
         """Build the "still subscribing" status message for an outage.
@@ -227,7 +243,7 @@ class ControllerHealer:
         Returns:
             str: The status message from :meth:`_status_message`.
         """
-        outage = self._outage if self._outage is not None else self._open_outage(now)
+        outage = self._current_outage(now)
         return self._status_message(outage, now)
 
     def healing_status_message(self, now: float) -> str | None:
@@ -293,30 +309,30 @@ class ControllerHealer:
     async def request_reconnect(self) -> bool:
         """Ask the loop to run a recreate pass immediately.
 
-        Signals the loop rather than recreating inline, so this returns without
-        waiting for the (potentially minutes-long) factory rebuild. The signal
-        is a single flag, so repeated requests coalesce into one pending pass
-        rather than queuing a backlog of attempts.
+        Pulls the outage's next-recreate deadline forward to now and wakes the
+        loop, rather than recreating inline, so this returns without waiting for
+        the (potentially minutes-long) factory rebuild. A request raised while
+        an attempt is already running is answered by that attempt, which re-arms
+        the deadline when it finishes; nothing queues behind it.
 
-        The signal is sent only when a pass would actually do something: the
-        cached controller is wedged, or an outage is in progress with the cache
-        momentarily empty. A healthy controller is left alone, and a source with
-        nothing cached and no outage has nothing to reconnect. Nothing is queued
-        for later in those cases; the loop polls often enough to notice a wedge
-        on its own.
+        The deadline is only pulled forward when a pass would actually do
+        something: the cached controller is wedged, or an outage is in progress
+        with the cache momentarily empty. A healthy controller is left alone,
+        and a source with nothing cached and no outage has nothing to reconnect.
+        Nothing is queued for later in those cases; the loop polls often enough
+        to notice a wedge on its own.
 
         Returns:
             bool: ``True`` when a running loop was signaled and its next pass
                 will attempt a recreate; ``False`` when no attempt was
                 requested, because nothing is wedged or no loop is running.
         """
-        poisoned = await self._source.peek_controller_poisoned()
+        poisoned = self._source.peek_controller_poisoned()
         running = self._task is not None and not self._task.done()
-        # ``None`` (nothing cached) is only actionable mid-outage, when the
-        # healer is between discarding a wedged factory and rebuilding it.
-        heal_would_act = poisoned is True or (poisoned is None and self.outage_active)
-        actionable = running and heal_would_act
+        actionable = running and self._rebuild_warranted(poisoned)
         if actionable:
+            now = time.monotonic()
+            self._current_outage(now).next_recreate = now
             self._requested.set()
         _LOGGER.info(
             f"[ControllerHealer:request_reconnect] Reconnect requested for "
@@ -325,22 +341,13 @@ class ControllerHealer:
         )
         return actionable
 
-    async def _wait_for_next_pass(self) -> bool:
-        """Wait one poll interval, returning early if a reconnect was requested.
-
-        Consumes the request, so requests raised before the pass starts all
-        coalesce into it.
-
-        Returns:
-            bool: ``True`` when :meth:`request_reconnect` cut the wait short,
-                ``False`` when the full interval elapsed.
-        """
+    async def _wait_for_next_pass(self) -> None:
+        """Wait one poll interval, returning early if a reconnect was requested."""
         try:
             await asyncio.wait_for(self._requested.wait(), timeout=_POLL_SECONDS)
         except TimeoutError:
-            return False
+            return
         self._requested.clear()
-        return True
 
     async def _loop(self) -> None:
         """Run a healing pass every poll interval until canceled.
@@ -354,9 +361,9 @@ class ControllerHealer:
         )
         try:
             while True:
-                forced = await self._wait_for_next_pass()
+                await self._wait_for_next_pass()
                 try:
-                    await self.heal_once(forced=forced)
+                    await self._heal_once()
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -371,45 +378,36 @@ class ControllerHealer:
             )
             raise
 
-    async def heal_once(self, forced: bool = False) -> None:
-        """Run one healing pass: recreate the factory iff the subscription is wedged.
+    async def _heal_once(self) -> None:
+        """Run one healing pass: recreate the factory iff a recreate is due.
 
-        A pass recreates when the cached controller is wedged, or when nothing
-        is cached *while an outage is in progress* -- the latter is how a
-        recreate that failed outright (leaving the cache empty) keeps the
+        A recreate is warranted when the cached controller is wedged, or when
+        nothing is cached *while an outage is in progress* -- the latter is how
+        a recreate that failed outright (leaving the cache empty) keeps the
         outage, and therefore the backoff escalation, alive. With no outage in
         progress an empty cache simply means idle, and the pass does nothing.
 
-        The pass that first *detects* a wedge only opens the outage; the
-        recreate waits out the deadline that opening armed. A forced pass skips
-        that wait.
-
-        Args:
-            forced (bool): Whether this pass was triggered by
-                :meth:`request_reconnect` rather than by the backoff elapsing.
-                A forced pass recreates on detection instead of waiting out the
-                backoff; it still never tears down a healthy controller.
+        The pass that first detects a wedge only opens the outage; the recreate
+        waits for the deadline that opening armed, which
+        :meth:`request_reconnect` can pull forward to now.
         """
-        poisoned = await self._source.peek_controller_poisoned()
+        poisoned = self._source.peek_controller_poisoned()
         if poisoned is False:
             self._outage = None
             return
+        if not self._rebuild_warranted(poisoned):
+            return
 
-        outage = self._outage
-        if outage is None:
-            if poisoned is None:
-                return
-            outage = self._open_outage(time.monotonic())
-            if not forced:
-                return
-        elif not forced and time.monotonic() < outage.next_recreate:
+        now = time.monotonic()
+        outage = self._current_outage(now)
+        if now < outage.next_recreate:
             return
 
         outage.attempts += 1
         _LOGGER.warning(
-            f"[ControllerHealer:heal_once] Controller subscription for "
+            f"[ControllerHealer:_heal_once] Controller subscription for "
             f"'{self._source.qualified_session_id}' unavailable; recreating "
-            f"factory (attempt {outage.attempts}, forced={forced})"
+            f"factory (attempt {outage.attempts})"
         )
         await self._source.rebuild_factory()
         outage.next_recreate = time.monotonic() + self._backoff_seconds(outage.attempts)

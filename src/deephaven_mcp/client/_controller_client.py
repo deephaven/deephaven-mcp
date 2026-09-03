@@ -614,11 +614,14 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service due to
-                                    network issues or if the controller becomes unavailable.
+                                    network issues, if the controller becomes unavailable, or
+                                    if the subscription is wedged (message carries
+                                    :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE`).
             TimeoutError: Propagated unchanged when the underlying call raises one.
             QueryError: If there is an issue with the query state or subscription, such as if
                        the subscription was not properly established with subscribe().
         """
+        self._raise_if_poisoned("wait_for_change")
         _LOGGER.debug(
             f"[CorePlusControllerClient:wait_for_change] Waiting for query state change, timeout={timeout_seconds}"
         )
@@ -681,13 +684,16 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         Raises:
             ValueError: If ``timeout_seconds`` is not strictly positive.
-            DeephavenConnectionError: If unable to connect to controller service.
+            DeephavenConnectionError: If unable to connect to controller service, or if
+                the subscription is wedged (message carries
+                :data:`CONTROLLER_SUBSCRIBING_ERROR_CODE`).
             QueryError: If subscription state is invalid.
         """
         if timeout_seconds <= 0:
             raise ValueError(
                 f"timeout_seconds must be a positive value, got {timeout_seconds!r}"
             )
+        self._raise_if_poisoned("wait_for_change_from_version")
         _LOGGER.debug(
             f"[CorePlusControllerClient:wait_for_change_from_version] "
             f"Waiting for version > {map_version}, timeout={timeout_seconds}s"

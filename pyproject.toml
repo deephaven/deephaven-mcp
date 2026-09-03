@@ -26,6 +26,7 @@ dependencies = [
     "aiofiles>=23.2.1",         # Async file support
     "aiohttp>=3.11.18",         # Async HTTP client (stress testing, SSE)
     "httpx>=0.24.0",            # HTTP client
+    "httpx2>=2.3.0",            # HTTP client used by openai >=3 and starlette.testclient >=1.2
     # MCP protocol and orchestration
     "mcp[cli]>=1.12.0,<2",       # CLI and fastmcp server; MCP 2.x removed mcp.server.fastmcp
     # Deephaven integration
@@ -37,7 +38,7 @@ dependencies = [
     # Docs/LLM and web server dependencies
     "fastapi>=0.116.0",         # FastAPI web framework for Docs server
     "uvicorn[standard]>=0.35.0", # ASGI server for FastAPI
-    "openai>=1.0.0",            # OpenAI Python SDK for LLM Q&A
+    "openai>=3.0.0",            # OpenAI Python SDK for LLM Q&A (3.x takes an httpx2 client)
     "pydantic>=2.6.0",          # Data validation and settings (model_serializer context support)
     # Configuration file parsing
     "json5>=0.9.0",             # JSON5 format support (comments, trailing commas)
@@ -59,7 +60,6 @@ test = [
     "pytest-asyncio>=1.3.0",   # Async test support
     "pytest-cov>=7.1.0",       # Code coverage reporting
     "pytest-timeout>=2.1.0",   # Test timeout support for integration tests
-    "httpx2>=2.3.0",           # Required by starlette.testclient >=1.2 (replaces httpx)
     # Stress testing dependencies
     "aiolimiter>=1.1.0",       # Rate limiting for stress tests
     "python-dotenv>=1.0.0",    # Optional .env file loading for test scripts
@@ -159,11 +159,13 @@ ignore-words-list = "unparseable"
 # Pytest configuration for testing
 [tool.pytest.ini_options]
 testpaths = ["tests"]  # Directory containing test files
-# The pydantic-settings 'lifespan' ignore lives here, not in filterwarnings
-# below, because command-line -W filters outrank ini filterwarnings: -W error
-# would otherwise re-promote it. FastMCP's Settings model emits it (a field with
-# an unrebuilt forward reference); matched by message to hold across versions.
-addopts = "-W error -W ignore::pytest.PytestUnraisableExceptionWarning -W \"ignore:Field 'lifespan' has an incomplete definition\" --cov=deephaven_mcp --cov-report=term-missing --cov-report=xml -m 'not integration'"
+# These ignores live here, not in filterwarnings below, because command-line -W
+# filters outrank ini filterwarnings: -W error would otherwise re-promote them.
+#   - 'lifespan': FastMCP's Settings model emits it (a field with an unrebuilt
+#     forward reference); matched by message to hold across versions.
+#   - 'anyio.abc.BlockingPortal': starlette.testclient still imports the
+#     deprecated alias at module scope, so -W error fails collection outright.
+addopts = "-W error -W ignore::pytest.PytestUnraisableExceptionWarning -W \"ignore:Field 'lifespan' has an incomplete definition\" -W \"ignore:The anyio.abc.BlockingPortal alias is deprecated\" --cov=deephaven_mcp --cov-report=term-missing --cov-report=xml -m 'not integration'"
 python_files = ["test_*.py"]  # Test file naming pattern
 python_classes = ["Test"]  # Test class naming pattern
 python_functions = ["test_"]  # Test function naming pattern
