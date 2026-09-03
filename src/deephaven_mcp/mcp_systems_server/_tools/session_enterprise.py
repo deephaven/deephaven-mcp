@@ -363,11 +363,14 @@ async def enterprise_controller_reconnect(
         dict[str, Any]: Response with the following fields:
             - success (bool): True if the reconnect request was accepted.
             - system (str): The system the request targeted. Present on success.
-            - reconnect_requested (bool): True when the background healer was
-              asked to run its next attempt immediately; the attempt starts
-              after this call returns. False when no attempt was requested
-              because nothing is currently wedged (including an already-healthy
-              controller) or no healer is running. Present on success.
+            - reconnect_requested (bool): True when the request was accepted by
+              a running healer, which either wakes it now or coalesces into an
+              attempt already under way — so it does not promise an *additional*
+              attempt. False when the request was not accepted, which means
+              either nothing is currently wedged (including an already-healthy
+              controller) or no healer is running; check
+              ``enterprise_systems_status`` to tell those apart. Present on
+              success.
             - detail (str): Human-readable next step. Present on success.
             - error (str): Error message. Present only on failure.
             - isError (bool): True. Present only on failure.
@@ -411,10 +414,10 @@ async def enterprise_controller_reconnect(
                 )
                 if requested
                 else (
-                    f"No reconnect attempt was started for enterprise system "
-                    f"'{system}': nothing is currently wedged, so there is "
-                    f"nothing to reconnect. Check enterprise_systems_status to "
-                    f"confirm the system's health."
+                    f"No reconnect attempt was requested for enterprise system "
+                    f"'{system}': either nothing is currently wedged, or no "
+                    f"background healer is running for it. Check "
+                    f"enterprise_systems_status to confirm the system's health."
                 )
             ),
         }

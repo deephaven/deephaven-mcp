@@ -3085,7 +3085,10 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         """
         detached = await self._detach_poisoned_item()
         if detached is not None:
-            await self._close_captured_item(detached)
+            # Shielded: the detach already dropped the cache's only reference,
+            # so a healer stop landing here would otherwise strand the
+            # factory's channels and threads with nothing left to close them.
+            await asyncio.shield(self._close_captured_item(detached))
         try:
             await self.get()
         except Exception as e:
@@ -3362,3 +3365,33 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             return (ResourceLivenessStatus.ONLINE, None)
         else:
             return (ResourceLivenessStatus.OFFLINE, "Ping returned False")
+
+    @override
+    async def liveness_status(
+        self, ensure_item: bool = False
+    ) -> tuple[ResourceLivenessStatus, str | None]:
+        """Report factory health, failing fast while the healer owns creation.
+
+        Adds one gate to :meth:`BaseItemManager.liveness_status`: while an
+        outage is in progress and the cache is empty -- between the healer's
+        discard and its rebuild -- ``ensure_item=True`` would start a competing
+        inline creation and block the caller for
+        ``session_connect_timeout_seconds``. The wedged controller is already
+        the answer, so report it without creating anything. The gate is
+        lock-free for the same reason as :meth:`get_controller_client`'s.
+
+        Args:
+            ensure_item (bool): Whether to create the factory when none is
+                cached. See :meth:`BaseItemManager.liveness_status` for the two
+                modes.
+
+        Returns:
+            tuple[ResourceLivenessStatus, str | None]: Liveness status and an
+                optional reason, matching the base method's contract.
+        """
+        if self._item_cache is None and self._healer.outage_active:
+            return (
+                ResourceLivenessStatus.OFFLINE,
+                "controller connection unavailable",
+            )
+        return await super().liveness_status(ensure_item)

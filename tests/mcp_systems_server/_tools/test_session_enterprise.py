@@ -2918,9 +2918,12 @@ async def test_enterprise_controller_reconnect_reports_no_running_healer():
 
     assert result["success"] is True
     assert result["reconnect_requested"] is False
-    # Must not claim an attempt is in flight, nor that one is queued for later.
+    # Must not claim an attempt is in flight, nor that one is queued for later,
+    # and must name both reasons — a stopped healer is not a healthy controller.
     detail = result["detail"]
-    assert "No reconnect attempt was started" in detail
+    assert "No reconnect attempt was requested" in detail
+    assert "nothing is currently wedged" in detail
+    assert "no background healer is running" in detail
     assert "runs in the background" not in detail
     assert "recorded" not in detail
 

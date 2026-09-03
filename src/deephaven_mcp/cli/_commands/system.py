@@ -223,10 +223,11 @@ _OUTPUT_RECONNECT = OutputSpec(
         OutputField(
             "reconnect_requested",
             "boolean",
-            "True when the background healer was asked to run its next "
-            "attempt immediately; the attempt starts after this command "
-            "returns. False when nothing is currently wedged (including an "
-            "already-healthy controller), so there was nothing to reconnect.",
+            "True when a running healer accepted the request, either waking it "
+            "now or coalescing into an attempt already under way — it does not "
+            "promise an additional attempt. False when the request was not "
+            "accepted: either nothing is currently wedged (including an "
+            "already-healthy controller), or no healer is running.",
         ),
         OutputField("detail", "string", "Human-readable next step."),
     ),

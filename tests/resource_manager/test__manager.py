@@ -1094,6 +1094,36 @@ class TestCorePlusSessionFactoryManager:
         assert manager._item_cache is None
         assert manager.peek_controller_poisoned() is None
 
+    @pytest.mark.asyncio
+    async def test_liveness_status_fails_fast_mid_outage_with_empty_cache(self):
+        """An active probe does not start a creation the healer already owns.
+
+        Regression guard: ``system status --connect`` passes
+        ``ensure_item=True``, so without this gate it would block for
+        ``session_connect_timeout_seconds`` during exactly the outage it is
+        being run to diagnose.
+        """
+        manager = self._make_factory_manager()
+        manager._item_cache = None
+        manager._healer.note_wedged(time.monotonic())
+        manager._get_unlocked = AsyncMock()
+
+        status, detail = await manager.liveness_status(ensure_item=True)
+
+        assert status is ResourceLivenessStatus.OFFLINE
+        assert detail == "controller connection unavailable"
+        manager._get_unlocked.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_liveness_status_probes_normally_when_no_outage(self):
+        """With no outage the probe runs the ordinary base-class path."""
+        manager = self._make_factory_manager()
+        factory, _ = self._make_factory_with_controller(poisoned=False)
+        factory.ping = AsyncMock(return_value=True)
+        manager._item_cache = factory
+
+        assert await manager.liveness_status() == (ResourceLivenessStatus.ONLINE, None)
+
     def test_peek_controller_poisoned_reflects_cached_controller(self):
         """The peek reports the cached controller's poison state without creating."""
         manager = self._make_factory_manager()

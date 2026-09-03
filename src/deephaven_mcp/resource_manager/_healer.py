@@ -146,6 +146,11 @@ class ControllerHealer:
         self._requested = asyncio.Event()
         self._outage: _Outage | None = None
 
+    @property
+    def outage_active(self) -> bool:
+        """Whether an outage is currently being tracked."""
+        return self._outage is not None
+
     def _backoff_seconds(self, attempts: int) -> float:
         """Return the delay before the next recreate attempt.
 

@@ -33,7 +33,7 @@ import time
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
-import httpx2
+import httpx
 import openai
 
 _LOGGER = logging.getLogger(__name__)
@@ -295,14 +295,14 @@ class OpenAIClient:
 
             # Step 1: Configure the underlying HTTP client with connection pool limits
             # This is the key to preventing resource exhaustion during stress testing
-            http_client: httpx2.AsyncClient = httpx2.AsyncClient(
+            http_client: httpx.AsyncClient = httpx.AsyncClient(
                 # Connection Pool Limits (prevents resource exhaustion)
-                limits=httpx2.Limits(
+                limits=httpx.Limits(
                     max_connections=max_connections,  # Total connections across all hosts
                     max_keepalive_connections=max_keepalive_connections,  # Reusable connections
                 ),
                 # Timeout Configuration (prevents hanging requests)
-                timeout=httpx2.Timeout(
+                timeout=httpx.Timeout(
                     connect=connect_timeout,  # Time to establish connection (handshake)
                     read=timeout,  # Time to read response (main request timeout)
                     write=write_timeout,  # Time to send request data
