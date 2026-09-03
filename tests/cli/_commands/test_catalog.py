@@ -18,7 +18,6 @@ from deephaven_mcp.cli._runtime import Runtime
 from .._helpers import fake_load_runtime, make_entry, make_runtime
 
 _SYS = "prod"
-_SID = "enterprise:prod:rpt"
 
 
 def _run(
@@ -141,82 +140,6 @@ def test_namespaces_truncated_warns_on_stderr(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert json.loads(result.stdout) == _NAMESPACES["namespaces"]
     assert "truncated" in result.stderr
-
-
-_SCHEMA = {
-    "success": True,
-    "id": _SID,
-    "namespace": "Market",
-    "table_name": "Trades",
-    "schema": [],
-    "column_count": 0,
-}
-
-
-def test_schema_single_table(tmp_path: Path) -> None:
-    result, call = _run(
-        ["catalog", "schema", _SID, "Market", "Trades"], _SCHEMA, tmp_path
-    )
-    assert result.exit_code == 0
-    assert call.await_args.args[2] == "catalog_table_schema"
-    assert call.await_args.args[3] == {
-        "id": _SID,
-        "namespace": "Market",
-        "table_name": "Trades",
-    }
-
-
-def test_schema_full_flag_is_removed(tmp_path: Path) -> None:
-    """Sparse column_type is always included; no full mode."""
-    result, _ = _run(
-        ["catalog", "schema", _SID, "Market", "Trades", "--full"], _SCHEMA, tmp_path
-    )
-    assert result.exit_code == 2
-    assert "no such option" in result.output.lower()
-
-
-def test_sample_defaults(tmp_path: Path) -> None:
-    result, call = _run(
-        ["catalog", "sample", _SID, "Market", "Trades"], {"success": True}, tmp_path
-    )
-    assert result.exit_code == 0
-    assert call.await_args.args[2] == "catalog_table_sample"
-    assert call.await_args.args[3] == {
-        "id": _SID,
-        "namespace": "Market",
-        "table_name": "Trades",
-        "head": True,
-        "format": "json-row",
-    }
-
-
-def test_sample_options(tmp_path: Path) -> None:
-    result, call = _run(
-        [
-            "catalog",
-            "sample",
-            _SID,
-            "Market",
-            "Trades",
-            "--max-rows",
-            "20",
-            "--tail",
-            "--filter",
-            "p>0",
-        ],
-        {"success": True},
-        tmp_path,
-    )
-    assert result.exit_code == 0
-    assert call.await_args.args[3] == {
-        "id": _SID,
-        "namespace": "Market",
-        "table_name": "Trades",
-        "head": False,
-        "max_rows": 20,
-        "filters": ["p>0"],
-        "format": "json-row",
-    }
 
 
 def test_tables_truncated_warns_on_stderr(tmp_path: Path) -> None:

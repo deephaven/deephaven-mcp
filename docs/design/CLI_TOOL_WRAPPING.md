@@ -1,7 +1,7 @@
 # Design: wrapping MCP tools as first-class `dhcli` CLI commands
 
 **Audience:** contributors and architects working on the `dhcli` CLI.
-**Scope:** *why* the CLI wraps MCP tools the way it does — the noun
+**Scope:** _why_ the CLI wraps MCP tools the way it does — the noun
 structure, the type-scoping rule, the wrapper categories, output shaping
 and diagnostics, and the schema-drift contract. Per-command reference
 (flags, output fields, examples) lives in [`docs/CLI.md`](../CLI.md), not
@@ -46,11 +46,11 @@ distinct.
   under `config` — never on a runtime noun.
 - **Runtime** — MCP tools executed against a running daemon: session
   lifecycle, tables, scripts, catalog, persistent queries, and
-  credential *retrieval*. This is what the wrapper layer covers.
+  credential _retrieval_. This is what the wrapper layer covers.
 
 A consequence worth stating: the runtime `session` noun stays lean
 permanently, because setup/auth growth lands on the static-config plane.
-`session credentials` is a runtime *token fetch* (a live browser-login
+`session credentials` is a runtime _token fetch_ (a live browser-login
 URL for a running Community session), not credential management, so it
 belongs with the runtime sessions.
 
@@ -59,12 +59,12 @@ belongs with the runtime sessions.
 There is no single "auth" concept to model as one noun. Four orthogonal
 mechanisms exist, each owned by the entity it secures:
 
-| Concept | Secures | Owner / where it lives |
-|---------|---------|------------------------|
-| PSK | client → daemon (HTTP gate) | the daemon (`server.json`) |
-| Community credentials | daemon → community worker | a community session def (`community/sessions/*.json`) |
-| Enterprise credentials | daemon → enterprise system | an enterprise system def (`enterprise/systems/*.json`) |
-| Browser-login retrieval | hand a human a live session URL+token | a running session (runtime, security-gated) |
+| Concept                 | Secures                               | Owner / where it lives                                 |
+| ----------------------- | ------------------------------------- | ------------------------------------------------------ |
+| PSK                     | client → daemon (HTTP gate)           | the daemon (`server.json`)                             |
+| Community credentials   | daemon → community worker             | a community session def (`community/sessions/*.json`)  |
+| Enterprise credentials  | daemon → enterprise system            | an enterprise system def (`enterprise/systems/*.json`) |
+| Browser-login retrieval | hand a human a live session URL+token | a running session (runtime, security-gated)            |
 
 So the CLI has no monolithic `auth` noun. Future auth/setup operations
 attach to their owning entity (PSK under `daemon`/`config`, system
@@ -108,7 +108,7 @@ command surface must make that place unmistakable:
 
 - **The CLI machine.** The flag names a local file. The CLI reads it
   itself (`read_local_script` in `_wrapping.py`) and forwards the
-  *contents* to the tool, so a relative path resolves against the
+  _contents_ to the tool, so a relative path resolves against the
   invoking shell's working directory, `-` means stdin, and an unreadable
   file fails fast with `file_read_failed` (exit 2) before any daemon
   round trip. Examples: `session exec --script-path`,
@@ -140,7 +140,7 @@ flow in
 one of two top-level helpers, both of which render via `echo_payload`:
 `call_and_echo` (emit the tool's whole success payload) or
 `call_and_echo_field` (emit one field — e.g. a `list` verb's array — and
-re-surface a partial-result diagnostic on stderr; see *Output shaping*).
+re-surface a partial-result diagnostic on stderr; see _Output shaping_).
 
 1. **Passthrough** — one tool; flags map to tool args; the payload is
    rendered. Example: `system list` → `list_systems`.
@@ -181,7 +181,7 @@ async def system_list(runtime: Runtime) -> None:
 
 Presentation is owned by a single knob, `-o human|json|json-pretty|yaml`
 (`format_output`); a wrapper never branches on output mode. It chooses
-only *what value* to render:
+only _what value_ to render:
 
 - **Whole envelope** (`call_and_echo`) — the tool's full success payload.
 - **One field** (`call_and_echo_field`) — a bare value (e.g. a `list`
@@ -217,7 +217,7 @@ Two mechanisms keep them honest.
   deliberately omits (an explicit allowlist, so an intentional subset is
   distinguishable from drift);
 - `router_params: frozenset[str]` — dispatch-router flags that steer
-  which tool runs but *are* a parameter of some wrapped tool (e.g.
+  which tool runs but _are_ a parameter of some wrapped tool (e.g.
   `system` on `session create`: it selects the backend and is the
   enterprise tool's required `system` arg). Exempt from the phantom
   check, but the drift test still asserts they are real tool params.
@@ -235,9 +235,9 @@ tool's JSON schema in-process (registering the `_tools` modules on a
 throwaway `FastMCP`), walks the live click tree for wrapper bindings,
 and asserts per wrapper:
 
-- *Drift:* every **required** tool parameter is a declared flag/argument
+- _Drift:_ every **required** tool parameter is a declared flag/argument
   or is listed in `intentionally_unsupported`.
-- *Phantom:* every declared flag is a real parameter of at least one
+- _Phantom:_ every declared flag is a real parameter of at least one
   wrapped tool, or is a declared `router_param`.
 
 When a tool signature changes, this test fails until the wrapper and
@@ -247,14 +247,14 @@ runs the drift check on `_tools/**` or `cli/_commands/**` edits).
 
 ## Command catalog
 
-| Group | Verbs → MCP tool(s) |
-|-------|---------------------|
+| Group     | Verbs → MCP tool(s)                                                                                                                                                                                                                                                                                                   |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `session` | `list`→`sessions_list`; `show`→`session_details`; `create --system`→`session_community_create`\|`session_enterprise_create`; `delete`→`session_community_delete`\|`session_enterprise_delete`; `exec`→`session_script_run`; `pip-list`→`session_pip_list`; `credentials`/`url`/`open`→`session_community_credentials` |
-| `system` | `list`→`list_systems`; `status`→`enterprise_systems_status` |
-| `table` | `list`→`session_tables_list`; `schema`→`session_table_schema`; `data`→`session_table_data` |
-| `catalog` | (Enterprise only) `tables`→`catalog_tables_list`; `namespaces`→`catalog_namespaces_list`; `schema`→`catalog_table_schema`; `sample`→`catalog_table_sample` |
-| `pq` | (Enterprise only) `list`/`details`/`create`/`modify`/`delete`/`start`/`stop`/`restart`/`name-to-id` → `pq_*` |
-| `docs` | (Direct-URL; docs server at `docs.url`, no daemon) `ask`→`docs_chat`; `status`→ connectivity probe (no tool binding) |
+| `system`  | `list`→`list_systems`; `status`→`enterprise_systems_status`                                                                                                                                                                                                                                                           |
+| `table`   | `list`→`session_tables_list`; `schema`→`session_table_schema`; `data`→`session_table_data`                                                                                                                                                                                                                            |
+| `catalog` | (Enterprise only) `tables`→`catalog_tables_list`; `namespaces`→`catalog_namespaces_list`                                                                                                                                                                                                                              |
+| `pq`      | (Enterprise only) `list`/`details`/`create`/`modify`/`delete`/`start`/`stop`/`restart`/`name-to-id` → `pq_*`                                                                                                                                                                                                          |
+| `docs`    | (Direct-URL; docs server at `docs.url`, no daemon) `ask`→`docs_chat`; `status`→ connectivity probe (no tool binding)                                                                                                                                                                                                  |
 
 Every group above is implemented, each complete (all of a noun's verbs
 are wrapped). Any tool is still reachable directly via `dhcli tool call`

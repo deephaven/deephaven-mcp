@@ -1,12 +1,10 @@
 """``dhcli catalog`` noun group: query an Enterprise (Core+) data catalog.
 
-Verbs: ``tables``, ``namespaces``, ``schema``, ``sample``.
+Verbs: ``tables``, ``namespaces``.
 
-Enterprise (Core+) only. ``tables`` and ``namespaces`` name a SYSTEM and read
-the listing through that system's shared ``WebClientData`` persistent query,
-scoped to the Enterprise principal the server is configured with; ``schema``
-and ``sample`` name a session ID, because reading a catalog table's schema or
-rows requires a worker the caller administers.
+Enterprise (Core+) only. Both verbs name a SYSTEM and read the listing through
+that system's shared ``WebClientData`` persistent query, scoped to the
+Enterprise principal the server is configured with.
 """
 
 from __future__ import annotations
@@ -20,11 +18,7 @@ import click
 from deephaven_mcp.cli._async import run_async
 from deephaven_mcp.cli._command import HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
-    TABULAR_OUTPUT_FIELDS,
-    TABULAR_OUTPUT_NOTE,
-    call_and_echo,
     call_and_echo_field,
-    call_and_echo_table,
     wrapper_error_codes,
 )
 from deephaven_mcp.cli._context import (
@@ -47,33 +41,22 @@ def catalog() -> None:
     """Query an Enterprise (Core+) data catalog (database).
 
     Enterprise (Core+) only. 'tables' and 'namespaces' enumerate the
-    catalog; 'schema' returns column definitions; 'sample' returns a few
-    rows of a catalog table. All auto-start the daemon unless
-    --no-auto-start is set, and none of them change anything.
+    catalog. Both auto-start the daemon unless --no-auto-start is set, and
+    neither changes anything.
 
-    The two halves address differently. 'tables' and 'namespaces' take a
-    SYSTEM and need no worker of your own: they read through the system's
-    shared 'WebClientData' persistent query. That listing reflects the
-    Enterprise principal the server is configured with for that system, not
-    your own identity — every caller sees the same set. 'schema' and 'sample'
-    take a session ID, because reading a catalog table's schema or rows is a
-    data access the server allows only on a worker you administer.
-
-    'tables' and 'namespaces' fall back to the sticky context system when
-    their SYSTEM is omitted; 'schema' and 'sample' cannot fall back, because a
-    namespace and table name follow the id (run 'context show' to see the
-    current defaults).
+    Both take a SYSTEM and need no worker of your own: they read through the
+    system's shared 'WebClientData' persistent query. That listing reflects
+    the Enterprise principal the server is configured with for that system,
+    not your own identity — every caller sees the same set. When SYSTEM is
+    omitted they fall back to the sticky context system (run 'context show'
+    to see the current defaults).
     """
 
 
 def _filter_option(f: Any) -> Any:
     """Attach the shared repeatable ``--filter`` option to a command.
 
-    The listing verbs and ``sample`` give the option different meanings,
-    so the help states the part they share and each verb's description
-    covers its own: on ``tables`` / ``namespaces`` a filter narrows the
-    catalog listing, while on ``sample`` it filters the table's rows and
-    omitting it triggers the tool's partition auto-detection.
+    On both verbs a filter narrows the catalog listing.
     """
     return click.option(
         "--filter",
@@ -100,8 +83,8 @@ _OUTPUT_TABLES = OutputSpec(
     ),
     note=(
         "Array of {namespace, table_name} entries, one per catalog table. A "
-        "listing is a candidate set: an entry can still fail to load when "
-        "'catalog schema' or 'catalog sample' reaches for it. When the list is "
+        "listing is a candidate set: an entry can still fail to load when a "
+        "session reaches for it. When the list is "
         "truncated by --max-rows, a warning is written to stderr — stdout "
         "alone cannot be told apart from a complete result."
     ),
@@ -116,8 +99,7 @@ _OUTPUT_TABLES = OutputSpec(
         description=(
             "Enterprise (Core+) only. Prints one {namespace, table_name} entry "
             "per catalog table. Narrow with repeatable --filter expressions and "
-            "cap rows with --max-rows. Follow up with 'catalog schema' or "
-            "'catalog sample' for a specific table."
+            "cap rows with --max-rows."
         ),
         arguments=(
             HelpEntry(
@@ -134,7 +116,6 @@ _OUTPUT_TABLES = OutputSpec(
         ),
         see_also=(
             "dhcli catalog namespaces SYSTEM",
-            "dhcli catalog schema ID NAMESPACE TABLE",
             "dhcli context show",
         ),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -258,213 +239,4 @@ async def catalog_namespaces(
         field="namespaces",
         default=[],
         truncation_hint="Raise --max-rows or narrow with --filter.",
-    )
-
-
-# ---------------------------------------------------------------------------
-# schema
-# ---------------------------------------------------------------------------
-
-_OUTPUT_SCHEMA = OutputSpec(
-    "object",
-    (
-        OutputField("id", "string", "The session id, echoed back."),
-        OutputField("namespace", "string", "The catalog namespace."),
-        OutputField("table_name", "string", "The table name."),
-        OutputField(
-            "schema",
-            "array",
-            "One entry per column: name and type (Deephaven type name), plus "
-            "sparse column_type ('Partitioning' or 'Grouping'; omitted for "
-            "Normal columns).",
-        ),
-        OutputField("column_count", "integer", "Number of columns."),
-    ),
-    note="Schema for the one named catalog table.",
-)
-
-
-@catalog.command(
-    "schema",
-    wraps_tool="catalog_table_schema",
-    help_spec=HelpSpec(
-        summary="Show column definitions for one catalog table.",
-        description=(
-            "Enterprise (Core+) only. Returns the schema (column names and "
-            "types) for a single catalog table. Discover namespace/table pairs "
-            "with 'catalog tables' first. Takes a session id, not a system "
-            "name: reading a catalog table is a data access the server allows "
-            "only on a worker you administer."
-        ),
-        arguments=(
-            HelpEntry(
-                "ID",
-                "Enterprise session id. Run 'session list'. Required — with "
-                "NAMESPACE and TABLE_NAME following it, it cannot fall back "
-                f"to the sticky context. {CONTEXT_HINT}",
-            ),
-            HelpEntry(
-                "NAMESPACE",
-                "The catalog namespace, as named by 'catalog namespaces' or "
-                "the namespace field of 'catalog tables'.",
-            ),
-            HelpEntry(
-                "TABLE_NAME",
-                "The catalog table whose schema to show, as named by "
-                "'catalog tables'.",
-            ),
-        ),
-        output=_OUTPUT_SCHEMA,
-        examples=(
-            "$ dhcli catalog schema enterprise:prod:rpt Market Trades",
-            "$ dhcli catalog schema enterprise:prod:rpt Market Trades "
-            "| jq -r '.schema[] | select(.column_type) | .name'",
-        ),
-        see_also=(
-            "dhcli catalog tables SYSTEM",
-            "dhcli catalog sample ID NAMESPACE TABLE",
-            "dhcli context show",
-        ),
-        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
-    ),
-)
-@click.argument("id")
-@click.argument("namespace")
-@click.argument("table_name")
-@click.pass_obj
-@run_async
-async def catalog_schema(
-    runtime: Runtime,
-    id: str,
-    namespace: str,
-    table_name: str,
-) -> None:
-    """Show column definitions for one catalog table."""
-    arguments: dict[str, Any] = {
-        "id": id,
-        "namespace": namespace,
-        "table_name": table_name,
-    }
-    await call_and_echo(
-        runtime,
-        "catalog_table_schema",
-        retry_command="dhcli catalog schema",
-        arguments=arguments,
-    )
-
-
-# ---------------------------------------------------------------------------
-# sample
-# ---------------------------------------------------------------------------
-
-_OUTPUT_TABULAR = OutputSpec(
-    "object",
-    (
-        *TABULAR_OUTPUT_FIELDS,
-        OutputField("namespace", "string", "The catalog namespace, echoed back."),
-    ),
-    note=TABULAR_OUTPUT_NOTE,
-)
-
-
-@catalog.command(
-    "sample",
-    wraps_tool="catalog_table_sample",
-    help_spec=HelpSpec(
-        summary="Sample rows from a catalog table.",
-        description=(
-            "Enterprise (Core+) only. Returns up to --max-rows rows from the "
-            "head (default) or, with --tail, the tail of NAMESPACE.TABLE_NAME. "
-            "A preview, not a query: the row cap is small and a truncated "
-            "result reports is_complete false. Partitioned tables (DbInternal, "
-            "System, and others) would return nothing without a partition "
-            "filter, so with no --filter the tool detects the table's "
-            "partition columns and samples the most recent partition holding "
-            "data; passing --filter replaces that with your own expressions. "
-            "'catalog schema' marks partition columns with column_type "
-            "'Partitioning'. Takes a session id, not a system name: sampling "
-            "a catalog table is a data access the server allows only on a "
-            "worker you administer."
-        ),
-        arguments=(
-            HelpEntry(
-                "ID",
-                "Enterprise session id. Run 'session list'. Required — with "
-                "NAMESPACE and TABLE_NAME following it, it cannot fall back "
-                f"to the sticky context. {CONTEXT_HINT}",
-            ),
-            HelpEntry(
-                "NAMESPACE",
-                "The catalog namespace, as named by 'catalog namespaces'.",
-            ),
-            HelpEntry("TABLE_NAME", "The catalog table, as named by 'catalog tables'."),
-        ),
-        output=_OUTPUT_TABULAR,
-        examples=(
-            "$ dhcli catalog sample enterprise:prod:rpt Market Trades",
-            "$ dhcli catalog sample enterprise:prod:rpt Market Trades --max-rows 20 --tail",
-            "$ dhcli catalog sample enterprise:prod:rpt Market Trades "
-            "| jq '.row_count, .is_complete'",
-        ),
-        see_also=(
-            "dhcli catalog tables SYSTEM",
-            "dhcli catalog schema ID NAMESPACE TABLE",
-            "dhcli context show",
-        ),
-        exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
-        error_codes=wrapper_error_codes(),
-    ),
-)
-@click.argument("id")
-@click.argument("namespace")
-@click.argument("table_name")
-@click.option(
-    "--max-rows",
-    "max_rows",
-    type=int,
-    default=None,
-    help=(
-        "Maximum number of rows to sample. Omitted: 100, the tool's own cap. "
-        "The server refuses a response over its size limit."
-    ),
-)
-@click.option(
-    "--head/--tail",
-    "head",
-    default=True,
-    help=(
-        "Take rows from the start of the table (default) or, with --tail, "
-        "from the end — the most recent rows for a time-series table."
-    ),
-)
-@_filter_option
-@click.pass_obj
-@run_async
-async def catalog_sample(
-    runtime: Runtime,
-    id: str,
-    namespace: str,
-    table_name: str,
-    max_rows: int | None,
-    head: bool,
-    filters: tuple[str, ...],
-) -> None:
-    """Sample rows from a catalog table."""
-    arguments: dict[str, Any] = {
-        "id": id,
-        "namespace": namespace,
-        "table_name": table_name,
-        "head": head,
-        "format": "json-row",
-    }
-    if max_rows is not None:
-        arguments["max_rows"] = max_rows
-    if filters:
-        arguments["filters"] = list(filters)
-    await call_and_echo_table(
-        runtime,
-        "catalog_table_sample",
-        retry_command="dhcli catalog sample",
-        arguments=arguments,
     )

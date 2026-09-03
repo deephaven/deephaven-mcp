@@ -85,12 +85,11 @@ TABULAR_OUTPUT_FIELDS: tuple[OutputField, ...] = (
         "data", "array", "The rows: one JSON object per row, keyed by column name."
     ),
 )
-"""Output fields of the tabular tools, shared by ``table data`` and ``catalog sample``.
+"""Output fields of the tabular tools, shared by the commands that render one
+envelope through :func:`call_and_echo_table`.
 
-Both commands render one envelope through :func:`call_and_echo_table`, so
-describing it once keeps the two help surfaces from drifting from each
-other and from the tools. ``catalog sample`` adds ``namespace``; see its
-own spec.
+Describing the envelope once keeps those help surfaces from drifting from
+each other and from the tools.
 """
 
 TABULAR_OUTPUT_NOTE = (
@@ -487,9 +486,9 @@ async def call_and_echo_table(
       commands request so the human renderer can re-draw ``data`` as an
       aligned table). Every current caller emits it.
     - ``columns``, a bare column-name list that would merely restate the
-      headers of the rendered ``data`` table. Defensive: the two tools routed
-      through this helper today (``session_table_data``,
-      ``catalog_table_sample``) describe their columns under ``schema``, which
+      headers of the rendered ``data`` table. Defensive: the tool routed
+      through this helper today (``session_table_data``) describes its
+      columns under ``schema``, which
       carries types and is left intact; the exclusion covers a tabular tool
       that reports the thinner key instead.
 

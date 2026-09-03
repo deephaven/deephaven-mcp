@@ -75,7 +75,7 @@ Test table listing and schema retrieval on a Deephaven Community session. Do the
 
 Pre-cleanup (idempotent): Call session_community_delete with id="community:community:mcp-test-tables". Ignore any error — this just ensures a clean starting state.
 
-Setup: 
+Setup:
 - Call session_community_create with session_name="mcp-test-tables", launch_method="python", auth_type="anonymous". Verify success==true.
 - Call session_script_run with id="community:community:mcp-test-tables" and this script:
   from deephaven import new_table
@@ -321,25 +321,16 @@ Report: PASS/FAIL for each numbered step with a one-line explanation. Include th
 ## Prompt 14: Enterprise Catalog Tools
 
 ```text
-Test the enterprise catalog tools. These are read-only operations. The two discovery tools are system-scoped (they take an enterprise system name and need no worker of your own); the two table-level tools are session-scoped (reading a catalog table's schema or rows requires a worker you administer). The catalog may be empty on development systems — steps that require catalog data are conditional. Requires the enterprise system to be ONLINE with its WebClientData persistent query running. Do the following steps in order and report results.
+Test the enterprise catalog tools. These are read-only operations. Both tools are system-scoped (they take an enterprise system name and need no worker of your own). The catalog may be empty on development systems — steps that require catalog data are conditional. Requires the enterprise system to be ONLINE with its WebClientData persistent query running. Do the following steps in order and report results.
 
 Setup:
 - Call list_systems. Pick an enterprise system and record its name. If no enterprise system is configured, report that and skip the rest.
-- Call session_enterprise_create with system set to the recorded system and session_name="mcp-test-catalog", and record the returned id. Always create a dedicated session rather than reusing one from sessions_list: steps 3-5 require a worker you administer, and a discovered session on the right system may still be one the configured principal can see but not administer, which would report a false failure.
 
 1. Call catalog_namespaces_list with the system from Setup. Verify success==true. Record the count of namespaces returned (may be 0 if no catalog is configured — that is acceptable).
 
 2. Call catalog_tables_list with the system from Setup. Verify success==true. Verify each entry in 'tables' contains only 'namespace' and 'table_name'. Record the count of catalog tables returned (may be 0).
 
-3. (Skip if step 2 returned zero tables.) Pick any table from the catalog_tables_list result. Record its namespace and table name separately. Call catalog_table_schema with the SESSION ID from Setup, namespace set to the recorded namespace, and table_name set to the recorded table name. Verify success==true. Note the column_count in the response.
-
-4. (Skip if step 2 returned zero tables.) Call catalog_table_sample with the SESSION ID from Setup, namespace and table_name from step 3, and max_rows=3. Verify success==true. Note the number of rows returned (may be 0 for empty tables).
-
-5. Call catalog_table_schema with the SESSION ID from Setup, namespace="nonexistent_ns_xyz", and table_name="nonexistent_table_xyz". Verify success==false and an error message is returned.
-
-6. Call catalog_tables_list with system="nonexistent_system_xyz". Verify success==false and the error names the unconfigured system.
-
-CLEANUP: Call session_enterprise_delete with the id from Setup. Verify success==true.
+3. Call catalog_tables_list with system="nonexistent_system_xyz". Verify success==false and the error names the unconfigured system.
 
 Report: PASS/FAIL for each numbered step (or SKIPPED with reason). Include namespace count and table count from steps 1 and 2.
 ```

@@ -77,7 +77,7 @@ while you focus on insights.
 
 Deephaven MCP ships as a single package, and one `dh-mcp-systems-server` reads **one configuration directory tree**. That tree can hold a `community/` section, an `enterprise/` section, or **both at once** — the single server hosts everything it finds, simultaneously. Each section is optional; you are never locked into one deployment type.
 
-The fastest on-ramp is the [Community Core quickstart](#community-core-quick-start) below. Once that works, [add Enterprise](#enterprise-quick-start) with one more command against the *same* config tree — no second install, no second server. (If you only need Enterprise, start there instead; the steps stand alone.)
+The fastest on-ramp is the [Community Core quickstart](#community-core-quick-start) below. Once that works, [add Enterprise](#enterprise-quick-start) with one more command against the _same_ config tree — no second install, no second server. (If you only need Enterprise, start there instead; the steps stand alone.)
 
 Install once (below), then configure whichever sections you need.
 
@@ -182,16 +182,19 @@ to manage.
 
 ```json5
 {
-  "mcpServers": {
+  mcpServers: {
     "deephaven-systems": {
-      "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"]
+      command: "dh-mcp-systems-server",
+      args: ["--transport", "stdio"],
     },
     "deephaven-docs": {
-      "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
-    }
-  }
+      command: "mcp-proxy",
+      args: [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+      ],
+    },
+  },
 }
 ```
 
@@ -324,16 +327,19 @@ to manage.
 
 ```json5
 {
-  "mcpServers": {
+  mcpServers: {
     "deephaven-systems": {
-      "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"]
+      command: "dh-mcp-systems-server",
+      args: ["--transport", "stdio"],
     },
     "deephaven-docs": {
-      "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
-    }
-  }
+      command: "mcp-proxy",
+      args: [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+      ],
+    },
+  },
 }
 ```
 
@@ -467,23 +473,23 @@ All tools below are exposed by the single multiplexed
 system take a required `system` argument; PQ tools encode the system
 in the PQ id (form `enterprise:<system>:<serial>`).
 
-*System discovery:*
+_System discovery:_
 
 - `list_systems` - List every configured Community session and Enterprise system as `(name, type)` pairs
 - `enterprise_systems_status(system)` - Report a configured DHE system's health (liveness) and any discovery errors
 
-*Community sessions:*
+_Community sessions:_
 
 - `session_community_create` - Dynamically launch Community Core sessions
 - `session_community_delete(id)` - Delete a dynamically created session
 - `session_community_credentials(id)` - Retrieve session credentials (subject to `security.credential_retrieval_mode`)
 
-*Enterprise sessions:*
+_Enterprise sessions:_
 
 - `session_enterprise_create(system, ...)` - Create a worker session in the named DHE system
 - `session_enterprise_delete(id)` - Delete a dynamically created enterprise session and the PQ backing it
 
-*Persistent Query (PQ) Management:*
+_Persistent Query (PQ) Management:_
 
 - `pq_name_to_id(system, name)` - Convert a PQ name to its canonical `id`
 - `pq_list(system)` - List all persistent queries in a system
@@ -497,14 +503,12 @@ in the PQ id (form `enterprise:<system>:<serial>`).
 
 **Parallel Batch Operations**: `pq_start`, `pq_stop`, `pq_restart`, and `pq_delete` accept a list of ids and operate on them in parallel, reporting success or failure per item rather than failing the whole batch. The concurrency cap is operator-configurable via `pq_tools.default_max_concurrent` in `enterprise/settings.json` — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 
-*Catalog discovery:*
+_Catalog discovery:_
 
 - `catalog_tables_list(system, ...)` - List catalog tables
 - `catalog_namespaces_list(system, ...)` - Browse catalog namespaces
-- `catalog_table_schema(id, ...)` - Get one catalog table's schema
-- `catalog_table_sample(id, ...)` - Sample catalog table data
 
-*Session & table operations (any session, community or enterprise):*
+_Session & table operations (any session, community or enterprise):_
 
 - `sessions_list` - List all sessions
 - `session_details(id)` - Get detailed session information
@@ -535,7 +539,7 @@ graph TD
     E2 --> ES("PQ workers (staging)")
 ```
 
-*A single `dh-mcp-systems-server` process composes one community child registry (when `community/sessions/` is non-empty) and one enterprise child registry per file under `enterprise/systems/`. Tools route to the right child based on either a `system` argument or the parsed prefix of a session/PQ id.*
+_A single `dh-mcp-systems-server` process composes one community child registry (when `community/sessions/` is non-empty) and one enterprise child registry per file under `enterprise/systems/`. Tools route to the right child based on either a `system` argument or the parsed prefix of a session/PQ id._
 
 ### Docs Server Architecture
 
@@ -547,7 +551,7 @@ graph TD
     B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 
-*The hosted Docs Server speaks streamable-HTTP. Clients with native HTTP MCP support connect directly; stdio-only clients (e.g. Claude Desktop) bridge through [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy).*
+_The hosted Docs Server speaks streamable-HTTP. Clients with native HTTP MCP support connect directly; stdio-only clients (e.g. Claude Desktop) bridge through [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy)._
 
 ---
 
@@ -601,20 +605,20 @@ After this command, `dhcli`, `dh-mcp-systems-server`, and `dh-mcp-docs-server` a
 
 **Where tools are installed:**
 
-| Platform | Scripts (on PATH) | Tool environment |
-|----------|-------------------|-----------------|
-| macOS/Linux | `~/.local/bin/` | `~/.local/share/uv/tools/deephaven-mcp/` |
-| Windows | `%LOCALAPPDATA%\uv\bin\` | `%APPDATA%\uv\tools\deephaven-mcp\` |
+| Platform    | Scripts (on PATH)        | Tool environment                         |
+| ----------- | ------------------------ | ---------------------------------------- |
+| macOS/Linux | `~/.local/bin/`          | `~/.local/share/uv/tools/deephaven-mcp/` |
+| Windows     | `%LOCALAPPDATA%\uv\bin\` | `%APPDATA%\uv\tools\deephaven-mcp\`      |
 
 Run `uv tool dir` to find the tool environment root on your system.
 
 Community Core session creation and Enterprise (Core+) connectivity are part of the base install — no extras are required for either. The optional extras cover development tooling only:
 
-| Extra | Provides |
-|-------|----------|
-| `[test]` | Testing framework and utilities |
+| Extra    | Provides                                                |
+| -------- | ------------------------------------------------------- |
+| `[test]` | Testing framework and utilities                         |
 | `[lint]` | Code quality tools (linting, formatting, type checking) |
-| `[dev]` | Full development environment (all of the above) |
+| `[dev]`  | Full development environment (all of the above)         |
 
 New to [`uv`](https://github.com/astral-sh/uv)? See the [`uv` crash course](docs/UV.md) for a quick orientation.
 
@@ -733,16 +737,19 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
 
 ```json5
 {
-  "mcpServers": {
+  mcpServers: {
     "deephaven-systems": {
-      "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"]
+      command: "dh-mcp-systems-server",
+      args: ["--transport", "stdio"],
     },
     "deephaven-docs": {
-      "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
-    }
-  }
+      command: "mcp-proxy",
+      args: [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+      ],
+    },
+  },
 }
 ```
 
@@ -771,16 +778,16 @@ Create or edit an MCP configuration file:
 
 ```json5
 {
-  "mcpServers": {
+  mcpServers: {
     "deephaven-systems": {
-      "type": "stdio",
-      "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"]
+      type: "stdio",
+      command: "dh-mcp-systems-server",
+      args: ["--transport", "stdio"],
     },
     "deephaven-docs": {
-      "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-    }
-  }
+      url: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    },
+  },
 }
 ```
 
@@ -798,16 +805,16 @@ Configure your servers:
 
 ```json5
 {
-  "servers": {
+  servers: {
     "deephaven-systems": {
-      "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"]
+      command: "dh-mcp-systems-server",
+      args: ["--transport", "stdio"],
     },
     "deephaven-docs": {
-      "type": "http",
-      "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-    }
-  }
+      type: "http",
+      url: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    },
+  },
 }
 ```
 
@@ -825,15 +832,15 @@ Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > 
 
 ```json5
 {
-  "mcpServers": {
+  mcpServers: {
     "deephaven-systems": {
-      "command": "dh-mcp-systems-server",
-      "args": ["--transport", "stdio"]
+      command: "dh-mcp-systems-server",
+      args: ["--transport", "stdio"],
     },
     "deephaven-docs": {
-      "serverUrl": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
-    }
-  }
+      serverUrl: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    },
+  },
 }
 ```
 
@@ -855,7 +862,7 @@ reading the value from an environment variable to keep the secret out of it:
 ```json5
 // ~/.deephaven/ai/config/server.json
 {
-  "psk": "${env:DH_MCP_PSK}"
+  psk: "${env:DH_MCP_PSK}",
 }
 ```
 
@@ -871,12 +878,12 @@ Cursor and Windsurf both resolve `${env:NAME}` inside `headers`:
 
 ```json5
 {
-  "mcpServers": {
+  mcpServers: {
     "deephaven-systems": {
-      "url": "http://127.0.0.1:8000/mcp",
-      "headers": { "X-Deephaven-PSK": "${env:DH_MCP_PSK}" }
-    }
-  }
+      url: "http://127.0.0.1:8000/mcp",
+      headers: { "X-Deephaven-PSK": "${env:DH_MCP_PSK}" },
+    },
+  },
 }
 ```
 
@@ -932,21 +939,21 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 ### Common Error Messages
 
-| Error | Where You'll See This | Solution |
-|-------|----------------------|----------|
-| `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
-| `Connection failed` | MCP server logs | Check internet connection and server URLs |
-| `Config directory not found` / permissions audit failure | MCP server startup | Verify the directory passed via `--config-dir` (or derived from `DH_AI_DATA_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX). |
-| `Permission denied` | Command execution | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path |
-| `Python version error` | uv tool install | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...` |
-| `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
-| `Module not found: deephaven_mcp` | MCP server logs | Re-run `uv tool install --python-preference managed "deephaven-mcp"` |
-| `Invalid id format` | MCP tool responses | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
-| `Invalid id` | MCP tool responses | PQ ids are `enterprise:<system>:<serial>` where `<serial>` is a non-negative integer. |
-| `Enterprise system 'foo' is not configured` | MCP tool responses | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems. |
-| HTTP `401`/`403` from the server | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK. |
-| HTTP server refuses to start with a loopback error | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead. |
-| `config_invalid` | `dhcli` commands | A file under the configuration directory failed validation. Run `dhcli config files` to find which one; the message names the file and field. An unresolved `${env:VAR}` reference counts — export the variable in the shell you are running from. |
+| Error                                                    | Where You'll See This                                            | Solution                                                                                                                                                                                                                                           |
+| -------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spawn mcp-proxy ENOENT`                                 | AI tool logs                                                     | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
+| `Connection failed`                                      | MCP server logs                                                  | Check internet connection and server URLs                                                                                                                                                                                                          |
+| `Config directory not found` / permissions audit failure | MCP server startup                                               | Verify the directory passed via `--config-dir` (or derived from `DH_AI_DATA_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX).                                                                              |
+| `Permission denied`                                      | Command execution                                                | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path                                                                                                                                                                   |
+| `Python version error`                                   | uv tool install                                                  | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...`                                                                                                                                                         |
+| `JSON parse error`                                       | IDE/AI assistant logs                                            | Fix JSON syntax errors in configuration files                                                                                                                                                                                                      |
+| `Module not found: deephaven_mcp`                        | MCP server logs                                                  | Re-run `uv tool install --python-preference managed "deephaven-mcp"`                                                                                                                                                                               |
+| `Invalid id format`                                      | MCP tool responses                                               | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}`                                                                                                                                                             |
+| `Invalid id`                                             | MCP tool responses                                               | PQ ids are `enterprise:<system>:<serial>` where `<serial>` is a non-negative integer.                                                                                                                                                              |
+| `Enterprise system 'foo' is not configured`              | MCP tool responses                                               | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems.                                                                                                                                     |
+| HTTP `401`/`403` from the server                         | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK.                                                                                                                                 |
+| HTTP server refuses to start with a loopback error       | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead.                                                                         |
+| `config_invalid`                                         | `dhcli` commands                                                 | A file under the configuration directory failed validation. Run `dhcli config files` to find which one; the message names the file and field. An unresolved `${env:VAR}` reference counts — export the variable in the shell you are running from. |
 
 > **For scripts and AI agents**: `dhcli` failures print a structured
 > `{error, error_code, exit_code, command}` object in the JSON output
@@ -968,7 +975,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Verify files exist at the specified paths
 
 - **Environment Variable Issues:**
-  - `DH_AI_DATA_DIR` must point to a valid user-data root *directory* (under which `config/` and `runtime/` live), or be unset to use the platform default
+  - `DH_AI_DATA_DIR` must point to a valid user-data root _directory_ (under which `config/` and `runtime/` live), or be unset to use the platform default
   - Environment variables in `env` block must use correct names
   - Sensitive values should use environment variables, not hardcoded strings
 
@@ -995,7 +1002,7 @@ Before diving into detailed troubleshooting, try these common solutions:
     - The MCP server from connecting to your Deephaven instances on their specified hosts and ports.
     - Your MCP client from reaching the systems server's HTTP endpoint (e.g., `http://127.0.0.1:8000/mcp`) — only if you set up the [Advanced HTTP path](#advanced-share-one-server-over-http).
     - Your MCP client from reaching the Docs Server at `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io`.
-  - Test basic network connectivity (e.g., using [`ping`](https://en.wikipedia.org/wiki/Ping_(networking_utility)) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
+  - Test basic network connectivity (e.g., using [`ping`](<https://en.wikipedia.org/wiki/Ping_(networking_utility)>) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
 
 ### Command and Path Issues
 
