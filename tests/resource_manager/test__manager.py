@@ -1237,6 +1237,8 @@ class TestCorePlusSessionFactoryManager:
         assert manager._item_cache is None
         # Clean up the task the stubbed stop() left running.
         task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
     @pytest.mark.asyncio
     async def test_close_then_get_restarts_the_healer(self):

@@ -159,8 +159,9 @@ async def _fetch_factory_pqs(
            recreation); the raise is caught below and returned as a
            ``_FactoryQueryError`` so discovery degrades gracefully until the
            healer restores the connection.
-        3. Otherwise ping the cached client to verify liveness; re-obtain via
-           ``get_controller_client()`` if dead.
+        3. Otherwise ping the cached client to verify liveness; if it is dead,
+           close the factory manager to evict it, then obtain a replacement via
+           ``get_controller_client()``.
         4. Call ``map()`` to get the current PQ list.
 
     Args:
@@ -204,6 +205,11 @@ async def _fetch_factory_pqs(
                     f"({type(ping_err).__name__}: {ping_err}); discarding and recreating"
                 )
                 t0 = time.monotonic()
+                # get_controller_client() hands back the cached factory's own
+                # controller whenever it is not poisoned, and a ping failure
+                # does not poison it. Evict the factory first or the "recreate"
+                # would return the very client that just failed.
+                await snapshot.factory_manager.close()
                 client = await snapshot.factory_manager.get_controller_client()
                 new_client = client
                 _LOGGER.debug(

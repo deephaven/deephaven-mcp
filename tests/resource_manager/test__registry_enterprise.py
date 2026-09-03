@@ -202,6 +202,9 @@ async def test_fetch_factory_pqs_poisoned_cached_client_recreates():
     # Poisoned client is discarded without pinging.
     mock_old_client.ping.assert_not_called()
     snapshot.factory_manager.get_controller_client.assert_awaited_once()
+    # The healer owns teardown of a poisoned factory; discovery must not
+    # evict it out from under an in-progress recreate.
+    snapshot.factory_manager.close.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -226,6 +229,43 @@ async def test_fetch_factory_pqs_cached_client_ping_ok():
     assert result.query_map == {"q1": "mypq"}
     # get_controller_client should NOT have been called
     snapshot.factory_manager.get_controller_client.assert_not_called()
+    snapshot.factory_manager.close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_factory_pqs_ping_failure_evicts_before_recreating():
+    """A dead client is evicted from the manager before a replacement is asked for.
+
+    Regression guard: ``get_controller_client()`` returns the cached factory's
+    own controller whenever it is not poisoned, and a ping failure does not
+    poison it. Without the eviction the "recreate" hands back the very client
+    that just failed, and ``map()`` runs on it.
+    """
+    mock_old_client = AsyncMock()
+    mock_old_client.is_poisoned = False
+    mock_old_client.ping = AsyncMock(side_effect=ConnectionError("dead"))
+
+    mock_new_client = AsyncMock()
+    mock_new_client.map = AsyncMock(return_value={})
+
+    snapshot = _make_factory_snapshot(client=mock_old_client)
+    calls: list[str] = []
+
+    async def _record_close():
+        calls.append("close")
+
+    async def _record_get():
+        calls.append("get_controller_client")
+        return mock_new_client
+
+    snapshot.factory_manager.close = _record_close
+    snapshot.factory_manager.get_controller_client = _record_get
+
+    result = await _fetch_factory_pqs(snapshot)
+
+    assert isinstance(result, _FactoryQueryResult)
+    assert calls == ["close", "get_controller_client"]
+    mock_old_client.map.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -252,6 +292,7 @@ async def test_fetch_factory_pqs_cached_client_ping_returns_false():
     assert isinstance(result, _FactoryQueryResult)
     assert result.new_client is mock_new_client
     assert result.query_map == {"q1": "fresh-pq"}
+    snapshot.factory_manager.close.assert_awaited_once()
     snapshot.factory_manager.get_controller_client.assert_awaited_once()
 
 
@@ -279,6 +320,7 @@ async def test_fetch_factory_pqs_cached_client_ping_raises():
     assert isinstance(result, _FactoryQueryResult)
     assert result.new_client is mock_new_client
     assert result.query_map == {"q1": "recovered-pq"}
+    snapshot.factory_manager.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

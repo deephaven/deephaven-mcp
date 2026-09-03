@@ -73,14 +73,21 @@ call returns while the subscription is still wedged in ``SUBSCRIBING``.
 Shared with :class:`~deephaven_mcp.resource_manager.CorePlusSessionFactoryManager`,
 which prefixes its richer "still initializing (waited Xs, N attempts, next
 recreate in ~Zs)" status message with the same token. Callers can key off the
-token to recognize the retryable "subscription healing in progress" condition
-without parsing prose."""
+token to recognize the retryable wedged-subscription condition without parsing
+prose."""
 
 _CONTROLLER_UNAVAILABLE_MESSAGE = (
     f"[{CONTROLLER_SUBSCRIBING_ERROR_CODE}] Unable to connect to the Deephaven "
-    "controller; the enterprise session subscription is still initializing and "
-    "is being healed in the background. Retry this call shortly."
+    "controller; the enterprise session subscription is still initializing. "
+    "Recovering requires a fresh session factory. Retry this call shortly."
 )
+"""Message for the client-level fast-fail, raised whether or not a healer exists.
+
+This client and :class:`CorePlusSessionFactory` are usable directly, with no
+manager behind them, so the message stays neutral about recovery: it names what
+recovery takes rather than promising a background retry. The manager's own
+status message adds the background-healer guidance for callers that have one.
+"""
 
 
 class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
