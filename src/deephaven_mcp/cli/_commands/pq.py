@@ -528,8 +528,12 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "python_virtual_environment",
             default=None,
             help=(
-                "Name of a Python virtualenv configured on the Enterprise "
-                "server — a name, not a path on this machine."
+                "Python environment control document for the worker, stored "
+                "in the PQ's python_control field. Either a JSON object as "
+                'plain unescaped text, e.g. {"ephemeral_venv": true, '
+                '"ephemeral_requirements": "pkg>=1.0"}, or the name of a '
+                "virtualenv configured on the Enterprise server — a name, "
+                "not a path on this machine."
             ),
         ),
         click.option(

@@ -666,7 +666,12 @@ inline source stored in the PQ definition; `--script-body-path PATH|-` is a
 controller's Git-backed script repository, resolved **on the server** each
 time the PQ starts (use it for version-controlled scripts). `--python-venv`
 and `--class-path` also name resources on the Enterprise server, not this
-machine.
+machine. `--python-venv` additionally accepts the PQ's full Python control
+document as plain, unescaped JSON text — for example
+`--python-venv '{"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0"}'`.
+Do not backslash-escape the quotes: the escaped text would be stored verbatim
+and leave `python_control` unparseable, which makes every later `pq modify` on
+that PQ fail until the field is cleared.
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the

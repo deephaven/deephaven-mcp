@@ -7,6 +7,7 @@ import warnings
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 
 from ._helpers import (
     MockContext,
@@ -148,6 +149,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_pq_states,
     _format_table_definition,
     _format_worker_protocol,
+    _normalize_python_control,
     _parse_pq_id,
     _pq_state_category,
     _setup_batch_pq_operation,
@@ -2100,6 +2102,120 @@ async def test_pq_create_forwards_owner():
     assert mock_controller.make_pq_config.call_args.kwargs["owner"] == "service-account"
 
 
+def test_normalize_python_control_none():
+    """``None`` passes through so the field is left unchanged."""
+    assert _normalize_python_control(None) is None
+
+
+def test_normalize_python_control_serializes_a_dict():
+    """A decoded JSON object is re-encoded to compact JSON text."""
+    assert (
+        _normalize_python_control(
+            {"ephemeral_venv": True, "ephemeral_requirements": "pkg>=1.0 other-pkg"}
+        )
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pkg>=1.0 other-pkg"}'
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["analytics-env", "", '{"ephemeral_venv": true}', '  {"a": 1}  '],
+)
+def test_normalize_python_control_passes_strings_through(value):
+    """Bare names, the clearing empty string, and valid JSON text are verbatim."""
+    assert _normalize_python_control(value) == value
+
+
+def test_normalize_python_control_rejects_unparseable_json_object():
+    """A backslash-escaped JSON object is rejected instead of corrupting the field."""
+    with pytest.raises(ValueError, match="does not parse"):
+        _normalize_python_control('{\\"ephemeral_venv\\": true}')
+
+
+@pytest.mark.parametrize(
+    ("tool", "required"),
+    [
+        (pq_create, {"system": "system", "pq_name": "pq", "heap_size_gb": 8.0}),
+        (pq_modify, {"id": "enterprise:system:12345"}),
+    ],
+)
+def test_python_control_survives_mcp_json_pre_parsing(tool, required):
+    """A JSON-object string argument validates against the tool signature.
+
+    The MCP SDK decodes any JSON-object string argument before validating it, so a
+    ``str``-only annotation rejected the very payload ``python_control`` requires.
+    """
+    meta = func_metadata(tool, skip_names=["context"])
+    raw = {**required, "python_virtual_environment": '{"ephemeral_venv": true}'}
+    validated = meta.arg_model.model_validate(meta.pre_parse_json(raw))
+    assert validated.model_dump_one_level()["python_virtual_environment"] == {
+        "ephemeral_venv": True
+    }
+
+
+@pytest.mark.asyncio
+async def test_pq_create_serializes_python_control_object():
+    """pq_create re-encodes a decoded python_virtual_environment object to JSON text."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    mock_config = MagicMock()
+    mock_config.pb = MagicMock()
+    mock_controller.make_pq_config = AsyncMock(return_value=mock_config)
+    mock_controller.add_query = AsyncMock(return_value=12345)
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="new-pq",
+        heap_size_gb=8.0,
+        python_virtual_environment={"ephemeral_venv": True},
+    )
+
+    assert result["success"] is True
+    assert (
+        mock_controller.make_pq_config.call_args.kwargs["python_virtual_environment"]
+        == '{"ephemeral_venv":true}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_pq_create_rejects_unparseable_python_control():
+    """pq_create reports an error rather than storing escaped JSON verbatim."""
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": MagicMock(spec=EnterpriseSessionRegistry),
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="new-pq",
+        heap_size_gb=8.0,
+        python_virtual_environment='{\\"ephemeral_venv\\": true}',
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "does not parse" in result["error"]
+
+
 @pytest.mark.asyncio
 async def test_pq_create_success_groovy():
     """Test successful PQ creation with Groovy programming language."""
@@ -2985,6 +3101,71 @@ async def test_pq_modify_mutually_exclusive_scripts():
     assert result["success"] is False
     assert "mutually exclusive" in result["error"]
     assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_serializes_python_control_object():
+    """pq_modify re-encodes a decoded python_virtual_environment object to JSON text."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+
+    current_pq_info = create_mock_pq_info(12345, "pq", "STOPPED", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment={
+            "ephemeral_venv": True,
+            "ephemeral_requirements": "pkg>=1.0",
+        },
+    )
+
+    assert result["success"] is True
+    assert (
+        mock_controller.update_pq_config.call_args.kwargs["python_virtual_environment"]
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pkg>=1.0"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_rejects_unparseable_python_control():
+    """pq_modify reports an error rather than corrupting python_control."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment='{\\"ephemeral_venv\\": true}',
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "does not parse" in result["error"]
 
 
 @pytest.mark.asyncio

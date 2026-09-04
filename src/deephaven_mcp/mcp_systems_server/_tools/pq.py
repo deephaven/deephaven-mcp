@@ -15,6 +15,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 """
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from typing import Annotated
@@ -108,6 +109,43 @@ def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
             ``'enterprise:<system_name>:<serial>'``.
     """
     return make_pq_id(system_name, int(serial))
+
+
+def _normalize_python_control(value: str | dict[str, object] | None) -> str | None:
+    """Normalize a ``python_virtual_environment`` argument into a ``pythonControl`` string.
+
+    A JSON object is re-encoded to compact JSON text; a string is passed through
+    verbatim. Both forms arrive for the same caller input, because MCP clients decode a
+    JSON-object string argument into a ``dict`` before the tool sees it.
+
+    Args:
+        value (str | dict[str, object] | None): Python environment control document as a
+            JSON object or as JSON text, a bare virtualenv name, an empty string to
+            clear the field, or ``None`` to leave it unchanged.
+
+    Returns:
+        str | None: Value to store in ``pythonControl``, or ``None`` when ``value`` is
+        ``None``.
+
+    Raises:
+        ValueError: If ``value`` is a string that opens with ``{`` but does not parse as
+            JSON. Storing it would leave the PQ with an unparseable ``pythonControl``
+            that the controller rejects on every subsequent modification.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return json.dumps(value, separators=(",", ":"))
+    if value.lstrip().startswith("{"):
+        try:
+            json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                "python_virtual_environment looks like a JSON control document but "
+                f"does not parse: {e}. Pass it as a JSON object, or as plain JSON "
+                "text with unescaped quotes - do not backslash-escape the quotes."
+            ) from e
+    return value
 
 
 def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
@@ -1268,7 +1306,7 @@ async def pq_create(
     jvm_profile: str | None = None,
     extra_jvm_args: list[str] | None = None,
     extra_class_path: list[str] | None = None,
-    python_virtual_environment: str | None = None,
+    python_virtual_environment: str | dict[str, object] | None = None,
     extra_environment_vars: list[str] | None = None,
     init_timeout_nanos: int | None = None,
     auto_delete_timeout: int | None = None,
@@ -1341,6 +1379,10 @@ async def pq_create(
     - configuration_type="Script" (default) for long-running interactive sessions
     - schedule parameter enables automated start/stop - see detailed format below
     - All list parameters (schedule, admin_groups, etc.) accept empty list [] or None
+    - python_virtual_environment takes a JSON object, e.g.
+      {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0 other-pkg"}. Pass it as a
+      real object; never backslash-escape the quotes to force it through as a string - the
+      escaped text would be stored verbatim and corrupt the PQ's python_control field.
 
     Script Source Options (mutually exclusive):
     - script_body: Inline Python/Groovy code as a string. Use for simple scripts or dynamic code generation.
@@ -1400,7 +1442,7 @@ async def pq_create(
         jvm_profile (str | None): Named JVM profile from controller config (e.g., "large-memory")
         extra_jvm_args (list[str] | None): Additional JVM arguments
         extra_class_path (list[str] | None): Additional classpath entries to prepend (e.g., ["/opt/libs/custom.jar"])
-        python_virtual_environment (str | None): Named Python venv for Core+ workers
+        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. Accepts a JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0"}), the equivalent unescaped JSON text, or a bare venv name; an object is serialized to compact JSON. A string that opens with ``{`` but does not parse as JSON is rejected.
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None (default) and 0 = permanent; positive = temporary
@@ -1454,6 +1496,12 @@ async def pq_create(
             )
             result["isError"] = True
             return result
+        try:
+            python_control = _normalize_python_control(python_virtual_environment)
+        except ValueError as e:
+            result["error"] = str(e)
+            result["isError"] = True
+            return result
 
         session_registry = get_enterprise_registry(context, system)
         system_name = system
@@ -1484,7 +1532,7 @@ async def pq_create(
             jvm_profile=jvm_profile,
             extra_jvm_args=extra_jvm_args,
             extra_class_path=extra_class_path,
-            python_virtual_environment=python_virtual_environment,
+            python_virtual_environment=python_control,
             extra_environment_vars=extra_environment_vars,
             init_timeout_nanos=init_timeout_nanos,
             auto_delete_timeout=auto_delete_timeout,
@@ -1753,7 +1801,7 @@ async def pq_modify(
     jvm_profile: str | None = None,
     extra_jvm_args: list[str] | None = None,
     extra_class_path: list[str] | None = None,
-    python_virtual_environment: str | None = None,
+    python_virtual_environment: str | dict[str, object] | None = None,
     extra_environment_vars: list[str] | None = None,
     init_timeout_nanos: int | None = None,
     auto_delete_timeout: int | None = None,
@@ -1811,6 +1859,11 @@ async def pq_modify(
       for it and call pq_restart to apply the changes.
     - Can modify RUNNING PQs but be cautious - restart=True will disrupt active sessions
     - Use pq_details first to see current config before modifying
+    - python_virtual_environment takes a JSON object, e.g.
+      {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0 other-pkg"}. Pass it as a
+      real object; never backslash-escape the quotes to force it through as a string - the
+      escaped text would be stored verbatim and corrupt the PQ's python_control field, after
+      which every later pq_modify on that PQ fails until it is cleared with an empty string.
 
     Parameter Behaviors:
     - pq_name: Renames the PQ (does not affect serial number or id)
@@ -1845,7 +1898,7 @@ async def pq_modify(
         jvm_profile (str | None): Named JVM profile from controller config
         extra_jvm_args (list[str] | None): Additional JVM arguments (replaces current)
         extra_class_path (list[str] | None): Additional classpath entries (replaces current)
-        python_virtual_environment (str | None): Named Python venv for Core+ workers
+        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. Accepts a JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0"}), the equivalent unescaped JSON text, or a bare venv name; an object is serialized to compact JSON. Pass "" to clear the field. A string that opens with ``{`` but does not parse as JSON is rejected.
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format; replaces current)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (auto-delete disabled), positive integer = timeout in seconds
@@ -1898,6 +1951,12 @@ async def pq_modify(
                 "auto_delete_timeout and schedule are mutually exclusive. "
                 "auto_delete_timeout installs its own scheduler."
             )
+            result["isError"] = True
+            return result
+        try:
+            python_control = _normalize_python_control(python_virtual_environment)
+        except ValueError as e:
+            result["error"] = str(e)
             result["isError"] = True
             return result
 
@@ -1959,7 +2018,7 @@ async def pq_modify(
             jvm_profile=jvm_profile,
             extra_jvm_args=extra_jvm_args,
             extra_class_path=extra_class_path,
-            python_virtual_environment=python_virtual_environment,
+            python_virtual_environment=python_control,
             extra_environment_vars=extra_environment_vars,
             init_timeout_nanos=init_timeout_nanos,
             auto_delete_timeout=auto_delete_timeout,
