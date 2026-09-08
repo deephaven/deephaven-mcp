@@ -124,8 +124,8 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
             to leave it unchanged.
 
     Returns:
-        str | None: Value to store in ``pythonControl``, or ``None`` when ``value`` is
-        ``None``.
+        str | None: Value to store in ``pythonControl``: compact JSON text, ``""`` when
+        ``value`` is blank, or ``None`` when ``value`` is ``None``.
 
     Raises:
         ValueError: If ``value`` is a non-blank string that is not a JSON object. The
@@ -136,8 +136,9 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
         return None
     if isinstance(value, dict):
         return json.dumps(value, separators=(",", ":"))
+    # Collapsed to "" so a cleared field reads back as None, not as truthy whitespace.
     if not value.strip():
-        return value
+        return ""
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as e:

@@ -2117,12 +2117,18 @@ def test_normalize_python_control_serializes_a_dict():
     )
 
 
+@pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+def test_normalize_python_control_blank_clears_the_field(value):
+    """Any blank string collapses to "" so the cleared field reads back as None."""
+    assert _normalize_python_control(value) == ""
+
+
 @pytest.mark.parametrize(
     "value",
-    ["", "   ", '{"ephemeral_venv": true}', '  {"seed_ephemeral_venv": false}  '],
+    ['{"ephemeral_venv": true}', '  {"seed_ephemeral_venv": false}  '],
 )
-def test_normalize_python_control_passes_strings_through(value):
-    """A blank string (clears the field) and JSON object text are stored verbatim."""
+def test_normalize_python_control_passes_json_text_through(value):
+    """JSON object text is stored verbatim, surrounding whitespace included."""
     assert _normalize_python_control(value) == value
 
 
