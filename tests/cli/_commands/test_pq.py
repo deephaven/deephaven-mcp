@@ -204,6 +204,49 @@ def test_modify_only_passes_given_fields(tmp_path: Path) -> None:
     assert "server" not in args
 
 
+def test_create_forwards_python_venv_verbatim(tmp_path: Path) -> None:
+    """The JSON control document reaches the tool as the exact shell text."""
+    document = '{"ephemeral_venv": true, "ephemeral_requirements": "pandas"}'
+    result, call = _run(
+        [
+            "pq",
+            "create",
+            "nightly",
+            "--system",
+            "prod",
+            "--heap-size-gb",
+            "4",
+            "--python-venv",
+            document,
+        ],
+        {"success": True, "id": "999"},
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[2] == "pq_create"
+    assert call.await_args.args[3]["python_virtual_environment"] == document
+
+
+def test_modify_forwards_python_venv_verbatim(tmp_path: Path) -> None:
+    """modify forwards the document unchanged; the tool owns normalization."""
+    document = '{"seed_ephemeral_venv": false}'
+    result, call = _run(
+        ["pq", "modify", "123", "--python-venv", document],
+        {"success": True},
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[2] == "pq_modify"
+    assert call.await_args.args[3]["python_virtual_environment"] == document
+
+
+def test_modify_omits_python_venv_when_not_given(tmp_path: Path) -> None:
+    """An unset --python-venv leaves python_control untouched on the PQ."""
+    result, call = _run(["pq", "modify", "123"], {"success": True}, tmp_path)
+    assert result.exit_code == 0
+    assert "python_virtual_environment" not in call.await_args.args[3]
+
+
 def test_modify_restart_flag(tmp_path: Path) -> None:
     result, call = _run(
         ["pq", "modify", "123", "--restart"], {"success": True}, tmp_path

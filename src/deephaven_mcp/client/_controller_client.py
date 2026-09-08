@@ -884,7 +884,8 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             f"configuration_type={configuration_type!r}, enabled={enabled}, "
             f"script_body={'<set>' if script_body else None}, script_path={script_path!r}, "
             f"schedule={schedule}, jvm_profile={jvm_profile!r}, "
-            f"python_virtual_environment={python_virtual_environment!r}, "
+            # Withheld: ephemeral_requirements may carry a PEP 508 URL with credentials.
+            f"python_virtual_environment={'<set>' if python_virtual_environment else None}, "
             f"admin_groups={admin_groups}, viewer_groups={viewer_groups}, restart_users={restart_users!r}, "
             f"owner={owner!r}"
         )
