@@ -90,7 +90,7 @@ The `kubectl` comparison above is not decoration — interaction-model decisions
 A path-valued flag resolves on exactly one of the CLI machine or the server — never the daemon (its cwd/filesystem view is not the user's; rationale in the design doc's *Path locality* section).
 
 - **Local file**: read it in the CLI with `read_local_script` from `_wrapping.py` (`-` = stdin, relative paths resolve against the shell cwd, unreadable file → `file_read_failed`, empty stdin → `missing_argument`) and forward the *contents* as the tool's inline param. A flag materialized into a different tool param this way (e.g. `script_body_path` → `script_body`) goes in `client_only_params`. Add `FILE_READ_FAILED` (and `MISSING_ARGUMENT` for the stdin case) to the help's `error_codes`. Canonical: `session exec --script-path`, `pq create --script-body-path`.
-- **Server-side identifier**: forward verbatim and give the flag a self-documenting name — `--git-script-path`, not `--script-path` — plus help text naming the server-side namespace ("the Enterprise controller's Git-backed script repository"). Canonical: `pq --git-script-path`, `pq --python-venv`.
+- **Server-side identifier**: forward verbatim and give the flag a self-documenting name — `--git-script-path`, not `--script-path` — plus help text naming the server-side namespace ("the Enterprise controller's Git-backed script repository"). Canonical: `pq --git-script-path`, `pq --class-path`.
 
 Per `ref-cli-help-standards` *Help-content contract*, every path-valued option's help states where the path resolves.
 

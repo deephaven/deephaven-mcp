@@ -143,7 +143,7 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
     except json.JSONDecodeError as e:
         raise ValueError(
             f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
-            "object such as {'ephemeral_venv': true}, not a bare virtualenv name. "
+            'object such as {"ephemeral_venv": true}, not a bare virtualenv name. '
             "Pass it as an object, or as plain JSON text with unescaped quotes - do "
             "not backslash-escape the quotes."
         ) from e
@@ -1026,7 +1026,7 @@ async def pq_details(
     context: Context,
     id: str,
 ) -> dict:
-    """MCP Tool: Get detailed information about a persistent query.
+    r"""MCP Tool: Get detailed information about a persistent query.
 
     Retrieves comprehensive details about a specific PQ including its full
     configuration, current state, resource allocation, permissions, and
@@ -1109,7 +1109,7 @@ async def pq_details(
                 "assignment_policy": "RoundRobin",
                 "assignment_policy_params": null,
                 "additional_memory_gb": 2.0,
-                "python_control": "analytics-env",
+                "python_control": "{\"ephemeral_venv\": true}",
                 "generic_worker_control": null
             },
             "state_details": {
