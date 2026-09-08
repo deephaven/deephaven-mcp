@@ -539,7 +539,8 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
                 "server, not on this machine. Replaces the field wholesale; "
                 "'dhcli pq details' redacts credentials in a package URL to "
                 "[REDACTED], so restore the real credential before writing a "
-                "document read from it back."
+                "document read from it back. A credential passed here is "
+                "visible in this process's arguments and your shell history."
             ),
         ),
         click.option(

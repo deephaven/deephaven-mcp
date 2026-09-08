@@ -687,6 +687,11 @@ not writable as-is — restore the real credential first. Passing a document tha
 still contains `[REDACTED]` exits `3` rather than overwriting the working
 credential with the marker.
 
+A credential written this way is visible in the process's arguments (readable
+by other local users on Linux) and is recorded in your shell history. Prefer an
+unauthenticated index, or set the field from the Enterprise web UI, when the
+requirements need a token.
+
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the
 `summary` and per-item `results` in the payload for failures. All ids in

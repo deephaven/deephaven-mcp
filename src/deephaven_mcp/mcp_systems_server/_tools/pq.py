@@ -83,6 +83,49 @@ def _redact_url_userinfo(value: str) -> str:
     return _URL_USERINFO.sub(REDACTED, value)
 
 
+def _redact_userinfo_deep(obj: object) -> object:
+    """Apply :func:`_redact_url_userinfo` to every string in a decoded JSON value.
+
+    Args:
+        obj (object): A value decoded by ``json.loads`` - dict, list, str, or scalar.
+
+    Returns:
+        object: The same structure with every string redacted; scalars pass through.
+    """
+    if isinstance(obj, str):
+        return _redact_url_userinfo(obj)
+    if isinstance(obj, dict):
+        return {key: _redact_userinfo_deep(item) for key, item in obj.items()}
+    if isinstance(obj, list):
+        return [_redact_userinfo_deep(item) for item in obj]
+    return obj
+
+
+def _redact_python_control(stored: str) -> str:
+    r"""Redact package-URL credentials in a stored ``pythonControl`` document.
+
+    Decodes before matching, because JSON may escape the URL delimiter
+    (``https:\/\/user:token@host``) and leave no literal ``://`` in the raw text.
+
+    Args:
+        stored (str): The raw ``pythonControl`` value read from the controller.
+
+    Returns:
+        str: Re-serialized JSON with each URL's userinfo replaced by ``[REDACTED]``,
+        or ``"[UNPARSEABLE]"`` when the stored value is not JSON at all - the content
+        is suppressed rather than echoed, since it cannot be inspected for secrets.
+    """
+    try:
+        parsed = json.loads(stored)
+    except (json.JSONDecodeError, ValueError):
+        _LOGGER.warning(
+            "[mcp_systems_server:_redact_python_control] Suppressing python_control: "
+            "stored value is not valid JSON and cannot be scanned for credentials"
+        )
+        return "[UNPARSEABLE]"
+    return json.dumps(_redact_userinfo_deep(parsed))
+
+
 # =============================================================================
 # Persistent Query (PQ) Management Tools
 # =============================================================================
@@ -329,7 +372,7 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         ),
         "additional_memory_gb": pb.additionalMemoryGb,
         "python_control": (
-            _redact_url_userinfo(pb.pythonControl) if pb.pythonControl else None
+            _redact_python_control(pb.pythonControl) if pb.pythonControl else None
         ),
         "generic_worker_control": (
             pb.genericWorkerControl if pb.genericWorkerControl else None

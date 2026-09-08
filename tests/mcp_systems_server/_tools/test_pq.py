@@ -153,6 +153,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _normalize_python_control,
     _parse_pq_id,
     _pq_state_category,
+    _redact_python_control,
     _redact_url_userinfo,
     _setup_batch_pq_operation,
     _validate_and_parse_pq_ids,
@@ -2191,6 +2192,42 @@ def test_normalize_python_control_rejects_unserializable_object(value):
 def test_redact_url_userinfo(stored, expected):
     """Index credentials are stripped from anything pq_details echoes back."""
     assert _redact_url_userinfo(stored) == expected
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        # Plain delimiter.
+        (
+            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
+            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+        ),
+        # JSON may escape "/" as "\/", leaving no literal "://" in the raw text.
+        (
+            r'{"ephemeral_requirements": "pkg @ https:\/\/user:tok@host/p.whl"}',
+            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+        ),
+        # Same for a \u escape of the delimiter.
+        (
+            r'{"ephemeral_requirements": "pkg @ https:\u002f\u002fuser:tok@h/p"}',
+            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@h/p"}',
+        ),
+        # Nested containers are walked.
+        (
+            '{"a": ["https://user:tok@host"], "b": {"c": "https://u:t@h"}}',
+            '{"a": ["https://[REDACTED]@host"], "b": {"c": "https://[REDACTED]@h"}}',
+        ),
+        ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
+    ],
+)
+def test_redact_python_control(stored, expected):
+    """Credentials are matched against the decoded value, not the raw JSON text."""
+    assert _redact_python_control(stored) == expected
+
+
+def test_redact_python_control_suppresses_unparseable():
+    """A value that cannot be decoded cannot be scanned, so it is not echoed."""
+    assert _redact_python_control("analytics-env") == "[UNPARSEABLE]"
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
