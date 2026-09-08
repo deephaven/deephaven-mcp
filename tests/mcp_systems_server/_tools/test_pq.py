@@ -2193,6 +2193,43 @@ def test_redact_url_userinfo(stored, expected):
     assert _redact_url_userinfo(stored) == expected
 
 
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (
+            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
+            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+        ),
+        ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
+        ("", None),
+    ],
+)
+def test_format_pq_config_redacts_python_control(mock_restart_enum, stored, expected):
+    """_format_pq_config is the wiring that keeps index tokens out of pq_details."""
+    mock_restart_enum.Name.return_value = "RU_ADMIN"
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.restartUsers = 0
+    mock_pb.typeSpecificFieldsJson = ""
+    mock_pb.pythonControl = stored
+    mock_config.pb = mock_pb
+    assert _format_pq_config(mock_config)["python_control"] == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+        {"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"},
+    ],
+)
+def test_normalize_python_control_rejects_redacted_round_trip(value):
+    """Writing back a pq_details document must not replace a credential with the marker."""
+    with pytest.raises(ValueError, match=r"still contains \[REDACTED\]"):
+        _normalize_python_control(value)
+
+
 @pytest.mark.parametrize(
     ("tool", "required"),
     [
@@ -3227,6 +3264,37 @@ async def test_pq_modify_rejects_unparseable_python_control():
     assert result["success"] is False
     assert result["isError"] is True
     assert "not valid JSON" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_rejects_redacted_python_control():
+    """A document read back from pq_details is refused before it reaches the PQ."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment=(
+            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}'
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "[REDACTED]" in result["error"]
+    # Refused before the controller is contacted at all.
+    mock_factory_manager.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio

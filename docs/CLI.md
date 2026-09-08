@@ -675,11 +675,17 @@ in plain, unescaped text. It has three optional keys: `ephemeral_venv`
 startup, which requires `ephemeral_venv`). For example:
 
 ```bash
-dhcli pq modify --python-venv '{"ephemeral_venv": true, "ephemeral_requirements": "pandas"}'
+dhcli pq modify enterprise:prod:1234567890 \
+  --python-venv '{"ephemeral_venv": true, "ephemeral_requirements": "pandas"}'
 ```
 
 The object replaces the field wholesale, so to change one key read the current
-`python_control` from `pq details`, modify it, and pass the whole object back.
+`python_control` from `dhcli pq details ID`, modify it, and pass the whole
+object back. One catch: `pq details` replaces the credentials in any
+`ephemeral_requirements` package URL with `[REDACTED]`, so what it returns is
+not writable as-is — restore the real credential first. Passing a document that
+still contains `[REDACTED]` exits `3` rather than overwriting the working
+credential with the marker.
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the

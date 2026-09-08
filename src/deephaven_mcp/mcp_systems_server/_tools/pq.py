@@ -165,41 +165,51 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
         ``value`` is blank, or ``None`` when ``value`` is ``None``.
 
     Raises:
-        ValueError: If ``value`` is a non-blank string that is not a JSON object, or
+        ValueError: If ``value`` is a non-blank string that is not a JSON object,
             holds a value JSON cannot represent (``NaN``/``Infinity``, or an object
-            such as a set). The controller rejects any non-blank ``pythonControl``
-            that does not parse, leaving the PQ unmodifiable until the field is
-            cleared.
+            such as a set), or still carries the ``[REDACTED]`` marker ``pq_details``
+            substitutes for a credential. The controller rejects any non-blank
+            ``pythonControl`` that does not parse, leaving the PQ unmodifiable until
+            the field is cleared.
     """
     if value is None:
         return None
     if isinstance(value, dict):
         try:
-            return json.dumps(value, separators=(",", ":"), allow_nan=False)
+            normalized = json.dumps(value, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError) as e:
             raise ValueError(
                 f"python_virtual_environment is not serializable as JSON: {e}. "
                 "Use a string, number, or boolean."
             ) from e
-    # Collapsed to "" so a cleared field reads back as None, not as truthy whitespace.
-    if not value.strip():
-        return ""
-    try:
-        parsed = json.loads(value, parse_constant=_reject_json_constant)
-    except json.JSONDecodeError as e:
+    else:
+        # Collapsed to "" so a cleared field reads back as None, not as truthy whitespace.
+        if not value.strip():
+            return ""
+        try:
+            parsed = json.loads(value, parse_constant=_reject_json_constant)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
+                'object such as {"ephemeral_venv": true}, not a bare virtualenv name. '
+                "Pass it as an object, or as plain JSON text with unescaped quotes - do "
+                "not backslash-escape the quotes."
+            ) from e
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                "python_virtual_environment must be a JSON object, got "
+                f"{type(parsed).__name__}. Valid keys are ephemeral_venv, "
+                "seed_ephemeral_venv, and ephemeral_requirements."
+            )
+        normalized = value
+    if REDACTED in normalized:
         raise ValueError(
-            f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
-            'object such as {"ephemeral_venv": true}, not a bare virtualenv name. '
-            "Pass it as an object, or as plain JSON text with unescaped quotes - do "
-            "not backslash-escape the quotes."
-        ) from e
-    if not isinstance(parsed, dict):
-        raise ValueError(
-            "python_virtual_environment must be a JSON object, got "
-            f"{type(parsed).__name__}. Valid keys are ephemeral_venv, "
-            "seed_ephemeral_venv, and ephemeral_requirements."
+            f"python_virtual_environment still contains {REDACTED}, which pq_details "
+            "substitutes for the credentials in a package URL. Writing it back would "
+            "replace a working credential with that marker. Restore the real "
+            "credential in ephemeral_requirements before sending the document."
         )
-    return value
+    return normalized
 
 
 def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
@@ -1106,6 +1116,9 @@ async def pq_details(
     - replicas array contains state of all active replicas (load-balanced instances)
     - spares array contains state of spare instances ready to replace failed replicas
     - num_failures in state_details is the cumulative lifetime failure count
+    - config.python_control is reported with the credentials in any package URL replaced
+      by [REDACTED], so it is not writable back through pq_modify as-is; restore the real
+      credential first (pq_modify rejects a document that still carries the marker)
 
     Args:
         context (Context): MCP context object
@@ -1958,6 +1971,10 @@ async def pq_modify(
     The object replaces the field wholesale - to change one key, read the current
     python_control from pq_details, modify it, and pass the whole object back. Unknown
     keys are silently ignored by the server. Pass "" to clear the field.
+    pq_details redacts the credentials in any ephemeral_requirements package URL to
+    [REDACTED], so a document read from it is not writable as-is: restore the real
+    credential first. Sending one that still contains [REDACTED] is rejected rather
+    than overwriting the working credential with the marker.
 
     Args:
         context (Context): MCP context object
