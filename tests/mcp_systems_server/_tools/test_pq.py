@@ -153,6 +153,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _normalize_python_control,
     _parse_pq_id,
     _pq_state_category,
+    _redact_url_userinfo,
     _setup_batch_pq_operation,
     _validate_and_parse_pq_ids,
     _validate_max_concurrent,
@@ -2163,6 +2164,33 @@ def test_normalize_python_control_rejects_non_standard_json_constants(constant):
     """json.loads accepts these Python extensions; the controller's parser does not."""
     with pytest.raises(ValueError, match=f"contains {re.escape(constant)}"):
         _normalize_python_control('{"ephemeral_venv": %s}' % constant)
+
+
+@pytest.mark.parametrize("value", [{1, 2}, object()])
+def test_normalize_python_control_rejects_unserializable_object(value):
+    """json.dumps raises TypeError here; it must still surface as ValueError."""
+    with pytest.raises(ValueError, match="not serializable as JSON"):
+        _normalize_python_control({"ephemeral_requirements": value})
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (
+            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
+            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+        ),
+        # A bare token in the userinfo position is still a credential.
+        ("https://tok@host/simple", "https://[REDACTED]@host/simple"),
+        # No userinfo, and an '@' that is not userinfo, are left alone.
+        ("https://host/simple", "https://host/simple"),
+        ("pkg @ https://host/p.whl", "pkg @ https://host/p.whl"),
+        ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
+    ],
+)
+def test_redact_url_userinfo(stored, expected):
+    """Index credentials are stripped from anything pq_details echoes back."""
+    assert _redact_url_userinfo(stored) == expected
 
 
 @pytest.mark.parametrize(

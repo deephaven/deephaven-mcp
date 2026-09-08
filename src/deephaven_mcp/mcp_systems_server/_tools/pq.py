@@ -17,6 +17,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Annotated, NoReturn
 
@@ -38,6 +39,7 @@ from pydantic import Field
 
 from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import InvalidSessionNameError
+from deephaven_mcp._redaction import REDACTED
 from deephaven_mcp.client import (
     PQ_STATES,
     CorePlusControllerClient,
@@ -61,6 +63,24 @@ _LOGGER = logging.getLogger(__name__)
 # Matches deephaven.constants.NULL_LONG / Java Long.MIN_VALUE. Defined locally because
 # deephaven.constants requires a live JVM which this server never starts.
 _NULL_LONG = -9223372036854775808
+
+# Userinfo in a URL: everything between "://" and "@". ephemeral_requirements
+# takes PEP 508 direct URLs, which may embed an index token.
+_URL_USERINFO = re.compile(r"(?<=://)[^/\s@]+(?=@)")
+
+
+def _redact_url_userinfo(value: str) -> str:
+    """Replace the userinfo of every URL in a string with the redaction marker.
+
+    Args:
+        value (str): Text that may contain URLs of the form
+            ``scheme://user:password@host/path``.
+
+    Returns:
+        str: The text with each URL's userinfo replaced by ``[REDACTED]``. URLs
+        without userinfo, and text containing no URL, are returned unchanged.
+    """
+    return _URL_USERINFO.sub(REDACTED, value)
 
 
 # =============================================================================
@@ -146,16 +166,17 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
 
     Raises:
         ValueError: If ``value`` is a non-blank string that is not a JSON object, or
-            holds a ``NaN``/``Infinity`` that is not representable in JSON. The
-            controller rejects any non-blank ``pythonControl`` that does not parse,
-            leaving the PQ unmodifiable until the field is cleared.
+            holds a value JSON cannot represent (``NaN``/``Infinity``, or an object
+            such as a set). The controller rejects any non-blank ``pythonControl``
+            that does not parse, leaving the PQ unmodifiable until the field is
+            cleared.
     """
     if value is None:
         return None
     if isinstance(value, dict):
         try:
             return json.dumps(value, separators=(",", ":"), allow_nan=False)
-        except ValueError as e:
+        except (TypeError, ValueError) as e:
             raise ValueError(
                 f"python_virtual_environment is not serializable as JSON: {e}. "
                 "Use a string, number, or boolean."
@@ -297,7 +318,9 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
             pb.assignmentPolicyParams if pb.assignmentPolicyParams else None
         ),
         "additional_memory_gb": pb.additionalMemoryGb,
-        "python_control": pb.pythonControl if pb.pythonControl else None,
+        "python_control": (
+            _redact_url_userinfo(pb.pythonControl) if pb.pythonControl else None
+        ),
         "generic_worker_control": (
             pb.genericWorkerControl if pb.genericWorkerControl else None
         ),
