@@ -259,17 +259,17 @@ def test_read_local_script_expands_tilde(
     assert read_local_script("~/job.py") == "print('home')\n"
 
 
-def test_read_local_script_dash_reads_stdin() -> None:
-    stream = io.StringIO("print('stdin')\n")
-    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
-        assert read_local_script("-") == "print('stdin')\n"
+def test_read_local_script_dash_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_wrapping.sys, "stdin", io.StringIO("print('stdin')\n"))
+    assert read_local_script("-") == "print('stdin')\n"
 
 
-def test_read_local_script_empty_stdin_raises_missing_argument() -> None:
-    stream = io.StringIO("")
-    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
-        with pytest.raises(CliError) as exc:
-            read_local_script("-")
+def test_read_local_script_empty_stdin_raises_missing_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_wrapping.sys, "stdin", io.StringIO(""))
+    with pytest.raises(CliError) as exc:
+        read_local_script("-")
     assert exc.value.code is ErrorCode.MISSING_ARGUMENT
 
 

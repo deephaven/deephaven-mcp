@@ -668,10 +668,10 @@ time the PQ starts (use it for version-controlled scripts). `--class-path`
 also names resources on the Enterprise server, not this machine.
 
 `--python-venv` takes the PQ's Python environment settings as a JSON object
-in plain, unescaped text. It has three optionalkeys: `ephemeral_venv` 
+in plain, unescaped text. It has three optional keys: `ephemeral_venv`
 (build a fresh venv for this worker instead of using the shared default),
-`seed_ephemeral_venv` (copy the default packages into it), and 
-`ephemeral_requirements` (space-separated pip requirements installed at worker 
+`seed_ephemeral_venv` (copy the default packages into it), and
+`ephemeral_requirements` (space-separated pip requirements installed at worker
 startup, which requires `ephemeral_venv`). For example:
 
 ```bash
