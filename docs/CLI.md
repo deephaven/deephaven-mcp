@@ -678,11 +678,8 @@ startup, which requires `ephemeral_venv`). For example:
 dhcli pq modify --python-venv '{"ephemeral_venv": true, "ephemeral_requirements": "pandas"}'
 ```
 
-Do not backslash-escape the quotes: the escaped text would be stored
-verbatim and leave `python_control` unparseable, which makes every later
-`pq modify` on that PQ fail until the field is cleared. The object replaces
-the field wholesale, so to change one key read the current `python_control`
-from `pq details`, modify it, and pass the whole object back.
+The object replaces the field wholesale, so to change one key read the current
+`python_control` from `pq details`, modify it, and pass the whole object back.
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the
