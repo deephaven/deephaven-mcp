@@ -154,7 +154,6 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _parse_pq_id,
     _pq_state_category,
     _redact_python_control,
-    _redact_url_userinfo,
     _setup_batch_pq_operation,
     _validate_and_parse_pq_ids,
     _validate_max_concurrent,
@@ -2177,56 +2176,53 @@ def test_normalize_python_control_rejects_unserializable_object(value):
 @pytest.mark.parametrize(
     ("stored", "expected"),
     [
+        # Any URL means the whole requirements value is withheld, wherever the
+        # credential sits: userinfo, query parameter, fragment, or path.
         (
             '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
-            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
         ),
-        # A bare token in the userinfo position is still a credential.
-        ("https://tok@host/simple", "https://[REDACTED]@host/simple"),
-        # No userinfo, and an '@' that is not userinfo, are left alone.
-        ("https://host/simple", "https://host/simple"),
-        ("pkg @ https://host/p.whl", "pkg @ https://host/p.whl"),
-        ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
-    ],
-)
-def test_redact_url_userinfo(stored, expected):
-    """Index credentials are stripped from anything pq_details echoes back."""
-    assert _redact_url_userinfo(stored) == expected
-
-
-@pytest.mark.parametrize(
-    ("stored", "expected"),
-    [
-        # Plain delimiter.
         (
-            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
-            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+            '{"ephemeral_requirements": "pkg @ https://host/p.whl?token=s3cr3t"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
         ),
-        # JSON may escape "/" as "\/", leaving no literal "://" in the raw text.
+        # Decoded before matching, so an escaped delimiter cannot hide the URL.
         (
             r'{"ephemeral_requirements": "pkg @ https:\/\/user:tok@host/p.whl"}',
-            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
         ),
-        # Same for a \u escape of the delimiter.
         (
-            r'{"ephemeral_requirements": "pkg @ https:\u002f\u002fuser:tok@h/p"}',
-            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@h/p"}',
+            r'{"ephemeral_requirements": "pkg @ https:\u002f\u002fu:t@h/p"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
         ),
-        # Nested containers are walked.
+        # Other keys are preserved alongside the withheld one.
         (
-            '{"a": ["https://user:tok@host"], "b": {"c": "https://u:t@h"}}',
-            '{"a": ["https://[REDACTED]@host"], "b": {"c": "https://[REDACTED]@h"}}',
+            '{"ephemeral_venv": true, "ephemeral_requirements": "pkg @ https://h/p"}',
+            '{"ephemeral_venv": true, "ephemeral_requirements": "[REDACTED]"}',
         ),
-        ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
     ],
 )
-def test_redact_python_control(stored, expected):
-    """Credentials are matched against the decoded value, not the raw JSON text."""
+def test_redact_python_control_withholds_url_requirements(stored, expected):
+    """A requirements value holding a URL is withheld whole, not partially scrubbed."""
     assert _redact_python_control(stored) == expected
 
 
+@pytest.mark.parametrize(
+    "stored",
+    [
+        # No "://" means no URL, so nothing can be carrying a URL credential.
+        '{"ephemeral_requirements": "pandas numpy"}',
+        '{"ephemeral_venv": true}',
+        '{"ephemeral_venv": true, "seed_ephemeral_venv": false}',
+    ],
+)
+def test_redact_python_control_passes_plain_documents_through(stored):
+    """Plain requirements stay visible, byte for byte."""
+    assert _redact_python_control(stored) == stored
+
+
 def test_redact_python_control_suppresses_unparseable():
-    """A value that cannot be decoded cannot be scanned, so it is not echoed."""
+    """A value that cannot be decoded cannot be inspected, so it is not echoed."""
     assert _redact_python_control("analytics-env") == "[UNPARSEABLE]"
 
 
@@ -2236,7 +2232,7 @@ def test_redact_python_control_suppresses_unparseable():
     [
         (
             '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
-            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
         ),
         ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
         ("", None),
@@ -2257,8 +2253,8 @@ def test_format_pq_config_redacts_python_control(mock_restart_enum, stored, expe
 @pytest.mark.parametrize(
     "value",
     [
-        '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}',
-        {"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"},
+        '{"ephemeral_requirements": "[REDACTED]"}',
+        {"ephemeral_requirements": "[REDACTED]"},
     ],
 )
 def test_normalize_python_control_rejects_redacted_round_trip(value):
@@ -3322,9 +3318,7 @@ async def test_pq_modify_rejects_redacted_python_control():
     result = await pq_modify(
         context,
         id="enterprise:system:12345",
-        python_virtual_environment=(
-            '{"ephemeral_requirements": "pkg @ https://[REDACTED]@host/p.whl"}'
-        ),
+        python_virtual_environment=('{"ephemeral_requirements": "[REDACTED]"}'),
     )
 
     assert result["success"] is False

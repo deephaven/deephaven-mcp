@@ -537,8 +537,8 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
                 "(space-separated pip requirements installed at startup, "
                 "which needs ephemeral_venv). Applied on the Enterprise "
                 "server, not on this machine. Replaces the field wholesale; "
-                "'dhcli pq details' redacts credentials in a package URL to "
-                "[REDACTED], so restore the real credential before writing a "
+                "'dhcli pq details' withholds ephemeral_requirements when it "
+                "contains a URL, so restore the real value before writing a "
                 "document read from it back. A credential passed here is "
                 "visible in this process's arguments and your shell history."
             ),

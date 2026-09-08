@@ -17,7 +17,6 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 import asyncio
 import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import Annotated, NoReturn
 
@@ -64,66 +63,40 @@ _LOGGER = logging.getLogger(__name__)
 # deephaven.constants requires a live JVM which this server never starts.
 _NULL_LONG = -9223372036854775808
 
-# Userinfo in a URL: everything between "://" and "@". ephemeral_requirements
-# takes PEP 508 direct URLs, which may embed an index token.
-_URL_USERINFO = re.compile(r"(?<=://)[^/\s@]+(?=@)")
-
-
-def _redact_url_userinfo(value: str) -> str:
-    """Replace the userinfo of every URL in a string with the redaction marker.
-
-    Args:
-        value (str): Text that may contain URLs of the form
-            ``scheme://user:password@host/path``.
-
-    Returns:
-        str: The text with each URL's userinfo replaced by ``[REDACTED]``. URLs
-        without userinfo, and text containing no URL, are returned unchanged.
-    """
-    return _URL_USERINFO.sub(REDACTED, value)
-
-
-def _redact_userinfo_deep(obj: object) -> object:
-    """Apply :func:`_redact_url_userinfo` to every string in a decoded JSON value.
-
-    Args:
-        obj (object): A value decoded by ``json.loads`` - dict, list, str, or scalar.
-
-    Returns:
-        object: The same structure with every string redacted; scalars pass through.
-    """
-    if isinstance(obj, str):
-        return _redact_url_userinfo(obj)
-    if isinstance(obj, dict):
-        return {key: _redact_userinfo_deep(item) for key, item in obj.items()}
-    if isinstance(obj, list):
-        return [_redact_userinfo_deep(item) for item in obj]
-    return obj
+# Only ephemeral_requirements can hold a URL, and a URL can hide a credential in its
+# userinfo, a query parameter, a fragment, or the path itself. This withholds the whole
+# value rather than scrubbing parts of it: sanitizing parts means enumerating encodings,
+# and any encoding missed is a silent leak. A value with no "://" cannot carry a URL
+# credential, so plain requirements stay visible.
+_REQUIREMENTS_KEY = "ephemeral_requirements"
+_URL_MARKER = "://"
 
 
 def _redact_python_control(stored: str) -> str:
-    r"""Redact package-URL credentials in a stored ``pythonControl`` document.
-
-    Decodes before matching, because JSON may escape the URL delimiter
-    (``https:\/\/user:token@host``) and leave no literal ``://`` in the raw text.
+    """Withhold ``ephemeral_requirements`` when it holds a URL that could carry a token.
 
     Args:
         stored (str): The raw ``pythonControl`` value read from the controller.
 
     Returns:
-        str: Re-serialized JSON with each URL's userinfo replaced by ``[REDACTED]``,
-        or ``"[UNPARSEABLE]"`` when the stored value is not JSON at all - the content
-        is suppressed rather than echoed, since it cannot be inspected for secrets.
+        str: ``stored`` unchanged when the requirements hold no URL; otherwise the
+        document with ``ephemeral_requirements`` replaced by ``[REDACTED]``. Returns
+        ``"[UNPARSEABLE]"`` when the value is not JSON, since it cannot be inspected.
     """
     try:
         parsed = json.loads(stored)
     except (json.JSONDecodeError, ValueError):
         _LOGGER.warning(
             "[mcp_systems_server:_redact_python_control] Suppressing python_control: "
-            "stored value is not valid JSON and cannot be scanned for credentials"
+            "stored value is not valid JSON and cannot be inspected for credentials"
         )
         return "[UNPARSEABLE]"
-    return json.dumps(_redact_userinfo_deep(parsed))
+    if isinstance(parsed, dict):
+        requirements = parsed.get(_REQUIREMENTS_KEY)
+        # Decoded first, so a JSON-escaped delimiter cannot hide the URL.
+        if isinstance(requirements, str) and _URL_MARKER in requirements:
+            return json.dumps({**parsed, _REQUIREMENTS_KEY: REDACTED})
+    return stored
 
 
 # =============================================================================
@@ -1159,9 +1132,10 @@ async def pq_details(
     - replicas array contains state of all active replicas (load-balanced instances)
     - spares array contains state of spare instances ready to replace failed replicas
     - num_failures in state_details is the cumulative lifetime failure count
-    - config.python_control is reported with the credentials in any package URL replaced
-      by [REDACTED], so it is not writable back through pq_modify as-is; restore the real
-      credential first (pq_modify rejects a document that still carries the marker)
+    - config.python_control withholds ephemeral_requirements entirely (reporting
+      [REDACTED]) when it contains a URL, because a URL can carry a token in its
+      userinfo, query, or path; it is therefore not writable back through pq_modify
+      as-is (pq_modify rejects a document that still carries the marker)
 
     Args:
         context (Context): MCP context object
@@ -2014,10 +1988,11 @@ async def pq_modify(
     The object replaces the field wholesale - to change one key, read the current
     python_control from pq_details, modify it, and pass the whole object back. Unknown
     keys are silently ignored by the server. Pass "" to clear the field.
-    pq_details redacts the credentials in any ephemeral_requirements package URL to
-    [REDACTED], so a document read from it is not writable as-is: restore the real
-    credential first. Sending one that still contains [REDACTED] is rejected rather
-    than overwriting the working credential with the marker.
+    pq_details withholds ephemeral_requirements entirely (reporting [REDACTED]) whenever
+    it contains a URL, since a URL can carry a token in several places. A document read
+    from pq_details is therefore not writable as-is: restore the real requirements
+    first. Sending one that still contains [REDACTED] is rejected rather than
+    overwriting the working value with the marker.
 
     Args:
         context (Context): MCP context object

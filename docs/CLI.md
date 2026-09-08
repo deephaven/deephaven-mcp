@@ -681,11 +681,13 @@ dhcli pq modify enterprise:prod:1234567890 \
 
 The object replaces the field wholesale, so to change one key read the current
 `python_control` from `dhcli pq details ID`, modify it, and pass the whole
-object back. One catch: `pq details` replaces the credentials in any
-`ephemeral_requirements` package URL with `[REDACTED]`, so what it returns is
-not writable as-is — restore the real credential first. Passing a document that
-still contains `[REDACTED]` exits `3` rather than overwriting the working
-credential with the marker.
+object back. One catch: when `ephemeral_requirements` contains a URL,
+`pq details` withholds that value entirely and reports `[REDACTED]` — a URL can
+carry a token in its userinfo, query string, or path, so the whole value is
+held back rather than scrubbed in parts. What it returns is therefore not
+writable as-is; restore the real requirements first. Passing a document that
+still contains `[REDACTED]` exits `3` rather than overwriting the working value
+with the marker. Requirements with no URL are shown normally.
 
 A credential written this way is visible in the process's arguments (readable
 by other local users on Linux) and is recorded in your shell history. Prefer an
