@@ -528,12 +528,15 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "python_virtual_environment",
             default=None,
             help=(
-                "Python environment control document for the worker, stored "
-                "in the PQ's python_control field. Either a JSON object as "
+                "Python environment for the worker, as a JSON object in "
                 'plain unescaped text, e.g. {"ephemeral_venv": true, '
-                '"ephemeral_requirements": "pkg>=1.0"}, or the name of a '
-                "virtualenv configured on the Enterprise server — a name, "
-                "not a path on this machine."
+                '"ephemeral_requirements": "pandas"}. Keys are '
+                "ephemeral_venv (build a fresh venv for this worker instead "
+                "of using the shared default), seed_ephemeral_venv (copy the "
+                "default packages into it), and ephemeral_requirements "
+                "(space-separated pip requirements installed at startup, "
+                "which needs ephemeral_venv). Applied on the Enterprise "
+                "server, not on this machine."
             ),
         ),
         click.option(

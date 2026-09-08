@@ -114,37 +114,45 @@ def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
 def _normalize_python_control(value: str | dict[str, object] | None) -> str | None:
     """Normalize a ``python_virtual_environment`` argument into a ``pythonControl`` string.
 
-    A JSON object is re-encoded to compact JSON text; a string is passed through
+    A JSON object is re-encoded to compact JSON text; JSON text is passed through
     verbatim. Both forms arrive for the same caller input, because MCP clients decode a
     JSON-object string argument into a ``dict`` before the tool sees it.
 
     Args:
         value (str | dict[str, object] | None): Python environment control document as a
-            JSON object or as JSON text, a bare virtualenv name, an empty string to
-            clear the field, or ``None`` to leave it unchanged.
+            JSON object or as JSON text, a blank string to clear the field, or ``None``
+            to leave it unchanged.
 
     Returns:
         str | None: Value to store in ``pythonControl``, or ``None`` when ``value`` is
         ``None``.
 
     Raises:
-        ValueError: If ``value`` is a string that opens with ``{`` but does not parse as
-            JSON. Storing it would leave the PQ with an unparseable ``pythonControl``
-            that the controller rejects on every subsequent modification.
+        ValueError: If ``value`` is a non-blank string that is not a JSON object. The
+            controller rejects any non-blank ``pythonControl`` that does not parse,
+            leaving the PQ unmodifiable until the field is cleared.
     """
     if value is None:
         return None
     if isinstance(value, dict):
         return json.dumps(value, separators=(",", ":"))
-    if value.lstrip().startswith("{"):
-        try:
-            json.loads(value)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                "python_virtual_environment looks like a JSON control document but "
-                f"does not parse: {e}. Pass it as a JSON object, or as plain JSON "
-                "text with unescaped quotes - do not backslash-escape the quotes."
-            ) from e
+    if not value.strip():
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
+            "object such as {'ephemeral_venv': true}, not a bare virtualenv name. "
+            "Pass it as an object, or as plain JSON text with unescaped quotes - do "
+            "not backslash-escape the quotes."
+        ) from e
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "python_virtual_environment must be a JSON object, got "
+            f"{type(parsed).__name__}. Valid keys are ephemeral_venv, "
+            "seed_ephemeral_venv, and ephemeral_requirements."
+        )
     return value
 
 
@@ -1379,10 +1387,10 @@ async def pq_create(
     - configuration_type="Script" (default) for long-running interactive sessions
     - schedule parameter enables automated start/stop - see detailed format below
     - All list parameters (schedule, admin_groups, etc.) accept empty list [] or None
-    - python_virtual_environment takes a JSON object, e.g.
-      {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0 other-pkg"}. Pass it as a
-      real object; never backslash-escape the quotes to force it through as a string - the
-      escaped text would be stored verbatim and corrupt the PQ's python_control field.
+    - python_virtual_environment takes a JSON object, e.g. {"ephemeral_venv": true,
+      "ephemeral_requirements": "pandas"}. Pass it as a real object; never
+      backslash-escape the quotes to force it through as a string - the escaped text
+      would be stored verbatim and corrupt the PQ's python_control field.
 
     Script Source Options (mutually exclusive):
     - script_body: Inline Python/Groovy code as a string. Use for simple scripts or dynamic code generation.
@@ -1426,6 +1434,18 @@ async def pq_create(
     - "RU_ADMIN_AND_VIEWERS": Both admins and viewers can restart
     - "RU_VIEWERS_WHEN_DOWN": Admins always; viewers only when query is down
 
+    Python Environment Control (python_virtual_environment):
+    A JSON object stored in the PQ's python_control field. Three optional keys, all
+    corresponding to the web UI's "Python environment" settings:
+    - ephemeral_venv (bool): Create a fresh virtual environment for this worker instead
+      of using the shared default one. Required before any package can be installed.
+    - seed_ephemeral_venv (bool): Initialize that environment with a copy of the default
+      environment's packages ("Include default packages" in the UI).
+    - ephemeral_requirements (str): Space-separated pip requirements to install into the
+      environment at worker startup. Requires ephemeral_venv=true.
+    Unknown keys are silently ignored by the server, so a misspelled key takes no effect
+    rather than erroring.
+
     Args:
         context (Context): MCP context object
         system (str): Enterprise system name as listed by ``list_systems``
@@ -1442,7 +1462,7 @@ async def pq_create(
         jvm_profile (str | None): Named JVM profile from controller config (e.g., "large-memory")
         extra_jvm_args (list[str] | None): Additional JVM arguments
         extra_class_path (list[str] | None): Additional classpath entries to prepend (e.g., ["/opt/libs/custom.jar"])
-        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. Accepts a JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0"}), the equivalent unescaped JSON text, or a bare venv name; an object is serialized to compact JSON. A string that opens with ``{`` but does not parse as JSON is rejected.
+        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. A JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pandas"}) or the equivalent unescaped JSON text; an object is serialized to compact JSON. See "Python Environment Control" above for the keys. Anything else non-blank is rejected.
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None (default) and 0 = permanent; positive = temporary
@@ -1859,11 +1879,11 @@ async def pq_modify(
       for it and call pq_restart to apply the changes.
     - Can modify RUNNING PQs but be cautious - restart=True will disrupt active sessions
     - Use pq_details first to see current config before modifying
-    - python_virtual_environment takes a JSON object, e.g.
-      {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0 other-pkg"}. Pass it as a
-      real object; never backslash-escape the quotes to force it through as a string - the
-      escaped text would be stored verbatim and corrupt the PQ's python_control field, after
-      which every later pq_modify on that PQ fails until it is cleared with an empty string.
+    - python_virtual_environment takes a JSON object, e.g. {"ephemeral_venv": true,
+      "ephemeral_requirements": "pandas"}. Pass it as a real object; never
+      backslash-escape the quotes to force it through as a string - the escaped text
+      would be stored verbatim and corrupt the PQ's python_control field, after which
+      every later pq_modify on that PQ fails until it is cleared with an empty string.
 
     Parameter Behaviors:
     - pq_name: Renames the PQ (does not affect serial number or id)
@@ -1879,6 +1899,19 @@ async def pq_modify(
     - restart=True: PQ is stopped and restarted immediately, applying all changes
     - restart=False: Changes are saved but PQ continues running with old config until manually restarted
     - Note: Even with restart=False, some changes won't apply until next restart
+
+    Python Environment Control (python_virtual_environment):
+    A JSON object stored in the PQ's python_control field. Three optional keys, all
+    corresponding to the web UI's "Python environment" settings:
+    - ephemeral_venv (bool): Create a fresh virtual environment for this worker instead
+      of using the shared default one. Required before any package can be installed.
+    - seed_ephemeral_venv (bool): Initialize that environment with a copy of the default
+      environment's packages ("Include default packages" in the UI).
+    - ephemeral_requirements (str): Space-separated pip requirements to install into the
+      environment at worker startup. Requires ephemeral_venv=true.
+    The object replaces the field wholesale - to change one key, read the current
+    python_control from pq_details, modify it, and pass the whole object back. Unknown
+    keys are silently ignored by the server. Pass "" to clear the field.
 
     Args:
         context (Context): MCP context object
@@ -1898,7 +1931,7 @@ async def pq_modify(
         jvm_profile (str | None): Named JVM profile from controller config
         extra_jvm_args (list[str] | None): Additional JVM arguments (replaces current)
         extra_class_path (list[str] | None): Additional classpath entries (replaces current)
-        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. Accepts a JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pkg>=1.0"}), the equivalent unescaped JSON text, or a bare venv name; an object is serialized to compact JSON. Pass "" to clear the field. A string that opens with ``{`` but does not parse as JSON is rejected.
+        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. A JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pandas"}) or the equivalent unescaped JSON text; an object is serialized to compact JSON and replaces the field wholesale. Pass "" to clear it. See "Python Environment Control" above for the keys. Anything else non-blank is rejected.
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format; replaces current)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (auto-delete disabled), positive integer = timeout in seconds

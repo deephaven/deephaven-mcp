@@ -2111,25 +2111,37 @@ def test_normalize_python_control_serializes_a_dict():
     """A decoded JSON object is re-encoded to compact JSON text."""
     assert (
         _normalize_python_control(
-            {"ephemeral_venv": True, "ephemeral_requirements": "pkg>=1.0 other-pkg"}
+            {"ephemeral_venv": True, "ephemeral_requirements": "pandas"}
         )
-        == '{"ephemeral_venv":true,"ephemeral_requirements":"pkg>=1.0 other-pkg"}'
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pandas"}'
     )
 
 
 @pytest.mark.parametrize(
     "value",
-    ["analytics-env", "", '{"ephemeral_venv": true}', '  {"a": 1}  '],
+    ["", "   ", '{"ephemeral_venv": true}', '  {"seed_ephemeral_venv": false}  '],
 )
 def test_normalize_python_control_passes_strings_through(value):
-    """Bare names, the clearing empty string, and valid JSON text are verbatim."""
+    """A blank string (clears the field) and JSON object text are stored verbatim."""
     assert _normalize_python_control(value) == value
 
 
-def test_normalize_python_control_rejects_unparseable_json_object():
+def test_normalize_python_control_rejects_escaped_json():
     """A backslash-escaped JSON object is rejected instead of corrupting the field."""
-    with pytest.raises(ValueError, match="does not parse"):
+    with pytest.raises(ValueError, match="not valid JSON"):
         _normalize_python_control('{\\"ephemeral_venv\\": true}')
+
+
+def test_normalize_python_control_rejects_a_bare_venv_name():
+    """The controller requires JSON, so a bare name is caught before it is stored."""
+    with pytest.raises(ValueError, match="not a bare virtualenv name"):
+        _normalize_python_control("analytics-env")
+
+
+def test_normalize_python_control_rejects_non_object_json():
+    """Valid JSON that is not an object cannot carry the control keys."""
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        _normalize_python_control('["ephemeral_venv"]')
 
 
 @pytest.mark.parametrize(
@@ -2213,7 +2225,7 @@ async def test_pq_create_rejects_unparseable_python_control():
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "does not parse" in result["error"]
+    assert "not valid JSON" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -3133,14 +3145,14 @@ async def test_pq_modify_serializes_python_control_object():
         id="enterprise:system:12345",
         python_virtual_environment={
             "ephemeral_venv": True,
-            "ephemeral_requirements": "pkg>=1.0",
+            "ephemeral_requirements": "pandas",
         },
     )
 
     assert result["success"] is True
     assert (
         mock_controller.update_pq_config.call_args.kwargs["python_virtual_environment"]
-        == '{"ephemeral_venv":true,"ephemeral_requirements":"pkg>=1.0"}'
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pandas"}'
     )
 
 
@@ -3165,7 +3177,7 @@ async def test_pq_modify_rejects_unparseable_python_control():
 
     assert result["success"] is False
     assert result["isError"] is True
-    assert "does not parse" in result["error"]
+    assert "not valid JSON" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -3387,7 +3399,7 @@ async def test_pq_modify_all_parameters():
         jvm_profile="default",
         extra_jvm_args=["-Xmx4g"],
         extra_class_path=["/path/to/lib.jar"],
-        python_virtual_environment="/path/to/venv",
+        python_virtual_environment='{"ephemeral_venv": true}',
         extra_environment_vars=["VAR1=value1"],
         init_timeout_nanos=60000000000,
         auto_delete_timeout=3600,
@@ -3416,7 +3428,7 @@ async def test_pq_modify_all_parameters():
     assert kwargs["jvm_profile"] == "default"
     assert kwargs["extra_jvm_args"] == ["-Xmx4g"]
     assert kwargs["extra_class_path"] == ["/path/to/lib.jar"]
-    assert kwargs["python_virtual_environment"] == "/path/to/venv"
+    assert kwargs["python_virtual_environment"] == '{"ephemeral_venv": true}'
     assert kwargs["extra_environment_vars"] == ["VAR1=value1"]
     assert kwargs["init_timeout_nanos"] == 60000000000
     assert kwargs["auto_delete_timeout"] == 3600
