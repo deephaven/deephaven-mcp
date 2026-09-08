@@ -81,21 +81,25 @@ def _redact_python_control(stored: str) -> str:
     Returns:
         str: ``stored`` unchanged when the requirements hold no URL; otherwise the
         document with ``ephemeral_requirements`` replaced by ``[REDACTED]``. Returns
-        ``"[UNPARSEABLE]"`` when the value is not JSON, since it cannot be inspected.
+        ``"[UNPARSEABLE]"`` for anything that is not a JSON object, since the rule
+        below cannot be applied to it.
     """
     try:
         parsed = json.loads(stored)
     except (json.JSONDecodeError, ValueError):
+        parsed = None
+    # Fail closed: an array, a bare string, or malformed text has no key to inspect,
+    # and any of them could still carry a URL.
+    if not isinstance(parsed, dict):
         _LOGGER.warning(
             "[mcp_systems_server:_redact_python_control] Suppressing python_control: "
-            "stored value is not valid JSON and cannot be inspected for credentials"
+            "stored value is not a JSON object and cannot be inspected for credentials"
         )
         return "[UNPARSEABLE]"
-    if isinstance(parsed, dict):
-        requirements = parsed.get(_REQUIREMENTS_KEY)
-        # Decoded first, so a JSON-escaped delimiter cannot hide the URL.
-        if isinstance(requirements, str) and _URL_MARKER in requirements:
-            return json.dumps({**parsed, _REQUIREMENTS_KEY: REDACTED})
+    requirements = parsed.get(_REQUIREMENTS_KEY)
+    # Decoded first, so a JSON-escaped delimiter cannot hide the URL.
+    if isinstance(requirements, str) and _URL_MARKER in requirements:
+        return json.dumps({**parsed, _REQUIREMENTS_KEY: REDACTED})
     return stored
 
 

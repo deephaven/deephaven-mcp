@@ -2221,9 +2221,22 @@ def test_redact_python_control_passes_plain_documents_through(stored):
     assert _redact_python_control(stored) == stored
 
 
-def test_redact_python_control_suppresses_unparseable():
-    """A value that cannot be decoded cannot be inspected, so it is not echoed."""
-    assert _redact_python_control("analytics-env") == "[UNPARSEABLE]"
+@pytest.mark.parametrize(
+    "stored",
+    [
+        # Not JSON at all.
+        "analytics-env",
+        # Valid JSON, but no object to find the requirements key in - and each of
+        # these could still be carrying a URL.
+        '["pkg @ https://user:tok@host/p.whl"]',
+        '"pkg @ https://user:tok@host/p.whl"',
+        "42",
+        "null",
+    ],
+)
+def test_redact_python_control_suppresses_uninspectable(stored):
+    """Anything that is not a JSON object fails closed rather than echoing through."""
+    assert _redact_python_control(stored) == "[UNPARSEABLE]"
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
