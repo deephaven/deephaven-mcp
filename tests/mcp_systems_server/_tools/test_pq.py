@@ -3,6 +3,7 @@ Tests for deephaven_mcp.mcp_systems_server._tools.pq.
 """
 
 import asyncio
+import re
 import warnings
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -2148,6 +2149,20 @@ def test_normalize_python_control_rejects_non_object_json():
     """Valid JSON that is not an object cannot carry the control keys."""
     with pytest.raises(ValueError, match="must be a JSON object"):
         _normalize_python_control('["ephemeral_venv"]')
+
+
+@pytest.mark.parametrize("number", [float("nan"), float("inf"), float("-inf")])
+def test_normalize_python_control_rejects_unserializable_float(number):
+    """json.dumps would emit a bare NaN/Infinity token, which is not JSON."""
+    with pytest.raises(ValueError, match="not serializable as JSON"):
+        _normalize_python_control({"ephemeral_venv": number})
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_normalize_python_control_rejects_non_standard_json_constants(constant):
+    """json.loads accepts these Python extensions; the controller's parser does not."""
+    with pytest.raises(ValueError, match=f"contains {re.escape(constant)}"):
+        _normalize_python_control('{"ephemeral_venv": %s}' % constant)
 
 
 @pytest.mark.parametrize(

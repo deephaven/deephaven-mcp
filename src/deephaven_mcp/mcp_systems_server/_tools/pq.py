@@ -18,7 +18,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from deephaven_enterprise.proto.common_pb2 import ExceptionDetailsMessage
 from deephaven_enterprise.proto.controller_common_pb2 import NamedStringList
@@ -111,6 +111,23 @@ def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
     return make_pq_id(system_name, int(serial))
 
 
+def _reject_json_constant(constant: str) -> NoReturn:
+    """Reject a non-standard JSON constant.
+
+    Args:
+        constant (str): The token ``json.loads`` matched - ``NaN``, ``Infinity``, or
+            ``-Infinity``.
+
+    Raises:
+        ValueError: Always. These tokens are Python extensions that the controller's
+            JSON parser rejects.
+    """
+    raise ValueError(
+        f"python_virtual_environment contains {constant}, which Python accepts but "
+        "JSON does not. Use a string, number, or boolean."
+    )
+
+
 def _normalize_python_control(value: str | dict[str, object] | None) -> str | None:
     """Normalize a ``python_virtual_environment`` argument into a ``pythonControl`` string.
 
@@ -128,19 +145,26 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
         ``value`` is blank, or ``None`` when ``value`` is ``None``.
 
     Raises:
-        ValueError: If ``value`` is a non-blank string that is not a JSON object. The
+        ValueError: If ``value`` is a non-blank string that is not a JSON object, or
+            holds a ``NaN``/``Infinity`` that is not representable in JSON. The
             controller rejects any non-blank ``pythonControl`` that does not parse,
             leaving the PQ unmodifiable until the field is cleared.
     """
     if value is None:
         return None
     if isinstance(value, dict):
-        return json.dumps(value, separators=(",", ":"))
+        try:
+            return json.dumps(value, separators=(",", ":"), allow_nan=False)
+        except ValueError as e:
+            raise ValueError(
+                f"python_virtual_environment is not serializable as JSON: {e}. "
+                "Use a string, number, or boolean."
+            ) from e
     # Collapsed to "" so a cleared field reads back as None, not as truthy whitespace.
     if not value.strip():
         return ""
     try:
-        parsed = json.loads(value)
+        parsed = json.loads(value, parse_constant=_reject_json_constant)
     except json.JSONDecodeError as e:
         raise ValueError(
             f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
@@ -1389,9 +1413,8 @@ async def pq_create(
     - schedule parameter enables automated start/stop - see detailed format below
     - All list parameters (schedule, admin_groups, etc.) accept empty list [] or None
     - python_virtual_environment takes a JSON object, e.g. {"ephemeral_venv": true,
-      "ephemeral_requirements": "pandas"}. Pass it as a real object; never
-      backslash-escape the quotes to force it through as a string - the escaped text
-      would be stored verbatim and corrupt the PQ's python_control field.
+      "ephemeral_requirements": "pandas"}. Pass it as a real object; a backslash-escaped
+      string is rejected with an error and no PQ is created.
 
     Script Source Options (mutually exclusive):
     - script_body: Inline Python/Groovy code as a string. Use for simple scripts or dynamic code generation.
@@ -1881,10 +1904,9 @@ async def pq_modify(
     - Can modify RUNNING PQs but be cautious - restart=True will disrupt active sessions
     - Use pq_details first to see current config before modifying
     - python_virtual_environment takes a JSON object, e.g. {"ephemeral_venv": true,
-      "ephemeral_requirements": "pandas"}. Pass it as a real object; never
-      backslash-escape the quotes to force it through as a string - the escaped text
-      would be stored verbatim and corrupt the PQ's python_control field, after which
-      every later pq_modify on that PQ fails until it is cleared with an empty string.
+      "ephemeral_requirements": "pandas"}. Pass it as a real object; a backslash-escaped
+      string is rejected before the PQ is read or updated, so the call fails with an
+      error and the existing configuration is left untouched.
 
     Parameter Behaviors:
     - pq_name: Renames the PQ (does not affect serial number or id)
