@@ -12,6 +12,8 @@ import pytest
 
 from deephaven_mcp import config
 from deephaven_mcp._exceptions import (
+    DeephavenConnectionError,
+    EnterpriseNotConfiguredError,
     RegistryItemNotFoundError,
     SessionCreationError,
 )
@@ -24,6 +26,7 @@ from deephaven_mcp.mcp_systems_server._tools.session_enterprise import (
     _generate_session_name_if_none,
     _resolve_session_parameters,
     _short_reason,
+    enterprise_controller_reconnect,
     enterprise_systems_status,
     register_tools,
     session_enterprise_create,
@@ -81,6 +84,36 @@ async def test_collect_one_enterprise_system_status_returns_compact_health_recor
         "is_alive": True,
         "liveness_detail": "all good",
     }
+
+
+@pytest.mark.asyncio
+async def test_collect_one_enterprise_system_status_derives_is_alive():
+    """``is_alive`` comes from the probe already run, not a second call.
+
+    Regression guard: ``is_alive()`` takes the manager lock, so probing twice
+    queues the status call behind an in-progress factory creation — during
+    exactly the outage ``--connect`` is being run to diagnose. Deriving also
+    keeps the flag consistent with the status it sits next to.
+    """
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = "prod"
+    mock_registry.get_all = AsyncMock(return_value=RegistrySnapshot.simple(items={}))
+    mock_registry.factory_manager.liveness_status = AsyncMock(
+        return_value=(
+            ResourceLivenessStatus.OFFLINE,
+            "controller connection unavailable",
+        )
+    )
+    # Would disagree with the probe if it were consulted.
+    mock_registry.factory_manager.is_alive = AsyncMock(return_value=True)
+
+    with patch(f"{_SE_MODULE}.get_enterprise_registry", return_value=mock_registry):
+        info, _, _ = await _collect_one_enterprise_system_status(
+            MagicMock(), "prod", True
+        )
+
+    assert info["is_alive"] is False
+    mock_registry.factory_manager.is_alive.assert_not_called()
 
 
 def test_short_reason_extracts_exception_type_prefix():
@@ -363,6 +396,9 @@ async def test_session_enterprise_delete_removal_missing_in_registry():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -399,6 +435,9 @@ async def test_session_enterprise_delete_cleanup_created_sessions_empty():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -435,6 +474,9 @@ async def test_session_enterprise_delete_pq_deletion_failure():
     mock_controller.delete_query = AsyncMock(side_effect=Exception("controller down"))
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -483,6 +525,9 @@ async def test_session_enterprise_delete_refuses_non_dynamic_session(origin):
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -529,6 +574,9 @@ async def test_session_enterprise_delete_registry_pop_raises_error():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -564,6 +612,9 @@ async def test_session_enterprise_delete_outer_exception_logger_info_raises():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -1304,6 +1355,64 @@ async def test_session_enterprise_create_success_with_defaults():
 
 
 @pytest.mark.asyncio
+async def test_session_enterprise_create_fast_fails_on_wedged_controller():
+    """Worker creation fails fast instead of blocking on a wedged subscription.
+
+    ``connect_to_new_worker`` waits on the controller subscription map, so a
+    poisoned controller would otherwise block for the vendor's subscription
+    timeout. The tool must surface the healer's status message instead.
+    """
+    mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_registry.system_name = _TEST_SYSTEM_NAME
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_config = AsyncMock(
+        return_value={
+            "connection_json_url": "https://prod.example.com/iris/connection.json",
+            "auth_type": "password",
+            "username": "admin",
+            "password": "secret",
+            "session_creation": {
+                "max_concurrent_sessions": 5,
+                "defaults": {"heap_size_gb": 8.0},
+            },
+        }
+    )
+
+    mock_factory = MagicMock()
+    mock_factory.connect_to_new_worker = AsyncMock()
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=DeephavenConnectionError(
+            "[CONTROLLER_SUBSCRIBING] Controller subscription is still initializing"
+        )
+    )
+    mock_registry.factory_manager = mock_factory_manager
+    mock_registry.get_all = AsyncMock(return_value={})
+    mock_registry.get = AsyncMock(
+        side_effect=RegistryItemNotFoundError("Session not found")
+    )
+    mock_registry.add_session = AsyncMock()
+    mock_registry.count_added_sessions = AsyncMock(return_value=0)
+
+    context = MockContext(
+        {
+            "config_manager": mock_config_manager,
+            "registry": mock_registry,
+        }
+    )
+
+    result = await session_enterprise_create(context, _TEST_SYSTEM_NAME, "test-worker")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "CONTROLLER_SUBSCRIBING" in result["error"]
+    # The blocking call must never have been reached.
+    mock_factory.connect_to_new_worker.assert_not_called()
+    mock_registry.add_session.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_session_enterprise_create_success_with_overrides():
     """Test session_enterprise_create with parameter overrides."""
     mock_registry = MagicMock(spec=EnterpriseSessionRegistry)
@@ -1717,6 +1826,9 @@ async def test_session_enterprise_delete_success():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -1876,6 +1988,9 @@ async def test_session_enterprise_delete_close_failure_continues():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -2430,6 +2545,9 @@ async def test_session_enterprise_delete_success_v2():
     mock_controller.delete_query = AsyncMock()
     mock_factory = MagicMock(controller_client=mock_controller)
     mock_session_registry.factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_session_registry.factory_manager.get_controller_client = AsyncMock(
+        return_value=mock_controller
+    )
 
     context = MockContext(
         {
@@ -2778,9 +2896,99 @@ def test_register_tools_registers_all_enterprise_tools():
     tools = server._tool_manager._tools
     assert set(tools) == {
         "enterprise_systems_status",
+        "enterprise_controller_reconnect",
         "session_enterprise_create",
         "session_enterprise_delete",
     }
+
+
+# ---------------------------------------------------------------------------
+# enterprise_controller_reconnect
+# ---------------------------------------------------------------------------
+
+
+def _make_reconnect_context(request_reconnect: AsyncMock) -> MockContext:
+    """Return a context whose enterprise registry exposes ``request_reconnect``."""
+    mock_factory_manager = AsyncMock()
+    mock_factory_manager.request_reconnect = request_reconnect
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_session_registry.factory_manager = mock_factory_manager
+    return MockContext(
+        {
+            "registry": mock_session_registry,
+            "config_manager": AsyncMock(),
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_success():
+    """A reconnect request is signaled and reported without waiting for it."""
+    request_reconnect = AsyncMock(return_value=True)
+    context = _make_reconnect_context(request_reconnect)
+
+    result = await enterprise_controller_reconnect(context, _TEST_SYSTEM_NAME)
+
+    assert result["success"] is True
+    assert result["system"] == _TEST_SYSTEM_NAME
+    assert result["reconnect_requested"] is True
+    assert "background" in result["detail"]
+    assert "isError" not in result
+    request_reconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_reports_no_running_healer():
+    """When nothing will be acted on, the request is accepted but flagged False."""
+    context = _make_reconnect_context(AsyncMock(return_value=False))
+
+    result = await enterprise_controller_reconnect(context, _TEST_SYSTEM_NAME)
+
+    assert result["success"] is True
+    assert result["reconnect_requested"] is False
+    # Must not claim an attempt is in flight, nor that one is queued for later,
+    # and must name both reasons — a stopped healer is not a healthy controller.
+    detail = result["detail"]
+    assert "No reconnect attempt was requested" in detail
+    assert "nothing is currently wedged" in detail
+    assert "no background healer is running" in detail
+    assert "runs in the background" not in detail
+    assert "recorded" not in detail
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_unknown_system_errors():
+    """An unconfigured system name returns a structured error, not a raise."""
+    context = MockContext(
+        {
+            "registry": MagicMock(spec=EnterpriseSessionRegistry),
+            "config_manager": AsyncMock(),
+            "instance_tracker": create_mock_instance_tracker(),
+        }
+    )
+    with patch(
+        "deephaven_mcp.mcp_systems_server._tools.session_enterprise.get_enterprise_registry",
+        side_effect=EnterpriseNotConfiguredError("no such system"),
+    ):
+        result = await enterprise_controller_reconnect(context, "nope")
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "nope" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_enterprise_controller_reconnect_signal_failure_errors():
+    """A failure while signaling the healer is reported as a structured error."""
+    context = _make_reconnect_context(AsyncMock(side_effect=RuntimeError("boom")))
+
+    result = await enterprise_controller_reconnect(context, _TEST_SYSTEM_NAME)
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "boom" in result["error"]
 
 
 @pytest.mark.asyncio
