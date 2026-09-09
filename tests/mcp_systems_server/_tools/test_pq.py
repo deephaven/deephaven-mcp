@@ -2214,11 +2214,22 @@ def test_redact_python_control_withholds_url_requirements(stored, expected):
         '{"ephemeral_requirements": "pandas numpy"}',
         '{"ephemeral_venv": true}',
         '{"ephemeral_venv": true, "seed_ephemeral_venv": false}',
+        '{"ephemeral_requirements": null}',
     ],
 )
 def test_redact_python_control_passes_plain_documents_through(stored):
     """Plain requirements stay visible, byte for byte."""
     assert _redact_python_control(stored) == stored
+
+
+@pytest.mark.parametrize(
+    "requirements",
+    ['{"u": "https://a:tok@h"}', '["https://a:tok@h"]', "42", "true"],
+)
+def test_redact_python_control_withholds_non_string_requirements(requirements):
+    """An unexpected type could nest a URL, so it is withheld rather than inspected."""
+    stored = '{"ephemeral_requirements": %s}' % requirements
+    assert _redact_python_control(stored) == '{"ephemeral_requirements": "[REDACTED]"}'
 
 
 @pytest.mark.parametrize(
@@ -2268,12 +2279,28 @@ def test_format_pq_config_redacts_python_control(mock_restart_enum, stored, expe
     [
         '{"ephemeral_requirements": "[REDACTED]"}',
         {"ephemeral_requirements": "[REDACTED]"},
+        # Matched on the decoded value, so escaping the brackets does not evade it.
+        r'{"ephemeral_requirements": "\u005bREDACTED\u005d"}',
     ],
 )
 def test_normalize_python_control_rejects_redacted_round_trip(value):
     """Writing back a pq_details document must not replace a credential with the marker."""
     with pytest.raises(ValueError, match=r"still contains \[REDACTED\]"):
         _normalize_python_control(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # The marker under a key pq_details never redacts is not a round trip.
+        '{"other": "[REDACTED]", "ephemeral_venv": true}',
+        # Nor is a requirements value that merely contains the text.
+        '{"ephemeral_requirements": "pkg-[REDACTED]-name"}',
+    ],
+)
+def test_normalize_python_control_allows_incidental_marker_text(value):
+    """Only the exact marker at the redacted key means a document was round-tripped."""
+    assert _normalize_python_control(value) == value
 
 
 @pytest.mark.parametrize(

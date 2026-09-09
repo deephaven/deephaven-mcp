@@ -97,10 +97,13 @@ def _redact_python_control(stored: str) -> str:
         )
         return "[UNPARSEABLE]"
     requirements = parsed.get(_REQUIREMENTS_KEY)
-    # Decoded first, so a JSON-escaped delimiter cannot hide the URL.
-    if isinstance(requirements, str) and _URL_MARKER in requirements:
-        return json.dumps({**parsed, _REQUIREMENTS_KEY: REDACTED})
-    return stored
+    # Fail closed: only a plain string with no URL is safe to show. A URL, or an
+    # unexpected type that could nest one, is withheld.
+    if requirements is None or (
+        isinstance(requirements, str) and _URL_MARKER not in requirements
+    ):
+        return stored
+    return json.dumps({**parsed, _REQUIREMENTS_KEY: REDACTED})
 
 
 # =============================================================================
@@ -195,6 +198,7 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
     if value is None:
         return None
     if isinstance(value, dict):
+        parsed = value
         try:
             normalized = json.dumps(value, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError) as e:
@@ -222,12 +226,14 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
                 "seed_ephemeral_venv, and ephemeral_requirements."
             )
         normalized = value
-    if REDACTED in normalized:
+    # Compared against the decoded value at its own key, so an escaped marker is still
+    # caught and the same text under an unrelated key is not.
+    if parsed.get(_REQUIREMENTS_KEY) == REDACTED:
         raise ValueError(
             f"python_virtual_environment still contains {REDACTED}, which pq_details "
-            "substitutes for the credentials in a package URL. Writing it back would "
-            "replace a working credential with that marker. Restore the real "
-            "credential in ephemeral_requirements before sending the document."
+            "substitutes for a requirements value holding a URL. Writing it back would "
+            "replace the working value with that marker. Restore the real "
+            "ephemeral_requirements before sending the document."
         )
     return normalized
 
