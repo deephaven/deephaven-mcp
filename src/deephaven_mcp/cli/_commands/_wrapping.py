@@ -144,8 +144,9 @@ def reveal_secrets_option(f: Any) -> Any:
 def warn_revealed_secrets(count: int | None = None) -> None:
     """Warn on stderr that plaintext secrets reached the command's output.
 
-    Call once that output has been produced, and only when a secret was
-    actually disclosed.
+    Call only when a secret really reached that output -- for a normal payload
+    that means after it has been written, not merely because the flag was
+    passed.
 
     Args:
         count (int | None): How many secret values were revealed. ``None`` (the

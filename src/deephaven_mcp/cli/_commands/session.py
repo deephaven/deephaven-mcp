@@ -1320,9 +1320,11 @@ async def session_open(
                 ),
             )
         )
-        echo_payload(runtime, {"opened": opened, "launched": launched})
-    finally:
-        # Also covers the browser_launch_failed path, whose message carries
-        # `opened` -- the token included -- to stderr.
-        if disclosing:
+    except CliError as exc:
+        # Only browser_launch_failed puts `opened` -- token included -- on stderr.
+        if disclosing and exc.code is ErrorCode.BROWSER_LAUNCH_FAILED:
             warn_revealed_secrets(1)
+        raise
+    echo_payload(runtime, {"opened": opened, "launched": launched})
+    if disclosing:
+        warn_revealed_secrets(1)
