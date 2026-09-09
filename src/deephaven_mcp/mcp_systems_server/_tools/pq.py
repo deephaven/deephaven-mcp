@@ -727,8 +727,24 @@ def _format_pq_states(
     return [f for f in formatted if f is not None]
 
 
-_REVEALABLE_CONFIG_FIELDS = ("python_control", "type_specific_fields_json")
-_REVEALABLE_STATE_FIELD = "type_specific_state_json"
+def _redaction_withholds(stored: str, redacted: str | None) -> bool:
+    """Report whether redacting ``stored`` withheld any of its content.
+
+    Compares the parsed values, so re-serialization is not mistaken for a
+    change: the redactors emit spaced separators whatever the stored spacing
+    was. A value neither side can parse counts as changed.
+
+    Args:
+        stored (str): The value as held by the controller.
+        redacted (str | None): What the field's redactor returns for ``stored``.
+
+    Returns:
+        bool: True when redaction drops, replaces, or suppresses content.
+    """
+    try:
+        return bool(json.loads(stored) != json.loads(redacted or "null"))
+    except (json.JSONDecodeError, ValueError):
+        return True
 
 
 def _revealed_any_secret(
@@ -737,10 +753,11 @@ def _revealed_any_secret(
     replicas: list[dict[str, object]],
     spares: list[dict[str, object]],
 ) -> bool:
-    """Report whether a revealed payload actually carries a secret value.
+    """Report whether revealing disclosed anything redaction would have withheld.
 
-    A field the PQ does not configure reads as None under ``reveal_secrets``
-    and does not count as a disclosure.
+    A field whose redacted form carries the same content - a ``python_control``
+    holding only the two booleans, a type-specific document with no sensitive
+    keys - is not a disclosure.
 
     Args:
         config (dict[str, object]): Formatted config, from :func:`_format_pq_config`.
@@ -750,12 +767,28 @@ def _revealed_any_secret(
         spares (list[dict[str, object]]): Formatted spare states.
 
     Returns:
-        bool: True when at least one secret-bearing field holds a value.
+        bool: True when at least one field revealed content the default response
+        withholds.
     """
-    states = [state_details, *replicas, *spares]
-    return any(config.get(name) for name in _REVEALABLE_CONFIG_FIELDS) or any(
-        state.get(_REVEALABLE_STATE_FIELD) for state in states if state
-    )
+    python_control = config.get("python_control")
+    if isinstance(python_control, str) and _redaction_withholds(
+        python_control, _redact_python_control(python_control)
+    ):
+        return True
+    fields_json = config.get("type_specific_fields_json")
+    if isinstance(fields_json, str) and _redaction_withholds(
+        fields_json, redact_json_sensitive_fields(fields_json)
+    ):
+        return True
+    for state in (state_details, *replicas, *spares):
+        if not state:
+            continue
+        state_json = state.get("type_specific_state_json")
+        if isinstance(state_json, str) and _redaction_withholds(
+            state_json, redact_json_sensitive_fields(state_json)
+        ):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -1209,10 +1242,11 @@ async def pq_details(
     - reveal_secrets=True reports python_control, type_specific_fields_json, and
       type_specific_state_json - the last one under state_details and under every
       replicas[] and spares[] entry - as stored, an unset field reading as null. When
-      that actually discloses a value it adds a "warning" field. Use it when
-      you need the real value - to read the configured requirements, or to round-trip a
-      document through pq_modify - and treat the whole response as a credential: keep it
-      out of logs, transcripts, and anything you echo back to a user.
+      that actually hands back something the redacted response withholds it adds a
+      "warning" field. Use it when you need the real value - to read the configured
+      requirements, or to round-trip a document through pq_modify - and treat the whole
+      response as a credential: keep it out of logs, transcripts, and anything you echo
+      back to a user.
 
     Args:
         context (Context): MCP context object

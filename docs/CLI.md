@@ -699,8 +699,10 @@ rather than overwriting the working value with the marker.
 `config.type_specific_fields_json`, and `state_details.type_specific_state_json`
 — plus that same `type_specific_state_json` on every `replicas[]` and
 `spares[]` entry — as stored, an unset field reading as `null`. When the reveal
-actually discloses a value it also warns on stderr and adds a `warning` field to
-the payload; a PQ that configures none of these fields gets neither, so the
+actually hands back something the redacted response withholds it also warns on
+stderr and adds a `warning` field to the payload; a PQ whose fields hold nothing
+redaction would have withheld — a `python_control` of just the two booleans, say
+— gets neither, so the warning always means something real was written.
 warning always means something real was written. Treat that output like a
 password.
 

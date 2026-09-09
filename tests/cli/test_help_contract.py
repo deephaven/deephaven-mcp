@@ -7,8 +7,11 @@ command is covered automatically.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import re
+import textwrap
+from collections.abc import Callable
 
 import click
 import pytest
@@ -508,15 +511,33 @@ def test_confirmable_command_declares_operation_canceled(
     )
 
 
+def _called_names(func: Callable[..., object]) -> set[str]:
+    """Return the names ``func`` actually calls, from its AST.
+
+    A textual search would be satisfied by a mention in a comment or
+    docstring, which is no assurance at all for a security check.
+    ``getsource`` unwraps ``@run_async``, so this reads the async body
+    rather than the adapter.
+    """
+    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        match node.func:
+            case ast.Name(id=name) | ast.Attribute(attr=name):
+                names.add(name)
+    return names
+
+
 @pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)
 def test_reveal_secrets_command_warns_on_stderr(path: str, cmd: click.Command) -> None:
     """``--reveal-secrets`` and ``warn_revealed_secrets`` travel together.
 
     The helper cannot enforce its own use, so the pairing is checked here:
     a verb that can put a plaintext secret on stdout must tell the user it
-    did. Reads the callback's source because the call is conditional on
-    what the payload turned out to hold, which no signature inspection can
-    see.
+    did. Inspects the callback because the call is conditional on what the
+    payload turned out to hold, which no signature inspection can see.
     """
     takes_flag = any(
         isinstance(param, click.Option) and param.name == "reveal_secrets"
@@ -525,9 +546,7 @@ def test_reveal_secrets_command_warns_on_stderr(path: str, cmd: click.Command) -
     if not takes_flag:
         return
     assert cmd.callback is not None, f"{path}: no callback to inspect"
-    # getsource unwraps @run_async, so this is the async body, not the adapter.
-    source = inspect.getsource(cmd.callback)
-    assert "warn_revealed_secrets(" in source, (
+    assert "warn_revealed_secrets" in _called_names(cmd.callback), (
         f"{path}: takes --reveal-secrets but never calls "
         "warn_revealed_secrets(); a disclosed secret must be announced "
         "on stderr"

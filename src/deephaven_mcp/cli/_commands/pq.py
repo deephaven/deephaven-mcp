@@ -248,9 +248,10 @@ _OUTPUT_DETAILS = OutputSpec(
         OutputField(
             "warning",
             "string",
-            "Present only when --reveal-secrets actually disclosed a value: "
-            "restates that the secret-bearing fields are reported as stored "
-            "and may carry plaintext credentials.",
+            "Present only when --reveal-secrets handed back something the "
+            "redacted response withholds: restates that the secret-bearing "
+            "fields are reported as stored and may carry plaintext "
+            "credentials.",
         ),
     ),
     note=(
@@ -315,7 +316,7 @@ async def pq_details(runtime: Runtime, id: str | None, reveal_secrets: bool) -> 
         arguments={"id": id, "reveal_secrets": reveal_secrets},
     )
     echo_payload(runtime, payload)
-    # The tool sets this only when the reveal actually disclosed a value.
+    # The tool sets this only when the reveal handed back withheld content.
     if payload.get("warning"):
         warn_revealed_secrets()
 

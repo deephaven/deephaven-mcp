@@ -1953,10 +1953,16 @@ async def test_pq_details_success_by_serial():
     "reveal,python_control,expected",
     [
         (True, '{"ephemeral_requirements": "pandas"}', True),
+        (True, '{"ephemeral_venv": true}', False),
         (True, "", False),
         (False, '{"ephemeral_requirements": "pandas"}', False),
     ],
-    ids=["disclosed-a-value", "nothing-to-disclose", "not-revealing"],
+    ids=[
+        "disclosed-a-value",
+        "booleans-only-disclose-nothing",
+        "nothing-to-disclose",
+        "not-revealing",
+    ],
 )
 async def test_pq_details_warning_only_when_revealing(reveal, python_control, expected):
     """The warning tracks the disclosure, not the flag.
@@ -2347,28 +2353,42 @@ def test_redact_python_control_suppresses_uninspectable(stored):
 @pytest.mark.parametrize(
     "config,state_details,replicas,spares,expected",
     [
-        ({"python_control": '{"a": 1}'}, None, [], [], True),
-        ({"type_specific_fields_json": '{"a": 1}'}, None, [], [], True),
-        ({}, {"type_specific_state_json": '{"a": 1}'}, [], [], True),
-        ({}, None, [{"type_specific_state_json": '{"a": 1}'}], [], True),
-        ({}, None, [], [{"type_specific_state_json": '{"a": 1}'}], True),
+        ({"python_control": '{"ephemeral_requirements": "pkg"}'}, None, [], [], True),
+        ({"python_control": '{"unknown": "secret"}'}, None, [], [], True),
+        ({"python_control": "not json"}, None, [], [], True),
+        ({"type_specific_fields_json": '{"token": "abc"}'}, None, [], [], True),
+        ({}, {"type_specific_state_json": '{"token": "abc"}'}, [], [], True),
+        ({}, None, [{"type_specific_state_json": '{"token": "abc"}'}], [], True),
+        ({}, None, [], [{"type_specific_state_json": '{"token": "abc"}'}], True),
+        ({"python_control": '{"ephemeral_venv": true}'}, None, [], [], False),
+        ({"python_control": '{"ephemeral_venv":true}'}, None, [], [], False),
+        ({"type_specific_fields_json": '{"port": 10000}'}, None, [], [], False),
         ({"python_control": None}, {"type_specific_state_json": None}, [], [], False),
         ({}, None, [], [], False),
     ],
     ids=[
-        "config-python-control",
-        "config-type-specific",
+        "requirements-are-withheld",
+        "unknown-key-is-dropped",
+        "unparseable-is-suppressed",
+        "config-sensitive-key",
         "state-details",
         "a-replica",
         "a-spare",
+        "booleans-only",
+        "booleans-only-stored-compact",
+        "no-sensitive-key",
         "every-field-unset",
         "nothing-at-all",
     ],
 )
-def test_revealed_any_secret_covers_every_source(
+def test_revealed_any_secret_tracks_what_redaction_withholds(
     config, state_details, replicas, spares, expected
 ):
-    """Each place a secret can hide counts, and an unset field does not."""
+    """Only content the default response withholds counts as a disclosure.
+
+    A document redaction leaves intact - booleans, non-sensitive keys, and
+    the same document stored without spaces - discloses nothing.
+    """
     assert _revealed_any_secret(config, state_details, replicas, spares) is expected
 
 
