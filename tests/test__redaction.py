@@ -9,7 +9,7 @@ from deephaven_mcp._redaction import (
     REDACTED,
     UNPARSEABLE,
     AllowedField,
-    parse_json_no_duplicate_keys,
+    parse_json_strict,
     project_json_fields,
     redact_json_sensitive_fields,
 )
@@ -38,7 +38,7 @@ def test_all_lists_the_public_surface():
         "AllowedField",
         "Redaction",
         "UNPARSEABLE",
-        "parse_json_no_duplicate_keys",
+        "parse_json_strict",
         "project_json_fields",
         "redact_json_sensitive_fields",
     ]
@@ -62,6 +62,7 @@ _SAMPLE_FIELDS = (
         ('{"unknown": "tok"}', "{}", True),
         ('{"flag": "not a bool"}', "{}", True),
         ('{"flag": true, "flag": true}', "[UNPARSEABLE]", True),
+        ('{"flag": NaN}', "[UNPARSEABLE]", True),
         ("not json", "[UNPARSEABLE]", True),
         ("[1, 2]", "[UNPARSEABLE]", True),
         ("{}", "{}", False),
@@ -74,6 +75,7 @@ _SAMPLE_FIELDS = (
         "unknown-key-dropped",
         "wrong-type-dropped",
         "repeated-key-suppressed",
+        "non-standard-constant-suppressed",
         "unparseable-suppressed",
         "non-object-suppressed",
         "empty-object",
@@ -87,20 +89,43 @@ def test_project_json_fields(stored, text, withheld):
     )
 
 
-def test_parse_json_no_duplicate_keys_accepts_distinct_keys():
-    assert parse_json_no_duplicate_keys('{"a": 1, "b": {"c": 2}}') == {
+def test_parse_json_strict_accepts_distinct_keys():
+    assert parse_json_strict('{"a": 1, "b": {"c": 2}}') == {
         "a": 1,
         "b": {"c": 2},
     }
 
 
 @pytest.mark.parametrize(
-    "text", ['{"a": 1, "a": 2}', '{"outer": {"a": 1, "a": 2}}', "not json"]
+    "text",
+    [
+        '{"a": 1, "a": 2}',
+        '{"outer": {"a": 1, "a": 2}}',
+        "not json",
+        '{"a": NaN}',
+        '{"a": Infinity}',
+        '{"a": -Infinity}',
+        "[NaN]",
+    ],
+    ids=[
+        "repeated-key",
+        "repeated-key-nested",
+        "malformed",
+        "nan",
+        "infinity",
+        "negative-infinity",
+        "nan-in-an-array",
+    ],
 )
-def test_parse_json_no_duplicate_keys_rejects(text):
-    """A repeated key at any depth is refused, as is malformed JSON."""
+def test_parse_json_strict_rejects(text):
+    """A repeated key or a non-standard constant is refused at any depth."""
     with pytest.raises(ValueError):
-        parse_json_no_duplicate_keys(text)
+        parse_json_strict(text)
+
+
+def test_redact_json_sensitive_fields_rejects_a_non_standard_constant():
+    """json.dumps would write NaN back, so the value would not be valid JSON."""
+    assert redact_json_sensitive_fields('{"port": NaN}') == ("[UNPARSEABLE]", True)
 
 
 def test_redact_json_sensitive_fields_none_returns_none():

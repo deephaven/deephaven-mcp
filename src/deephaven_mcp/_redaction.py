@@ -29,14 +29,14 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import NamedTuple, NoReturn
 
 __all__ = [
     "REDACTED",
     "AllowedField",
     "Redaction",
     "UNPARSEABLE",
-    "parse_json_no_duplicate_keys",
+    "parse_json_strict",
     "project_json_fields",
     "redact_json_sensitive_fields",
 ]
@@ -104,11 +104,29 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return dict(pairs)
 
 
-def parse_json_no_duplicate_keys(text: str) -> object:
-    """Parse JSON text, rejecting any object that repeats a key.
+def _reject_json_constant(constant: str) -> NoReturn:
+    """Reject a constant Python's JSON parser accepts but the JSON spec does not.
 
-    ``json.loads`` keeps only the last value for a repeated key, so a redactor
-    built on it drops the others while the raw text still carries them.
+    Args:
+        constant (str): The token matched - ``NaN``, ``Infinity``, or ``-Infinity``.
+
+    Raises:
+        ValueError: Always.
+    """
+    raise ValueError(f"JSON does not allow the constant {constant}")
+
+
+def parse_json_strict(text: str) -> object:
+    """Parse JSON text, refusing what the JSON spec does not allow.
+
+    Stricter than :func:`json.loads` in two ways, each of which would otherwise
+    let a redactor built on it report something misleading:
+
+    - A repeated object key is rejected. ``json.loads`` keeps only the last value,
+      so a redactor would drop the others while the raw text still carries them.
+    - ``NaN``/``Infinity``/``-Infinity`` are rejected. ``json.loads`` accepts these
+      Python extensions and ``json.dumps`` writes them back, so a redacted value
+      would not itself be valid JSON.
 
     Args:
         text (str): JSON text to parse.
@@ -117,10 +135,15 @@ def parse_json_no_duplicate_keys(text: str) -> object:
         object: The parsed value.
 
     Raises:
-        ValueError: When ``text`` is not valid JSON, or an object in it repeats
-            a key. ``json.JSONDecodeError`` is a subclass.
+        ValueError: When ``text`` is not valid JSON, an object in it repeats a key,
+            or it holds a non-standard constant. ``json.JSONDecodeError`` is a
+            subclass.
     """
-    return json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    return json.loads(
+        text,
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=_reject_json_constant,
+    )
 
 
 def _redact_recursive(obj: object) -> tuple[object, bool]:
@@ -171,11 +194,11 @@ def redact_json_sensitive_fields(json_str: str | None) -> Redaction:
     if not json_str:
         return Redaction(None, False)
     try:
-        parsed = parse_json_no_duplicate_keys(json_str)
+        parsed = parse_json_strict(json_str)
     except ValueError:
         _LOGGER.warning(
             "[_redaction:redact_json_sensitive_fields] Suppressing JSON field: "
-            "not valid JSON, or an object in it repeats a key"
+            "not parseable as strict JSON"
         )
         return Redaction(UNPARSEABLE, True)
     redacted, withheld = _redact_recursive(parsed)
@@ -206,13 +229,13 @@ def project_json_fields(
             held.
     """
     try:
-        parsed = parse_json_no_duplicate_keys(stored)
+        parsed = parse_json_strict(stored)
     except ValueError:
         parsed = None
     if not isinstance(parsed, dict):
         _LOGGER.warning(
             f"[_redaction:project_json_fields] Suppressing {label}: not a JSON "
-            "object, or an object in it repeats a key"
+            "object, or not parseable as strict JSON"
         )
         return Redaction(UNPARSEABLE, True)
     projected: dict[str, object] = {}
