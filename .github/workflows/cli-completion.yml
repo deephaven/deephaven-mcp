@@ -35,7 +35,12 @@ jobs:
 
       - name: Install shells
         run: |
-          sudo apt-get update
+          # zsh and fish come from the Ubuntu archive, but the runner image also
+          # carries third-party lists (Chrome et al.) whose indexes intermittently
+          # fail their hash check and take the whole update down with them. The
+          # install below is the real gate: it still fails if the archive we need
+          # is genuinely unreachable.
+          sudo apt-get update || true
           sudo apt-get install -y zsh fish
 
       - name: Install uv

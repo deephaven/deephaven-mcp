@@ -1,7 +1,7 @@
 """Tests for deephaven_mcp._redaction."""
 
 from deephaven_mcp import _redaction
-from deephaven_mcp._redaction import REDACTED
+from deephaven_mcp._redaction import REDACTED, UNPARSEABLE
 
 
 def test_redacted_has_canonical_value():
@@ -15,6 +15,11 @@ def test_redacted_has_canonical_value():
     assert REDACTED == "[REDACTED]"
 
 
-def test_redacted_is_in_all():
-    """``REDACTED`` is the module's sole public symbol."""
-    assert _redaction.__all__ == ["REDACTED"]
+def test_unparseable_has_canonical_value():
+    """Pin down the canonical suppression marker, for the same reason."""
+    assert UNPARSEABLE == "[UNPARSEABLE]"
+
+
+def test_all_lists_both_markers():
+    """The two markers are the module's public symbols."""
+    assert _redaction.__all__ == ["REDACTED", "UNPARSEABLE"]

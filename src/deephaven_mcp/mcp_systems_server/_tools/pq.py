@@ -38,7 +38,7 @@ from pydantic import Field
 
 from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import InvalidSessionNameError
-from deephaven_mcp._redaction import REDACTED
+from deephaven_mcp._redaction import REDACTED, UNPARSEABLE
 from deephaven_mcp.client import (
     PQ_STATES,
     CorePlusControllerClient,
@@ -90,7 +90,7 @@ def _redact_python_control(stored: str) -> str:
     Returns:
         str: A JSON object holding only the recognized keys, with
         ``ephemeral_requirements`` reported as ``[REDACTED]`` when present. Returns
-        ``"[UNPARSEABLE]"`` when the stored value is not a JSON object.
+        ``UNPARSEABLE`` when the stored value is not a JSON object.
     """
     try:
         parsed = json.loads(stored)
@@ -101,7 +101,7 @@ def _redact_python_control(stored: str) -> str:
             "[mcp_systems_server:_redact_python_control] Suppressing python_control: "
             "stored value is not a JSON object and cannot be projected"
         )
-        return "[UNPARSEABLE]"
+        return UNPARSEABLE
     projected: dict[str, object] = {}
     for key in (_VENV_KEY, _SEED_KEY):
         value = parsed.get(key)
@@ -727,6 +727,37 @@ def _format_pq_states(
     return [f for f in formatted if f is not None]
 
 
+_REVEALABLE_CONFIG_FIELDS = ("python_control", "type_specific_fields_json")
+_REVEALABLE_STATE_FIELD = "type_specific_state_json"
+
+
+def _revealed_any_secret(
+    config: dict[str, object],
+    state_details: dict[str, object] | None,
+    replicas: list[dict[str, object]],
+    spares: list[dict[str, object]],
+) -> bool:
+    """Report whether a revealed payload actually carries a secret value.
+
+    A field the PQ does not configure reads as None under ``reveal_secrets``
+    and does not count as a disclosure.
+
+    Args:
+        config (dict[str, object]): Formatted config, from :func:`_format_pq_config`.
+        state_details (dict[str, object] | None): Formatted state, from
+            :func:`_format_pq_state`; None when the PQ is not running.
+        replicas (list[dict[str, object]]): Formatted replica states.
+        spares (list[dict[str, object]]): Formatted spare states.
+
+    Returns:
+        bool: True when at least one secret-bearing field holds a value.
+    """
+    states = [state_details, *replicas, *spares]
+    return any(config.get(name) for name in _REVEALABLE_CONFIG_FIELDS) or any(
+        state.get(_REVEALABLE_STATE_FIELD) for state in states if state
+    )
+
+
 @dataclass(frozen=True)
 class _BatchPqSetup:
     """Validated inputs shared by the batch PQ operations."""
@@ -1176,7 +1207,9 @@ async def pq_details(
       credential; it is therefore not writable back through pq_modify as-is (pq_modify
       rejects a document that still carries the marker)
     - reveal_secrets=True reports python_control, type_specific_fields_json, and
-      type_specific_state_json exactly as stored, and adds a "warning" field. Use it when
+      type_specific_state_json - the last one under state_details and under every
+      replicas[] and spares[] entry - as stored, an unset field reading as null. When
+      that actually discloses a value it adds a "warning" field. Use it when
       you need the real value - to read the configured requirements, or to round-trip a
       document through pq_modify - and treat the whole response as a credential: keep it
       out of logs, transcripts, and anything you echo back to a user.
@@ -1393,22 +1426,29 @@ async def pq_details(
         status_obj = pq_info.state.status if pq_info.state else None
         state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
+        config = _format_pq_config(pq_info.config, reveal_secrets)
+        state_details = _format_pq_state(pq_info.state, reveal_secrets)
+        replicas = _format_pq_states(pq_info.replicas, reveal_secrets)
+        spares = _format_pq_states(pq_info.spares, reveal_secrets)
         pq_data = {
             "success": True,
             "id": id,
             "serial": serial,
             "name": pq_name,
             "state": state_name,
-            "config": _format_pq_config(pq_info.config, reveal_secrets),
-            "state_details": _format_pq_state(pq_info.state, reveal_secrets),
-            "replicas": _format_pq_states(pq_info.replicas, reveal_secrets),
-            "spares": _format_pq_states(pq_info.spares, reveal_secrets),
+            "config": config,
+            "state_details": state_details,
+            "replicas": replicas,
+            "spares": spares,
         }
-        if reveal_secrets:
+        if reveal_secrets and _revealed_any_secret(
+            config, state_details, replicas, spares
+        ):
             pq_data["warning"] = (
                 "reveal_secrets=True: python_control, type_specific_fields_json, and "
-                "type_specific_state_json are reported as stored and may contain "
-                "plaintext credentials. Treat this response like a password and keep "
+                "type_specific_state_json (including each entry under replicas and "
+                "spares) are reported as stored and may contain plaintext "
+                "credentials. Treat this response like a password and keep "
                 "it out of logs, transcripts, and user-visible output."
             )
 

@@ -521,8 +521,9 @@ def test_reveal_secrets_command_warns_on_stderr(path: str, cmd: click.Command) -
     )
     if not takes_flag:
         return
+    assert cmd.callback is not None, f"{path}: no callback to inspect"
     # getsource unwraps @run_async, so this is the async body, not the adapter.
-    source = inspect.getsource(cmd.callback) if cmd.callback else ""
+    source = inspect.getsource(cmd.callback)
     assert "warn_revealed_secrets(" in source, (
         f"{path}: takes --reveal-secrets but never calls "
         "warn_revealed_secrets(); a disclosed secret must be announced "

@@ -154,6 +154,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _parse_pq_id,
     _pq_state_category,
     _redact_python_control,
+    _revealed_any_secret,
     _setup_batch_pq_operation,
     _validate_and_parse_pq_ids,
     _validate_max_concurrent,
@@ -1948,9 +1949,21 @@ async def test_pq_details_success_by_serial():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reveal", [True, False])
-async def test_pq_details_warning_only_when_revealing(reveal):
-    """The disclosure is announced in the payload, and only when it happened."""
+@pytest.mark.parametrize(
+    "reveal,python_control,expected",
+    [
+        (True, '{"ephemeral_requirements": "pandas"}', True),
+        (True, "", False),
+        (False, '{"ephemeral_requirements": "pandas"}', False),
+    ],
+    ids=["disclosed-a-value", "nothing-to-disclose", "not-revealing"],
+)
+async def test_pq_details_warning_only_when_revealing(reveal, python_control, expected):
+    """The warning tracks the disclosure, not the flag.
+
+    A PQ that configures no secret-bearing field discloses nothing, and
+    announcing that would be a false alarm.
+    """
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
     mock_session_registry.system_name = _TEST_SYSTEM_NAME
     mock_factory_manager = MagicMock()
@@ -1960,9 +1973,9 @@ async def test_pq_details_warning_only_when_revealing(reveal):
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
-    mock_controller.map = AsyncMock(
-        return_value={12345: create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)}
-    )
+    pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
+    pq_info.config.pb.pythonControl = python_control
+    mock_controller.map = AsyncMock(return_value={12345: pq_info})
     context = MockContext(
         {"config_manager": MagicMock(), "registry": mock_session_registry}
     )
@@ -1972,7 +1985,7 @@ async def test_pq_details_warning_only_when_revealing(reveal):
     )
 
     assert result["success"] is True
-    assert ("warning" in result) is reveal
+    assert ("warning" in result) is expected
 
 
 @pytest.mark.asyncio
@@ -2329,6 +2342,34 @@ def test_redact_python_control_projects_allowlist(stored, expected):
 def test_redact_python_control_suppresses_uninspectable(stored):
     """Anything that is not a JSON object fails closed rather than echoing through."""
     assert _redact_python_control(stored) == "[UNPARSEABLE]"
+
+
+@pytest.mark.parametrize(
+    "config,state_details,replicas,spares,expected",
+    [
+        ({"python_control": '{"a": 1}'}, None, [], [], True),
+        ({"type_specific_fields_json": '{"a": 1}'}, None, [], [], True),
+        ({}, {"type_specific_state_json": '{"a": 1}'}, [], [], True),
+        ({}, None, [{"type_specific_state_json": '{"a": 1}'}], [], True),
+        ({}, None, [], [{"type_specific_state_json": '{"a": 1}'}], True),
+        ({"python_control": None}, {"type_specific_state_json": None}, [], [], False),
+        ({}, None, [], [], False),
+    ],
+    ids=[
+        "config-python-control",
+        "config-type-specific",
+        "state-details",
+        "a-replica",
+        "a-spare",
+        "every-field-unset",
+        "nothing-at-all",
+    ],
+)
+def test_revealed_any_secret_covers_every_source(
+    config, state_details, replicas, spares, expected
+):
+    """Each place a secret can hide counts, and an unset field does not."""
+    assert _revealed_any_secret(config, state_details, replicas, spares) is expected
 
 
 @patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")

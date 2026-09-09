@@ -1103,7 +1103,8 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             jvm_profile (str | None): Named JVM profile.
             extra_jvm_args (list[str] | None): JVM arguments; replaces existing.
             extra_class_path (list[str] | None): Classpath entries; replaces existing.
-            python_virtual_environment (str | None): Python venv control.
+            python_virtual_environment (str | None): Python environment control document
+                for Core+ workers as JSON text, e.g. ``'{"ephemeral_venv": true}'``.
             extra_environment_vars (list[str] | None): Env vars as ``"KEY=VALUE"`` entries
                 (converted internally to the controller's alternating key/value wire
                 format); replaces existing.

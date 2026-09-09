@@ -134,8 +134,9 @@ def reveal_secrets_option(f: Any) -> Any:
             "Include plaintext secret values in the output. Without this "
             "flag each command withholds them in whatever way suits its "
             "output: 'config get' prints [REDACTED], 'session open' "
-            "reports the URL without its auth token. Treat the result "
-            "like a password."
+            "reports the URL without its auth token. When this actually "
+            "discloses something a warning is written to stderr. Treat "
+            "the result like a password."
         ),
     )(f)
 
@@ -143,11 +144,8 @@ def reveal_secrets_option(f: Any) -> Any:
 def warn_revealed_secrets(count: int | None = None) -> None:
     """Warn on stderr that plaintext secrets were written to stdout.
 
-    Call this *after* writing the output it describes, and only when a secret
-    was actually disclosed -- the message is past tense, and a verb whose
-    payload happens to hold no secret should stay quiet. Every command taking
-    :func:`reveal_secrets_option` must reach this helper;
-    ``test_help_contract.py`` fails the build if one does not.
+    Call after writing the output being described, and only when a secret was
+    actually disclosed.
 
     Args:
         count (int | None): How many secret values were revealed. ``None`` (the

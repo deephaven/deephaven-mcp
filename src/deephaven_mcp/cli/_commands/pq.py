@@ -248,9 +248,9 @@ _OUTPUT_DETAILS = OutputSpec(
         OutputField(
             "warning",
             "string",
-            "Present only under --reveal-secrets: restates that the "
-            "secret-bearing fields are reported as stored and may carry "
-            "plaintext credentials.",
+            "Present only when --reveal-secrets actually disclosed a value: "
+            "restates that the secret-bearing fields are reported as stored "
+            "and may carry plaintext credentials.",
         ),
     ),
     note=(
@@ -273,7 +273,9 @@ _OUTPUT_DETAILS = OutputSpec(
             "a PQ is actually doing: 'pq start' / 'pq restart' report that the "
             "request was accepted, not that the worker is serving.\n\n"
             "Secret-bearing fields (config.python_control, "
-            "config.type_specific_fields_json, state_details.type_specific_state_json) "
+            "config.type_specific_fields_json, and "
+            "state_details.type_specific_state_json together with the same "
+            "field on every replicas[] and spares[] entry) "
             "are redacted by default. Pass --reveal-secrets to get them as stored, "
             "which is what you need to read the configured pip requirements or to "
             "round-trip a python_control document back through 'pq modify'."
@@ -306,13 +308,15 @@ _OUTPUT_DETAILS = OutputSpec(
 async def pq_details(runtime: Runtime, id: str | None, reveal_secrets: bool) -> None:
     """Show details for one Persistent Query."""
     id = require_context_value(runtime, ContextKey.PQ, id)
-    await call_and_echo(
+    payload = await call_for_payload(
         runtime,
         "pq_details",
         retry_command="dhcli pq details",
         arguments={"id": id, "reveal_secrets": reveal_secrets},
     )
-    if reveal_secrets:
+    echo_payload(runtime, payload)
+    # The tool sets this only when the reveal actually disclosed a value.
+    if payload.get("warning"):
         warn_revealed_secrets()
 
 

@@ -694,8 +694,12 @@ rather than overwriting the working value with the marker.
 
 `--reveal-secrets` on `pq details` returns `config.python_control`,
 `config.type_specific_fields_json`, and `state_details.type_specific_state_json`
-exactly as stored, warns on stderr, and adds a `warning` field to the payload.
-Treat that output like a password.
+— plus that same `type_specific_state_json` on every `replicas[]` and
+`spares[]` entry — as stored, an unset field reading as `null`. When the reveal
+actually discloses a value it also warns on stderr and adds a `warning` field to
+the payload; a PQ that configures none of these fields gets neither, so the
+warning always means something real was written. Treat that output like a
+password.
 
 A credential written this way is visible in the process's arguments (readable
 by other local users on Linux) and is recorded in your shell history. Prefer an

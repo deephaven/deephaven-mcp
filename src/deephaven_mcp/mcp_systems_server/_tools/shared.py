@@ -42,7 +42,7 @@ from deephaven_mcp._exceptions import (
     SessionCreationError,
     UnsupportedOperationError,
 )
-from deephaven_mcp._redaction import REDACTED
+from deephaven_mcp._redaction import REDACTED, UNPARSEABLE
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.config.schema import (
     CommunitySettings,
@@ -820,7 +820,7 @@ def redact_json_sensitive_fields(json_str: str | None) -> str | None:
         json_str (str | None): The JSON string to scan, or ``None``.
 
     Returns:
-        str | None: ``None`` for empty/``None`` input. ``"[UNPARSEABLE]"``
+        str | None: ``None`` for empty/``None`` input. ``UNPARSEABLE``
             (with a warning log) when the string is not valid JSON.
             Otherwise a re-serialized JSON string with sensitive values
             replaced by ``[REDACTED]``.
@@ -834,5 +834,5 @@ def redact_json_sensitive_fields(json_str: str | None) -> str | None:
             "[mcp_systems_server:redact_json_sensitive_fields] type_specific "
             "JSON field is not valid JSON; content suppressed"
         )
-        return "[UNPARSEABLE]"
+        return UNPARSEABLE
     return json.dumps(_redact_recursive(parsed))
