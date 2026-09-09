@@ -631,7 +631,7 @@ no PQ counterpart (local workers are ephemeral).
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
 | `list [SYSTEM]`                       | Lists PQs configured on a system — every user's, including production; see [Choosing a target](#choosing-a-target). Wraps `pq_list`. |
-| `details [ID]`                        | Configuration + status for one PQ. Wraps `pq_details`. |
+| `details [ID]`                        | Configuration + status for one PQ. Secret-bearing fields are redacted unless `--reveal-secrets` is passed. Wraps `pq_details`. |
 | `name-to-id <system> <name>`          | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`. |
 | `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-body-path`/`--git-script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
 | `modify [ID]`                         | Updates only the fields passed; everything else is left unchanged. A repeatable option **replaces** the PQ's existing list rather than appending. `--restart` restarts the PQ after applying the change. `--yes` skips the context confirmation. Wraps `pq_modify`. |
@@ -680,14 +680,18 @@ dhcli pq modify enterprise:prod:1234567890 \
 ```
 
 The object replaces the field wholesale, so to change one key read the current
-`python_control` from `dhcli pq details ID`, modify it, and pass the whole
-object back. One catch: when `ephemeral_requirements` contains a URL,
-`pq details` withholds that value entirely and reports `[REDACTED]` — a URL can
-carry a token in its userinfo, query string, or path, so the whole value is
-held back rather than scrubbed in parts. What it returns is therefore not
-writable as-is; restore the real requirements first. Passing a document that
-still contains `[REDACTED]` exits `3` rather than overwriting the working value
-with the marker. Requirements with no URL are shown normally.
+`python_control` from `dhcli pq details ID --reveal-secrets`, modify it, and pass
+the whole object back. **Without** `--reveal-secrets`, `pq details` reports only
+the three recognized keys and always shows `ephemeral_requirements` as
+`[REDACTED]`, because a pip requirement can carry an index credential and no
+attempt is made to judge which ones do — so a document read that way is not
+writable as-is, and passing one that still contains `[REDACTED]` exits `3`
+rather than overwriting the working value with the marker.
+
+`--reveal-secrets` on `pq details` returns `config.python_control`,
+`config.type_specific_fields_json`, and `state_details.type_specific_state_json`
+exactly as stored, warns on stderr, and adds a `warning` field to the payload.
+Treat that output like a password.
 
 A credential written this way is visible in the process's arguments (readable
 by other local users on Linux) and is recorded in your shell history. Prefer an

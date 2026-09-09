@@ -24,6 +24,8 @@ from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo_field,
     call_for_payload,
     read_local_script,
+    reveal_secrets_option,
+    warn_revealed_secrets,
     wrapper_error_codes,
     yes_option,
 )
@@ -262,7 +264,12 @@ _OUTPUT_DETAILS = OutputSpec(
             "(config) and the live state (state_details) of ID, including the "
             "running worker's connection details. This is how to confirm what "
             "a PQ is actually doing: 'pq start' / 'pq restart' report that the "
-            "request was accepted, not that the worker is serving."
+            "request was accepted, not that the worker is serving.\n\n"
+            "Secret-bearing fields (config.python_control, "
+            "config.type_specific_fields_json, state_details.type_specific_state_json) "
+            "are redacted by default. Pass --reveal-secrets to get them as stored, "
+            "which is what you need to read the configured pip requirements or to "
+            "round-trip a python_control document back through 'pq modify'."
         ),
         arguments=(
             HelpEntry(
@@ -277,6 +284,8 @@ _OUTPUT_DETAILS = OutputSpec(
             "$ dhcli pq details enterprise:prod:1234567890",
             "$ dhcli pq details enterprise:prod:1234567890 | jq .state",
             "$ dhcli pq details enterprise:prod:1234567890 | jq '.config.scheduling'",
+            "$ dhcli pq details enterprise:prod:1234567890 --reveal-secrets "
+            "| jq -r '.config.python_control'",
         ),
         see_also=("dhcli pq list SYSTEM", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -284,16 +293,19 @@ _OUTPUT_DETAILS = OutputSpec(
     ),
 )
 @click.argument("id", required=False)
+@reveal_secrets_option
 @click.pass_obj
 @run_async
-async def pq_details(runtime: Runtime, id: str | None) -> None:
+async def pq_details(runtime: Runtime, id: str | None, reveal_secrets: bool) -> None:
     """Show details for one Persistent Query."""
     id = require_context_value(runtime, ContextKey.PQ, id)
+    if reveal_secrets:
+        warn_revealed_secrets()
     await call_and_echo(
         runtime,
         "pq_details",
         retry_command="dhcli pq details",
-        arguments={"id": id},
+        arguments={"id": id, "reveal_secrets": reveal_secrets},
     )
 
 
@@ -537,10 +549,10 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
                 "(space-separated pip requirements installed at startup, "
                 "which needs ephemeral_venv). Applied on the Enterprise "
                 "server, not on this machine. Replaces the field wholesale; "
-                "'dhcli pq details' withholds ephemeral_requirements when it "
-                "contains a URL, so restore the real value before writing a "
-                "document read from it back. A credential passed here is "
-                "visible in this process's arguments and your shell history."
+                "'dhcli pq details' never shows ephemeral_requirements, so "
+                "restore the real value before writing a document read from "
+                "it back. A credential passed here is visible in this "
+                "process's arguments and your shell history."
             ),
         ),
         click.option(

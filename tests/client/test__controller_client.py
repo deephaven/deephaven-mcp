@@ -1,4 +1,6 @@
 import asyncio
+import contextlib
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -441,6 +443,25 @@ async def test_make_pq_config_success(
         mock_cfg.return_value.config = "config"
         result = await coreplus_controller_client.make_pq_config("name", 1.0)
         assert hasattr(result, "config")
+
+
+@pytest.mark.asyncio
+async def test_make_pq_config_does_not_log_requirements_credentials(
+    coreplus_controller_client, dummy_controller_client, caplog
+):
+    """ephemeral_requirements can hold an index token, so only '<set>' is logged."""
+    caplog.set_level(logging.DEBUG, logger="deephaven_mcp.client._controller_client")
+    # The debug line is emitted before the vendor call, whose mock cannot complete.
+    with contextlib.suppress(Exception):
+        await coreplus_controller_client.make_pq_config(
+            "name",
+            1.0,
+            python_virtual_environment=(
+                '{"ephemeral_requirements": "pkg @ https://u:s3cr3t-token@h/p.whl"}'
+            ),
+        )
+    assert "s3cr3t-token" not in caplog.text
+    assert "python_virtual_environment=<set>" in caplog.text
 
 
 @pytest.mark.asyncio

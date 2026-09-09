@@ -63,47 +63,53 @@ _LOGGER = logging.getLogger(__name__)
 # deephaven.constants requires a live JVM which this server never starts.
 _NULL_LONG = -9223372036854775808
 
-# Only ephemeral_requirements can hold a URL, and a URL can hide a credential in its
-# userinfo, a query parameter, a fragment, or the path itself. This withholds the whole
-# value rather than scrubbing parts of it: sanitizing parts means enumerating encodings,
-# and any encoding missed is a silent leak. A value with no "://" cannot carry a URL
-# credential, so plain requirements stay visible.
+# The three keys the controller understands, and the JSON type each must hold.
+# Deephaven's PythonCreationInfo ignores anything else.
+_VENV_KEY = "ephemeral_venv"
+_SEED_KEY = "seed_ephemeral_venv"
 _REQUIREMENTS_KEY = "ephemeral_requirements"
-_URL_MARKER = "://"
+_CONTROL_FIELD_TYPES: dict[str, type] = {
+    _VENV_KEY: bool,
+    _SEED_KEY: bool,
+    _REQUIREMENTS_KEY: str,
+}
 
 
 def _redact_python_control(stored: str) -> str:
-    """Withhold ``ephemeral_requirements`` when it holds a URL that could carry a token.
+    """Project a stored ``pythonControl`` document down to what is safe to report.
+
+    Builds the result from an allowlist rather than editing the input, and never
+    echoes the stored bytes. ``ephemeral_requirements`` is always withheld because a
+    pip requirement can carry an index credential; the two booleans are reported only
+    when they really are booleans. Anything else in the document is dropped, so no
+    unknown key, duplicate key, or unexpected type can carry a secret through.
 
     Args:
         stored (str): The raw ``pythonControl`` value read from the controller.
 
     Returns:
-        str: ``stored`` unchanged when the requirements hold no URL; otherwise the
-        document with ``ephemeral_requirements`` replaced by ``[REDACTED]``. Returns
-        ``"[UNPARSEABLE]"`` for anything that is not a JSON object, since the rule
-        below cannot be applied to it.
+        str: A JSON object holding only the recognized keys, with
+        ``ephemeral_requirements`` reported as ``[REDACTED]`` when present. Returns
+        ``"[UNPARSEABLE]"`` when the stored value is not a JSON object.
     """
     try:
         parsed = json.loads(stored)
     except (json.JSONDecodeError, ValueError):
         parsed = None
-    # Fail closed: an array, a bare string, or malformed text has no key to inspect,
-    # and any of them could still carry a URL.
     if not isinstance(parsed, dict):
         _LOGGER.warning(
             "[mcp_systems_server:_redact_python_control] Suppressing python_control: "
-            "stored value is not a JSON object and cannot be inspected for credentials"
+            "stored value is not a JSON object and cannot be projected"
         )
         return "[UNPARSEABLE]"
-    requirements = parsed.get(_REQUIREMENTS_KEY)
-    # Fail closed: only a plain string with no URL is safe to show. A URL, or an
-    # unexpected type that could nest one, is withheld.
-    if requirements is None or (
-        isinstance(requirements, str) and _URL_MARKER not in requirements
-    ):
-        return stored
-    return json.dumps({**parsed, _REQUIREMENTS_KEY: REDACTED})
+    projected: dict[str, object] = {}
+    for key in (_VENV_KEY, _SEED_KEY):
+        value = parsed.get(key)
+        if isinstance(value, bool):
+            projected[key] = value
+    if _REQUIREMENTS_KEY in parsed:
+        projected[_REQUIREMENTS_KEY] = REDACTED
+    return json.dumps(projected)
 
 
 # =============================================================================
@@ -231,10 +237,16 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
     if parsed.get(_REQUIREMENTS_KEY) == REDACTED:
         raise ValueError(
             f"python_virtual_environment still contains {REDACTED}, which pq_details "
-            "substitutes for a requirements value holding a URL. Writing it back would "
-            "replace the working value with that marker. Restore the real "
+            "reports in place of ephemeral_requirements. Writing it back would replace "
+            "the working value with that marker. Restore the real "
             "ephemeral_requirements before sending the document."
         )
+    for key, expected in _CONTROL_FIELD_TYPES.items():
+        if key in parsed and not isinstance(parsed[key], expected):
+            raise ValueError(
+                f"python_virtual_environment key {key!r} must be "
+                f"{expected.__name__}, got {type(parsed[key]).__name__}."
+            )
     return normalized
 
 
@@ -259,7 +271,9 @@ def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
     return max_concurrent
 
 
-def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
+def _format_pq_config(
+    config: CorePlusQueryConfig, reveal_secrets: bool = False
+) -> dict[str, object]:
     """Format PersistentQueryConfigMessage into MCP-compatible dictionary.
 
     Extracts ALL 38 fields from PersistentQueryConfigMessage protobuf and formats them
@@ -284,6 +298,9 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
 
     Args:
         config (CorePlusQueryConfig): Wrapper around PersistentQueryConfigMessage protobuf
+        reveal_secrets (bool): When True, report ``type_specific_fields_json`` and
+            ``python_control`` as stored instead of redacting them. The caller has
+            asked for plaintext secrets.
 
     Returns:
         dict[str, object]: All 38 config fields formatted for MCP API, with optional fields
@@ -321,8 +338,10 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         "script_path": pb.scriptPath if pb.scriptPath else None,
         "script_language": pb.scriptLanguage,
         "configuration_type": pb.configurationType,
-        "type_specific_fields_json": redact_json_sensitive_fields(
-            pb.typeSpecificFieldsJson
+        "type_specific_fields_json": (
+            pb.typeSpecificFieldsJson or None
+            if reveal_secrets
+            else redact_json_sensitive_fields(pb.typeSpecificFieldsJson)
         ),
         "scheduling": list(pb.scheduling),
         "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
@@ -355,7 +374,13 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         ),
         "additional_memory_gb": pb.additionalMemoryGb,
         "python_control": (
-            _redact_python_control(pb.pythonControl) if pb.pythonControl else None
+            (
+                pb.pythonControl
+                if reveal_secrets
+                else _redact_python_control(pb.pythonControl)
+            )
+            if pb.pythonControl
+            else None
         ),
         "generic_worker_control": (
             pb.genericWorkerControl if pb.genericWorkerControl else None
@@ -569,7 +594,9 @@ def _format_exception_details(ed: ExceptionDetailsMessage) -> dict[str, object]:
     }
 
 
-def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | None:
+def _format_pq_state(
+    state: CorePlusQueryState | None, reveal_secrets: bool = False
+) -> dict[str, object] | None:
     """Format PersistentQueryStateMessage into MCP-compatible dictionary.
 
     Extracts ALL 25 fields from PersistentQueryStateMessage protobuf and formats them
@@ -610,6 +637,8 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
     Args:
         state (CorePlusQueryState | None): CorePlusQueryState wrapper around PersistentQueryStateMessage protobuf,
                                           or None if no state available
+        reveal_secrets (bool): When True, report ``type_specific_state_json`` as stored
+            instead of redacting its sensitive keys.
 
     Returns:
         dict[str, object] | None: All 25 state fields formatted for MCP API, with optional
@@ -653,8 +682,10 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
         "scope_types": scope_types,
         "connection_details": connection_details,
         "exception_details": exception_details,
-        "type_specific_state_json": redact_json_sensitive_fields(
-            pb.typeSpecificStateJson
+        "type_specific_state_json": (
+            pb.typeSpecificStateJson or None
+            if reveal_secrets
+            else redact_json_sensitive_fields(pb.typeSpecificStateJson)
         ),
         "last_authenticated_user": pb.lastAuthenticatedUser or None,
         "last_effective_user": pb.lastEffectiveUser or None,
@@ -674,7 +705,9 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
     return result
 
 
-def _format_pq_states(states: list[CorePlusQueryState]) -> list[dict[str, object]]:
+def _format_pq_states(
+    states: list[CorePlusQueryState], reveal_secrets: bool = False
+) -> list[dict[str, object]]:
     """Format a list of PersistentQueryStateMessage objects, dropping None entries.
 
     Used for a PQ's replicas (additional running instances for high availability) and its
@@ -684,12 +717,13 @@ def _format_pq_states(states: list[CorePlusQueryState]) -> list[dict[str, object
     Args:
         states (list[CorePlusQueryState]): CorePlusQueryState wrappers to format. None
             entries are tolerated and dropped from the result.
+        reveal_secrets (bool): Forwarded to :func:`_format_pq_state`.
 
     Returns:
         list[dict[str, object]]: Formatted state dictionaries (25 fields each) with None
             entries removed; empty list if no states are provided.
     """
-    formatted = [_format_pq_state(state) for state in states]
+    formatted = [_format_pq_state(state, reveal_secrets) for state in states]
     return [f for f in formatted if f is not None]
 
 
@@ -1109,6 +1143,7 @@ async def pq_list(
 async def pq_details(
     context: Context,
     id: str,
+    reveal_secrets: bool = False,
 ) -> dict:
     r"""MCP Tool: Get detailed information about a persistent query.
 
@@ -1142,15 +1177,22 @@ async def pq_details(
     - replicas array contains state of all active replicas (load-balanced instances)
     - spares array contains state of spare instances ready to replace failed replicas
     - num_failures in state_details is the cumulative lifetime failure count
-    - config.python_control withholds ephemeral_requirements entirely (reporting
-      [REDACTED]) when it contains a URL, because a URL can carry a token in its
-      userinfo, query, or path; it is therefore not writable back through pq_modify
-      as-is (pq_modify rejects a document that still carries the marker)
+    - config.python_control reports only the three recognized keys, and always shows
+      ephemeral_requirements as [REDACTED] because a pip requirement can carry an index
+      credential; it is therefore not writable back through pq_modify as-is (pq_modify
+      rejects a document that still carries the marker)
+    - reveal_secrets=True reports python_control, type_specific_fields_json, and
+      type_specific_state_json exactly as stored, and adds a "warning" field. Use it when
+      you need the real value - to read the configured requirements, or to round-trip a
+      document through pq_modify - and treat the whole response as a credential: keep it
+      out of logs, transcripts, and anything you echo back to a user.
 
     Args:
         context (Context): MCP context object
         id (str): Fully qualified id of the PQ in format 'enterprise:<system_name>:<serial>',
             as returned by pq_list
+        reveal_secrets (bool): When True, return the secret-bearing fields as stored
+            instead of redacted (default: False).
 
     Returns:
         dict: Success response with comprehensive PQ information:
@@ -1303,7 +1345,10 @@ async def pq_details(
             "isError": True
         }
     """
-    _LOGGER.info(f"[mcp_systems_server:pq_details] Invoked: id={id!r}")
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_details] Invoked: id={id!r}, "
+        f"reveal_secrets={reveal_secrets}"
+    )
 
     result: dict[str, object] = {"success": False}
 
@@ -1363,11 +1408,18 @@ async def pq_details(
             "serial": serial,
             "name": pq_name,
             "state": state_name,
-            "config": _format_pq_config(pq_info.config),
-            "state_details": _format_pq_state(pq_info.state),
-            "replicas": _format_pq_states(pq_info.replicas),
-            "spares": _format_pq_states(pq_info.spares),
+            "config": _format_pq_config(pq_info.config, reveal_secrets),
+            "state_details": _format_pq_state(pq_info.state, reveal_secrets),
+            "replicas": _format_pq_states(pq_info.replicas, reveal_secrets),
+            "spares": _format_pq_states(pq_info.spares, reveal_secrets),
         }
+        if reveal_secrets:
+            pq_data["warning"] = (
+                "reveal_secrets=True: python_control, type_specific_fields_json, and "
+                "type_specific_state_json are reported as stored and may contain "
+                "plaintext credentials. Treat this response like a password and keep "
+                "it out of logs, transcripts, and user-visible output."
+            )
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_details] Retrieved details for PQ '{pq_name}' (serial: {serial})"
@@ -1998,11 +2050,11 @@ async def pq_modify(
     The object replaces the field wholesale - to change one key, read the current
     python_control from pq_details, modify it, and pass the whole object back. Unknown
     keys are silently ignored by the server. Pass "" to clear the field.
-    pq_details withholds ephemeral_requirements entirely (reporting [REDACTED]) whenever
-    it contains a URL, since a URL can carry a token in several places. A document read
-    from pq_details is therefore not writable as-is: restore the real requirements
-    first. Sending one that still contains [REDACTED] is rejected rather than
-    overwriting the working value with the marker.
+    pq_details never reports ephemeral_requirements - it always shows [REDACTED],
+    because a pip requirement can carry an index credential - and reports only the two
+    booleans besides. A document read from pq_details is therefore not writable as-is:
+    restore the real requirements first. Sending one that still contains [REDACTED] is
+    rejected rather than overwriting the working value with the marker.
 
     Args:
         context (Context): MCP context object

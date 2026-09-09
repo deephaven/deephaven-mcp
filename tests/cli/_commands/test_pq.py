@@ -71,7 +71,17 @@ def test_details(tmp_path: Path) -> None:
     result, call = _run(["pq", "details", "123"], {"success": True}, tmp_path)
     assert result.exit_code == 0
     assert call.await_args.args[2] == "pq_details"
-    assert call.await_args.args[3] == {"id": "123"}
+    assert call.await_args.args[3] == {"id": "123", "reveal_secrets": False}
+
+
+def test_details_reveal_secrets_forwards_and_warns(tmp_path: Path) -> None:
+    """The opt-in reaches the tool and announces the disclosure on stderr."""
+    result, call = _run(
+        ["pq", "details", "123", "--reveal-secrets"], {"success": True}, tmp_path
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": "123", "reveal_secrets": True}
+    assert "--reveal-secrets wrote plaintext secret values" in result.stderr
 
 
 def test_name_to_id(tmp_path: Path) -> None:
@@ -369,7 +379,10 @@ def test_details_falls_back_to_context_pq(tmp_path: Path) -> None:
     rt.context_store.set(ContextKey.PQ, "enterprise:prod:123")
     result, call = _run(["pq", "details"], {"success": True}, tmp_path, runtime=rt)
     assert result.exit_code == 0
-    assert call.await_args.args[3] == {"id": "enterprise:prod:123"}
+    assert call.await_args.args[3] == {
+        "id": "enterprise:prod:123",
+        "reveal_secrets": False,
+    }
 
 
 def test_create_falls_back_to_context_system(tmp_path: Path) -> None:

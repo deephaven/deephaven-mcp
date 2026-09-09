@@ -25,7 +25,9 @@ __all__ = [
     "parse_key_value",
     "read_local_script",
     "require_success",
+    "reveal_secrets_option",
     "tool_payload",
+    "warn_revealed_secrets",
     "wrapper_error_codes",
     "yes_option",
 ]
@@ -136,6 +138,30 @@ def reveal_secrets_option(f: Any) -> Any:
             "like a password."
         ),
     )(f)
+
+
+def warn_revealed_secrets(count: int | None = None) -> None:
+    """Warn on stderr that plaintext secrets were written to stdout.
+
+    Paired with :func:`reveal_secrets_option` so the flag and the warning it
+    triggers cannot drift apart between verbs.
+
+    Args:
+        count (int | None): How many secret values were revealed. ``None`` (the
+            default) omits the number, for a verb that reveals a fixed set of
+            fields rather than a countable list of values.
+    """
+    if count is None:
+        subject = "plaintext secret values"
+    else:
+        plural = "" if count == 1 else "s"
+        subject = f"{count} plaintext secret value{plural}"
+    click.echo(
+        f"warning: --reveal-secrets wrote {subject} to stdout; treat this "
+        "output like a password and keep it out of logs, shell history, and "
+        "shared transcripts.",
+        err=True,
+    )
 
 
 def yes_option(f: Any) -> Any:
