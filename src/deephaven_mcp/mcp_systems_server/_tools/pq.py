@@ -19,7 +19,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated, NoReturn
+from typing import Annotated
 
 from deephaven_enterprise.proto.common_pb2 import ExceptionDetailsMessage
 from deephaven_enterprise.proto.controller_common_pb2 import NamedStringList
@@ -43,6 +43,7 @@ from deephaven_mcp._redaction import (
     REDACTED,
     AllowedField,
     Redaction,
+    parse_json_strict,
     project_json_fields,
     redact_json_sensitive_fields,
 )
@@ -150,21 +151,43 @@ def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
     return make_pq_id(system_name, int(serial))
 
 
-def _reject_json_constant(constant: str) -> NoReturn:
-    """Reject a non-standard JSON constant.
+def _parse_python_control_text(value: str) -> dict[str, object]:
+    """Parse ``python_virtual_environment`` JSON text into its object.
 
     Args:
-        constant (str): The token ``json.loads`` matched - ``NaN``, ``Infinity``, or
-            ``-Infinity``.
+        value (str): Non-blank JSON text.
+
+    Returns:
+        dict[str, object]: The parsed object.
 
     Raises:
-        ValueError: Always. These tokens are Python extensions that the controller's
-            JSON parser rejects.
+        ValueError: If ``value`` is not strict JSON - malformed, repeating an object
+            key, or holding ``NaN``/``Infinity`` - or parses to something other than
+            a JSON object.
     """
-    raise ValueError(
-        f"python_virtual_environment contains {constant}, which Python accepts but "
-        "JSON does not. Use a string, number, or boolean."
-    )
+    try:
+        parsed = parse_json_strict(value)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
+            'object such as {"ephemeral_venv": true}, not a bare virtualenv name. '
+            "Pass it as an object, or as plain JSON text with unescaped quotes - do "
+            "not backslash-escape the quotes."
+        ) from e
+    except ValueError as e:
+        # The controller's parser may resolve a repeated key differently than this
+        # one, applying a value the caller's document was never validated for.
+        raise ValueError(
+            f"python_virtual_environment is not valid JSON: {e}. Use a JSON object "
+            "with distinct keys, holding only string, number, or boolean values."
+        ) from e
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "python_virtual_environment must be a JSON object, got "
+            f"{type(parsed).__name__}. Valid keys are ephemeral_venv, "
+            "seed_ephemeral_venv, and ephemeral_requirements."
+        )
+    return parsed
 
 
 def _normalize_python_control(value: str | dict[str, object] | None) -> str | None:
@@ -184,12 +207,12 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
         ``value`` is blank, or ``None`` when ``value`` is ``None``.
 
     Raises:
-        ValueError: If ``value`` is a non-blank string that is not a JSON object,
-            holds a value JSON cannot represent (``NaN``/``Infinity``, or an object
-            such as a set), or still carries the ``[REDACTED]`` marker ``pq_details``
-            substitutes for a credential. The controller rejects any non-blank
-            ``pythonControl`` that does not parse, leaving the PQ unmodifiable until
-            the field is cleared.
+        ValueError: If ``value`` is a non-blank string that is not strict JSON or not a
+            JSON object, holds a value JSON cannot represent (``NaN``/``Infinity``, or
+            an object such as a set), carries a key of the wrong type, or still carries
+            the ``[REDACTED]`` marker ``pq_details`` substitutes for a credential. The
+            controller rejects any non-blank ``pythonControl`` that does not parse,
+            leaving the PQ unmodifiable until the field is cleared.
     """
     if value is None:
         return None
@@ -206,21 +229,7 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
         # Collapsed to "" so a cleared field reads back as None, not as truthy whitespace.
         if not value.strip():
             return ""
-        try:
-            parsed = json.loads(value, parse_constant=_reject_json_constant)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
-                'object such as {"ephemeral_venv": true}, not a bare virtualenv name. '
-                "Pass it as an object, or as plain JSON text with unescaped quotes - do "
-                "not backslash-escape the quotes."
-            ) from e
-        if not isinstance(parsed, dict):
-            raise ValueError(
-                "python_virtual_environment must be a JSON object, got "
-                f"{type(parsed).__name__}. Valid keys are ephemeral_venv, "
-                "seed_ephemeral_venv, and ephemeral_requirements."
-            )
+        parsed = _parse_python_control_text(value)
         normalized = value
     # Compared against the decoded value at its own key, so an escaped marker is still
     # caught and the same text under an unrelated key is not.

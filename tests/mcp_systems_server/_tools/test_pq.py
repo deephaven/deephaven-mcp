@@ -2271,8 +2271,21 @@ def test_normalize_python_control_rejects_unserializable_float(number):
 @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
 def test_normalize_python_control_rejects_non_standard_json_constants(constant):
     """json.loads accepts these Python extensions; the controller's parser does not."""
-    with pytest.raises(ValueError, match=f"contains {re.escape(constant)}"):
+    with pytest.raises(ValueError, match=f"constant {re.escape(constant)}"):
         _normalize_python_control('{"ephemeral_venv": %s}' % constant)
+
+
+def test_normalize_python_control_rejects_a_repeated_key():
+    """A repeated key would let a value reach the controller unvalidated.
+
+    Python keeps the last value, so the checks below see only that one; a
+    controller parser that keeps the first would apply the other.
+    """
+    with pytest.raises(ValueError, match="repeats a key"):
+        _normalize_python_control(
+            '{"ephemeral_requirements": "[REDACTED]", '
+            '"ephemeral_requirements": "real-value"}'
+        )
 
 
 @pytest.mark.parametrize("value", [{1, 2}, object()])
