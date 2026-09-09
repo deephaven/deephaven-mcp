@@ -58,6 +58,7 @@ Note:
 
 # Standard library imports
 import asyncio
+import contextlib
 import io
 import logging
 import time
@@ -191,6 +192,33 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
         )
 
     @classmethod
+    async def _subscribe_or_close(cls, instance: "CorePlusSessionFactory") -> None:
+        """Subscribe the newly built factory's controller, closing it on failure.
+
+        A factory whose controller never subscribed is unusable, yet it already
+        owns a live ``SessionManager`` (gRPC channel plus background refresh and
+        response threads). The construction helpers raise instead of returning
+        it, so without this cleanup nobody would ever be able to close it.
+
+        Args:
+            instance (CorePlusSessionFactory): The freshly constructed factory.
+
+        Raises:
+            Exception: Whatever :meth:`CorePlusControllerClient.subscribe`
+                raised, after the partially built factory has been released.
+        """
+        try:
+            await instance._controller_client.subscribe()
+        except BaseException:
+            _LOGGER.warning(
+                "[CorePlusSessionFactory:_subscribe_or_close] Controller "
+                "subscription failed; closing the partially built factory"
+            )
+            with contextlib.suppress(Exception):
+                await instance.close()
+            raise
+
+    @classmethod
     async def from_url(
         cls,
         url: str,
@@ -298,7 +326,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
 
         # Subscribe to controller client for persistent query operations.
         # Subscribe uses its own timeout from EnterpriseClientTimeouts.subscribe_timeout_seconds.
-        await instance._controller_client.subscribe()
+        await cls._subscribe_or_close(instance)
 
         return instance
 
@@ -429,7 +457,7 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
         )
         subscribe_start = time.monotonic()
         # Subscribe uses its own timeout from EnterpriseClientTimeouts.subscribe_timeout_seconds.
-        await instance._controller_client.subscribe()
+        await cls._subscribe_or_close(instance)
         subscribe_elapsed = time.monotonic() - subscribe_start
         _LOGGER.info(
             f"[CorePlusSessionFactory:from_credentials] Controller subscription "

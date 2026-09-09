@@ -178,7 +178,7 @@ markers = [
 ]
 asyncio_mode = "strict"
 filterwarnings = [
-    "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning"
+    "ignore:The NumPy module was reloaded (imported a second time).*:UserWarning",
 ]
 asyncio_default_fixture_loop_scope = "function"
 

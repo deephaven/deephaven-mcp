@@ -539,6 +539,7 @@ plus every configured Enterprise (Core+) system.
 | `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dhcli config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
 | `url [NAME]` | Prints an Enterprise system's web console URL — pipe-friendly. |
 | `open [NAME]`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
+| `reconnect [SYSTEM]` | Forces a wedged Enterprise controller to retry connecting now. Wraps `enterprise_controller_reconnect`. Use when a command fails with an error containing `[CONTROLLER_SUBSCRIBING]`, which means the controller subscription is wedged and a background healer is already retrying on an exponential backoff; this skips the remaining wait. Returns as soon as the request is accepted — it never blocks for the reconnect and does **not** report whether the reconnect succeeded. Safe to repeat (requests coalesce, so repeating never queues a backlog of attempts) and a no-op when the controller is already healthy, so it never tears down a working connection. `SYSTEM` falls back to the sticky context when omitted (`context_not_set` otherwise). Output: `{system, reconnect_requested, detail}`; `reconnect_requested` is `true` when a running healer accepted the request — either waking it now or coalescing into an attempt already under way, so it does not promise an additional attempt — and `false` when the request was not accepted: either nothing is currently wedged (including an already-healthy controller), or no healer is running. Exits `3` if the tool reports failure. |
 
 `url` and `open` are Enterprise-only and computed locally from
 configuration — they do **not** contact the daemon. The URL is the
@@ -558,6 +559,8 @@ dhcli system list | jq '.[].name'
 dhcli system status --system prod --connect
 dhcli system url prod
 dhcli system open prod --print
+dhcli system reconnect prod
+dhcli system reconnect prod && dhcli system status --system prod --connect
 ```
 
 ### `dhcli table`
