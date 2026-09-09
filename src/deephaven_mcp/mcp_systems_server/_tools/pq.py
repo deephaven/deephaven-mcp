@@ -17,6 +17,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, NoReturn
 
@@ -38,7 +39,13 @@ from pydantic import Field
 
 from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import InvalidSessionNameError
-from deephaven_mcp._redaction import REDACTED, UNPARSEABLE
+from deephaven_mcp._redaction import (
+    REDACTED,
+    AllowedField,
+    Redaction,
+    project_json_fields,
+    redact_json_sensitive_fields,
+)
 from deephaven_mcp.client import (
     PQ_STATES,
     CorePlusControllerClient,
@@ -52,7 +59,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_enterprise_settings,
     make_pq_id,
     parse_pq_id,
-    redact_json_sensitive_fields,
     resolve_pq_ids_to_single_system,
 )
 from deephaven_mcp.sessions import ProgrammingLanguage
@@ -68,48 +74,32 @@ _NULL_LONG = -9223372036854775808
 _VENV_KEY = "ephemeral_venv"
 _SEED_KEY = "seed_ephemeral_venv"
 _REQUIREMENTS_KEY = "ephemeral_requirements"
+
+_PYTHON_CONTROL_FIELDS = (
+    AllowedField(_VENV_KEY, bool),
+    AllowedField(_SEED_KEY, bool),
+    # A pip requirement can carry an index credential, so it is never reported.
+    AllowedField(_REQUIREMENTS_KEY, str, secret=True),
+)
+"""What ``pq_details`` may report from a stored ``pythonControl`` document."""
+
 _CONTROL_FIELD_TYPES: dict[str, type] = {
-    _VENV_KEY: bool,
-    _SEED_KEY: bool,
-    _REQUIREMENTS_KEY: str,
+    field.name: field.type for field in _PYTHON_CONTROL_FIELDS
 }
+"""The same declaration, as the write path's type check."""
 
 
-def _redact_python_control(stored: str) -> str:
+def _redact_python_control(stored: str) -> Redaction:
     """Project a stored ``pythonControl`` document down to what is safe to report.
-
-    Builds the result from an allowlist rather than editing the input, and never
-    echoes the stored bytes. ``ephemeral_requirements`` is always withheld because a
-    pip requirement can carry an index credential; the two booleans are reported only
-    when they really are booleans. Anything else in the document is dropped, so no
-    unknown key, duplicate key, or unexpected type can carry a secret through.
 
     Args:
         stored (str): The raw ``pythonControl`` value read from the controller.
 
     Returns:
-        str: A JSON object holding only the recognized keys, with
-        ``ephemeral_requirements`` reported as ``[REDACTED]`` when present. Returns
-        ``UNPARSEABLE`` when the stored value is not a JSON object.
+        Redaction: As :func:`project_json_fields` produces for
+            ``_PYTHON_CONTROL_FIELDS``.
     """
-    try:
-        parsed = json.loads(stored)
-    except (json.JSONDecodeError, ValueError):
-        parsed = None
-    if not isinstance(parsed, dict):
-        _LOGGER.warning(
-            "[mcp_systems_server:_redact_python_control] Suppressing python_control: "
-            "stored value is not a JSON object and cannot be projected"
-        )
-        return UNPARSEABLE
-    projected: dict[str, object] = {}
-    for key in (_VENV_KEY, _SEED_KEY):
-        value = parsed.get(key)
-        if isinstance(value, bool):
-            projected[key] = value
-    if _REQUIREMENTS_KEY in parsed:
-        projected[_REQUIREMENTS_KEY] = REDACTED
-    return json.dumps(projected)
+    return project_json_fields(stored, _PYTHON_CONTROL_FIELDS, label="python_control")
 
 
 # =============================================================================
@@ -341,7 +331,7 @@ def _format_pq_config(
         "type_specific_fields_json": (
             pb.typeSpecificFieldsJson or None
             if reveal_secrets
-            else redact_json_sensitive_fields(pb.typeSpecificFieldsJson)
+            else redact_json_sensitive_fields(pb.typeSpecificFieldsJson).text
         ),
         "scheduling": list(pb.scheduling),
         "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
@@ -377,7 +367,7 @@ def _format_pq_config(
             (
                 pb.pythonControl
                 if reveal_secrets
-                else _redact_python_control(pb.pythonControl)
+                else _redact_python_control(pb.pythonControl).text
             )
             if pb.pythonControl
             else None
@@ -685,7 +675,7 @@ def _format_pq_state(
         "type_specific_state_json": (
             pb.typeSpecificStateJson or None
             if reveal_secrets
-            else redact_json_sensitive_fields(pb.typeSpecificStateJson)
+            else redact_json_sensitive_fields(pb.typeSpecificStateJson).text
         ),
         "last_authenticated_user": pb.lastAuthenticatedUser or None,
         "last_effective_user": pb.lastEffectiveUser or None,
@@ -727,24 +717,17 @@ def _format_pq_states(
     return [f for f in formatted if f is not None]
 
 
-def _redaction_withholds(stored: str, redacted: str | None) -> bool:
-    """Report whether redacting ``stored`` withheld any of its content.
+_SECRET_FIELDS: tuple[tuple[str, Callable[[str], Redaction]], ...] = (
+    ("python_control", _redact_python_control),
+    ("type_specific_fields_json", redact_json_sensitive_fields),
+    ("type_specific_state_json", redact_json_sensitive_fields),
+)
+"""Every ``pq_details`` field that holds redactable text, and the redactor guarding it.
 
-    Compares the parsed values, so re-serialization is not mistaken for a
-    change: the redactors emit spaced separators whatever the stored spacing
-    was. A value neither side can parse counts as changed.
-
-    Args:
-        stored (str): The value as held by the controller.
-        redacted (str | None): What the field's redactor returns for ``stored``.
-
-    Returns:
-        bool: True when redaction drops, replaces, or suppresses content.
-    """
-    try:
-        return bool(json.loads(stored) != json.loads(redacted or "null"))
-    except (json.JSONDecodeError, ValueError):
-        return True
+Applied to each formatted document in the payload, so a field is covered wherever
+it appears - ``type_specific_state_json`` under ``state_details`` and under every
+``replicas[]`` and ``spares[]`` entry alike.
+"""
 
 
 def _revealed_any_secret(
@@ -755,9 +738,10 @@ def _revealed_any_secret(
 ) -> bool:
     """Report whether revealing disclosed anything redaction would have withheld.
 
-    A field whose redacted form carries the same content - a ``python_control``
-    holding only the two booleans, a type-specific document with no sensitive
-    keys - is not a disclosure.
+    Asks each field's redactor what it withholds rather than comparing its output
+    against the stored value, so a document redaction leaves intact - a
+    ``python_control`` of just the two booleans, one with no sensitive keys - is
+    not a disclosure.
 
     Args:
         config (dict[str, object]): Formatted config, from :func:`_format_pq_config`.
@@ -770,24 +754,13 @@ def _revealed_any_secret(
         bool: True when at least one field revealed content the default response
         withholds.
     """
-    python_control = config.get("python_control")
-    if isinstance(python_control, str) and _redaction_withholds(
-        python_control, _redact_python_control(python_control)
-    ):
-        return True
-    fields_json = config.get("type_specific_fields_json")
-    if isinstance(fields_json, str) and _redaction_withholds(
-        fields_json, redact_json_sensitive_fields(fields_json)
-    ):
-        return True
-    for state in (state_details, *replicas, *spares):
-        if not state:
+    for document in (config, state_details, *replicas, *spares):
+        if not document:
             continue
-        state_json = state.get("type_specific_state_json")
-        if isinstance(state_json, str) and _redaction_withholds(
-            state_json, redact_json_sensitive_fields(state_json)
-        ):
-            return True
+        for name, redact in _SECRET_FIELDS:
+            value = document.get(name)
+            if isinstance(value, str) and redact(value).withheld:
+                return True
     return False
 
 

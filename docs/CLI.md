@@ -702,9 +702,8 @@ rather than overwriting the working value with the marker.
 actually hands back something the redacted response withholds it also warns on
 stderr and adds a `warning` field to the payload; a PQ whose fields hold nothing
 redaction would have withheld — a `python_control` of just the two booleans, say
-— gets neither, so the warning always means something real was written.
-warning always means something real was written. Treat that output like a
-password.
+— gets neither, so the warning always means something real was written. Treat
+that output like a password.
 
 A credential written this way is visible in the process's arguments (readable
 by other local users on Linux) and is recorded in your shell history. Prefer an

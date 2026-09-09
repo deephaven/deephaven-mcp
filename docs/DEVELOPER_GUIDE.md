@@ -958,7 +958,7 @@ deephaven-mcp/
 - **`_exceptions.py`**: Custom exception classes for MCP-specific errors
 - **`_health.py`**: Single source of truth for the `/health` probe path
 - **`_logging.py`**: Centralized logging configuration with sensitive data redaction
-- **`_redaction.py`**: Constants and helpers for redacting sensitive values in logs
+- **`_redaction.py`**: Redaction markers and the JSON redactor, which reports what it withheld
 
 #### Script References
 

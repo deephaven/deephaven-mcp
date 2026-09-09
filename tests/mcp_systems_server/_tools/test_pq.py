@@ -2296,13 +2296,6 @@ def test_normalize_python_control_rejects_unserializable_object(value):
             '{"ephemeral_requirements": "pandas numpy"}',
             '{"ephemeral_requirements": "[REDACTED]"}',
         ),
-        # A duplicate key cannot smuggle a value past the projection, because the
-        # output is rebuilt rather than echoed.
-        (
-            '{"ephemeral_requirements": "https://u:tok@h", '
-            '"ephemeral_requirements": "pandas"}',
-            '{"ephemeral_requirements": "[REDACTED]"}',
-        ),
         # A scheme-less authority reference needs no special case.
         (
             '{"ephemeral_requirements": "pkg @ //u:tok@h/p.whl"}',
@@ -2329,7 +2322,7 @@ def test_normalize_python_control_rejects_unserializable_object(value):
 )
 def test_redact_python_control_projects_allowlist(stored, expected):
     """Output is rebuilt from known keys, so nothing unrecognized is ever echoed."""
-    assert _redact_python_control(stored) == expected
+    assert _redact_python_control(stored).text == expected
 
 
 @pytest.mark.parametrize(
@@ -2343,11 +2336,41 @@ def test_redact_python_control_projects_allowlist(stored, expected):
         '"pkg @ https://user:tok@host/p.whl"',
         "42",
         "null",
+        # A repeated key loses a value on parse, so the document is suppressed
+        # rather than projected from a view that is missing part of it.
+        '{"ephemeral_requirements": "https://u:tok@h", '
+        '"ephemeral_requirements": "pandas"}',
     ],
 )
 def test_redact_python_control_suppresses_uninspectable(stored):
     """Anything that is not a JSON object fails closed rather than echoing through."""
-    assert _redact_python_control(stored) == "[UNPARSEABLE]"
+    assert _redact_python_control(stored) == ("[UNPARSEABLE]", True)
+
+
+@pytest.mark.parametrize(
+    "stored,withheld",
+    [
+        ('{"ephemeral_requirements": "pkg"}', True),
+        ('{"unknown": "secret"}', True),
+        ('{"ephemeral_venv": "not a bool"}', True),
+        ('{"ephemeral_venv": true, "ephemeral_venv": true}', True),
+        ('{"ephemeral_venv": true}', False),
+        ('{"ephemeral_venv":true,"seed_ephemeral_venv":false}', False),
+        ("{}", False),
+    ],
+    ids=[
+        "requirements-replaced",
+        "unknown-key-dropped",
+        "wrong-type-dropped",
+        "repeated-key-suppressed",
+        "boolean-reported-as-is",
+        "booleans-stored-compact",
+        "empty-object",
+    ],
+)
+def test_redact_python_control_reports_what_it_withheld(stored, withheld):
+    """The projection says whether it lost anything, rather than leaving it inferred."""
+    assert _redact_python_control(stored).withheld is withheld
 
 
 @pytest.mark.parametrize(
@@ -2357,12 +2380,30 @@ def test_redact_python_control_suppresses_uninspectable(stored):
         ({"python_control": '{"unknown": "secret"}'}, None, [], [], True),
         ({"python_control": "not json"}, None, [], [], True),
         ({"type_specific_fields_json": '{"token": "abc"}'}, None, [], [], True),
+        (
+            {
+                "type_specific_fields_json": (
+                    '{"password":"secret","password":"[REDACTED]"}'
+                )
+            },
+            None,
+            [],
+            [],
+            True,
+        ),
         ({}, {"type_specific_state_json": '{"token": "abc"}'}, [], [], True),
         ({}, None, [{"type_specific_state_json": '{"token": "abc"}'}], [], True),
         ({}, None, [], [{"type_specific_state_json": '{"token": "abc"}'}], True),
         ({"python_control": '{"ephemeral_venv": true}'}, None, [], [], False),
         ({"python_control": '{"ephemeral_venv":true}'}, None, [], [], False),
         ({"type_specific_fields_json": '{"port": 10000}'}, None, [], [], False),
+        (
+            {"type_specific_fields_json": '{"b": 2, "a": 1}'},
+            None,
+            [],
+            [],
+            False,
+        ),
         ({"python_control": None}, {"type_specific_state_json": None}, [], [], False),
         ({}, None, [], [], False),
     ],
@@ -2371,12 +2412,14 @@ def test_redact_python_control_suppresses_uninspectable(stored):
         "unknown-key-is-dropped",
         "unparseable-is-suppressed",
         "config-sensitive-key",
+        "duplicate-key-hides-a-value",
         "state-details",
         "a-replica",
         "a-spare",
         "booleans-only",
         "booleans-only-stored-compact",
         "no-sensitive-key",
+        "key-order-is-not-a-disclosure",
         "every-field-unset",
         "nothing-at-all",
     ],

@@ -15,7 +15,6 @@ Provides common helpers used across the MCP tool modules:
   :func:`build_table_data_response`, :func:`format_schema_result`.
 - Parameter guards: :func:`validate_programming_language`.
 - Partial-result formatting: :func:`format_partial_result`.
-- JSON redaction: :func:`redact_json_sensitive_fields`.
 
 This module is internal — none of its functions are MCP tools.
 
@@ -27,7 +26,6 @@ context produced by
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import NamedTuple, assert_never
 
@@ -42,7 +40,6 @@ from deephaven_mcp._exceptions import (
     SessionCreationError,
     UnsupportedOperationError,
 )
-from deephaven_mcp._redaction import REDACTED, UNPARSEABLE
 from deephaven_mcp.client import BaseSession, CorePlusSession
 from deephaven_mcp.config.schema import (
     CommunitySettings,
@@ -83,7 +80,6 @@ __all__ = [
     "get_session_from_context",
     "make_pq_id",
     "parse_pq_id",
-    "redact_json_sensitive_fields",
     "resolve_pq_ids_to_single_system",
     "validate_programming_language",
 ]
@@ -788,51 +784,3 @@ def build_table_data_response(
     response["schema"] = schema
     response["data"] = formatted_data
     return response
-
-
-# ---------------------------------------------------------------------------
-# JSON redaction
-# ---------------------------------------------------------------------------
-
-
-_SENSITIVE_JSON_KEYS: frozenset[str] = frozenset(
-    {"password", "passwd", "token", "secret", "api_key", "apikey", "api_secret"}
-)
-"""JSON object keys whose values are redacted in nested-JSON tool output."""
-
-
-def _redact_recursive(obj: object) -> object:
-    """Recursively redact values of sensitive keys in a parsed JSON structure."""
-    if isinstance(obj, dict):
-        return {
-            k: (REDACTED if k.lower() in _SENSITIVE_JSON_KEYS else _redact_recursive(v))
-            for k, v in obj.items()
-        }
-    if isinstance(obj, list):
-        return [_redact_recursive(item) for item in obj]
-    return obj
-
-
-def redact_json_sensitive_fields(json_str: str | None) -> str | None:
-    """Parse a JSON string and redact values whose keys match known-sensitive names.
-
-    Args:
-        json_str (str | None): The JSON string to scan, or ``None``.
-
-    Returns:
-        str | None: ``None`` for empty/``None`` input. ``UNPARSEABLE``
-            (with a warning log) when the string is not valid JSON.
-            Otherwise a re-serialized JSON string with sensitive values
-            replaced by ``[REDACTED]``.
-    """
-    if not json_str:
-        return None
-    try:
-        parsed = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
-        _LOGGER.warning(
-            "[mcp_systems_server:redact_json_sensitive_fields] type_specific "
-            "JSON field is not valid JSON; content suppressed"
-        )
-        return UNPARSEABLE
-    return json.dumps(_redact_recursive(parsed))

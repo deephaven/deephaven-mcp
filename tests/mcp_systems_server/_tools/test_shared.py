@@ -8,7 +8,7 @@ Covers the helpers used by every tool:
 - Session retrieval (``get_session_from_context``, ``get_enterprise_session``).
 - Response shapers / size guards (``error_response``, ``check_response_size``,
   ``format_schema_result``, ``build_table_data_response``).
-- ``format_partial_result``, ``redact_json_sensitive_fields``.
+- ``format_partial_result``.
 """
 
 from __future__ import annotations
@@ -584,42 +584,6 @@ def test_build_table_data_response_reading_order():
         "schema",
         "data",
     ]
-
-
-# ---------------------------------------------------------------------------
-# JSON redaction
-# ---------------------------------------------------------------------------
-
-
-def test_redact_json_sensitive_fields_none_returns_none():
-    assert shared.redact_json_sensitive_fields(None) is None
-    assert shared.redact_json_sensitive_fields("") is None
-
-
-def test_redact_json_sensitive_fields_unparseable():
-    assert shared.redact_json_sensitive_fields("not json") == "[UNPARSEABLE]"
-
-
-def test_redact_json_sensitive_fields_redacts_known_keys():
-    import json
-
-    raw = json.dumps(
-        {
-            "password": "secret-pw",
-            "token": "abc",
-            "nested": {"api_key": "k", "ok": "keep-me"},
-            "items": [{"secret": "s", "x": 1}],
-        }
-    )
-    out = shared.redact_json_sensitive_fields(raw)
-    assert out is not None
-    parsed = json.loads(out)
-    assert parsed["password"] == "[REDACTED]"
-    assert parsed["token"] == "[REDACTED]"
-    assert parsed["nested"]["api_key"] == "[REDACTED]"
-    assert parsed["nested"]["ok"] == "keep-me"
-    assert parsed["items"][0]["secret"] == "[REDACTED]"
-    assert parsed["items"][0]["x"] == 1
 
 
 # ---------------------------------------------------------------------------

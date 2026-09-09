@@ -515,11 +515,11 @@ def _called_names(func: Callable[..., object]) -> set[str]:
     """Return the names ``func`` actually calls, from its AST.
 
     A textual search would be satisfied by a mention in a comment or
-    docstring, which is no assurance at all for a security check.
-    ``getsource`` unwraps ``@run_async``, so this reads the async body
-    rather than the adapter.
+    docstring, which is no assurance at all for a security check. Unwraps
+    first so this reads the decorated body rather than ``@run_async``'s
+    adapter.
     """
-    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    tree = ast.parse(textwrap.dedent(inspect.getsource(inspect.unwrap(func))))
     names: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
