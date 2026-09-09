@@ -143,8 +143,11 @@ def reveal_secrets_option(f: Any) -> Any:
 def warn_revealed_secrets(count: int | None = None) -> None:
     """Warn on stderr that plaintext secrets were written to stdout.
 
-    Paired with :func:`reveal_secrets_option` so the flag and the warning it
-    triggers cannot drift apart between verbs.
+    Call this *after* writing the output it describes, and only when a secret
+    was actually disclosed -- the message is past tense, and a verb whose
+    payload happens to hold no secret should stay quiet. Every command taking
+    :func:`reveal_secrets_option` must reach this helper;
+    ``test_help_contract.py`` fails the build if one does not.
 
     Args:
         count (int | None): How many secret values were revealed. ``None`` (the

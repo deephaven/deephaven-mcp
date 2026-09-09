@@ -2048,13 +2048,15 @@ async def pq_modify(
     - ephemeral_requirements (str): Space-separated pip requirements to install into the
       environment at worker startup. Requires ephemeral_venv=true.
     The object replaces the field wholesale - to change one key, read the current
-    python_control from pq_details, modify it, and pass the whole object back. Unknown
-    keys are silently ignored by the server. Pass "" to clear the field.
-    pq_details never reports ephemeral_requirements - it always shows [REDACTED],
-    because a pip requirement can carry an index credential - and reports only the two
-    booleans besides. A document read from pq_details is therefore not writable as-is:
-    restore the real requirements first. Sending one that still contains [REDACTED] is
-    rejected rather than overwriting the working value with the marker.
+    python_control from pq_details with reveal_secrets=True, modify it, and pass the
+    whole object back. Unknown keys are silently ignored by the server. Pass "" to
+    clear the field.
+    By default pq_details reports ephemeral_requirements as [REDACTED] - a pip
+    requirement can carry an index credential - and reports only the two booleans
+    besides, so a document read that way is not writable as-is: either re-read it with
+    reveal_secrets=True or restore the real requirements yourself. Sending one that
+    still contains [REDACTED] is rejected rather than overwriting the working value
+    with the marker.
 
     Args:
         context (Context): MCP context object

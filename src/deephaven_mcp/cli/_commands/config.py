@@ -717,9 +717,9 @@ async def config_get(
             payload, secrets = _read_section_tree(store, section, reveal=reveal_secrets)
         case _:
             assert_never(resolved)
+    echo_payload_no_runtime(ctx, payload)
     if reveal_secrets and secrets:
         warn_revealed_secrets(secrets)
-    echo_payload_no_runtime(ctx, payload)
 
 
 def _redacted(

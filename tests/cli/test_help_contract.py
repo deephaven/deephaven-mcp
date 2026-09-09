@@ -7,6 +7,7 @@ command is covered automatically.
 
 from __future__ import annotations
 
+import inspect
 import re
 
 import click
@@ -501,6 +502,31 @@ def test_confirmable_command_declares_operation_canceled(
     assert has_yes == declares, (
         f"{path}: --yes present={has_yes} but operation_canceled "
         f"declared={declares}; they must agree"
+    )
+
+
+@pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)
+def test_reveal_secrets_command_warns_on_stderr(path: str, cmd: click.Command) -> None:
+    """``--reveal-secrets`` and ``warn_revealed_secrets`` travel together.
+
+    The helper cannot enforce its own use, so the pairing is checked here:
+    a verb that can put a plaintext secret on stdout must tell the user it
+    did. Reads the callback's source because the call is conditional on
+    what the payload turned out to hold, which no signature inspection can
+    see.
+    """
+    takes_flag = any(
+        isinstance(param, click.Option) and param.name == "reveal_secrets"
+        for param in cmd.params
+    )
+    if not takes_flag:
+        return
+    # getsource unwraps @run_async, so this is the async body, not the adapter.
+    source = inspect.getsource(cmd.callback) if cmd.callback else ""
+    assert "warn_revealed_secrets(" in source, (
+        f"{path}: takes --reveal-secrets but never calls "
+        "warn_revealed_secrets(); a disclosed secret must be announced "
+        "on stderr"
     )
 
 

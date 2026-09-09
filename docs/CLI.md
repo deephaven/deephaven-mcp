@@ -509,7 +509,8 @@ when refused — or the session is missing or not a Community session —
 they exit `3`. `session open` additionally keeps the token out of its
 output unless `--reveal-secrets` is passed — including on the
 `browser_launch_failed` path, where the URL offered for manual opening
-is the token-free one. All session verbs exit `0` on
+is the token-free one. When that flag does disclose a token, the
+command warns on stderr, as `config get` and `pq details` do. All session verbs exit `0` on
 success, `2` on client-side/daemon failure, and `3` when the wrapped
 tool reports an error.
 

@@ -245,6 +245,13 @@ _OUTPUT_DETAILS = OutputSpec(
             "array",
             "Per-spare state for standby instances; empty when none.",
         ),
+        OutputField(
+            "warning",
+            "string",
+            "Present only under --reveal-secrets: restates that the "
+            "secret-bearing fields are reported as stored and may carry "
+            "plaintext credentials.",
+        ),
     ),
     note=(
         "This is the authority on what a PQ is really doing — read it after a "
@@ -299,14 +306,14 @@ _OUTPUT_DETAILS = OutputSpec(
 async def pq_details(runtime: Runtime, id: str | None, reveal_secrets: bool) -> None:
     """Show details for one Persistent Query."""
     id = require_context_value(runtime, ContextKey.PQ, id)
-    if reveal_secrets:
-        warn_revealed_secrets()
     await call_and_echo(
         runtime,
         "pq_details",
         retry_command="dhcli pq details",
         arguments={"id": id, "reveal_secrets": reveal_secrets},
     )
+    if reveal_secrets:
+        warn_revealed_secrets()
 
 
 _OUTPUT_NAME_TO_ID = OutputSpec(
@@ -548,10 +555,11 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
                 "default packages into it), and ephemeral_requirements "
                 "(space-separated pip requirements installed at startup, "
                 "which needs ephemeral_venv). Applied on the Enterprise "
-                "server, not on this machine. Replaces the field wholesale; "
-                "'dhcli pq details' never shows ephemeral_requirements, so "
-                "restore the real value before writing a document read from "
-                "it back. A credential passed here is visible in this "
+                "server, not on this machine. Replaces the field wholesale, "
+                "so read the current document with 'dhcli pq details ID "
+                "--reveal-secrets' before editing one key: without that flag "
+                "ephemeral_requirements reads as [REDACTED] and is rejected "
+                "if written back. A credential passed here is visible in this "
                 "process's arguments and your shell history."
             ),
         ),

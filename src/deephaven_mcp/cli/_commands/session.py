@@ -31,6 +31,7 @@ from deephaven_mcp.cli._commands._wrapping import (
     parse_key_value,
     read_local_script,
     reveal_secrets_option,
+    warn_revealed_secrets,
     wrapper_error_codes,
     yes_option,
 )
@@ -1291,7 +1292,8 @@ async def session_open(
     # Disclosure is orthogonal to launching: --print says "do not open a
     # browser", not "put the token on stdout". Only --reveal-secrets does
     # that, the same flag 'config get' uses.
-    opened = url if reveal_secrets else payload.get("connection_url") or url
+    token_free = payload.get("connection_url") or url
+    opened = url if reveal_secrets else token_free
     launched = (
         False
         if print_only
@@ -1315,3 +1317,7 @@ async def session_open(
         )
     )
     echo_payload(runtime, {"opened": opened, "launched": launched})
+    # Not simply `if reveal_secrets`: an anonymous session's URL carries no
+    # token, so `opened` is what we would have reported anyway.
+    if opened != token_free:
+        warn_revealed_secrets(1)
