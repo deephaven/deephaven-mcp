@@ -407,7 +407,10 @@ were not given and you have disclosed that session's credentials.
 `credentials` and `url` print the token — that is what they are for.
 `session open` hands it to the browser instead and keeps it out of
 stdout unless you pass `--reveal-secrets`, the same opt-in `config get`
-uses.
+uses. `pq details --reveal-secrets` is the same case for a PQ: it
+reports that PQ's stored secret-bearing fields, so aiming it at a PQ you
+were not given discloses whatever credentials that PQ was configured
+with.
 
 ### `dhcli daemon`
 

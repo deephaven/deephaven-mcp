@@ -285,7 +285,7 @@ _OUTPUT_DETAILS = OutputSpec(
                 "ID",
                 "Fully qualified PQ id 'enterprise:system:serial'. "
                 "Run 'pq list' or 'pq name-to-id'. Defaults to the sticky "
-                f"context pq if omitted. {CONTEXT_HINT}",
+                f"context pq if omitted. {TARGET_SELECTION_HINT} {CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_DETAILS,

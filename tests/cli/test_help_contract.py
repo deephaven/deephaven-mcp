@@ -373,13 +373,16 @@ def _wraps_a_tool(cmd: click.Command) -> bool:
 
 
 _CREDENTIAL_DISCLOSING_PATHS = frozenset(
-    {"session credentials", "session url", "session open"}
+    {"session credentials", "session url", "session open", "pq details"}
 )
-"""Verbs whose payload embeds a live auth token for the named session.
+"""Verbs that can put a live credential in their output for the named target.
 
 Not structurally detectable -- they take no ``--yes`` (nothing is
-destroyed) yet aiming one at another user's session hands out that
-session's credentials, so they belong to the target-sensitive set.
+destroyed) yet aiming one at another user's resource hands out that
+resource's secrets, so they belong to the target-sensitive set. The
+``session`` verbs embed an auth token unconditionally; ``pq details``
+does so under ``--reveal-secrets``, which reports the PQ's stored
+secret-bearing fields.
 """
 
 _STATE_LEAVING_PATHS = frozenset({"pq start"})

@@ -142,9 +142,9 @@ def reveal_secrets_option(f: Any) -> Any:
 
 
 def warn_revealed_secrets(count: int | None = None) -> None:
-    """Warn on stderr that plaintext secrets were written to stdout.
+    """Warn on stderr that plaintext secrets reached the command's output.
 
-    Call after writing the output being described, and only when a secret was
+    Call once that output has been produced, and only when a secret was
     actually disclosed.
 
     Args:
@@ -158,8 +158,8 @@ def warn_revealed_secrets(count: int | None = None) -> None:
         plural = "" if count == 1 else "s"
         subject = f"{count} plaintext secret value{plural}"
     click.echo(
-        f"warning: --reveal-secrets wrote {subject} to stdout; treat this "
-        "output like a password and keep it out of logs, shell history, and "
+        f"warning: --reveal-secrets wrote {subject} to this command's output; "
+        "treat it like a password and keep it out of logs, shell history, and "
         "shared transcripts.",
         err=True,
     )

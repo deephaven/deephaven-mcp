@@ -1294,30 +1294,35 @@ async def session_open(
     # that, the same flag 'config get' uses.
     token_free = payload.get("connection_url") or url
     opened = url if reveal_secrets else token_free
-    launched = (
-        False
-        if print_only
-        # The browser still receives the authenticated URL -- it has to,
-        # or the page cannot log in. Only the *error message* falls back
-        # to the token-free URL, so a launch failure does not write the
-        # credential to stderr behind the opt-in's back.
-        else launch_browser(
-            url,
-            manual_url=opened,
-            # Earn the hint: an anonymous session (and any payload with
-            # no separate authenticated URL) makes `opened` identical to
-            # what we opened, so there is no withheld token to explain
-            # and no better URL for 'session url' to hand back.
-            hint=(
-                "That URL omits the auth token; run 'dhcli session url' "
-                "to get one you can log in with."
-                if opened != url
-                else None
-            ),
+    # An anonymous session's URL carries no token, so `opened` is what we would
+    # have reported anyway.
+    disclosing = opened != token_free
+    try:
+        launched = (
+            False
+            if print_only
+            # The browser still receives the authenticated URL -- it has to,
+            # or the page cannot log in. The *error message* shows `opened`
+            # instead, so a launch failure discloses the token only when
+            # --reveal-secrets already asked for it.
+            else launch_browser(
+                url,
+                manual_url=opened,
+                # Earn the hint: an anonymous session (and any payload with
+                # no separate authenticated URL) makes `opened` identical to
+                # what we opened, so there is no withheld token to explain
+                # and no better URL for 'session url' to hand back.
+                hint=(
+                    "That URL omits the auth token; run 'dhcli session url' "
+                    "to get one you can log in with."
+                    if opened != url
+                    else None
+                ),
+            )
         )
-    )
-    echo_payload(runtime, {"opened": opened, "launched": launched})
-    # Not simply `if reveal_secrets`: an anonymous session's URL carries no
-    # token, so `opened` is what we would have reported anyway.
-    if opened != token_free:
-        warn_revealed_secrets(1)
+        echo_payload(runtime, {"opened": opened, "launched": launched})
+    finally:
+        # Also covers the browser_launch_failed path, whose message carries
+        # `opened` -- the token included -- to stderr.
+        if disclosing:
+            warn_revealed_secrets(1)
