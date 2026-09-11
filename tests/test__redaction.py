@@ -47,7 +47,8 @@ def test_all_lists_the_public_surface():
 _SAMPLE_FIELDS = (
     AllowedField("flag", bool),
     AllowedField("note", str),
-    AllowedField("credential", str, secret=True),
+    AllowedField("credential", str, secret_when=lambda _: True),
+    AllowedField("maybe", str, secret_when=lambda value: value != "safe"),
 )
 
 
@@ -57,8 +58,10 @@ _SAMPLE_FIELDS = (
         ('{"flag": true}', '{"flag": true}', False),
         ('{"flag":true,"note":"hi"}', '{"flag": true, "note": "hi"}', False),
         ('{"credential": "tok"}', '{"credential": "[REDACTED]"}', True),
-        # A secret is marked on presence alone, whatever type it turns out to hold.
+        # The predicate runs before the type check, so an unexpected type reaches it.
         ('{"credential": {"a": 1}}', '{"credential": "[REDACTED]"}', True),
+        ('{"maybe": "safe"}', '{"maybe": "safe"}', False),
+        ('{"maybe": "other"}', '{"maybe": "[REDACTED]"}', True),
         ('{"unknown": "tok"}', "{}", True),
         ('{"flag": "not a bool"}', "{}", True),
         ('{"flag": true, "flag": true}', "[UNPARSEABLE]", True),
@@ -71,7 +74,9 @@ _SAMPLE_FIELDS = (
         "allowed-value-reported",
         "order-follows-the-declaration",
         "secret-replaced",
-        "secret-not-inspected",
+        "secret-predicate-sees-any-type",
+        "predicate-declines-value-reported",
+        "predicate-accepts-value-withheld",
         "unknown-key-dropped",
         "wrong-type-dropped",
         "repeated-key-suppressed",

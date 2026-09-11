@@ -277,8 +277,10 @@ _OUTPUT_DETAILS = OutputSpec(
             "config.type_specific_fields_json, and "
             "state_details.type_specific_state_json together with the same "
             "field on every replicas[] and spares[] entry) "
-            "are redacted by default. Pass --reveal-secrets to get them as stored, "
-            "which is what you need to read the configured pip requirements or to "
+            "are redacted by default; config.python_control keeps the keys that "
+            "cannot carry a secret, withholding ephemeral_requirements unless it "
+            "is a bare package list. Pass --reveal-secrets to get these fields as "
+            "stored, which is what you need to read a withheld value or to "
             "round-trip a python_control document back through 'pq modify'."
         ),
         arguments=(
@@ -561,11 +563,12 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
                 "(space-separated pip requirements installed at startup, "
                 "which needs ephemeral_venv). Applied on the Enterprise "
                 "server, not on this machine. Replaces the field wholesale, "
-                "so read the current document with 'dhcli pq details ID "
-                "--reveal-secrets' before editing one key: without that flag "
-                "ephemeral_requirements reads as [REDACTED] and is rejected "
-                "if written back. A credential passed here is visible in this "
-                "process's arguments and your shell history."
+                "so read the current document with 'dhcli pq details ID' "
+                "before editing one key: ephemeral_requirements reads as "
+                "[REDACTED], and is rejected if written back that way, unless "
+                "it is a bare package list - add --reveal-secrets to read it. "
+                "A credential passed here is visible in this process's "
+                "arguments and your shell history."
             ),
         ),
         click.option(

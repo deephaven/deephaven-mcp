@@ -150,6 +150,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_pq_states,
     _format_table_definition,
     _format_worker_protocol,
+    _may_carry_a_credential,
     _normalize_python_control,
     _parse_pq_id,
     _pq_state_category,
@@ -1952,10 +1953,10 @@ async def test_pq_details_success_by_serial():
 @pytest.mark.parametrize(
     "reveal,python_control,expected",
     [
-        (True, '{"ephemeral_requirements": "pandas"}', True),
+        (True, '{"ephemeral_requirements": "pkg @ https://u:tok@h/p.whl"}', True),
         (True, '{"ephemeral_venv": true}', False),
         (True, "", False),
-        (False, '{"ephemeral_requirements": "pandas"}', False),
+        (False, '{"ephemeral_requirements": "pkg @ https://u:tok@h/p.whl"}', False),
     ],
     ids=[
         "disclosed-a-value",
@@ -2298,23 +2299,22 @@ def test_normalize_python_control_rejects_unserializable_object(value):
 @pytest.mark.parametrize(
     ("stored", "expected"),
     [
-        # ephemeral_requirements is always withheld: a pip requirement can carry an
-        # index credential, and no inspection of it is trusted.
+        # A requirement carrying a URL credential is withheld whole.
         (
             '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
             '{"ephemeral_requirements": "[REDACTED]"}',
         ),
-        # Including when it holds no URL at all.
+        # A bare package list holds nothing a credential can hide in.
         (
-            '{"ephemeral_requirements": "pandas numpy"}',
-            '{"ephemeral_requirements": "[REDACTED]"}',
+            '{"ephemeral_requirements": "pandas numpy>=2,<3 scikit-learn[perf]"}',
+            '{"ephemeral_requirements": "pandas numpy>=2,<3 scikit-learn[perf]"}',
         ),
         # A scheme-less authority reference needs no special case.
         (
             '{"ephemeral_requirements": "pkg @ //u:tok@h/p.whl"}',
             '{"ephemeral_requirements": "[REDACTED]"}',
         ),
-        # An unexpected type is dropped, not inspected.
+        # An unexpected type fails closed rather than being reported.
         (
             '{"ephemeral_requirements": {"a": "https://u:tok@h"}}',
             '{"ephemeral_requirements": "[REDACTED]"}',
@@ -2363,7 +2363,8 @@ def test_redact_python_control_suppresses_uninspectable(stored):
 @pytest.mark.parametrize(
     "stored,withheld",
     [
-        ('{"ephemeral_requirements": "pkg"}', True),
+        ('{"ephemeral_requirements": "pkg @ https://u:tok@h/p.whl"}', True),
+        ('{"ephemeral_requirements": "pandas"}', False),
         ('{"unknown": "secret"}', True),
         ('{"ephemeral_venv": "not a bool"}', True),
         ('{"ephemeral_venv": true, "ephemeral_venv": true}', True),
@@ -2373,6 +2374,7 @@ def test_redact_python_control_suppresses_uninspectable(stored):
     ],
     ids=[
         "requirements-replaced",
+        "plain-requirements-reported",
         "unknown-key-dropped",
         "wrong-type-dropped",
         "repeated-key-suppressed",
@@ -2387,9 +2389,108 @@ def test_redact_python_control_reports_what_it_withheld(stored, withheld):
 
 
 @pytest.mark.parametrize(
+    "value",
+    [
+        "pandas",
+        "pandas numpy scikit-learn",
+        "numpy>=1.26,<2",
+        "pandas[perf]==2.0.*",
+        "requests~=2.31.0",
+        "pkg!=1.0",
+        "",
+    ],
+    ids=[
+        "one-name",
+        "several-names",
+        "version-range",
+        "extras-and-wildcard",
+        "compatible-release",
+        "exclusion",
+        "empty",
+    ],
+)
+def test_may_carry_a_credential_reports_a_bare_package_list(value):
+    """A value built only from package-name characters has nowhere to hide a URL."""
+    assert _may_carry_a_credential(value) is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "pkg @ https://user:tok@host/p.whl",
+        "pkg @ //user:tok@host/p.whl",
+        "--index-url https://tok@host/simple",
+        "-i https://tok@host/simple",
+        "https://user:tok@host/p.whl",
+        # Percent encoding cannot launder the characters the allowlist excludes.
+        "pkg %40 host",
+        # Nor can a homoglyph: the allowlist is ASCII-only.
+        "pkg \uff20 host",
+        # An environment marker brings quotes and a semicolon.
+        'pandas; python_version < "3.13"',
+        # Interpolation could pull a secret in from the environment.
+        "pkg @ https://${TOKEN}@host/p.whl",
+        "pkg\\host",
+        "pandas\nsecret",
+        "pandas\ttok",
+        # A type other than str fails closed.
+        {"a": "https://u:tok@h"},
+        None,
+        42,
+    ],
+    ids=[
+        "direct-reference-url",
+        "scheme-less-authority",
+        "index-url-option",
+        "index-url-short-option",
+        "bare-url",
+        "percent-encoded",
+        "fullwidth-homoglyph",
+        "environment-marker",
+        "environment-interpolation",
+        "backslash",
+        "newline",
+        "tab",
+        "mapping",
+        "none",
+        "integer",
+    ],
+)
+def test_may_carry_a_credential_withholds_anything_else(value):
+    """Anything beyond a bare package list is withheld whole, never in part."""
+    assert _may_carry_a_credential(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+        "pypi-AgEIcHlwaS5vcmcCJDY2ZjJhNzhh",
+    ],
+    ids=["github-token", "pypi-token"],
+)
+def test_may_carry_a_credential_reports_a_bare_token(value):
+    """Pins the documented limitation of the character allowlist.
+
+    A credential using only package-name characters is indistinguishable from a
+    package name, so it is reported. Telling the two apart would need a length or
+    entropy guess; the tradeoff is accepted and documented on
+    :func:`_may_carry_a_credential`. This test exists so the behavior cannot change
+    silently - narrowing it is a deliberate decision, not an incidental one.
+    """
+    assert _may_carry_a_credential(value) is False
+
+
+@pytest.mark.parametrize(
     "config,state_details,replicas,spares,expected",
     [
-        ({"python_control": '{"ephemeral_requirements": "pkg"}'}, None, [], [], True),
+        (
+            {"python_control": '{"ephemeral_requirements": "pkg @ https://u:tok@h"}'},
+            None,
+            [],
+            [],
+            True,
+        ),
         ({"python_control": '{"unknown": "secret"}'}, None, [], [], True),
         ({"python_control": "not json"}, None, [], [], True),
         ({"type_specific_fields_json": '{"token": "abc"}'}, None, [], [], True),

@@ -17,6 +17,7 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 import asyncio
 import json
 import logging
+import string
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated
@@ -76,11 +77,38 @@ _VENV_KEY = "ephemeral_venv"
 _SEED_KEY = "seed_ephemeral_venv"
 _REQUIREMENTS_KEY = "ephemeral_requirements"
 
+_PLAIN_REQUIREMENT_CHARS = frozenset(
+    string.ascii_letters + string.digits + "._-[]<>=!~,*+ "
+)
+"""Every character a bare pip requirement list can use - names, extras, and version
+specifiers such as ``pandas[perf]`` or ``numpy>=1.26,<2``. Excludes ``:`` and ``/``
+(URLs), ``@`` (direct references, URL userinfo), ``%`` (percent encoding), ``$`` and
+``{`` (interpolation), quotes and ``;`` (markers), backslash, and all non-ASCII."""
+
+
+def _may_carry_a_credential(value: object) -> bool:
+    """Report whether ``ephemeral_requirements`` must be withheld from output.
+
+    A value built only from :data:`_PLAIN_REQUIREMENT_CHARS` is reported; anything
+    else is withheld whole, never in part, and a type other than ``str`` fails closed.
+
+    Known limitation, accepted deliberately: this is a character allowlist, not
+    credential detection, so a bare token such as ``ghp_...`` with no URL around it is
+    indistinguishable from a package name and IS reported.
+
+    Args:
+        value (object): The stored ``ephemeral_requirements`` value, as parsed.
+
+    Returns:
+        bool: True when the value must be withheld.
+    """
+    return not isinstance(value, str) or not set(value) <= _PLAIN_REQUIREMENT_CHARS
+
+
 _PYTHON_CONTROL_FIELDS = (
     AllowedField(_VENV_KEY, bool),
     AllowedField(_SEED_KEY, bool),
-    # A pip requirement can carry an index credential, so it is never reported.
-    AllowedField(_REQUIREMENTS_KEY, str, secret=True),
+    AllowedField(_REQUIREMENTS_KEY, str, secret_when=_may_carry_a_credential),
 )
 """What ``pq_details`` may report from a stored ``pythonControl`` document."""
 
@@ -210,7 +238,8 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
         ValueError: If ``value`` is a non-blank string that is not strict JSON or not a
             JSON object, holds a value JSON cannot represent (``NaN``/``Infinity``, or
             an object such as a set), carries a key of the wrong type, or still carries
-            the ``[REDACTED]`` marker ``pq_details`` substitutes for a credential. The
+            the ``[REDACTED]`` marker ``pq_details`` substitutes for a withheld value.
+            The
             controller rejects any non-blank ``pythonControl`` that does not parse,
             leaving the PQ unmodifiable until the field is cleared.
     """
@@ -236,9 +265,9 @@ def _normalize_python_control(value: str | dict[str, object] | None) -> str | No
     if parsed.get(_REQUIREMENTS_KEY) == REDACTED:
         raise ValueError(
             f"python_virtual_environment still contains {REDACTED}, which pq_details "
-            "reports in place of ephemeral_requirements. Writing it back would replace "
-            "the working value with that marker. Restore the real "
-            "ephemeral_requirements before sending the document."
+            "reports in place of a withheld ephemeral_requirements. Re-read the "
+            "document with reveal_secrets=True, or restore the real requirements "
+            "yourself, before sending it."
         )
     for key, expected in _CONTROL_FIELD_TYPES.items():
         if key in parsed and not isinstance(parsed[key], expected):
@@ -1217,10 +1246,11 @@ async def pq_details(
     - replicas array contains state of all active replicas (load-balanced instances)
     - spares array contains state of spare instances ready to replace failed replicas
     - num_failures in state_details is the cumulative lifetime failure count
-    - config.python_control reports only the three recognized keys, and always shows
-      ephemeral_requirements as [REDACTED] because a pip requirement can carry an index
-      credential; it is therefore not writable back through pq_modify as-is (pq_modify
-      rejects a document that still carries the marker)
+    - config.python_control reports only the three recognized keys, and withholds
+      ephemeral_requirements as [REDACTED] unless it is a bare package list, since a
+      URL or index option may carry a credential. A withheld value is not writable
+      back through pq_modify as-is. The check is a character allowlist, not credential
+      detection, so a reported value is not certified secret-free
     - reveal_secrets=True reports python_control, type_specific_fields_json, and
       type_specific_state_json - the last one under state_details and under every
       replicas[] and spares[] entry - as stored, an unset field reading as null. When
@@ -2092,15 +2122,12 @@ async def pq_modify(
     - ephemeral_requirements (str): Space-separated pip requirements to install into the
       environment at worker startup. Requires ephemeral_venv=true.
     The object replaces the field wholesale - to change one key, read the current
-    python_control from pq_details with reveal_secrets=True, modify it, and pass the
-    whole object back. Unknown keys are silently ignored by the server. Pass "" to
-    clear the field.
-    By default pq_details reports ephemeral_requirements as [REDACTED] - a pip
-    requirement can carry an index credential - and reports only the two booleans
-    besides, so a document read that way is not writable as-is: either re-read it with
-    reveal_secrets=True or restore the real requirements yourself. Sending one that
-    still contains [REDACTED] is rejected rather than overwriting the working value
-    with the marker.
+    python_control from pq_details, modify it, and pass the whole object back.
+    Unknown keys are silently ignored by the server. Pass "" to clear the field.
+    pq_details withholds ephemeral_requirements as [REDACTED] unless it is a bare
+    package list, since a URL or index option may carry a credential. A withheld
+    document is not writable as-is: re-read it with reveal_secrets=True, or restore the
+    real requirements yourself. Sending one that still contains [REDACTED] is rejected.
 
     Args:
         context (Context): MCP context object

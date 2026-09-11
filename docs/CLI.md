@@ -687,28 +687,24 @@ dhcli pq modify enterprise:prod:1234567890 \
 ```
 
 The object replaces the field wholesale, so to change one key read the current
-`python_control` from `dhcli pq details ID --reveal-secrets`, modify it, and pass
-the whole object back. **Without** `--reveal-secrets`, `pq details` reports only
-the three recognized keys and always shows `ephemeral_requirements` as
-`[REDACTED]`, because a pip requirement can carry an index credential and no
-attempt is made to judge which ones do — so a document read that way is not
-writable as-is, and passing one that still contains `[REDACTED]` exits `3`
-rather than overwriting the working value with the marker.
+`python_control` from `dhcli pq details ID`, modify it, and pass the whole object
+back. `pq details` reports only the three recognized keys, and withholds
+`ephemeral_requirements` as `[REDACTED]` unless a character allowlist says it is
+a bare package list (names, extras, version specifiers). Anything else — notably
+a URL, which can carry an index credential — withholds the whole value; re-read
+with `--reveal-secrets` to get it, and writing back a document that still holds
+`[REDACTED]` exits `3`. Being a character check rather than credential detection,
+it cannot flag a bare token that looks like a package name, so keep index
+credentials in `~/.netrc`, a keyring, or the environment instead.
 
 `--reveal-secrets` on `pq details` returns `config.python_control`,
 `config.type_specific_fields_json`, and `state_details.type_specific_state_json`
 — plus that same `type_specific_state_json` on every `replicas[]` and
-`spares[]` entry — as stored, an unset field reading as `null`. When the reveal
-actually hands back something the redacted response withholds it also warns on
-stderr and adds a `warning` field to the payload; a PQ whose fields hold nothing
-redaction would have withheld — a `python_control` of just the two booleans, say
-— gets neither, so the warning always means something real was written. Treat
-that output like a password.
-
-A credential written this way is visible in the process's arguments (readable
-by other local users on Linux) and is recorded in your shell history. Prefer an
-unauthenticated index, or set the field from the Enterprise web UI, when the
-requirements need a token.
+`spares[]` entry — as stored, an unset field reading as `null`. When it actually
+discloses something the redacted response withholds, it warns on stderr and adds
+a `warning` field to the payload. Treat that output like a password: a credential
+passed on the command line is visible in the process's arguments (readable by
+other local users on Linux) and recorded in your shell history.
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the

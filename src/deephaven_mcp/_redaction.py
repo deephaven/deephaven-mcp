@@ -27,7 +27,7 @@ changes.
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, NoReturn
 
@@ -80,9 +80,11 @@ class AllowedField:
     type: type
     """The type the value must hold; a value of any other type is dropped."""
 
-    secret: bool = False
-    """When True the value is never reported: presence of the key alone yields
-    ``REDACTED``, whatever the value turns out to be."""
+    secret_when: Callable[[object], bool] | None = None
+    """Decides, from the stored value, whether to withhold it, yielding ``REDACTED``
+    when it returns True. ``None`` reports the value whenever it holds :attr:`type`.
+    Runs before that type check and receives the value exactly as parsed, so it must
+    fail closed on a type it does not expect."""
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -213,8 +215,9 @@ def project_json_fields(
     The complement of :func:`redact_json_sensitive_fields`, which removes known-bad
     keys: this reports only known-good ones. The result is constructed from
     ``fields`` rather than edited from ``stored``, so an unknown key, a repeated
-    key, or an unexpected type cannot carry a value through. A secret field is
-    reported as ``REDACTED`` on presence alone, its value never inspected.
+    key, or an unexpected type cannot carry a value through. A field whose
+    ``secret_when`` predicate accepts the stored value is reported as ``REDACTED``
+    instead, the predicate running before the type check.
 
     Args:
         stored (str): The raw value read from the source.
@@ -243,11 +246,12 @@ def project_json_fields(
     for field in fields:
         if field.name not in parsed:
             continue
-        if field.secret:
+        value = parsed[field.name]
+        if field.secret_when is not None and field.secret_when(value):
             projected[field.name] = REDACTED
             withheld = True
-        elif isinstance(parsed[field.name], field.type):
-            projected[field.name] = parsed[field.name]
+        elif isinstance(value, field.type):
+            projected[field.name] = value
     # A stored key absent from the projection was dropped rather than reported.
     withheld = withheld or set(parsed) != set(projected)
     return Redaction(json.dumps(projected), withheld)
