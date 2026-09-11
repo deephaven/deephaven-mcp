@@ -77,7 +77,7 @@ The confirmation only fires when the target came from `context.json` **and** `cl
 
 A read-only verb never confirms. Classify by consequence, not by whether the data looks sensitive: the test is whether a wrong target **leaves state behind, disrupts others, or destroys something**.
 
-**Credential-disclosing verbs are the exception that needs manual wiring.** `session credentials` / `url` / `open` destroy nothing, so they take no `--yes` and never prompt — but each returns a URL carrying a live auth token for whatever session was named, so a wrong target discloses that session's credentials. They still carry `TARGET_SELECTION_HINT`, and because they have no structural marker for the guardrail test to key off, **a new one must be added to `_CREDENTIAL_DISCLOSING_PATHS` in `tests/cli/test_help_contract.py`** or the hint requirement will not be enforced for it.
+**Credential-disclosing verbs are the exception that needs manual wiring.** `session credentials` / `url` / `open` destroy nothing, so they take no `--yes` and never prompt — but each returns a URL carrying a live auth token for whatever session was named, so a wrong target discloses that session's credentials. `pq details --reveal-secrets` is the same case for a PQ's stored secret-bearing fields: disclosure is opt-in, but the verb can still disclose. They all carry `TARGET_SELECTION_HINT`, and because they have no structural marker for the guardrail test to key off, **a new one must be added to `_CREDENTIAL_DISCLOSING_PATHS` in `tests/cli/test_help_contract.py`** or the hint requirement will not be enforced for it.
 
 The `kubectl` comparison above is not decoration — interaction-model decisions are grounded in comparable CLIs by rule. Apply `ref-cli-design-prior-art` before changing confirmation, prompting, or default-safety behavior.
 
@@ -90,7 +90,7 @@ The `kubectl` comparison above is not decoration — interaction-model decisions
 A path-valued flag resolves on exactly one of the CLI machine or the server — never the daemon (its cwd/filesystem view is not the user's; rationale in the design doc's *Path locality* section).
 
 - **Local file**: read it in the CLI with `read_local_script` from `_wrapping.py` (`-` = stdin, relative paths resolve against the shell cwd, unreadable file → `file_read_failed`, empty stdin → `missing_argument`) and forward the *contents* as the tool's inline param. A flag materialized into a different tool param this way (e.g. `script_body_path` → `script_body`) goes in `client_only_params`. Add `FILE_READ_FAILED` (and `MISSING_ARGUMENT` for the stdin case) to the help's `error_codes`. Canonical: `session exec --script-path`, `pq create --script-body-path`.
-- **Server-side identifier**: forward verbatim and give the flag a self-documenting name — `--git-script-path`, not `--script-path` — plus help text naming the server-side namespace ("the Enterprise controller's Git-backed script repository"). Canonical: `pq --git-script-path`, `pq --python-venv`.
+- **Server-side identifier**: forward verbatim and give the flag a self-documenting name — `--git-script-path`, not `--script-path` — plus help text naming the server-side namespace ("the Enterprise controller's Git-backed script repository"). Canonical: `pq --git-script-path`, `pq --class-path`.
 
 Per `ref-cli-help-standards` *Help-content contract*, every path-valued option's help states where the path resolves.
 

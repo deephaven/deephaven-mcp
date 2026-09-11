@@ -883,11 +883,12 @@ def test_open_reveal_secrets_includes_the_token(tmp_path: Path) -> None:
         )
     assert result.exit_code == 0
     wb.assert_not_called()
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload == {
         "opened": _CREDS["connection_url_with_auth"],
         "launched": False,
     }
+    assert "--reveal-secrets wrote 1 plaintext secret value" in result.stderr
 
 
 def test_open_reveal_secrets_is_independent_of_print(tmp_path: Path) -> None:
@@ -904,11 +905,42 @@ def test_open_reveal_secrets_is_independent_of_print(tmp_path: Path) -> None:
         )
     assert result.exit_code == 0
     wb.assert_called_once_with(_CREDS["connection_url_with_auth"])
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload == {
         "opened": _CREDS["connection_url_with_auth"],
         "launched": True,
     }
+    assert "--reveal-secrets wrote 1 plaintext secret value" in result.stderr
+
+
+def test_open_reveal_secrets_on_anonymous_session_does_not_warn(
+    tmp_path: Path,
+) -> None:
+    """An anonymous session's URL carries no token, so nothing was disclosed.
+
+    Warning here would train users to ignore the warning.
+    """
+    creds = {
+        "success": True,
+        "id": _SID,
+        "auth_type": "ANONYMOUS",
+        "auth_token": "",
+        "connection_url": "http://h:1",
+        "connection_url_with_auth": "http://h:1",
+    }
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(creds))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=True),
+    ):
+        result = _invoke(
+            ["-o", "json", "session", "open", _SID, "--print", "--reveal-secrets"], rt
+        )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"opened": "http://h:1", "launched": False}
+    assert result.stderr == ""
 
 
 def test_open_no_browser_found_exits_2(tmp_path: Path) -> None:
@@ -1011,6 +1043,22 @@ def test_open_browser_failure_reveals_the_token_when_asked(tmp_path: Path) -> No
     assert _CREDS["connection_url_with_auth"] in message
     # The redirect to 'session url' would be noise: they already have it.
     assert "dhcli session url" not in message
+    # The failure message is itself a disclosure, so it is announced too.
+    assert "--reveal-secrets wrote 1 plaintext secret value" in result.stderr
+
+
+def test_open_browser_failure_without_reveal_does_not_warn(tmp_path: Path) -> None:
+    """A failure that hands back the token-free URL disclosed nothing."""
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_CREDS))
+    with (
+        acquire_p,
+        call_p,
+        patch.object(browser_mod.webbrowser, "open", return_value=False),
+    ):
+        result = _invoke(["session", "open", _SID], rt, standalone_mode=False)
+    assert _error_code(result) == "browser_launch_failed"
+    assert "--reveal-secrets wrote" not in result.stderr
 
 
 def test_open_no_url_exits_2(tmp_path: Path) -> None:

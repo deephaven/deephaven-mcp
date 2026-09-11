@@ -24,6 +24,8 @@ from deephaven_mcp.cli._commands._wrapping import (
     call_and_echo_field,
     call_for_payload,
     read_local_script,
+    reveal_secrets_option,
+    warn_revealed_secrets,
     wrapper_error_codes,
     yes_option,
 )
@@ -243,6 +245,14 @@ _OUTPUT_DETAILS = OutputSpec(
             "array",
             "Per-spare state for standby instances; empty when none.",
         ),
+        OutputField(
+            "warning",
+            "string",
+            "Present only when --reveal-secrets handed back something the "
+            "redacted response withholds: restates that the secret-bearing "
+            "fields are reported as stored and may carry plaintext "
+            "credentials.",
+        ),
     ),
     note=(
         "This is the authority on what a PQ is really doing — read it after a "
@@ -262,14 +272,23 @@ _OUTPUT_DETAILS = OutputSpec(
             "(config) and the live state (state_details) of ID, including the "
             "running worker's connection details. This is how to confirm what "
             "a PQ is actually doing: 'pq start' / 'pq restart' report that the "
-            "request was accepted, not that the worker is serving."
+            "request was accepted, not that the worker is serving.\n\n"
+            "Secret-bearing fields (config.python_control, "
+            "config.type_specific_fields_json, and "
+            "state_details.type_specific_state_json together with the same "
+            "field on every replicas[] and spares[] entry) "
+            "are redacted by default; config.python_control keeps the keys that "
+            "cannot carry a secret, withholding ephemeral_requirements unless it "
+            "is a bare package list. Pass --reveal-secrets to get these fields as "
+            "stored, which is what you need to read a withheld value or to "
+            "round-trip a python_control document back through 'pq modify'."
         ),
         arguments=(
             HelpEntry(
                 "ID",
                 "Fully qualified PQ id 'enterprise:system:serial'. "
                 "Run 'pq list' or 'pq name-to-id'. Defaults to the sticky "
-                f"context pq if omitted. {CONTEXT_HINT}",
+                f"context pq if omitted. {TARGET_SELECTION_HINT} {CONTEXT_HINT}",
             ),
         ),
         output=_OUTPUT_DETAILS,
@@ -277,6 +296,8 @@ _OUTPUT_DETAILS = OutputSpec(
             "$ dhcli pq details enterprise:prod:1234567890",
             "$ dhcli pq details enterprise:prod:1234567890 | jq .state",
             "$ dhcli pq details enterprise:prod:1234567890 | jq '.config.scheduling'",
+            "$ dhcli pq details enterprise:prod:1234567890 --reveal-secrets "
+            "| jq -r '.config.python_control'",
         ),
         see_also=("dhcli pq list SYSTEM", "dhcli context show"),
         exit_codes=(ExitCode.SUCCESS, ExitCode.USER_ERROR, ExitCode.TOOL_ERROR),
@@ -284,17 +305,22 @@ _OUTPUT_DETAILS = OutputSpec(
     ),
 )
 @click.argument("id", required=False)
+@reveal_secrets_option
 @click.pass_obj
 @run_async
-async def pq_details(runtime: Runtime, id: str | None) -> None:
+async def pq_details(runtime: Runtime, id: str | None, reveal_secrets: bool) -> None:
     """Show details for one Persistent Query."""
     id = require_context_value(runtime, ContextKey.PQ, id)
-    await call_and_echo(
+    payload = await call_for_payload(
         runtime,
         "pq_details",
         retry_command="dhcli pq details",
-        arguments={"id": id},
+        arguments={"id": id, "reveal_secrets": reveal_secrets},
     )
+    echo_payload(runtime, payload)
+    # The tool sets this only when the reveal handed back withheld content.
+    if payload.get("warning"):
+        warn_revealed_secrets()
 
 
 _OUTPUT_NAME_TO_ID = OutputSpec(
@@ -528,8 +554,21 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "python_virtual_environment",
             default=None,
             help=(
-                "Name of a Python virtualenv configured on the Enterprise "
-                "server — a name, not a path on this machine."
+                "Python environment for the worker, as a JSON object in "
+                'plain unescaped text, e.g. {"ephemeral_venv": true, '
+                '"ephemeral_requirements": "pandas"}. Keys are '
+                "ephemeral_venv (build a fresh venv for this worker instead "
+                "of using the shared default), seed_ephemeral_venv (copy the "
+                "default packages into it), and ephemeral_requirements "
+                "(space-separated pip requirements installed at startup, "
+                "which needs ephemeral_venv). Applied on the Enterprise "
+                "server, not on this machine. Replaces the field wholesale, "
+                "so read the current document with 'dhcli pq details ID' "
+                "before editing one key: ephemeral_requirements reads as "
+                "[REDACTED], and is rejected if written back that way, unless "
+                "it is a bare package list - add --reveal-secrets to read it. "
+                "A credential passed here is visible in this process's "
+                "arguments and your shell history."
             ),
         ),
         click.option(

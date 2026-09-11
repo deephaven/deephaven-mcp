@@ -3,10 +3,12 @@ Tests for deephaven_mcp.mcp_systems_server._tools.pq.
 """
 
 import asyncio
+import re
 import warnings
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 
 from ._helpers import (
     MockContext,
@@ -148,8 +150,12 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_pq_states,
     _format_table_definition,
     _format_worker_protocol,
+    _may_carry_a_credential,
+    _normalize_python_control,
     _parse_pq_id,
     _pq_state_category,
+    _redact_python_control,
+    _revealed_any_secret,
     _setup_batch_pq_operation,
     _validate_and_parse_pq_ids,
     _validate_max_concurrent,
@@ -1211,6 +1217,36 @@ def test_format_exception_details_with_empty_values():
     assert result["short_causes"] is None
 
 
+def test_format_pq_state_reveal_secrets_returns_stored():
+    """reveal_secrets=True hands back type_specific_state_json verbatim."""
+    stored = '{"password": "hunter2"}'
+    state = MagicMock()
+    state.pb = MagicMock()
+    state.pb.typeSpecificStateJson = stored
+    state.pb.tableGroups = []
+    state.pb.scopeTypes = []
+    state.pb.connectionDetails = None
+    state.pb.exceptionDetails = None
+    assert _format_pq_state(state, reveal_secrets=True)["type_specific_state_json"] == (
+        stored
+    )
+    assert _format_pq_state(state)["type_specific_state_json"] != stored
+
+
+def test_format_pq_states_forwards_reveal_secrets():
+    """The replicas/spares wrapper passes the flag through to each state."""
+    stored = '{"password": "hunter2"}'
+    state = MagicMock()
+    state.pb = MagicMock()
+    state.pb.typeSpecificStateJson = stored
+    state.pb.tableGroups = []
+    state.pb.scopeTypes = []
+    state.pb.connectionDetails = None
+    state.pb.exceptionDetails = None
+    revealed = _format_pq_states([state], reveal_secrets=True)
+    assert revealed[0]["type_specific_state_json"] == stored
+
+
 def test_format_pq_state_with_none():
     """Test _format_pq_state returns None when state is None."""
     result = _format_pq_state(None)
@@ -1914,6 +1950,52 @@ async def test_pq_details_success_by_serial():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reveal,python_control,expected",
+    [
+        (True, '{"ephemeral_requirements": "pkg @ https://u:tok@h/p.whl"}', True),
+        (True, '{"ephemeral_venv": true}', False),
+        (True, "", False),
+        (False, '{"ephemeral_requirements": "pkg @ https://u:tok@h/p.whl"}', False),
+    ],
+    ids=[
+        "disclosed-a-value",
+        "booleans-only-disclose-nothing",
+        "nothing-to-disclose",
+        "not-revealing",
+    ],
+)
+async def test_pq_details_warning_only_when_revealing(reveal, python_control, expected):
+    """The warning tracks the disclosure, not the flag.
+
+    A PQ that configures no secret-bearing field discloses nothing, and
+    announcing that would be a false alarm.
+    """
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
+    pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
+    pq_info.config.pb.pythonControl = python_control
+    mock_controller.map = AsyncMock(return_value={12345: pq_info})
+    context = MockContext(
+        {"config_manager": MagicMock(), "registry": mock_session_registry}
+    )
+
+    result = await pq_details(
+        context, id="enterprise:system:12345", reveal_secrets=reveal
+    )
+
+    assert result["success"] is True
+    assert ("warning" in result) is expected
+
+
+@pytest.mark.asyncio
 async def test_pq_details_not_found():
     """Test pq_details when PQ not found."""
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
@@ -2130,6 +2212,512 @@ async def test_pq_create_forwards_owner():
     assert result["success"] is True
     mock_controller.make_pq_config.assert_called_once()
     assert mock_controller.make_pq_config.call_args.kwargs["owner"] == "service-account"
+
+
+def test_normalize_python_control_none():
+    """``None`` passes through so the field is left unchanged."""
+    assert _normalize_python_control(None) is None
+
+
+def test_normalize_python_control_serializes_a_dict():
+    """A decoded JSON object is re-encoded to compact JSON text."""
+    assert (
+        _normalize_python_control(
+            {"ephemeral_venv": True, "ephemeral_requirements": "pandas"}
+        )
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pandas"}'
+    )
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+def test_normalize_python_control_blank_clears_the_field(value):
+    """Any blank string collapses to "" so the cleared field reads back as None."""
+    assert _normalize_python_control(value) == ""
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['{"ephemeral_venv": true}', '  {"seed_ephemeral_venv": false}  '],
+)
+def test_normalize_python_control_passes_json_text_through(value):
+    """JSON object text is stored verbatim, surrounding whitespace included."""
+    assert _normalize_python_control(value) == value
+
+
+def test_normalize_python_control_rejects_escaped_json():
+    """A backslash-escaped JSON object is rejected instead of corrupting the field."""
+    with pytest.raises(ValueError, match="not valid JSON"):
+        _normalize_python_control('{\\"ephemeral_venv\\": true}')
+
+
+def test_normalize_python_control_rejects_a_bare_venv_name():
+    """The controller requires JSON, so a bare name is caught before it is stored."""
+    with pytest.raises(ValueError, match="not a bare virtualenv name"):
+        _normalize_python_control("analytics-env")
+
+
+def test_normalize_python_control_rejects_non_object_json():
+    """Valid JSON that is not an object cannot carry the control keys."""
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        _normalize_python_control('["ephemeral_venv"]')
+
+
+@pytest.mark.parametrize("number", [float("nan"), float("inf"), float("-inf")])
+def test_normalize_python_control_rejects_unserializable_float(number):
+    """json.dumps would emit a bare NaN/Infinity token, which is not JSON."""
+    with pytest.raises(ValueError, match="not serializable as JSON"):
+        _normalize_python_control({"ephemeral_venv": number})
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_normalize_python_control_rejects_non_standard_json_constants(constant):
+    """json.loads accepts these Python extensions; the controller's parser does not."""
+    with pytest.raises(ValueError, match=f"constant {re.escape(constant)}"):
+        _normalize_python_control('{"ephemeral_venv": %s}' % constant)
+
+
+def test_normalize_python_control_rejects_a_repeated_key():
+    """A repeated key would let a value reach the controller unvalidated.
+
+    Python keeps the last value, so the checks below see only that one; a
+    controller parser that keeps the first would apply the other.
+    """
+    with pytest.raises(ValueError, match="repeats a key"):
+        _normalize_python_control(
+            '{"ephemeral_requirements": "[REDACTED]", '
+            '"ephemeral_requirements": "real-value"}'
+        )
+
+
+@pytest.mark.parametrize("value", [{1, 2}, object()])
+def test_normalize_python_control_rejects_unserializable_object(value):
+    """json.dumps raises TypeError here; it must still surface as ValueError."""
+    with pytest.raises(ValueError, match="not serializable as JSON"):
+        _normalize_python_control({"ephemeral_requirements": value})
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        # A requirement carrying a URL credential is withheld whole.
+        (
+            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
+        ),
+        # A bare package list holds nothing a credential can hide in.
+        (
+            '{"ephemeral_requirements": "pandas numpy>=2,<3 scikit-learn[perf]"}',
+            '{"ephemeral_requirements": "pandas numpy>=2,<3 scikit-learn[perf]"}',
+        ),
+        # A scheme-less authority reference needs no special case.
+        (
+            '{"ephemeral_requirements": "pkg @ //u:tok@h/p.whl"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
+        ),
+        # An unexpected type fails closed rather than being reported.
+        (
+            '{"ephemeral_requirements": {"a": "https://u:tok@h"}}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
+        ),
+        # An unknown key is never echoed, so it cannot carry a secret out.
+        (
+            '{"custom": "https://u:tok@h", "ephemeral_venv": true}',
+            '{"ephemeral_venv": true}',
+        ),
+        # A documented key holding the wrong type is dropped.
+        ('{"ephemeral_venv": "https://u:tok@h"}', "{}"),
+        # Booleans are reported when they really are booleans.
+        (
+            '{"ephemeral_venv": true, "seed_ephemeral_venv": false}',
+            '{"ephemeral_venv": true, "seed_ephemeral_venv": false}',
+        ),
+    ],
+)
+def test_redact_python_control_projects_allowlist(stored, expected):
+    """Output is rebuilt from known keys, so nothing unrecognized is ever echoed."""
+    assert _redact_python_control(stored).text == expected
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        # Not JSON at all.
+        "analytics-env",
+        # Valid JSON, but no object to find the requirements key in - and each of
+        # these could still be carrying a URL.
+        '["pkg @ https://user:tok@host/p.whl"]',
+        '"pkg @ https://user:tok@host/p.whl"',
+        "42",
+        "null",
+        # A repeated key loses a value on parse, so the document is suppressed
+        # rather than projected from a view that is missing part of it.
+        '{"ephemeral_requirements": "https://u:tok@h", '
+        '"ephemeral_requirements": "pandas"}',
+    ],
+)
+def test_redact_python_control_suppresses_uninspectable(stored):
+    """Anything that is not a JSON object fails closed rather than echoing through."""
+    assert _redact_python_control(stored) == ("[UNPARSEABLE]", True)
+
+
+@pytest.mark.parametrize(
+    "stored,withheld",
+    [
+        ('{"ephemeral_requirements": "pkg @ https://u:tok@h/p.whl"}', True),
+        ('{"ephemeral_requirements": "pandas"}', False),
+        ('{"unknown": "secret"}', True),
+        ('{"ephemeral_venv": "not a bool"}', True),
+        ('{"ephemeral_venv": true, "ephemeral_venv": true}', True),
+        ('{"ephemeral_venv": true}', False),
+        ('{"ephemeral_venv":true,"seed_ephemeral_venv":false}', False),
+        ("{}", False),
+    ],
+    ids=[
+        "requirements-replaced",
+        "plain-requirements-reported",
+        "unknown-key-dropped",
+        "wrong-type-dropped",
+        "repeated-key-suppressed",
+        "boolean-reported-as-is",
+        "booleans-stored-compact",
+        "empty-object",
+    ],
+)
+def test_redact_python_control_reports_what_it_withheld(stored, withheld):
+    """The projection says whether it lost anything, rather than leaving it inferred."""
+    assert _redact_python_control(stored).withheld is withheld
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "pandas",
+        "pandas numpy scikit-learn",
+        "numpy>=1.26,<2",
+        "pandas[perf]==2.0.*",
+        "requests~=2.31.0",
+        "pkg!=1.0",
+        "",
+    ],
+    ids=[
+        "one-name",
+        "several-names",
+        "version-range",
+        "extras-and-wildcard",
+        "compatible-release",
+        "exclusion",
+        "empty",
+    ],
+)
+def test_may_carry_a_credential_reports_a_bare_package_list(value):
+    """A value built only from package-name characters has nowhere to hide a URL."""
+    assert _may_carry_a_credential(value) is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "pkg @ https://user:tok@host/p.whl",
+        "pkg @ //user:tok@host/p.whl",
+        "--index-url https://tok@host/simple",
+        "-i https://tok@host/simple",
+        "https://user:tok@host/p.whl",
+        # Percent encoding cannot launder the characters the allowlist excludes.
+        "pkg %40 host",
+        # Nor can a homoglyph: the allowlist is ASCII-only.
+        "pkg \uff20 host",
+        # An environment marker brings quotes and a semicolon.
+        'pandas; python_version < "3.13"',
+        # Interpolation could pull a secret in from the environment.
+        "pkg @ https://${TOKEN}@host/p.whl",
+        "pkg\\host",
+        "pandas\nsecret",
+        "pandas\ttok",
+        # A type other than str fails closed.
+        {"a": "https://u:tok@h"},
+        None,
+        42,
+    ],
+    ids=[
+        "direct-reference-url",
+        "scheme-less-authority",
+        "index-url-option",
+        "index-url-short-option",
+        "bare-url",
+        "percent-encoded",
+        "fullwidth-homoglyph",
+        "environment-marker",
+        "environment-interpolation",
+        "backslash",
+        "newline",
+        "tab",
+        "mapping",
+        "none",
+        "integer",
+    ],
+)
+def test_may_carry_a_credential_withholds_anything_else(value):
+    """Anything beyond a bare package list is withheld whole, never in part."""
+    assert _may_carry_a_credential(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+        "pypi-AgEIcHlwaS5vcmcCJDY2ZjJhNzhh",
+    ],
+    ids=["github-token", "pypi-token"],
+)
+def test_may_carry_a_credential_reports_a_bare_token(value):
+    """Pins the documented limitation of the character allowlist.
+
+    A credential using only package-name characters is indistinguishable from a
+    package name, so it is reported. Telling the two apart would need a length or
+    entropy guess; the tradeoff is accepted and documented on
+    :func:`_may_carry_a_credential`. This test exists so the behavior cannot change
+    silently - narrowing it is a deliberate decision, not an incidental one.
+    """
+    assert _may_carry_a_credential(value) is False
+
+
+@pytest.mark.parametrize(
+    "config,state_details,replicas,spares,expected",
+    [
+        (
+            {"python_control": '{"ephemeral_requirements": "pkg @ https://u:tok@h"}'},
+            None,
+            [],
+            [],
+            True,
+        ),
+        ({"python_control": '{"unknown": "secret"}'}, None, [], [], True),
+        ({"python_control": "not json"}, None, [], [], True),
+        ({"type_specific_fields_json": '{"token": "abc"}'}, None, [], [], True),
+        (
+            {
+                "type_specific_fields_json": (
+                    '{"password":"secret","password":"[REDACTED]"}'
+                )
+            },
+            None,
+            [],
+            [],
+            True,
+        ),
+        ({}, {"type_specific_state_json": '{"token": "abc"}'}, [], [], True),
+        ({}, None, [{"type_specific_state_json": '{"token": "abc"}'}], [], True),
+        ({}, None, [], [{"type_specific_state_json": '{"token": "abc"}'}], True),
+        ({"python_control": '{"ephemeral_venv": true}'}, None, [], [], False),
+        ({"python_control": '{"ephemeral_venv":true}'}, None, [], [], False),
+        ({"type_specific_fields_json": '{"port": 10000}'}, None, [], [], False),
+        (
+            {"type_specific_fields_json": '{"b": 2, "a": 1}'},
+            None,
+            [],
+            [],
+            False,
+        ),
+        ({"python_control": None}, {"type_specific_state_json": None}, [], [], False),
+        ({}, None, [], [], False),
+    ],
+    ids=[
+        "requirements-are-withheld",
+        "unknown-key-is-dropped",
+        "unparseable-is-suppressed",
+        "config-sensitive-key",
+        "duplicate-key-hides-a-value",
+        "state-details",
+        "a-replica",
+        "a-spare",
+        "booleans-only",
+        "booleans-only-stored-compact",
+        "no-sensitive-key",
+        "key-order-is-not-a-disclosure",
+        "every-field-unset",
+        "nothing-at-all",
+    ],
+)
+def test_revealed_any_secret_tracks_what_redaction_withholds(
+    config, state_details, replicas, spares, expected
+):
+    """Only content the default response withholds counts as a disclosure.
+
+    A document redaction leaves intact - booleans, non-sensitive keys, and
+    the same document stored without spaces - discloses nothing.
+    """
+    assert _revealed_any_secret(config, state_details, replicas, spares) is expected
+
+
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
+def test_format_pq_config_reveal_secrets_returns_stored(mock_restart_enum):
+    """reveal_secrets=True hands back both secret-bearing config fields verbatim."""
+    mock_restart_enum.Name.return_value = "RU_ADMIN"
+    stored = '{"ephemeral_requirements": "pkg @ https://u:tok@h/p.whl"}'
+    type_specific = '{"password": "hunter2"}'
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.restartUsers = 0
+    mock_pb.typeSpecificFieldsJson = type_specific
+    mock_pb.pythonControl = stored
+    mock_config.pb = mock_pb
+    result = _format_pq_config(mock_config, reveal_secrets=True)
+    assert result["python_control"] == stored
+    assert result["type_specific_fields_json"] == type_specific
+
+
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (
+            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
+            '{"ephemeral_requirements": "[REDACTED]"}',
+        ),
+        ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
+        ("", None),
+    ],
+)
+def test_format_pq_config_redacts_python_control(mock_restart_enum, stored, expected):
+    """_format_pq_config is the wiring that keeps index tokens out of pq_details."""
+    mock_restart_enum.Name.return_value = "RU_ADMIN"
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.restartUsers = 0
+    mock_pb.typeSpecificFieldsJson = ""
+    mock_pb.pythonControl = stored
+    mock_config.pb = mock_pb
+    assert _format_pq_config(mock_config)["python_control"] == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        '{"ephemeral_requirements": "[REDACTED]"}',
+        {"ephemeral_requirements": "[REDACTED]"},
+        # Matched on the decoded value, so escaping the brackets does not evade it.
+        r'{"ephemeral_requirements": "\u005bREDACTED\u005d"}',
+    ],
+)
+def test_normalize_python_control_rejects_redacted_round_trip(value):
+    """Writing back a pq_details document must not replace a credential with the marker."""
+    with pytest.raises(ValueError, match=r"still contains \[REDACTED\]"):
+        _normalize_python_control(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "key"),
+    [
+        ('{"ephemeral_venv": {"x": 1}}', "ephemeral_venv"),
+        ('{"ephemeral_venv": 1}', "ephemeral_venv"),
+        ('{"seed_ephemeral_venv": "yes"}', "seed_ephemeral_venv"),
+        ('{"ephemeral_requirements": ["pandas"]}', "ephemeral_requirements"),
+        ({"ephemeral_requirements": 3}, "ephemeral_requirements"),
+    ],
+)
+def test_normalize_python_control_rejects_wrong_field_types(value, key):
+    """The documented keys are typed, so a wrong type never reaches the controller."""
+    with pytest.raises(ValueError, match=f"key '{key}' must be"):
+        _normalize_python_control(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # The marker under a key pq_details never redacts is not a round trip.
+        '{"other": "[REDACTED]", "ephemeral_venv": true}',
+        # Nor is a requirements value that merely contains the text.
+        '{"ephemeral_requirements": "pkg-[REDACTED]-name"}',
+    ],
+)
+def test_normalize_python_control_allows_incidental_marker_text(value):
+    """Only the exact marker at the redacted key means a document was round-tripped."""
+    assert _normalize_python_control(value) == value
+
+
+@pytest.mark.parametrize(
+    ("tool", "required"),
+    [
+        (pq_create, {"system": "system", "pq_name": "pq", "heap_size_gb": 8.0}),
+        (pq_modify, {"id": "enterprise:system:12345"}),
+    ],
+)
+def test_python_control_survives_mcp_json_pre_parsing(tool, required):
+    """A JSON-object string argument validates against the tool signature.
+
+    The MCP SDK decodes any JSON-object string argument before validating it, so a
+    ``str``-only annotation rejected the very payload ``python_control`` requires.
+    """
+    meta = func_metadata(tool, skip_names=["context"])
+    raw = {**required, "python_virtual_environment": '{"ephemeral_venv": true}'}
+    validated = meta.arg_model.model_validate(meta.pre_parse_json(raw))
+    assert validated.model_dump_one_level()["python_virtual_environment"] == {
+        "ephemeral_venv": True
+    }
+
+
+@pytest.mark.asyncio
+async def test_pq_create_serializes_python_control_object():
+    """pq_create re-encodes a decoded python_virtual_environment object to JSON text."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
+
+    mock_config = MagicMock()
+    mock_config.pb = MagicMock()
+    mock_controller.make_pq_config = AsyncMock(return_value=mock_config)
+    mock_controller.add_query = AsyncMock(return_value=12345)
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="new-pq",
+        heap_size_gb=8.0,
+        python_virtual_environment={"ephemeral_venv": True},
+    )
+
+    assert result["success"] is True
+    assert (
+        mock_controller.make_pq_config.call_args.kwargs["python_virtual_environment"]
+        == '{"ephemeral_venv":true}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_pq_create_rejects_unparseable_python_control():
+    """pq_create reports an error rather than storing escaped JSON verbatim."""
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": MagicMock(spec=EnterpriseSessionRegistry),
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="new-pq",
+        heap_size_gb=8.0,
+        python_virtual_environment='{\\"ephemeral_venv\\": true}',
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not valid JSON" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -3044,6 +3632,101 @@ async def test_pq_modify_mutually_exclusive_scripts():
 
 
 @pytest.mark.asyncio
+async def test_pq_modify_serializes_python_control_object():
+    """pq_modify re-encodes a decoded python_virtual_environment object to JSON text."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
+
+    current_pq_info = create_mock_pq_info(12345, "pq", "STOPPED", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment={
+            "ephemeral_venv": True,
+            "ephemeral_requirements": "pandas",
+        },
+    )
+
+    assert result["success"] is True
+    assert (
+        mock_controller.update_pq_config.call_args.kwargs["python_virtual_environment"]
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pandas"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_rejects_unparseable_python_control():
+    """pq_modify reports an error rather than corrupting python_control."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment='{\\"ephemeral_venv\\": true}',
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not valid JSON" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_rejects_redacted_python_control():
+    """A document read back from pq_details is refused before it reaches the PQ."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment=('{"ephemeral_requirements": "[REDACTED]"}'),
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "[REDACTED]" in result["error"]
+    # Refused before the controller is contacted at all.
+    mock_factory_manager.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_pq_modify_invalid_pq_id():
     """Test pq_modify with invalid id format."""
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
@@ -3269,7 +3952,7 @@ async def test_pq_modify_all_parameters():
         jvm_profile="default",
         extra_jvm_args=["-Xmx4g"],
         extra_class_path=["/path/to/lib.jar"],
-        python_virtual_environment="/path/to/venv",
+        python_virtual_environment='{"ephemeral_venv": true}',
         extra_environment_vars=["VAR1=value1"],
         init_timeout_nanos=60000000000,
         auto_delete_timeout=3600,
@@ -3298,7 +3981,7 @@ async def test_pq_modify_all_parameters():
     assert kwargs["jvm_profile"] == "default"
     assert kwargs["extra_jvm_args"] == ["-Xmx4g"]
     assert kwargs["extra_class_path"] == ["/path/to/lib.jar"]
-    assert kwargs["python_virtual_environment"] == "/path/to/venv"
+    assert kwargs["python_virtual_environment"] == '{"ephemeral_venv": true}'
     assert kwargs["extra_environment_vars"] == ["VAR1=value1"]
     assert kwargs["init_timeout_nanos"] == 60000000000
     assert kwargs["auto_delete_timeout"] == 3600

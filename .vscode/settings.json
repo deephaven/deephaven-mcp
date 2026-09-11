@@ -20,5 +20,12 @@
     // docs/DEVELOPER_GUIDE.md before. TOCs are maintained by hand; see
     // .agents/skills/ref-markdown-documentation-standards/SKILL.md.
     "markdown.extension.toc.updateOnSave": false,
+    // Markdown is formatted only by markdownlint-cli2 --fix in bin/precommit.sh,
+    // whose rule set disables MD013/MD060 so prose and tables are left alone. A
+    // format-on-save formatter reflows both file-wide and splits inline code
+    // spans across lines, burying small doc edits in whole-file diffs.
+    "[markdown]": {
+        "editor.formatOnSave": false
+    },
     "scm.defaultViewMode": "tree"
 }

@@ -7,7 +7,11 @@ command is covered automatically.
 
 from __future__ import annotations
 
+import ast
+import inspect
 import re
+import textwrap
+from collections.abc import Callable
 
 import click
 import pytest
@@ -372,13 +376,16 @@ def _wraps_a_tool(cmd: click.Command) -> bool:
 
 
 _CREDENTIAL_DISCLOSING_PATHS = frozenset(
-    {"session credentials", "session url", "session open"}
+    {"session credentials", "session url", "session open", "pq details"}
 )
-"""Verbs whose payload embeds a live auth token for the named session.
+"""Verbs that can put a live credential in their output for the named target.
 
 Not structurally detectable -- they take no ``--yes`` (nothing is
-destroyed) yet aiming one at another user's session hands out that
-session's credentials, so they belong to the target-sensitive set.
+destroyed) yet aiming one at another user's resource hands out that
+resource's secrets, so they belong to the target-sensitive set. The
+``session`` verbs embed an auth token unconditionally; ``pq details``
+does so under ``--reveal-secrets``, which reports the PQ's stored
+secret-bearing fields.
 """
 
 _STATE_LEAVING_PATHS = frozenset({"pq start"})
@@ -501,6 +508,48 @@ def test_confirmable_command_declares_operation_canceled(
     assert has_yes == declares, (
         f"{path}: --yes present={has_yes} but operation_canceled "
         f"declared={declares}; they must agree"
+    )
+
+
+def _called_names(func: Callable[..., object]) -> set[str]:
+    """Return the names ``func`` actually calls, from its AST.
+
+    A textual search would be satisfied by a mention in a comment or
+    docstring, which is no assurance at all for a security check. Unwraps
+    first so this reads the decorated body rather than ``@run_async``'s
+    adapter.
+    """
+    tree = ast.parse(textwrap.dedent(inspect.getsource(inspect.unwrap(func))))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        match node.func:
+            case ast.Name(id=name) | ast.Attribute(attr=name):
+                names.add(name)
+    return names
+
+
+@pytest.mark.parametrize("path,cmd", _LEAVES, ids=_LEAF_IDS)
+def test_reveal_secrets_command_warns_on_stderr(path: str, cmd: click.Command) -> None:
+    """``--reveal-secrets`` and ``warn_revealed_secrets`` travel together.
+
+    The helper cannot enforce its own use, so the pairing is checked here:
+    a verb that can put a plaintext secret on stdout must tell the user it
+    did. Inspects the callback because the call is conditional on what the
+    payload turned out to hold, which no signature inspection can see.
+    """
+    takes_flag = any(
+        isinstance(param, click.Option) and param.name == "reveal_secrets"
+        for param in cmd.params
+    )
+    if not takes_flag:
+        return
+    assert cmd.callback is not None, f"{path}: no callback to inspect"
+    assert "warn_revealed_secrets" in _called_names(cmd.callback), (
+        f"{path}: takes --reveal-secrets but never calls "
+        "warn_revealed_secrets(); a disclosed secret must be announced "
+        "on stderr"
     )
 
 

@@ -15,7 +15,10 @@ These tools require Deephaven Enterprise (Core+) and are not available in Commun
 """
 
 import asyncio
+import json
 import logging
+import string
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -37,6 +40,14 @@ from pydantic import Field
 
 from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import InvalidSessionNameError
+from deephaven_mcp._redaction import (
+    REDACTED,
+    AllowedField,
+    Redaction,
+    parse_json_strict,
+    project_json_fields,
+    redact_json_sensitive_fields,
+)
 from deephaven_mcp.client import (
     PQ_STATES,
     CorePlusControllerClient,
@@ -50,7 +61,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_enterprise_settings,
     make_pq_id,
     parse_pq_id,
-    redact_json_sensitive_fields,
     resolve_pq_ids_to_single_system,
 )
 from deephaven_mcp.sessions import ProgrammingLanguage
@@ -60,6 +70,65 @@ _LOGGER = logging.getLogger(__name__)
 # Matches deephaven.constants.NULL_LONG / Java Long.MIN_VALUE. Defined locally because
 # deephaven.constants requires a live JVM which this server never starts.
 _NULL_LONG = -9223372036854775808
+
+# The three keys the controller understands, and the JSON type each must hold.
+# Deephaven's PythonCreationInfo ignores anything else.
+_VENV_KEY = "ephemeral_venv"
+_SEED_KEY = "seed_ephemeral_venv"
+_REQUIREMENTS_KEY = "ephemeral_requirements"
+
+_PLAIN_REQUIREMENT_CHARS = frozenset(
+    string.ascii_letters + string.digits + "._-[]<>=!~,*+ "
+)
+"""Every character a bare pip requirement list can use - names, extras, and version
+specifiers such as ``pandas[perf]`` or ``numpy>=1.26,<2``. Excludes ``:`` and ``/``
+(URLs), ``@`` (direct references, URL userinfo), ``%`` (percent encoding), ``$`` and
+``{`` (interpolation), quotes and ``;`` (markers), backslash, and all non-ASCII."""
+
+
+def _may_carry_a_credential(value: object) -> bool:
+    """Report whether ``ephemeral_requirements`` must be withheld from output.
+
+    A value built only from :data:`_PLAIN_REQUIREMENT_CHARS` is reported; anything
+    else is withheld whole, never in part, and a type other than ``str`` fails closed.
+
+    Known limitation, accepted deliberately: this is a character allowlist, not
+    credential detection, so a bare token such as ``ghp_...`` with no URL around it is
+    indistinguishable from a package name and IS reported.
+
+    Args:
+        value (object): The stored ``ephemeral_requirements`` value, as parsed.
+
+    Returns:
+        bool: True when the value must be withheld.
+    """
+    return not isinstance(value, str) or not set(value) <= _PLAIN_REQUIREMENT_CHARS
+
+
+_PYTHON_CONTROL_FIELDS = (
+    AllowedField(_VENV_KEY, bool),
+    AllowedField(_SEED_KEY, bool),
+    AllowedField(_REQUIREMENTS_KEY, str, secret_when=_may_carry_a_credential),
+)
+"""What ``pq_details`` may report from a stored ``pythonControl`` document."""
+
+_CONTROL_FIELD_TYPES: dict[str, type] = {
+    field.name: field.type for field in _PYTHON_CONTROL_FIELDS
+}
+"""The same declaration, as the write path's type check."""
+
+
+def _redact_python_control(stored: str) -> Redaction:
+    """Project a stored ``pythonControl`` document down to what is safe to report.
+
+    Args:
+        stored (str): The raw ``pythonControl`` value read from the controller.
+
+    Returns:
+        Redaction: As :func:`project_json_fields` produces for
+            ``_PYTHON_CONTROL_FIELDS``.
+    """
+    return project_json_fields(stored, _PYTHON_CONTROL_FIELDS, label="python_control")
 
 
 # =============================================================================
@@ -110,6 +179,105 @@ def _make_pq_id(serial: CorePlusQuerySerial, system_name: str) -> str:
     return make_pq_id(system_name, int(serial))
 
 
+def _parse_python_control_text(value: str) -> dict[str, object]:
+    """Parse ``python_virtual_environment`` JSON text into its object.
+
+    Args:
+        value (str): Non-blank JSON text.
+
+    Returns:
+        dict[str, object]: The parsed object.
+
+    Raises:
+        ValueError: If ``value`` is not strict JSON - malformed, repeating an object
+            key, or holding ``NaN``/``Infinity`` - or parses to something other than
+            a JSON object.
+    """
+    try:
+        parsed = parse_json_strict(value)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
+            'object such as {"ephemeral_venv": true}, not a bare virtualenv name. '
+            "Pass it as an object, or as plain JSON text with unescaped quotes - do "
+            "not backslash-escape the quotes."
+        ) from e
+    except ValueError as e:
+        # The controller's parser may resolve a repeated key differently than this
+        # one, applying a value the caller's document was never validated for.
+        raise ValueError(
+            f"python_virtual_environment is not valid JSON: {e}. Use a JSON object "
+            "with distinct keys, holding only string, number, or boolean values."
+        ) from e
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "python_virtual_environment must be a JSON object, got "
+            f"{type(parsed).__name__}. Valid keys are ephemeral_venv, "
+            "seed_ephemeral_venv, and ephemeral_requirements."
+        )
+    return parsed
+
+
+def _normalize_python_control(value: str | dict[str, object] | None) -> str | None:
+    """Normalize a ``python_virtual_environment`` argument into a ``pythonControl`` string.
+
+    A JSON object is re-encoded to compact JSON text; JSON text is passed through
+    verbatim. Both forms arrive for the same caller input, because MCP clients decode a
+    JSON-object string argument into a ``dict`` before the tool sees it.
+
+    Args:
+        value (str | dict[str, object] | None): Python environment control document as a
+            JSON object or as JSON text, a blank string to clear the field, or ``None``
+            to leave it unchanged.
+
+    Returns:
+        str | None: Value to store in ``pythonControl``: compact JSON text, ``""`` when
+        ``value`` is blank, or ``None`` when ``value`` is ``None``.
+
+    Raises:
+        ValueError: If ``value`` is a non-blank string that is not strict JSON or not a
+            JSON object, holds a value JSON cannot represent (``NaN``/``Infinity``, or
+            an object such as a set), carries a key of the wrong type, or still carries
+            the ``[REDACTED]`` marker ``pq_details`` substitutes for a withheld value.
+            The
+            controller rejects any non-blank ``pythonControl`` that does not parse,
+            leaving the PQ unmodifiable until the field is cleared.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        parsed = value
+        try:
+            normalized = json.dumps(value, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"python_virtual_environment is not serializable as JSON: {e}. "
+                "Use a string, number, or boolean."
+            ) from e
+    else:
+        # Collapsed to "" so a cleared field reads back as None, not as truthy whitespace.
+        if not value.strip():
+            return ""
+        parsed = _parse_python_control_text(value)
+        normalized = value
+    # Compared against the decoded value at its own key, so an escaped marker is still
+    # caught and the same text under an unrelated key is not.
+    if parsed.get(_REQUIREMENTS_KEY) == REDACTED:
+        raise ValueError(
+            f"python_virtual_environment still contains {REDACTED}, which pq_details "
+            "reports in place of a withheld ephemeral_requirements. Re-read the "
+            "document with reveal_secrets=True, or restore the real requirements "
+            "yourself, before sending it."
+        )
+    for key, expected in _CONTROL_FIELD_TYPES.items():
+        if key in parsed and not isinstance(parsed[key], expected):
+            raise ValueError(
+                f"python_virtual_environment key {key!r} must be "
+                f"{expected.__name__}, got {type(parsed[key]).__name__}."
+            )
+    return normalized
+
+
 def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
     """Validate max_concurrent is valid for parallel operations.
 
@@ -131,7 +299,9 @@ def _validate_max_concurrent(max_concurrent: int, function_name: str) -> int:
     return max_concurrent
 
 
-def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
+def _format_pq_config(
+    config: CorePlusQueryConfig, reveal_secrets: bool = False
+) -> dict[str, object]:
     """Format PersistentQueryConfigMessage into MCP-compatible dictionary.
 
     Extracts ALL 38 fields from PersistentQueryConfigMessage protobuf and formats them
@@ -156,6 +326,9 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
 
     Args:
         config (CorePlusQueryConfig): Wrapper around PersistentQueryConfigMessage protobuf
+        reveal_secrets (bool): When True, report ``type_specific_fields_json`` and
+            ``python_control`` as stored instead of redacting them. The caller has
+            asked for plaintext secrets.
 
     Returns:
         dict[str, object]: All 38 config fields formatted for MCP API, with optional fields
@@ -193,8 +366,10 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
         "script_path": pb.scriptPath if pb.scriptPath else None,
         "script_language": pb.scriptLanguage,
         "configuration_type": pb.configurationType,
-        "type_specific_fields_json": redact_json_sensitive_fields(
-            pb.typeSpecificFieldsJson
+        "type_specific_fields_json": (
+            pb.typeSpecificFieldsJson or None
+            if reveal_secrets
+            else redact_json_sensitive_fields(pb.typeSpecificFieldsJson).text
         ),
         "scheduling": list(pb.scheduling),
         "timeout_nanos": pb.timeoutNanos if pb.timeoutNanos else None,
@@ -226,7 +401,15 @@ def _format_pq_config(config: CorePlusQueryConfig) -> dict[str, object]:
             pb.assignmentPolicyParams if pb.assignmentPolicyParams else None
         ),
         "additional_memory_gb": pb.additionalMemoryGb,
-        "python_control": pb.pythonControl if pb.pythonControl else None,
+        "python_control": (
+            (
+                pb.pythonControl
+                if reveal_secrets
+                else _redact_python_control(pb.pythonControl).text
+            )
+            if pb.pythonControl
+            else None
+        ),
         "generic_worker_control": (
             pb.genericWorkerControl if pb.genericWorkerControl else None
         ),
@@ -439,7 +622,9 @@ def _format_exception_details(ed: ExceptionDetailsMessage) -> dict[str, object]:
     }
 
 
-def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | None:
+def _format_pq_state(
+    state: CorePlusQueryState | None, reveal_secrets: bool = False
+) -> dict[str, object] | None:
     """Format PersistentQueryStateMessage into MCP-compatible dictionary.
 
     Extracts ALL 25 fields from PersistentQueryStateMessage protobuf and formats them
@@ -480,6 +665,8 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
     Args:
         state (CorePlusQueryState | None): CorePlusQueryState wrapper around PersistentQueryStateMessage protobuf,
                                           or None if no state available
+        reveal_secrets (bool): When True, report ``type_specific_state_json`` as stored
+            instead of redacting its sensitive keys.
 
     Returns:
         dict[str, object] | None: All 25 state fields formatted for MCP API, with optional
@@ -523,8 +710,10 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
         "scope_types": scope_types,
         "connection_details": connection_details,
         "exception_details": exception_details,
-        "type_specific_state_json": redact_json_sensitive_fields(
-            pb.typeSpecificStateJson
+        "type_specific_state_json": (
+            pb.typeSpecificStateJson or None
+            if reveal_secrets
+            else redact_json_sensitive_fields(pb.typeSpecificStateJson).text
         ),
         "last_authenticated_user": pb.lastAuthenticatedUser or None,
         "last_effective_user": pb.lastEffectiveUser or None,
@@ -544,7 +733,9 @@ def _format_pq_state(state: CorePlusQueryState | None) -> dict[str, object] | No
     return result
 
 
-def _format_pq_states(states: list[CorePlusQueryState]) -> list[dict[str, object]]:
+def _format_pq_states(
+    states: list[CorePlusQueryState], reveal_secrets: bool = False
+) -> list[dict[str, object]]:
     """Format a list of PersistentQueryStateMessage objects, dropping None entries.
 
     Used for a PQ's replicas (additional running instances for high availability) and its
@@ -554,13 +745,61 @@ def _format_pq_states(states: list[CorePlusQueryState]) -> list[dict[str, object
     Args:
         states (list[CorePlusQueryState]): CorePlusQueryState wrappers to format. None
             entries are tolerated and dropped from the result.
+        reveal_secrets (bool): Forwarded to :func:`_format_pq_state`.
 
     Returns:
         list[dict[str, object]]: Formatted state dictionaries (25 fields each) with None
             entries removed; empty list if no states are provided.
     """
-    formatted = [_format_pq_state(state) for state in states]
+    formatted = [_format_pq_state(state, reveal_secrets) for state in states]
     return [f for f in formatted if f is not None]
+
+
+_SECRET_FIELDS: tuple[tuple[str, Callable[[str], Redaction]], ...] = (
+    ("python_control", _redact_python_control),
+    ("type_specific_fields_json", redact_json_sensitive_fields),
+    ("type_specific_state_json", redact_json_sensitive_fields),
+)
+"""Every ``pq_details`` field that holds redactable text, and the redactor guarding it.
+
+Applied to each formatted document in the payload, so a field is covered wherever
+it appears - ``type_specific_state_json`` under ``state_details`` and under every
+``replicas[]`` and ``spares[]`` entry alike.
+"""
+
+
+def _revealed_any_secret(
+    config: dict[str, object],
+    state_details: dict[str, object] | None,
+    replicas: list[dict[str, object]],
+    spares: list[dict[str, object]],
+) -> bool:
+    """Report whether revealing disclosed anything redaction would have withheld.
+
+    Asks each field's redactor what it withholds rather than comparing its output
+    against the stored value, so a document redaction leaves intact - a
+    ``python_control`` of just the two booleans, one with no sensitive keys - is
+    not a disclosure.
+
+    Args:
+        config (dict[str, object]): Formatted config, from :func:`_format_pq_config`.
+        state_details (dict[str, object] | None): Formatted state, from
+            :func:`_format_pq_state`; None when the PQ is not running.
+        replicas (list[dict[str, object]]): Formatted replica states.
+        spares (list[dict[str, object]]): Formatted spare states.
+
+    Returns:
+        bool: True when at least one field revealed content the default response
+        withholds.
+    """
+    for document in (config, state_details, *replicas, *spares):
+        if not document:
+            continue
+        for name, redact in _SECRET_FIELDS:
+            value = document.get(name)
+            if isinstance(value, str) and redact(value).withheld:
+                return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -973,8 +1212,9 @@ async def pq_list(
 async def pq_details(
     context: Context,
     id: str,
+    reveal_secrets: bool = False,
 ) -> dict:
-    """MCP Tool: Get detailed information about a persistent query.
+    r"""MCP Tool: Get detailed information about a persistent query.
 
     Retrieves comprehensive details about a specific PQ including its full
     configuration, current state, resource allocation, permissions, and
@@ -1006,11 +1246,26 @@ async def pq_details(
     - replicas array contains state of all active replicas (load-balanced instances)
     - spares array contains state of spare instances ready to replace failed replicas
     - num_failures in state_details is the cumulative lifetime failure count
+    - config.python_control reports only the three recognized keys, and withholds
+      ephemeral_requirements as [REDACTED] unless it is a bare package list, since a
+      URL or index option may carry a credential. A withheld value is not writable
+      back through pq_modify as-is. The check is a character allowlist, not credential
+      detection, so a reported value is not certified secret-free
+    - reveal_secrets=True reports python_control, type_specific_fields_json, and
+      type_specific_state_json - the last one under state_details and under every
+      replicas[] and spares[] entry - as stored, an unset field reading as null. When
+      that actually hands back something the redacted response withholds it adds a
+      "warning" field. Use it when you need the real value - to read the configured
+      requirements, or to round-trip a document through pq_modify - and treat the whole
+      response as a credential: keep it out of logs, transcripts, and anything you echo
+      back to a user.
 
     Args:
         context (Context): MCP context object
         id (str): Fully qualified id of the PQ in format 'enterprise:<system_name>:<serial>',
             as returned by pq_list
+        reveal_secrets (bool): When True, return the secret-bearing fields as stored
+            instead of redacted (default: False).
 
     Returns:
         dict: Success response with comprehensive PQ information:
@@ -1057,7 +1312,7 @@ async def pq_details(
                 "assignment_policy": "RoundRobin",
                 "assignment_policy_params": null,
                 "additional_memory_gb": 2.0,
-                "python_control": "analytics-env",
+                "python_control": "{\"ephemeral_venv\": true}",
                 "generic_worker_control": null
             },
             "state_details": {
@@ -1163,7 +1418,10 @@ async def pq_details(
             "isError": True
         }
     """
-    _LOGGER.info(f"[mcp_systems_server:pq_details] Invoked: id={id!r}")
+    _LOGGER.info(
+        f"[mcp_systems_server:pq_details] Invoked: id={id!r}, "
+        f"reveal_secrets={reveal_secrets}"
+    )
 
     result: dict[str, object] = {"success": False}
 
@@ -1214,17 +1472,31 @@ async def pq_details(
         status_obj = pq_info.state.status if pq_info.state else None
         state_name = status_obj.name if status_obj is not None else "UNKNOWN"
 
+        config = _format_pq_config(pq_info.config, reveal_secrets)
+        state_details = _format_pq_state(pq_info.state, reveal_secrets)
+        replicas = _format_pq_states(pq_info.replicas, reveal_secrets)
+        spares = _format_pq_states(pq_info.spares, reveal_secrets)
         pq_data = {
             "success": True,
             "id": id,
             "serial": serial,
             "name": pq_name,
             "state": state_name,
-            "config": _format_pq_config(pq_info.config),
-            "state_details": _format_pq_state(pq_info.state),
-            "replicas": _format_pq_states(pq_info.replicas),
-            "spares": _format_pq_states(pq_info.spares),
+            "config": config,
+            "state_details": state_details,
+            "replicas": replicas,
+            "spares": spares,
         }
+        if reveal_secrets and _revealed_any_secret(
+            config, state_details, replicas, spares
+        ):
+            pq_data["warning"] = (
+                "reveal_secrets=True: python_control, type_specific_fields_json, and "
+                "type_specific_state_json (including each entry under replicas and "
+                "spares) are reported as stored and may contain plaintext "
+                "credentials. Treat this response like a password and keep "
+                "it out of logs, transcripts, and user-visible output."
+            )
 
         _LOGGER.info(
             f"[mcp_systems_server:pq_details] Retrieved details for PQ '{pq_name}' (serial: {serial})"
@@ -1259,7 +1531,7 @@ async def pq_create(
     jvm_profile: str | None = None,
     extra_jvm_args: list[str] | None = None,
     extra_class_path: list[str] | None = None,
-    python_virtual_environment: str | None = None,
+    python_virtual_environment: str | dict[str, object] | None = None,
     extra_environment_vars: list[str] | None = None,
     init_timeout_nanos: int | None = None,
     auto_delete_timeout: int | None = None,
@@ -1332,6 +1604,9 @@ async def pq_create(
     - configuration_type="Script" (default) for long-running interactive sessions
     - schedule parameter enables automated start/stop - see detailed format below
     - All list parameters (schedule, admin_groups, etc.) accept empty list [] or None
+    - python_virtual_environment takes a JSON object, e.g. {"ephemeral_venv": true,
+      "ephemeral_requirements": "pandas"}. Pass it as a real object; a backslash-escaped
+      string is rejected with an error and no PQ is created.
 
     Script Source Options (mutually exclusive):
     - script_body: Inline Python/Groovy code as a string. Use for simple scripts or dynamic code generation.
@@ -1375,6 +1650,18 @@ async def pq_create(
     - "RU_ADMIN_AND_VIEWERS": Both admins and viewers can restart
     - "RU_VIEWERS_WHEN_DOWN": Admins always; viewers only when query is down
 
+    Python Environment Control (python_virtual_environment):
+    A JSON object stored in the PQ's python_control field. Three optional keys, all
+    corresponding to the web UI's "Python environment" settings:
+    - ephemeral_venv (bool): Create a fresh virtual environment for this worker instead
+      of using the shared default one. Required before any package can be installed.
+    - seed_ephemeral_venv (bool): Initialize that environment with a copy of the default
+      environment's packages ("Include default packages" in the UI).
+    - ephemeral_requirements (str): Space-separated pip requirements to install into the
+      environment at worker startup. Requires ephemeral_venv=true.
+    Unknown keys are silently ignored by the server, so a misspelled key takes no effect
+    rather than erroring.
+
     Args:
         context (Context): MCP context object
         system (str): Enterprise system name as listed by ``list_systems``
@@ -1391,7 +1678,7 @@ async def pq_create(
         jvm_profile (str | None): Named JVM profile from controller config (e.g., "large-memory")
         extra_jvm_args (list[str] | None): Additional JVM arguments
         extra_class_path (list[str] | None): Additional classpath entries to prepend (e.g., ["/opt/libs/custom.jar"])
-        python_virtual_environment (str | None): Named Python venv for Core+ workers
+        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. A JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pandas"}) or the equivalent unescaped JSON text; an object is serialized to compact JSON. See "Python Environment Control" above for the keys. Anything else non-blank is rejected.
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None (default) and 0 = permanent; positive = temporary
@@ -1445,6 +1732,12 @@ async def pq_create(
             )
             result["isError"] = True
             return result
+        try:
+            python_control = _normalize_python_control(python_virtual_environment)
+        except ValueError as e:
+            result["error"] = str(e)
+            result["isError"] = True
+            return result
 
         session_registry = get_enterprise_registry(context, system)
         system_name = system
@@ -1472,7 +1765,7 @@ async def pq_create(
             jvm_profile=jvm_profile,
             extra_jvm_args=extra_jvm_args,
             extra_class_path=extra_class_path,
-            python_virtual_environment=python_virtual_environment,
+            python_virtual_environment=python_control,
             extra_environment_vars=extra_environment_vars,
             init_timeout_nanos=init_timeout_nanos,
             auto_delete_timeout=auto_delete_timeout,
@@ -1741,7 +2034,7 @@ async def pq_modify(
     jvm_profile: str | None = None,
     extra_jvm_args: list[str] | None = None,
     extra_class_path: list[str] | None = None,
-    python_virtual_environment: str | None = None,
+    python_virtual_environment: str | dict[str, object] | None = None,
     extra_environment_vars: list[str] | None = None,
     init_timeout_nanos: int | None = None,
     auto_delete_timeout: int | None = None,
@@ -1799,6 +2092,10 @@ async def pq_modify(
       for it and call pq_restart to apply the changes.
     - Can modify RUNNING PQs but be cautious - restart=True will disrupt active sessions
     - Use pq_details first to see current config before modifying
+    - python_virtual_environment takes a JSON object, e.g. {"ephemeral_venv": true,
+      "ephemeral_requirements": "pandas"}. Pass it as a real object; a backslash-escaped
+      string is rejected before the PQ is read or updated, so the call fails with an
+      error and the existing configuration is left untouched.
 
     Parameter Behaviors:
     - pq_name: Renames the PQ (does not affect serial number or id)
@@ -1814,6 +2111,23 @@ async def pq_modify(
     - restart=True: PQ is stopped and restarted immediately, applying all changes
     - restart=False: Changes are saved but PQ continues running with old config until manually restarted
     - Note: Even with restart=False, some changes won't apply until next restart
+
+    Python Environment Control (python_virtual_environment):
+    A JSON object stored in the PQ's python_control field. Three optional keys, all
+    corresponding to the web UI's "Python environment" settings:
+    - ephemeral_venv (bool): Create a fresh virtual environment for this worker instead
+      of using the shared default one. Required before any package can be installed.
+    - seed_ephemeral_venv (bool): Initialize that environment with a copy of the default
+      environment's packages ("Include default packages" in the UI).
+    - ephemeral_requirements (str): Space-separated pip requirements to install into the
+      environment at worker startup. Requires ephemeral_venv=true.
+    The object replaces the field wholesale - to change one key, read the current
+    python_control from pq_details, modify it, and pass the whole object back.
+    Unknown keys are silently ignored by the server. Pass "" to clear the field.
+    pq_details withholds ephemeral_requirements as [REDACTED] unless it is a bare
+    package list, since a URL or index option may carry a credential. A withheld
+    document is not writable as-is: re-read it with reveal_secrets=True, or restore the
+    real requirements yourself. Sending one that still contains [REDACTED] is rejected.
 
     Args:
         context (Context): MCP context object
@@ -1833,7 +2147,7 @@ async def pq_modify(
         jvm_profile (str | None): Named JVM profile from controller config
         extra_jvm_args (list[str] | None): Additional JVM arguments (replaces current)
         extra_class_path (list[str] | None): Additional classpath entries (replaces current)
-        python_virtual_environment (str | None): Named Python venv for Core+ workers
+        python_virtual_environment (str | dict | None): Python environment control document for Core+ workers, stored in the PQ's ``python_control`` field. A JSON object (e.g., {"ephemeral_venv": true, "ephemeral_requirements": "pandas"}) or the equivalent unescaped JSON text; an object is serialized to compact JSON and replaces the field wholesale. Pass "" to clear it. See "Python Environment Control" above for the keys. Anything else non-blank is rejected.
         extra_environment_vars (list[str] | None): Environment variables as ["KEY=value", ...] entries (converted internally to the controller's alternating key/value wire format; replaces current)
         init_timeout_nanos (int | None): Initialization timeout in nanoseconds
         auto_delete_timeout (int | None): Seconds of inactivity before auto-deletion. None = no change, 0 = permanent (auto-delete disabled), positive integer = timeout in seconds
@@ -1886,6 +2200,12 @@ async def pq_modify(
                 "auto_delete_timeout and schedule are mutually exclusive. "
                 "auto_delete_timeout installs its own scheduler."
             )
+            result["isError"] = True
+            return result
+        try:
+            python_control = _normalize_python_control(python_virtual_environment)
+        except ValueError as e:
+            result["error"] = str(e)
             result["isError"] = True
             return result
 
@@ -1944,7 +2264,7 @@ async def pq_modify(
             jvm_profile=jvm_profile,
             extra_jvm_args=extra_jvm_args,
             extra_class_path=extra_class_path,
-            python_virtual_environment=python_virtual_environment,
+            python_virtual_environment=python_control,
             extra_environment_vars=extra_environment_vars,
             init_timeout_nanos=init_timeout_nanos,
             auto_delete_timeout=auto_delete_timeout,

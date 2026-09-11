@@ -71,7 +71,28 @@ def test_details(tmp_path: Path) -> None:
     result, call = _run(["pq", "details", "123"], {"success": True}, tmp_path)
     assert result.exit_code == 0
     assert call.await_args.args[2] == "pq_details"
-    assert call.await_args.args[3] == {"id": "123"}
+    assert call.await_args.args[3] == {"id": "123", "reveal_secrets": False}
+
+
+def test_details_reveal_secrets_forwards_and_warns(tmp_path: Path) -> None:
+    """The opt-in reaches the tool, and the tool's signal drives the stderr warning."""
+    result, call = _run(
+        ["pq", "details", "123", "--reveal-secrets"],
+        {"success": True, "warning": "reveal_secrets=True: ..."},
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"id": "123", "reveal_secrets": True}
+    assert "--reveal-secrets wrote plaintext secret values" in result.stderr
+
+
+def test_details_reveal_secrets_without_a_disclosure_is_quiet(tmp_path: Path) -> None:
+    """No warning field means nothing was disclosed, so nothing is announced."""
+    result, _ = _run(
+        ["pq", "details", "123", "--reveal-secrets"], {"success": True}, tmp_path
+    )
+    assert result.exit_code == 0
+    assert result.stderr == ""
 
 
 def test_name_to_id(tmp_path: Path) -> None:
@@ -204,6 +225,49 @@ def test_modify_only_passes_given_fields(tmp_path: Path) -> None:
     assert "server" not in args
 
 
+def test_create_forwards_python_venv_verbatim(tmp_path: Path) -> None:
+    """The JSON control document reaches the tool as the exact shell text."""
+    document = '{"ephemeral_venv": true, "ephemeral_requirements": "pandas"}'
+    result, call = _run(
+        [
+            "pq",
+            "create",
+            "nightly",
+            "--system",
+            "prod",
+            "--heap-size-gb",
+            "4",
+            "--python-venv",
+            document,
+        ],
+        {"success": True, "id": "999"},
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[2] == "pq_create"
+    assert call.await_args.args[3]["python_virtual_environment"] == document
+
+
+def test_modify_forwards_python_venv_verbatim(tmp_path: Path) -> None:
+    """modify forwards the document unchanged; the tool owns normalization."""
+    document = '{"seed_ephemeral_venv": false}'
+    result, call = _run(
+        ["pq", "modify", "123", "--python-venv", document],
+        {"success": True},
+        tmp_path,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[2] == "pq_modify"
+    assert call.await_args.args[3]["python_virtual_environment"] == document
+
+
+def test_modify_omits_python_venv_when_not_given(tmp_path: Path) -> None:
+    """An unset --python-venv leaves python_control untouched on the PQ."""
+    result, call = _run(["pq", "modify", "123"], {"success": True}, tmp_path)
+    assert result.exit_code == 0
+    assert "python_virtual_environment" not in call.await_args.args[3]
+
+
 def test_modify_restart_flag(tmp_path: Path) -> None:
     result, call = _run(
         ["pq", "modify", "123", "--restart"], {"success": True}, tmp_path
@@ -326,7 +390,10 @@ def test_details_falls_back_to_context_pq(tmp_path: Path) -> None:
     rt.context_store.set(ContextKey.PQ, "enterprise:prod:123")
     result, call = _run(["pq", "details"], {"success": True}, tmp_path, runtime=rt)
     assert result.exit_code == 0
-    assert call.await_args.args[3] == {"id": "enterprise:prod:123"}
+    assert call.await_args.args[3] == {
+        "id": "enterprise:prod:123",
+        "reveal_secrets": False,
+    }
 
 
 def test_create_falls_back_to_context_system(tmp_path: Path) -> None:

@@ -25,7 +25,9 @@ __all__ = [
     "parse_key_value",
     "read_local_script",
     "require_success",
+    "reveal_secrets_option",
     "tool_payload",
+    "warn_revealed_secrets",
     "wrapper_error_codes",
     "yes_option",
 ]
@@ -132,10 +134,36 @@ def reveal_secrets_option(f: Any) -> Any:
             "Include plaintext secret values in the output. Without this "
             "flag each command withholds them in whatever way suits its "
             "output: 'config get' prints [REDACTED], 'session open' "
-            "reports the URL without its auth token. Treat the result "
-            "like a password."
+            "reports the URL without its auth token. When this actually "
+            "discloses something a warning is written to stderr. Treat "
+            "the result like a password."
         ),
     )(f)
+
+
+def warn_revealed_secrets(count: int | None = None) -> None:
+    """Warn on stderr that plaintext secrets reached the command's output.
+
+    Call only when a secret really reached that output -- for a normal payload
+    that means after it has been written, not merely because the flag was
+    passed.
+
+    Args:
+        count (int | None): How many secret values were revealed. ``None`` (the
+            default) omits the number, for a verb that reveals a fixed set of
+            fields rather than a countable list of values.
+    """
+    if count is None:
+        subject = "plaintext secret values"
+    else:
+        plural = "" if count == 1 else "s"
+        subject = f"{count} plaintext secret value{plural}"
+    click.echo(
+        f"warning: --reveal-secrets wrote {subject} to this command's output; "
+        "treat it like a password and keep it out of logs, shell history, and "
+        "shared transcripts.",
+        err=True,
+    )
 
 
 def yes_option(f: Any) -> Any:

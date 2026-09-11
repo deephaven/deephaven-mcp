@@ -65,7 +65,6 @@ from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_response_size,              # Validate response size limits
     format_schema_result,             # Format a single-table schema result
     build_table_data_response,        # Build a table data response dict
-    redact_json_sensitive_fields,     # Redact sensitive fields from JSON strings
 )
 ```
 
