@@ -139,7 +139,8 @@ def _parse_python_control_text(value: str) -> dict[str, object]:
     """
     try:
         parsed = json.loads(value)
-    except json.JSONDecodeError as e:
+        json.dumps(parsed, allow_nan=False)
+    except ValueError as e:
         raise ValueError(
             f"python_virtual_environment is not valid JSON: {e}. It takes a JSON "
             'object such as {"ephemeral_venv": true}, not a bare virtualenv name. '
