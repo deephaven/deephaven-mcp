@@ -43,7 +43,6 @@ from deephaven_mcp.cli._command import HelpfulCommand, HelpfulGroup
 from deephaven_mcp.cli._commands._wrapping import (
     parse_key_value,
     reveal_secrets_option,
-    warn_revealed_secrets,
 )
 from deephaven_mcp.cli._echo import echo_payload, echo_payload_no_runtime
 from deephaven_mcp.cli._errors import CliError, ErrorCode, ExitCode
@@ -245,6 +244,22 @@ def _warn_restart_hint() -> None:
     click.echo(
         "note: if a daemon is running, it keeps the configuration it loaded; "
         "run 'dhcli daemon stop' so the next command picks up this change.",
+        err=True,
+    )
+
+
+def _warn_revealed_secrets(count: int) -> None:
+    """Warn on stderr that plaintext secrets were written to stdout.
+
+    Args:
+        count (int): How many secret values were revealed. Callers only
+            invoke this when it is non-zero.
+    """
+    plural = "" if count == 1 else "s"
+    click.echo(
+        f"warning: --reveal-secrets wrote {count} plaintext secret value{plural} "
+        "to stdout; treat this output like a password and keep it out of logs, "
+        "shell history, and shared transcripts.",
         err=True,
     )
 
@@ -717,9 +732,9 @@ async def config_get(
             payload, secrets = _read_section_tree(store, section, reveal=reveal_secrets)
         case _:
             assert_never(resolved)
-    echo_payload_no_runtime(ctx, payload)
     if reveal_secrets and secrets:
-        warn_revealed_secrets(secrets)
+        _warn_revealed_secrets(secrets)
+    echo_payload_no_runtime(ctx, payload)
 
 
 def _redacted(

@@ -407,10 +407,7 @@ were not given and you have disclosed that session's credentials.
 `credentials` and `url` print the token — that is what they are for.
 `session open` hands it to the browser instead and keeps it out of
 stdout unless you pass `--reveal-secrets`, the same opt-in `config get`
-uses. `pq details --reveal-secrets` is the same case for a PQ: it
-reports that PQ's stored secret-bearing fields, so aiming it at a PQ you
-were not given discloses whatever credentials that PQ was configured
-with.
+uses.
 
 ### `dhcli daemon`
 
@@ -638,7 +635,7 @@ no PQ counterpart (local workers are ephemeral).
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
 | `list [SYSTEM]`                       | Lists PQs configured on a system — every user's, including production; see [Choosing a target](#choosing-a-target). Wraps `pq_list`. |
-| `details [ID]`                        | Configuration + status for one PQ. Secret-bearing fields are redacted unless `--reveal-secrets` is passed. Wraps `pq_details`. |
+| `details [ID]`                        | Configuration + status for one PQ. Wraps `pq_details`. |
 | `name-to-id <system> <name>`          | Resolves a PQ name to its fully qualified id. Wraps `pq_name_to_id`. |
 | `create <name> --system S --heap-size-gb N` | Creates a PQ on `--system` with `--heap-size-gb` of heap. Script via `--script-body`/`--script-body-path`/`--git-script-path`; see the config flags below. Unset flags use controller defaults. Wraps `pq_create`. |
 | `modify [ID]`                         | Updates only the fields passed; everything else is left unchanged. A repeatable option **replaces** the PQ's existing list rather than appending. `--restart` restarts the PQ after applying the change. `--yes` skips the context confirmation. Wraps `pq_modify`. |
@@ -688,23 +685,17 @@ dhcli pq modify enterprise:prod:1234567890 \
 
 The object replaces the field wholesale, so to change one key read the current
 `python_control` from `dhcli pq details ID`, modify it, and pass the whole object
-back. `pq details` reports only the three recognized keys, and withholds
-`ephemeral_requirements` as `[REDACTED]` unless a character allowlist says it is
-a bare package list (names, extras, version specifiers). Anything else — notably
-a URL, which can carry an index credential — withholds the whole value; re-read
-with `--reveal-secrets` to get it, and writing back a document that still holds
-`[REDACTED]` exits `3`. Being a character check rather than credential detection,
-it cannot flag a bare token that looks like a package name, so keep index
-credentials in `~/.netrc`, a keyring, or the environment instead.
+back.
 
-`--reveal-secrets` on `pq details` returns `config.python_control`,
-`config.type_specific_fields_json`, and `state_details.type_specific_state_json`
-— plus that same `type_specific_state_json` on every `replicas[]` and
-`spares[]` entry — as stored, an unset field reading as `null`. When it actually
-discloses something the redacted response withholds, it warns on stderr and adds
-a `warning` field to the payload. Treat that output like a password: a credential
-passed on the command line is visible in the process's arguments (readable by
-other local users on Linux) and recorded in your shell history.
+Note that a pip requirement can point at a URL, and a URL can carry a password
+in its [userinfo][userinfo] — `pkg @ https://user:TOKEN@host/pkg.whl`. That form
+is deprecated by RFC 3986, and `pq details` reports `python_control` as stored,
+so prefer an index credential the worker already holds over one written into
+this field. A credential passed on the command line is also visible in the
+process's arguments (readable by other local users on Linux) and recorded in
+your shell history.
+
+[userinfo]: https://datatracker.ietf.org/doc/html/rfc3986.html#section-3.2.1
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the
