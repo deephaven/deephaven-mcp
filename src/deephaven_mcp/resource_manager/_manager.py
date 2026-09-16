@@ -98,6 +98,7 @@ from deephaven_mcp._taxonomy import SessionOrigin, SystemType
 from deephaven_mcp.auth.credentials import Credentials
 from deephaven_mcp.client import (
     CommunityClientTimeouts,
+    CorePlusControllerClient,
     CorePlusSession,
     CorePlusSessionFactory,
     CoreSession,
@@ -105,6 +106,7 @@ from deephaven_mcp.client import (
 )
 from deephaven_mcp.sessions import CommunitySessionConfig, EnterpriseSystemConfig
 
+from ._healer import ControllerHealer
 from ._launcher import (
     DockerLaunchedSession,
     PythonLaunchedSession,
@@ -389,13 +391,13 @@ class BaseItemManager[T: AsyncClosable](ABC):
             - ``_item_cache`` (``T | None``): the lazily created resource,
               or ``None`` when not yet created / after :meth:`close` /
               after idle eviction. Set to non-``None`` only by
-              :meth:`_get_unlocked` (cache miss path).
+              :meth:`_ensure_item` (cache miss path).
             - ``_last_accessed`` (``float | None``): monotonic timestamp
               of the most recent :meth:`get`. ``None`` means "never
               accessed since construction or last close / idle-eviction"
               and is therefore not eligible for idle eviction. Whenever
               ``_item_cache`` is non-``None``, ``_last_accessed`` is also
-              non-``None`` (set together in :meth:`_get_unlocked`).
+              non-``None`` (set together in :meth:`_ensure_item`).
             - ``_lock`` (``asyncio.Lock``): serializes reads and writes
               of the two slots above.
 
@@ -431,6 +433,8 @@ class BaseItemManager[T: AsyncClosable](ABC):
         self._item_cache: T | None = None
         self._last_accessed: float | None = None
         self._lock = asyncio.Lock()
+        self._creation_lock = asyncio.Lock()
+        self._generation = 0
 
         qualified_session_id = QualifiedSessionId(system_type, system, session_id)
         _LOGGER.info(
@@ -763,81 +767,110 @@ class BaseItemManager[T: AsyncClosable](ABC):
         """
         return QualifiedSessionId(self.system_type, self.system, self.session_id)
 
-    async def _get_unlocked(self) -> T:
-        """Get the managed resource without acquiring the synchronization lock.
+    def _clear_cache_unlocked(self) -> T | None:
+        """Empty the cache slot and invalidate any creation still in flight.
 
-        This private method provides non-locking access to the managed resource,
-        implementing lazy initialization when no cached resource exists. It assumes
-        the caller has already acquired self._lock to ensure thread-safe operation.
-
-        Lazy Initialization Pattern:
-            - If a resource is cached, returns it immediately (cache hit)
-            - If no resource is cached, creates a new one via _create_item() (cache miss)
-            - Caches the newly created resource for future requests
-            - Provides comprehensive logging for debugging and monitoring
+        Bumping the generation is what stops a :meth:`_create_item` that
+        started before this call from publishing its result afterwards.
 
         Lock Safety:
-            This method MUST be called while holding self._lock. It is designed to be
-            used by other methods that need resource access within their critical sections,
-            avoiding the overhead and potential deadlock issues of nested lock acquisition.
-
-        Usage Context:
-            Called by:
-            - liveness_status() when ensure_item=True and no cached resource exists
-            - Other internal methods that need lock-free resource access
-            - Should NOT be called directly by external code
-
-        Performance Characteristics:
-            - Cache hits are very fast (simple attribute access)
-            - Cache misses involve resource creation overhead
-            - Comprehensive logging helps with performance monitoring
-
-        Error Propagation:
-            This method does not handle exceptions from resource creation. All exceptions
-            from _create_item() bubble up to the caller, where they can be handled
-            appropriately based on the calling context.
+            Must be called while holding ``self._lock``.
 
         Returns:
-            T: The managed resource instance, either:
-                - An existing cached resource (immediate return)
-                - A newly created and cached resource (after successful creation)
-
-        Raises:
-            Exception: Any exception raised by the _create_item() implementation,
-                including but not limited to:
-                - ConfigurationError: Invalid or missing configuration
-                - AuthenticationError: Authentication or authorization failures
-                - SessionCreationError: Resource creation failures
-                - NetworkError: Connectivity or communication issues
-
-        Thread Safety:
-            This method is NOT thread-safe by itself. The caller MUST hold ``self._lock``
-            before calling this method. Both ``self._item_cache`` and
-            ``self._last_accessed`` are read and written here; future refactors must
-            keep the timestamp update inside the same critical section as the cache
-            mutation, since :meth:`maybe_close_if_idle` reads
-            ``self._last_accessed`` under the same lock.
-
-        See Also:
-            get(): The public, thread-safe method that acquires the lock and calls this
-            liveness_status(): Another caller that uses this for resource access
+            T | None: The item that was cached, for the caller to close outside
+                the lock; ``None`` when the cache was already empty.
         """
-        if self._item_cache:
+        item = self._item_cache
+        self._item_cache = None
+        self._last_accessed = None
+        self._generation += 1
+        return item
+
+    async def _cached_unlocked(self) -> T | None:
+        """Return the cached item without creating one, refreshing its access time.
+
+        The subclass hook for gating cache hits; :meth:`_ensure_item` calls it
+        under ``self._lock``.
+
+        Lock Safety:
+            Must be called while holding ``self._lock``. Both ``_item_cache``
+            and ``_last_accessed`` are read and written here; future refactors
+            must keep the timestamp update inside the same critical section as
+            the cache read, since :meth:`maybe_close_if_idle` reads
+            ``_last_accessed`` under the same lock.
+
+        Returns:
+            T | None: The cached item, or ``None`` when the cache is empty.
+        """
+        if self._item_cache is not None:
             _LOGGER.debug(
                 f"[{self.__class__.__name__}] Cache hit for '{self.qualified_session_id}'"
             )
             self._last_accessed = time.monotonic()
-            return self._item_cache
-
-        _LOGGER.info(
-            f"[{self.__class__.__name__}] Cache miss - creating new item for '{self.qualified_session_id}'..."
-        )
-        self._item_cache = await self._create_item()
-        self._last_accessed = time.monotonic()
-        _LOGGER.info(
-            f"[{self.__class__.__name__}] Successfully created and cached new item for '{self.qualified_session_id}'"
-        )
         return self._item_cache
+
+    async def _ensure_item(self) -> T:
+        """Return the cached item, creating it once if the cache is empty.
+
+        Concurrency:
+            Two locks with distinct jobs. ``self._lock`` guards the cache slot
+            and is only ever held for synchronous state reads and writes --
+            never across ``_create_item()``. ``self._creation_lock`` provides
+            single-flight creation: the first caller creates while the rest
+            queue behind it and then observe the published item.
+
+            Holding ``self._lock`` across creation would make it a fail-fast
+            hazard for the whole class: every method that takes it (:meth:`get`,
+            :meth:`liveness_status`, :meth:`is_alive`, :meth:`close`,
+            :meth:`maybe_close_if_idle`) would block for the full connect
+            timeout whenever any caller happened to be creating. Callers that
+            must answer instantly -- the enterprise controller's fail-fast
+            paths, for instance -- depend on that not happening.
+
+        Returns:
+            T: The cached item, or a newly created and cached one.
+
+        Raises:
+            Exception: Anything :meth:`_create_item` raises, unchanged. A failed
+                creation caches nothing, so a later call retries.
+        """
+        async with self._lock:
+            item = await self._cached_unlocked()
+        if item is not None:
+            return item
+
+        async with self._creation_lock:
+            while True:
+                # Another caller may have created and published while we queued.
+                async with self._lock:
+                    item = await self._cached_unlocked()
+                    generation = self._generation
+                if item is not None:
+                    return item
+
+                _LOGGER.info(
+                    f"[{self.__class__.__name__}] Cache miss - creating new item for '{self.qualified_session_id}'..."
+                )
+                created = await self._create_item()
+                async with self._lock:
+                    published = self._generation == generation
+                    if published:
+                        self._item_cache = created
+                        self._last_accessed = time.monotonic()
+                if published:
+                    _LOGGER.info(
+                        f"[{self.__class__.__name__}] Successfully created and cached new item for '{self.qualified_session_id}'"
+                    )
+                    return created
+
+                # A close landed while this was being created, so the item
+                # belongs to nobody. Release it and start over; a manager that
+                # refuses to be reopened raises from _create_item next pass.
+                _LOGGER.info(
+                    f"[{self.__class__.__name__}] Discarding item created for "
+                    f"'{self.qualified_session_id}' during a concurrent close"
+                )
+                await self._close_captured_item(created)
 
     async def get(self) -> T:
         """Get the managed resource, using lazy initialization with full thread safety.
@@ -913,25 +946,22 @@ class BaseItemManager[T: AsyncClosable](ABC):
         _LOGGER.debug(
             f"[{self.__class__.__name__}] Getting managed item for '{self.qualified_session_id}'"
         )
-        async with self._lock:
-            result = await self._get_unlocked()
-            _LOGGER.debug(
-                f"[{self.__class__.__name__}] Successfully retrieved managed item for '{self.qualified_session_id}'"
-            )
-            return result
+        result = await self._ensure_item()
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] Successfully retrieved managed item for '{self.qualified_session_id}'"
+        )
+        return result
 
-    async def _liveness_status_unlocked(
+    async def _classify_liveness(
         self, ensure_item: bool = False
     ) -> tuple[ResourceLivenessStatus, str | None]:
-        """Check resource liveness without acquiring the synchronization lock.
+        """Resolve the item and check its health, mapping failures to a status.
 
-        This private method provides non-locking access to liveness checking functionality,
-        implementing the same dual-mode liveness checking as the public liveness_status()
-        method. It assumes the caller has already acquired self._lock for thread safety.
+        Takes no lock: :meth:`_ensure_item` does its own locking, and
+        :meth:`_check_liveness` performs I/O that must not run under the
+        manager lock.
 
         Dual Liveness Check Modes:
-            The method supports two distinct liveness checking scenarios:
-
             **Mode 1: Manager Capability Check (ensure_item=True)**
             - Question: "Can this manager provide a working resource?"
             - Behavior: Creates resource if none cached, then checks its health
@@ -943,29 +973,11 @@ class BaseItemManager[T: AsyncClosable](ABC):
             - Use Case: Health monitoring, periodic status checks
 
         Exception Handling Strategy:
-            This method implements centralized exception handling that converts various
-            error types into appropriate ResourceLivenessStatus values:
+            Converts error types into ResourceLivenessStatus values:
             - AuthenticationError → UNAUTHORIZED
             - ConfigurationError → MISCONFIGURED
             - SessionCreationError → OFFLINE (if connection failure) or MISCONFIGURED (if config issue)
             - Other exceptions → UNKNOWN (with warning log)
-
-        Lock Safety:
-            This method MUST be called while holding self._lock. It delegates to other
-            non-locking methods (_get_unlocked, _check_liveness) to avoid nested lock
-            acquisition that could cause deadlocks.
-
-        Usage Context:
-            Called by:
-            - liveness_status(): The public thread-safe wrapper method
-            - Other internal methods needing lock-free liveness checking
-            - Should NOT be called directly by external code
-
-        Performance Characteristics:
-            - Mode 1 (ensure_item=True): May be slow due to resource creation
-            - Mode 2 (ensure_item=False): Fast for cached resources, immediate for none
-            - Exception handling adds minimal overhead
-            - Error logging provides debugging context
 
         Args:
             ensure_item: Controls the liveness checking mode:
@@ -978,32 +990,23 @@ class BaseItemManager[T: AsyncClosable](ABC):
                 - str | None: Optional detail message explaining non-ONLINE statuses,
                   particularly useful for debugging and error reporting
 
-        Thread Safety:
-            This method is NOT thread-safe by itself. The caller MUST hold self._lock
-            before calling this method to ensure proper synchronization.
-
-        Logging:
-            - Warning logs for unexpected exceptions with full context
-            - No logging for successful operations (handled by calling methods)
-            - Error details included in return value for caller processing
-
         See Also:
-            liveness_status(): The public, thread-safe wrapper for this method
+            liveness_status(): The public wrapper that logs the outcome
             _check_liveness(): The abstract method that performs actual health checks
-            _get_unlocked(): Method used to get/create resources in ensure_item mode
+            _ensure_item(): Resolves the item in ``ensure_item`` mode
         """
         try:
             if ensure_item:
                 # Mode 1: "Can this manager provide a working item?"
-                # Get or create the item, then check its liveness
-                item = await self._get_unlocked()
-                return await self._check_liveness(item)
+                item = await self._ensure_item()
             else:
-                # Mode 2: "Is the cached item alive?"
-                # Only check cached item, return OFFLINE if none cached
-                if not self._item_cache:
+                # Mode 2: "Is the cached item alive?" A plain attribute read
+                # with no await, so it needs no lock.
+                cached = self._item_cache
+                if cached is None:
                     return (ResourceLivenessStatus.OFFLINE, "No item cached")
-                return await self._check_liveness(self._item_cache)
+                item = cached
+            return await self._check_liveness(item)
         except AuthenticationError as e:
             return (ResourceLivenessStatus.UNAUTHORIZED, str(e))
         except ConfigurationError as e:
@@ -1151,58 +1154,12 @@ class BaseItemManager[T: AsyncClosable](ABC):
             f"[{self.__class__.__name__}] Checking liveness status ({mode} mode) for '{self.qualified_session_id}'"
         )
 
-        async with self._lock:
-            status, detail = await self._liveness_status_unlocked(ensure_item)
-            detail_suffix = f" ({detail})" if detail else ""
-            _LOGGER.info(
-                f"[{self.__class__.__name__}] Liveness check ({mode} mode) for '{self.qualified_session_id}': {status.value}{detail_suffix}"
-            )
-            return status, detail
-
-    async def _is_alive_unlocked(self) -> bool:
-        """Check if the cached resource is alive without acquiring the synchronization lock.
-
-        This private method provides a simplified boolean health check for the cached
-        resource without lock acquisition. It assumes the caller has already acquired
-        self._lock and delegates to _liveness_status_unlocked for the actual health check.
-
-        Simplified Health Check:
-            This method provides a boolean interface to the more comprehensive liveness
-            checking functionality, returning True only if the resource status is
-            ResourceLivenessStatus.ONLINE, False for any other status.
-
-        Lock Safety:
-            This method MUST be called while holding self._lock. It is designed for use
-            within critical sections where simplified health checking is needed without
-            the complexity of status detail messages.
-
-        Usage Context:
-            Called by:
-            - close(): To check if a resource needs cleanup before closing
-            - is_alive(): The public thread-safe wrapper method
-            - Other internal methods needing simple boolean health checks
-            - Should NOT be called directly by external code
-
-        Performance:
-            Very fast operation that delegates to _liveness_status_unlocked() and
-            performs a simple enum comparison. The performance characteristics depend
-            on the default cached-only mode of _liveness_status_unlocked().
-
-        Returns:
-            bool: True if the cached resource is ONLINE and ready for use,
-                  False for any other status (OFFLINE, UNAUTHORIZED, MISCONFIGURED, UNKNOWN)
-                  or if no resource is cached.
-
-        Thread Safety:
-            This method is NOT thread-safe by itself. The caller MUST hold self._lock
-            before calling this method to ensure proper synchronization.
-
-        See Also:
-            is_alive(): The public, thread-safe wrapper for this method
-            _liveness_status_unlocked(): The underlying method that provides detailed status
-        """
-        status, _ = await self._liveness_status_unlocked()
-        return status == ResourceLivenessStatus.ONLINE
+        status, detail = await self._classify_liveness(ensure_item)
+        detail_suffix = f" ({detail})" if detail else ""
+        _LOGGER.info(
+            f"[{self.__class__.__name__}] Liveness check ({mode} mode) for '{self.qualified_session_id}': {status.value}{detail_suffix}"
+        )
+        return status, detail
 
     async def is_alive(self) -> bool:
         """Check if the cached resource is currently alive and ready for use.
@@ -1274,8 +1231,8 @@ class BaseItemManager[T: AsyncClosable](ABC):
             get(): Method to retrieve the managed resource
             close(): Method to clean up resources when they're no longer needed
         """
-        async with self._lock:
-            return await self._is_alive_unlocked()
+        status, _ = await self._classify_liveness()
+        return status is ResourceLivenessStatus.ONLINE
 
     async def close(self) -> None:
         """Close the cached resource and reset the manager for reuse.
@@ -1301,9 +1258,7 @@ class BaseItemManager[T: AsyncClosable](ABC):
         )
 
         async with self._lock:
-            item_to_close = self._item_cache
-            self._item_cache = None
-            self._last_accessed = None
+            item_to_close = self._clear_cache_unlocked()
 
         if item_to_close is None:
             _LOGGER.debug(
@@ -1997,11 +1952,11 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
     async def _create_item(self) -> CoreSession:
         """Create a new CoreSession, refusing once the manager has been stopped.
 
-        Called under ``self._lock`` from
-        :meth:`BaseItemManager._get_unlocked` on a cache miss.  Reading
-        :attr:`_is_stopped` here is lock-protected because
-        :meth:`close` sets the flag under the same lock that captures
-        and clears the cache.
+        Called from :meth:`BaseItemManager._ensure_item` on a cache miss,
+        under the creation lock rather than the manager lock. :meth:`close`
+        sets :attr:`_is_stopped` before it stops the process, so a creation
+        that passes this check races only the teardown itself — the caller's
+        next use surfaces a clear closed-resource error.
 
         Returns:
             CoreSession: A new session connected to the launched process.
@@ -2022,10 +1977,10 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         return await super()._create_item()
 
     @override
-    async def _get_unlocked(self) -> CoreSession:
+    async def _cached_unlocked(self) -> CoreSession | None:
         """Return the cached session, refusing once the manager has been stopped.
 
-        Overrides :meth:`BaseItemManager._get_unlocked` to consult
+        Overrides :meth:`BaseItemManager._cached_unlocked` to consult
         :attr:`_is_stopped` **before** returning a cached item.  Without
         this gate, a caller racing :meth:`close` could acquire
         ``self._lock`` between the close's cache-clear and the underlying
@@ -2033,11 +1988,11 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         to become unusable.
 
         Must be called while holding ``self._lock``; see
-        :meth:`BaseItemManager._get_unlocked` for the contract.
+        :meth:`BaseItemManager._cached_unlocked` for the contract.
 
         Returns:
-            CoreSession: A live cached session, or a freshly created
-                session on cache miss.
+            CoreSession | None: The cached session, or ``None`` when the cache
+                is empty.
 
         Raises:
             SessionCreationError: When :meth:`close` has stopped the
@@ -2049,7 +2004,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
                 f"Cannot return session for '{self.qualified_session_id}': "
                 f"the dynamic session has been stopped."
             )
-        return await super()._get_unlocked()
+        return await super()._cached_unlocked()
 
     @property
     def connection_url(self) -> str:
@@ -2136,9 +2091,7 @@ class DynamicCommunitySessionManager(CommunitySessionManager):
         # _is_stopped=True (raises) or, if it won the lock before this
         # block, returns a cached session that is closed promptly below.
         async with self._lock:
-            session_to_close = self._item_cache
-            self._item_cache = None
-            self._last_accessed = None
+            session_to_close = self._clear_cache_unlocked()
             self._is_stopped = True
 
         # Close the captured session outside the lock.
@@ -2943,6 +2896,177 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
         self._system_config = system_config
         self._creds = creds
         self._timeouts = timeouts
+        self._healer = ControllerHealer(self, timeouts)
+
+    async def get_controller_client(self) -> CorePlusControllerClient:
+        """Return the factory's controller client, or fail fast while it is healing.
+
+        Returns the cached factory's controller client when the controller
+        subscription is healthy, ending any recorded outage first.
+
+        When the subscription is wedged (see
+        :attr:`CorePlusControllerClient.is_poisoned`), this does **not** block or
+        recreate inline. Recreation is owned by the
+        :class:`~deephaven_mcp.resource_manager._healer.ControllerHealer` that
+        runs for as long as a factory exists, recreating it on a capped
+        exponential backoff until a fresh controller subscribes cleanly. This
+        method instead records the outage and raises immediately with the
+        healer's status message, carrying
+        :data:`~deephaven_mcp.client.CONTROLLER_SUBSCRIBING_ERROR_CODE` and
+        reporting how long the subscription has been initializing, how many
+        recreate attempts have been made, the countdown to the next recreate,
+        and the ``enterprise_controller_reconnect`` tool that forces one now.
+
+        The same instant response is given while an outage is in progress and
+        the cache is momentarily empty (between the healer's discard and its
+        rebuild): the healer owns creation for the duration of the outage, so
+        this does not queue behind its rebuild on the creation lock and block
+        the caller for ``session_connect_timeout_seconds``. Both the cache
+        inspection and the outage check are lock-free, so the gate answers even
+        while that rebuild runs.
+
+        Returns:
+            CorePlusControllerClient: A healthy controller client.
+
+        Raises:
+            DeephavenConnectionError: If the controller subscription is currently
+                wedged (message carries
+                :data:`~deephaven_mcp.client.CONTROLLER_SUBSCRIBING_ERROR_CODE`).
+            DeephavenConnectionError: If obtaining the factory times out or the
+                enterprise system is unreachable.
+            AuthenticationError: If authentication fails while creating the factory.
+            Exception: Any other error raised by factory creation.
+        """
+        if self._item_cache is None:
+            msg = self._healer.healing_status_message(time.monotonic())
+            if msg is not None:
+                _LOGGER.warning(
+                    f"[{self.__class__.__name__}:get_controller_client] {msg}"
+                )
+                raise DeephavenConnectionError(msg)
+
+        # A cached factory means get() is a cache hit, so this cannot block on
+        # a creation even when the cached controller turns out to be wedged.
+        factory = await self.get()
+        controller = factory.controller_client
+
+        if controller.is_poisoned:
+            msg = self._healer.note_wedged(time.monotonic())
+            _LOGGER.warning(f"[{self.__class__.__name__}:get_controller_client] {msg}")
+            raise DeephavenConnectionError(msg)
+
+        self._healer.note_healthy()
+        return controller
+
+    async def request_reconnect(self) -> bool:
+        """Ask the background healer to run a recreate pass immediately.
+
+        Returns without waiting for the (potentially minutes-long) factory
+        rebuild. Backs the ``enterprise_controller_reconnect`` MCP tool. See
+        :meth:`ControllerHealer.request_reconnect` for when a signal is sent.
+
+        Returns:
+            bool: ``True`` when a running healer was signaled and its next pass
+                will attempt a recreate; ``False`` when no attempt was
+                requested, because nothing is wedged or no healer is running.
+        """
+        return await self._healer.request_reconnect()
+
+    @override
+    async def close(self) -> None:
+        """Stop the subscription healer and close the cached factory.
+
+        Both happen under one acquisition of the creation lock, which
+        :meth:`_ensure_item` holds while :meth:`_create_item` starts a healer.
+        Stopping a healer and starting one are therefore mutually exclusive: a
+        concurrent :meth:`get` either finishes before this runs, and has its
+        factory closed and its healer stopped here, or starts afterwards as an
+        ordinary reuse. Stopping also clears any outage the healer was
+        tracking, so a manager closed while wedged is reusable rather than
+        failing fast forever against an outage nothing is left to heal.
+
+        Idempotent: safe to call multiple times. Never raises.
+        """
+        _LOGGER.debug(
+            f"[{self.__class__.__name__}] Starting close operation for '{self.qualified_session_id}'"
+        )
+        async with self._creation_lock, self._lock:
+            await self._healer.stop()
+            factory = self._clear_cache_unlocked()
+
+        if factory is not None:
+            _LOGGER.info(
+                f"[{self.__class__.__name__}] Closing item for '{self.qualified_session_id}'"
+            )
+            await self._close_captured_item(factory)
+
+    def peek_controller_poisoned(self) -> bool | None:
+        """Report the cached controller's poison state without forcing creation.
+
+        Satisfies :class:`~deephaven_mcp.resource_manager._healer.HealableFactorySource`.
+
+        Takes no lock, and must not: it backs the fail-fast paths, which have
+        to answer instantly even while a rebuild is in flight. Synchronous and
+        single-statement, so the event loop cannot interleave a cache swap into
+        the read.
+
+        Returns:
+            bool | None: ``None`` when no factory is cached; otherwise whether
+                the cached factory's controller subscription is wedged in
+                ``SUBSCRIBING``. ``None`` is ambiguous on its own — it means
+                either "idle, nothing to heal" or "the last recreate failed
+                mid-outage" — and is disambiguated by the healer's outage state.
+        """
+        item = self._item_cache
+        return None if item is None else item.controller_client.is_poisoned
+
+    async def rebuild_factory(self) -> None:
+        """Discard the cached factory if still wedged, then create a replacement.
+
+        Satisfies :class:`~deephaven_mcp.resource_manager._healer.HealableFactorySource`.
+
+        Teardown goes through :meth:`_detach_poisoned_item`, so a controller
+        that recovered or was replaced since the healer's peek is left alone.
+        Never raises: a failed creation is logged and leaves the cache empty,
+        which the healer treats as a continuing outage.
+        """
+        detached = await self._detach_poisoned_item()
+        if detached is not None:
+            # The detach dropped the cache's only reference, so this close is
+            # the last chance to release the factory's channels and threads.
+            # Shielded against a healer stop landing here, and awaited to
+            # completion before unwinding so nothing outlives the cancellation.
+            cleanup = asyncio.create_task(self._close_captured_item(detached))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                await cleanup
+                raise
+        try:
+            await self.get()
+        except Exception as e:
+            _LOGGER.warning(
+                f"[{self.__class__.__name__}:rebuild_factory] Factory recreate "
+                f"failed for '{self.qualified_session_id}': {e}"
+            )
+
+    async def _detach_poisoned_item(self) -> CorePlusSessionFactory | None:
+        """Atomically remove the cached factory, but only if still wedged.
+
+        Re-checks identity and poison state inside the same ``self._lock``
+        acquisition that clears the cache, so a factory that was replaced or
+        that recovered after the healer's earlier peek is never torn down.
+
+        Returns:
+            CorePlusSessionFactory | None: The detached factory, which the
+                caller must close outside the lock; ``None`` when nothing was
+                cached or the cached factory is healthy.
+        """
+        async with self._lock:
+            item = self._item_cache
+            if item is None or not item.controller_client.is_poisoned:
+                return None
+            return self._clear_cache_unlocked()
 
     @override
     async def _create_item(self) -> CorePlusSessionFactory:
@@ -2959,7 +3083,9 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
                the value).
             2. Calls ``CorePlusSessionFactory.from_credentials(system_config, creds)`` with a timeout wrapper.
             3. Logs creation progress (DEBUG) and completion (INFO).
-            4. Handles timeout errors with appropriate logging and exception.
+            4. Starts the subscription healer, which watches this factory's
+               controller for as long as the factory exists.
+            5. Handles timeout errors with appropriate logging and exception.
 
         Timeout Behavior:
             The configurable timeout prevents indefinite hanging when connecting to
@@ -3015,6 +3141,8 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             _LOGGER.info(
                 f"[{self.__class__.__name__}] Successfully created enterprise factory for '{self.qualified_session_id}'"
             )
+            # Idempotent: a rebuild by the running healer re-enters here.
+            self._healer.start()
             return factory
         except TimeoutError as e:
             _LOGGER.error(
@@ -3174,9 +3302,47 @@ class CorePlusSessionFactoryManager(BaseItemManager[CorePlusSessionFactory]):
             EnterpriseSessionManager._check_liveness(): Session-level health checking counterpart
             ResourceLivenessStatus: The enum values returned by this method
         """
+        # A lost controller connection is a factory-level health failure even
+        # when the transport still pings, so surface it as its own OFFLINE reason.
+        if item.controller_client.is_poisoned:
+            return (
+                ResourceLivenessStatus.OFFLINE,
+                "controller connection unavailable",
+            )
+
         alive = await item.ping()
 
         if alive:
             return (ResourceLivenessStatus.ONLINE, None)
         else:
             return (ResourceLivenessStatus.OFFLINE, "Ping returned False")
+
+    @override
+    async def liveness_status(
+        self, ensure_item: bool = False
+    ) -> tuple[ResourceLivenessStatus, str | None]:
+        """Report factory health, failing fast while the healer owns creation.
+
+        Adds one gate to :meth:`BaseItemManager.liveness_status`: while an
+        outage is in progress and the cache is empty -- between the healer's
+        discard and its rebuild -- ``ensure_item=True`` would queue behind that
+        rebuild on the creation lock and block the caller for
+        ``session_connect_timeout_seconds``. The wedged controller is already
+        the answer, so report it without creating anything. The gate is
+        lock-free for the same reason as :meth:`get_controller_client`'s.
+
+        Args:
+            ensure_item (bool): Whether to create the factory when none is
+                cached. See :meth:`BaseItemManager.liveness_status` for the two
+                modes.
+
+        Returns:
+            tuple[ResourceLivenessStatus, str | None]: Liveness status and an
+                optional reason, matching the base method's contract.
+        """
+        if self._item_cache is None and self._healer.outage_active:
+            return (
+                ResourceLivenessStatus.OFFLINE,
+                "controller connection unavailable",
+            )
+        return await super().liveness_status(ensure_item)

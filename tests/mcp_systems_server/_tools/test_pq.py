@@ -3,10 +3,12 @@ Tests for deephaven_mcp.mcp_systems_server._tools.pq.
 """
 
 import asyncio
+import re
 import warnings
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 
 from ._helpers import (
     MockContext,
@@ -148,6 +150,7 @@ from deephaven_mcp.mcp_systems_server._tools.pq import (
     _format_pq_states,
     _format_table_definition,
     _format_worker_protocol,
+    _normalize_python_control,
     _parse_pq_id,
     _pq_state_category,
     _setup_batch_pq_operation,
@@ -189,6 +192,7 @@ async def test_pq_name_to_id_success():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
     mock_controller.get_serial_for_name = AsyncMock(return_value=12345)
 
     context = MockContext(
@@ -221,6 +225,7 @@ async def test_pq_name_to_id_not_found():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
     mock_controller.get_serial_for_name = AsyncMock(
         side_effect=KeyError("PQ not found")
     )
@@ -248,6 +253,9 @@ async def test_pq_name_to_id_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -271,6 +279,9 @@ async def test_pq_name_to_id_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -658,6 +669,7 @@ async def test_pq_restart_multiple():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_pq_info_1 = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_pq_info_2 = create_mock_pq_info(67890, "reporting", "RUNNING", 8.0)
@@ -707,6 +719,7 @@ async def test_pq_restart_partial_failure():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_pq_info_1 = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
 
@@ -758,6 +771,7 @@ async def test_pq_delete_partial_failure():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_pq_info_1 = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
     mock_pq_info_2 = create_mock_pq_info(67890, "reporting", "STOPPED", 8.0)
@@ -816,6 +830,7 @@ async def test_pq_start_partial_failure():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     async def mock_start_side_effect(serial, wait=True):
         if serial == 67890:
@@ -877,6 +892,7 @@ async def test_pq_stop_partial_failure():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
 
@@ -1630,6 +1646,7 @@ async def test_pq_list_success():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Create mock PQ map
     mock_pq_map = {
@@ -1692,6 +1709,9 @@ async def test_pq_list_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -1715,6 +1735,9 @@ async def test_pq_list_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -1753,6 +1776,7 @@ async def test_pq_details_success_by_name(mock_exported_enum, mock_restart_enum)
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller.map() to return PQ map (pq_details uses map() to ensure subscription is ready)
     mock_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -1869,6 +1893,7 @@ async def test_pq_details_success_by_serial():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller.map() to return PQ map (pq_details uses map() to ensure subscription is ready)
     mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
@@ -1904,6 +1929,7 @@ async def test_pq_details_not_found():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller.map() to return empty map (PQ not found)
     mock_controller.map = AsyncMock(return_value={})
@@ -1952,6 +1978,9 @@ async def test_pq_details_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -1975,6 +2004,9 @@ async def test_pq_details_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -2003,6 +2035,7 @@ async def test_pq_details_not_found_by_serial():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller to return None for non-existent PQ
     mock_controller.map = AsyncMock(return_value={})
@@ -2033,6 +2066,7 @@ async def test_pq_create_success():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_config = MagicMock()
@@ -2074,6 +2108,7 @@ async def test_pq_create_forwards_owner():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_config = MagicMock()
     mock_config.pb = MagicMock()
@@ -2100,6 +2135,195 @@ async def test_pq_create_forwards_owner():
     assert mock_controller.make_pq_config.call_args.kwargs["owner"] == "service-account"
 
 
+def test_normalize_python_control_none():
+    """``None`` passes through so the field is left unchanged."""
+    assert _normalize_python_control(None) is None
+
+
+def test_normalize_python_control_serializes_a_dict():
+    """A decoded JSON object is re-encoded to compact JSON text."""
+    assert (
+        _normalize_python_control(
+            {"ephemeral_venv": True, "ephemeral_requirements": "pandas"}
+        )
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pandas"}'
+    )
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+def test_normalize_python_control_blank_clears_the_field(value):
+    """Any blank string collapses to "" so the cleared field reads back as None."""
+    assert _normalize_python_control(value) == ""
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['{"ephemeral_venv": true}', '  {"seed_ephemeral_venv": false}  '],
+)
+def test_normalize_python_control_passes_json_text_through(value):
+    """JSON object text is stored verbatim, surrounding whitespace included."""
+    assert _normalize_python_control(value) == value
+
+
+def test_normalize_python_control_rejects_escaped_json():
+    """A backslash-escaped JSON object is rejected instead of corrupting the field."""
+    with pytest.raises(ValueError, match="not valid JSON"):
+        _normalize_python_control('{\\"ephemeral_venv\\": true}')
+
+
+def test_normalize_python_control_rejects_a_bare_venv_name():
+    """The controller requires JSON, so a bare name is caught before it is stored."""
+    with pytest.raises(ValueError, match="not a bare virtualenv name"):
+        _normalize_python_control("analytics-env")
+
+
+def test_normalize_python_control_rejects_non_object_json():
+    """Valid JSON that is not an object cannot carry the control keys."""
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        _normalize_python_control('["ephemeral_venv"]')
+
+
+@pytest.mark.parametrize("number", [float("nan"), float("inf"), float("-inf")])
+def test_normalize_python_control_rejects_unserializable_float(number):
+    """json.dumps would emit a bare NaN/Infinity token, which is not JSON."""
+    with pytest.raises(ValueError, match="not serializable as JSON"):
+        _normalize_python_control({"ephemeral_venv": number})
+
+
+@pytest.mark.parametrize("value", [{1, 2}, object()])
+def test_normalize_python_control_rejects_unserializable_object(value):
+    """json.dumps raises TypeError here; it must still surface as ValueError."""
+    with pytest.raises(ValueError, match="not serializable as JSON"):
+        _normalize_python_control({"ephemeral_requirements": value})
+
+
+@patch("deephaven_mcp.mcp_systems_server._tools.pq.RestartUsersEnum")
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (
+            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
+            '{"ephemeral_requirements": "pkg @ https://user:tok@host/p.whl"}',
+        ),
+        ('{"ephemeral_venv": true}', '{"ephemeral_venv": true}'),
+        ("", None),
+    ],
+)
+def test_format_pq_config_reports_python_control_as_stored(
+    mock_restart_enum, stored, expected
+):
+    """python_control is not redacted; an unset field reads as None."""
+    mock_restart_enum.Name.return_value = "RU_ADMIN"
+    mock_config = MagicMock()
+    mock_pb = MagicMock()
+    mock_pb.restartUsers = 0
+    mock_pb.typeSpecificFieldsJson = ""
+    mock_pb.pythonControl = stored
+    mock_config.pb = mock_pb
+    assert _format_pq_config(mock_config)["python_control"] == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "key"),
+    [
+        ('{"ephemeral_venv": {"x": 1}}', "ephemeral_venv"),
+        ('{"ephemeral_venv": 1}', "ephemeral_venv"),
+        ('{"seed_ephemeral_venv": "yes"}', "seed_ephemeral_venv"),
+        ('{"ephemeral_requirements": ["pandas"]}', "ephemeral_requirements"),
+        ({"ephemeral_requirements": 3}, "ephemeral_requirements"),
+    ],
+)
+def test_normalize_python_control_rejects_wrong_field_types(value, key):
+    """The documented keys are typed, so a wrong type never reaches the controller."""
+    with pytest.raises(ValueError, match=f"key '{key}' must be"):
+        _normalize_python_control(value)
+
+
+@pytest.mark.parametrize(
+    ("tool", "required"),
+    [
+        (pq_create, {"system": "system", "pq_name": "pq", "heap_size_gb": 8.0}),
+        (pq_modify, {"id": "enterprise:system:12345"}),
+    ],
+)
+def test_python_control_survives_mcp_json_pre_parsing(tool, required):
+    """A JSON-object string argument validates against the tool signature.
+
+    The MCP SDK decodes any JSON-object string argument before validating it, so a
+    ``str``-only annotation rejected the very payload ``python_control`` requires.
+    """
+    meta = func_metadata(tool, skip_names=["context"])
+    raw = {**required, "python_virtual_environment": '{"ephemeral_venv": true}'}
+    validated = meta.arg_model.model_validate(meta.pre_parse_json(raw))
+    assert validated.model_dump_one_level()["python_virtual_environment"] == {
+        "ephemeral_venv": True
+    }
+
+
+@pytest.mark.asyncio
+async def test_pq_create_serializes_python_control_object():
+    """pq_create re-encodes a decoded python_virtual_environment object to JSON text."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
+
+    mock_config = MagicMock()
+    mock_config.pb = MagicMock()
+    mock_controller.make_pq_config = AsyncMock(return_value=mock_config)
+    mock_controller.add_query = AsyncMock(return_value=12345)
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="new-pq",
+        heap_size_gb=8.0,
+        python_virtual_environment={"ephemeral_venv": True},
+    )
+
+    assert result["success"] is True
+    assert (
+        mock_controller.make_pq_config.call_args.kwargs["python_virtual_environment"]
+        == '{"ephemeral_venv":true}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_pq_create_rejects_unparseable_python_control():
+    """pq_create reports an error rather than storing escaped JSON verbatim."""
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": MagicMock(spec=EnterpriseSessionRegistry),
+        }
+    )
+
+    result = await pq_create(
+        context,
+        _TEST_SYSTEM_NAME,
+        pq_name="new-pq",
+        heap_size_gb=8.0,
+        python_virtual_environment='{\\"ephemeral_venv\\": true}',
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not valid JSON" in result["error"]
+
+
 @pytest.mark.asyncio
 async def test_pq_create_success_groovy():
     """Test successful PQ creation with Groovy programming language."""
@@ -2113,6 +2337,7 @@ async def test_pq_create_success_groovy():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_config = MagicMock()
@@ -2155,6 +2380,7 @@ async def test_pq_create_invalid_language():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
     # pq_create now passes programming_language raw to make_pq_config, which normalizes
     # and validates it; an invalid value raises ValueError.
     mock_controller.make_pq_config = AsyncMock(
@@ -2192,6 +2418,9 @@ async def test_pq_create_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -2217,6 +2446,9 @@ async def test_pq_create_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -2375,6 +2607,7 @@ async def test_pq_delete_success_by_name():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_controller.delete_query = AsyncMock()
@@ -2419,6 +2652,7 @@ async def test_pq_delete_success_custom_timeout():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_controller.delete_query = AsyncMock()
@@ -2473,6 +2707,9 @@ async def test_pq_delete_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -2496,6 +2733,9 @@ async def test_pq_delete_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -2524,6 +2764,7 @@ async def test_pq_delete_multiple():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_controller.delete_query = AsyncMock()
@@ -2664,6 +2905,7 @@ async def test_pq_modify_success():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info - this config will be modified in-place
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -2726,6 +2968,7 @@ async def test_pq_modify_with_restart():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info - config will be modified in-place
     current_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
@@ -2784,6 +3027,7 @@ async def test_pq_modify_script_body_running_no_restart_warns():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
@@ -2822,6 +3066,7 @@ async def test_pq_modify_stopped_pq_no_warning():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     current_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
@@ -2858,6 +3103,7 @@ async def test_pq_modify_metadata_only_no_warning():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
@@ -2894,6 +3140,7 @@ async def test_pq_modify_running_with_restart_no_warning():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
@@ -2931,6 +3178,7 @@ async def test_pq_modify_script_path():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -2988,6 +3236,72 @@ async def test_pq_modify_mutually_exclusive_scripts():
 
 
 @pytest.mark.asyncio
+async def test_pq_modify_serializes_python_control_object():
+    """pq_modify re-encodes a decoded python_virtual_environment object to JSON text."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
+
+    current_pq_info = create_mock_pq_info(12345, "pq", "STOPPED", 8.0)
+    mock_controller.map = AsyncMock(return_value={12345: current_pq_info})
+    mock_controller.update_pq_config.return_value = True
+    mock_controller.modify_query = AsyncMock()
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment={
+            "ephemeral_venv": True,
+            "ephemeral_requirements": "pandas",
+        },
+    )
+
+    assert result["success"] is True
+    assert (
+        mock_controller.update_pq_config.call_args.kwargs["python_virtual_environment"]
+        == '{"ephemeral_venv":true,"ephemeral_requirements":"pandas"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_pq_modify_rejects_unparseable_python_control():
+    """pq_modify reports an error rather than corrupting python_control."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await pq_modify(
+        context,
+        id="enterprise:system:12345",
+        python_virtual_environment='{\\"ephemeral_venv\\": true}',
+    )
+
+    assert result["success"] is False
+    assert result["isError"] is True
+    assert "not valid JSON" in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_pq_modify_invalid_pq_id():
     """Test pq_modify with invalid id format."""
     mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
@@ -3020,6 +3334,9 @@ async def test_pq_modify_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -3052,6 +3369,7 @@ async def test_pq_modify_pq_not_found():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller.map() to return empty dict (PQ doesn't exist)
     mock_controller.map = AsyncMock(return_value={})
@@ -3088,6 +3406,7 @@ async def test_pq_modify_invalid_language():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -3128,6 +3447,7 @@ async def test_pq_modify_no_changes():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -3175,6 +3495,7 @@ async def test_pq_modify_all_parameters():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "old_name", "RUNNING", 8.0)
@@ -3206,7 +3527,7 @@ async def test_pq_modify_all_parameters():
         jvm_profile="default",
         extra_jvm_args=["-Xmx4g"],
         extra_class_path=["/path/to/lib.jar"],
-        python_virtual_environment="/path/to/venv",
+        python_virtual_environment='{"ephemeral_venv": true}',
         extra_environment_vars=["VAR1=value1"],
         init_timeout_nanos=60000000000,
         auto_delete_timeout=3600,
@@ -3235,7 +3556,7 @@ async def test_pq_modify_all_parameters():
     assert kwargs["jvm_profile"] == "default"
     assert kwargs["extra_jvm_args"] == ["-Xmx4g"]
     assert kwargs["extra_class_path"] == ["/path/to/lib.jar"]
-    assert kwargs["python_virtual_environment"] == "/path/to/venv"
+    assert kwargs["python_virtual_environment"] == '{"ephemeral_venv": true}'
     assert kwargs["extra_environment_vars"] == ["VAR1=value1"]
     assert kwargs["init_timeout_nanos"] == 60000000000
     assert kwargs["auto_delete_timeout"] == 3600
@@ -3258,6 +3579,7 @@ async def test_pq_modify_clear_auto_delete_timeout():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -3302,6 +3624,7 @@ async def test_pq_modify_set_owner():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     current_pq_info.config.pb.owner = "authenticated-user"
@@ -3348,6 +3671,7 @@ async def test_pq_modify_invalid_restart_users_value():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock current PQ info
     current_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -3384,6 +3708,9 @@ async def test_pq_modify_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -3416,6 +3743,7 @@ async def test_pq_start_success():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_controller.start_and_wait = AsyncMock()
@@ -3466,6 +3794,7 @@ async def test_pq_start_already_running():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_controller.start_and_wait = AsyncMock()
     mock_pq_running = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -3519,6 +3848,9 @@ async def test_pq_start_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -3542,6 +3874,9 @@ async def test_pq_start_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -3570,6 +3905,7 @@ async def test_pq_start_multiple():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_controller.start_and_wait = AsyncMock()
@@ -3676,6 +4012,7 @@ async def test_pq_stop_success():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods - now uses stop_query
     mock_controller.stop_query = AsyncMock()
@@ -3721,6 +4058,7 @@ async def test_pq_stop_success_custom_timeout():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods - now uses stop_query
     mock_controller.stop_query = AsyncMock()
@@ -3804,6 +4142,9 @@ async def test_pq_stop_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -3827,6 +4168,9 @@ async def test_pq_stop_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -3855,6 +4199,7 @@ async def test_pq_restart_success():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods (no more get_serial_for_name)
     mock_controller.restart_query = AsyncMock()
@@ -3938,6 +4283,9 @@ async def test_pq_restart_connection_failed():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("connection failed"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("connection failed")
+    )
 
     context = MockContext(
         {
@@ -3961,6 +4309,9 @@ async def test_pq_restart_exception():
 
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(side_effect=RuntimeError("Connection error"))
+    mock_factory_manager.get_controller_client = AsyncMock(
+        side_effect=RuntimeError("Connection error")
+    )
 
     context = MockContext(
         {
@@ -3989,6 +4340,7 @@ async def test_pq_stop_multiple():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_controller.stop_query = AsyncMock()
@@ -4045,6 +4397,7 @@ async def test_pq_restart_multiple():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
     mock_controller.restart_query = AsyncMock()
@@ -4214,6 +4567,7 @@ async def test_pq_delete_parallel_execution_with_semaphore():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Track execution order and timing
     execution_log = []
@@ -4288,6 +4642,7 @@ async def test_pq_delete_handles_unexpected_exception():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # First PQ succeeds, second raises unexpected exception, third succeeds
     mock_pq_info1 = create_mock_pq_info(1, "pq1", "STOPPED")
@@ -4360,6 +4715,7 @@ async def test_pq_start_parallel_execution():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Track concurrent execution
     active_operations = []
@@ -4419,6 +4775,7 @@ async def test_pq_stop_parallel_with_mixed_results():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # First and third succeed, second fails
     async def mock_stop_side_effect(serials, wait=True):
@@ -4478,6 +4835,7 @@ async def test_pq_restart_parallel_execution():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock successful restarts
     mock_controller.restart_query = AsyncMock()
@@ -4522,6 +4880,7 @@ async def test_pq_delete_exception_escapes_to_gather(monkeypatch):
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_controller.delete_query = AsyncMock()
     mock_controller.get = AsyncMock(
@@ -4578,6 +4937,7 @@ async def test_pq_delete_base_exception_escapes_to_gather(monkeypatch):
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_controller.delete_query = AsyncMock()
     mock_controller.get = AsyncMock(
@@ -4627,6 +4987,7 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_controller.start_and_wait = AsyncMock()
     mock_controller.get = AsyncMock(
@@ -4680,6 +5041,7 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_controller.stop_query = AsyncMock()
     mock_controller.get = AsyncMock(
@@ -4733,6 +5095,7 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     mock_controller.restart_query = AsyncMock()
     mock_controller.get = AsyncMock(
@@ -4812,6 +5175,7 @@ async def test_pq_create_auto_delete_and_schedule_mutually_exclusive():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
     mock_controller.make_pq_config = AsyncMock()
 
     context = MockContext(
@@ -4851,6 +5215,7 @@ async def test_pq_modify_auto_delete_and_schedule_mutually_exclusive():
     mock_session_registry.factory_manager = mock_factory_manager
     mock_factory_manager.get = AsyncMock(return_value=mock_factory)
     mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     context = MockContext(
         {

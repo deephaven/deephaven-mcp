@@ -36,7 +36,10 @@ Note:
 
 from ._auth_client import CorePlusAuthClient
 from ._base import ClientObjectWrapper, describe_exception_chain
-from ._controller_client import CorePlusControllerClient
+from ._controller_client import (
+    CONTROLLER_SUBSCRIBING_ERROR_CODE,
+    CorePlusControllerClient,
+)
 from ._pq_config import wire_to_env_var_entries
 from ._protobuf import (
     PQ_STATES,
@@ -60,6 +63,7 @@ from ._webclientdata import (
 __all__ = [
     "CommunityClientTimeouts",
     "EnterpriseClientTimeouts",
+    "CONTROLLER_SUBSCRIBING_ERROR_CODE",
     "CorePlusAuthClient",
     "ClientObjectWrapper",
     "CorePlusControllerClient",

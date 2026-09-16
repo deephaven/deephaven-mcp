@@ -509,7 +509,8 @@ when refused — or the session is missing or not a Community session —
 they exit `3`. `session open` additionally keeps the token out of its
 output unless `--reveal-secrets` is passed — including on the
 `browser_launch_failed` path, where the URL offered for manual opening
-is the token-free one. All session verbs exit `0` on
+is the token-free one. When that flag does disclose a token, the
+command warns on stderr, as `config get` does. All session verbs exit `0` on
 success, `2` on client-side/daemon failure, and `3` when the wrapped
 tool reports an error.
 
@@ -532,12 +533,13 @@ A _system_ is the source dimension of every fully qualified session id
 (`type:system:name`): the single Community umbrella (named `community`)
 plus every configured Enterprise (Core+) system.
 
-| Verb          | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list`        | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `status`      | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dhcli config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
-| `url [NAME]`  | Prints an Enterprise system's web console URL — pipe-friendly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `open [NAME]` | Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Verb         | Purpose                                                                                       |
+|--------------|-----------------------------------------------------------------------------------------------|
+| `list`       | Lists every configured system as `{name, type}` pairs — use the names with `session create --system NAME`. Wraps `list_systems`. |
+| `status`     | Reports Enterprise (Core+) system health as a compact array of per-system records (`name`, `type`, `liveness_status`, `is_alive`, `liveness_detail`). Wraps `enterprise_systems_status`. Health only — use `dhcli config show` for configuration. Enterprise-only: an all-Community deployment returns an empty list. `--system NAME` scopes to one system; `--connect` actively verifies connectivity instead of reading cached state. `liveness_detail` is a short reason code: when `--connect` probed the system, the probe's own message; otherwise, when discovery recorded an error, the kubectl-style exception-type prefix (e.g. `DeephavenConnectionError`). When discovery is still running or has failed, a phase-summary warning is written to stderr; when `partial_result.errors` is present, stderr also includes a per-system details map with the full failure messages. The completed-phase banner may be suppressed when reasons are already in each row's `liveness_detail`. Exits `3` if the tool reports failure. |
+| `url [NAME]` | Prints an Enterprise system's web console URL — pipe-friendly. |
+| `open [NAME]`| Opens the Enterprise system's web console in the default browser; `--print` prints the URL instead (headless-safe). |
+| `reconnect [SYSTEM]` | Forces a wedged Enterprise controller to retry connecting now. Wraps `enterprise_controller_reconnect`. Use when a command fails with an error containing `[CONTROLLER_SUBSCRIBING]`, which means the controller subscription is wedged and a background healer is already retrying on an exponential backoff; this skips the remaining wait. Returns as soon as the request is accepted — it never blocks for the reconnect and does **not** report whether the reconnect succeeded. Safe to repeat (requests coalesce, so repeating never queues a backlog of attempts) and a no-op when the controller is already healthy, so it never tears down a working connection. `SYSTEM` falls back to the sticky context when omitted (`context_not_set` otherwise). Output: `{system, reconnect_requested, detail}`; `reconnect_requested` is `true` when a running healer accepted the request — either waking it now or coalescing into an attempt already under way, so it does not promise an additional attempt — and `false` when the request was not accepted: either nothing is currently wedged (including an already-healthy controller), or no healer is running. Exits `3` if the tool reports failure. |
 
 `url` and `open` are Enterprise-only and computed locally from
 configuration — they do **not** contact the daemon. The URL is the
@@ -557,6 +559,8 @@ dhcli system list | jq '.[].name'
 dhcli system status --system prod --connect
 dhcli system url prod
 dhcli system open prod --print
+dhcli system reconnect prod
+dhcli system reconnect prod && dhcli system status --system prod --connect
 ```
 
 ### `dhcli table`
@@ -658,9 +662,34 @@ inline source stored in the PQ definition; `--script-body-path PATH|-` is a
 — and stored as the inline body (unreadable file exits `2`,
 `file_read_failed`); `--git-script-path PATH` is a path into the Enterprise
 controller's Git-backed script repository, resolved **on the server** each
-time the PQ starts (use it for version-controlled scripts). `--python-venv`
-and `--class-path` also name resources on the Enterprise server, not this
-machine.
+time the PQ starts (use it for version-controlled scripts). `--class-path`
+also names resources on the Enterprise server, not this machine.
+
+`--python-venv` takes the PQ's Python environment settings as a JSON object
+in plain, unescaped text. It has three optional keys: `ephemeral_venv`
+(build a fresh venv for this worker instead of using the shared default),
+`seed_ephemeral_venv` (copy the default packages into it), and
+`ephemeral_requirements` (space-separated pip requirements installed at worker
+startup, which requires `ephemeral_venv`). For example:
+
+```bash
+dhcli pq modify enterprise:prod:1234567890 \
+  --python-venv '{"ephemeral_venv": true, "ephemeral_requirements": "pandas"}'
+```
+
+The object replaces the field wholesale, so to change one key read the current
+`python_control` from `dhcli pq details ID`, modify it, and pass the whole object
+back.
+
+Note that a pip requirement can point at a URL, and a URL can carry a password
+in its [userinfo][userinfo] — `pkg @ https://user:TOKEN@host/pkg.whl`. That form
+is deprecated by RFC 3986, and `pq details` reports `python_control` as stored,
+so prefer an index credential the worker already holds over one written into
+this field. A credential passed on the command line is also visible in the
+process's arguments (readable by other local users on Linux) and recorded in
+your shell history.
+
+[userinfo]: https://datatracker.ietf.org/doc/html/rfc3986.html#section-3.2.1
 
 `delete` / `start` / `stop` / `restart` are best-effort across multiple ids:
 exit `0` means the batch ran, not that every id succeeded — check the

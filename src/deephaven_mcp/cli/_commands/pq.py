@@ -528,8 +528,20 @@ def _create_modify_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "python_virtual_environment",
             default=None,
             help=(
-                "Name of a Python virtualenv configured on the Enterprise "
-                "server — a name, not a path on this machine."
+                "Python environment for the worker, as a JSON object in "
+                'plain unescaped text, e.g. {"ephemeral_venv": true, '
+                '"ephemeral_requirements": "pandas"}. Keys are '
+                "ephemeral_venv (build a fresh venv for this worker instead "
+                "of using the shared default), seed_ephemeral_venv (copy the "
+                "default packages into it), and ephemeral_requirements "
+                "(space-separated pip requirements installed at startup, "
+                "which needs ephemeral_venv). Applied on the Enterprise "
+                "server, not on this machine. Replaces the field wholesale, "
+                "so read the current document with 'dhcli pq details ID' "
+                "before editing one key. A pip requirement can embed a "
+                "credential in a URL, and 'pq details' reports this field as "
+                "stored; a credential passed here is also visible in this "
+                "process's arguments and your shell history."
             ),
         ),
         click.option(

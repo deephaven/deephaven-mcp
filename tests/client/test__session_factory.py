@@ -676,6 +676,60 @@ async def test_from_url_success():
 
 
 @pytest.mark.asyncio
+async def test_from_url_closes_factory_when_subscribe_fails():
+    """A factory whose controller never subscribes is closed, not leaked.
+
+    The construction helper raises instead of returning the instance, so
+    without this cleanup its SessionManager (gRPC channel plus background
+    threads) would be unreachable and never closed.
+    """
+    from deephaven_mcp._exceptions import DeephavenConnectionError
+
+    patches, _mgr_cls = _patches_for_from_url()
+    p1, p2 = patches
+    with p1, p2:
+        import deephaven_mcp.client._session_factory as sm_mod
+
+        with (
+            patch.object(
+                sm_mod.CorePlusControllerClient,
+                "subscribe",
+                new_callable=AsyncMock,
+                side_effect=DeephavenConnectionError("wedged"),
+            ),
+            patch.object(
+                sm_mod.CorePlusSessionFactory,
+                "close",
+                new_callable=AsyncMock,
+            ) as mock_close,
+            pytest.raises(DeephavenConnectionError),
+        ):
+            await sm_mod.CorePlusSessionFactory.from_url(
+                "https://example.com/iris/connection.json",
+                timeouts=EnterpriseClientTimeouts(),
+            )
+        mock_close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_or_close_swallows_close_failure():
+    """A close failure during cleanup does not mask the subscribe error."""
+    import deephaven_mcp.client._session_factory as sm_mod
+    from deephaven_mcp._exceptions import DeephavenConnectionError
+
+    instance = MagicMock()
+    instance._controller_client.subscribe = AsyncMock(
+        side_effect=DeephavenConnectionError("wedged")
+    )
+    instance.close = AsyncMock(side_effect=RuntimeError("close blew up"))
+
+    with pytest.raises(DeephavenConnectionError, match="wedged"):
+        await sm_mod.CorePlusSessionFactory._subscribe_or_close(instance)
+
+    instance.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_from_url_timeout():
     """from_url raises DeephavenConnectionError if the constructor times out."""
     import time as _time
