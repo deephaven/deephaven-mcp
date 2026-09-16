@@ -180,21 +180,21 @@ to manage.
 
 **For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
-```json5
+```json
 {
-  mcpServers: {
+  "mcpServers": {
     "deephaven-systems": {
-      command: "dh-mcp-systems-server",
-      args: ["--transport", "stdio"],
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
-      command: "mcp-proxy",
-      args: [
+      "command": "mcp-proxy",
+      "args": [
         "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-      ],
-    },
-  },
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
+    }
+  }
 }
 ```
 
@@ -325,21 +325,21 @@ to manage.
 
 **For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
-```json5
+```json
 {
-  mcpServers: {
+  "mcpServers": {
     "deephaven-systems": {
-      command: "dh-mcp-systems-server",
-      args: ["--transport", "stdio"],
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
-      command: "mcp-proxy",
-      args: [
+      "command": "mcp-proxy",
+      "args": [
         "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-      ],
-    },
-  },
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
+    }
+  }
 }
 ```
 
@@ -737,21 +737,21 @@ so it reaches the hosted docs server through `mcp-proxy`.
 
 Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
-```json5
+```json
 {
-  mcpServers: {
+  "mcpServers": {
     "deephaven-systems": {
-      command: "dh-mcp-systems-server",
-      args: ["--transport", "stdio"],
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
-      command: "mcp-proxy",
-      args: [
+      "command": "mcp-proxy",
+      "args": [
         "--transport=streamablehttp",
-        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-      ],
-    },
-  },
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
+    }
+  }
 }
 ```
 
@@ -778,18 +778,18 @@ Create or edit an MCP configuration file:
 - **Project-specific**: `.cursor/mcp.json` in your project root
 - **Global**: `~/.cursor/mcp.json` for all projects
 
-```json5
+```json
 {
-  mcpServers: {
+  "mcpServers": {
     "deephaven-systems": {
-      type: "stdio",
-      command: "dh-mcp-systems-server",
-      args: ["--transport", "stdio"],
+      "type": "stdio",
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
-      url: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-    },
-  },
+      "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    }
+  }
 }
 ```
 
@@ -805,18 +805,18 @@ manually in your project root.
 
 Configure your servers:
 
-```json5
+```json
 {
-  servers: {
+  "servers": {
     "deephaven-systems": {
-      command: "dh-mcp-systems-server",
-      args: ["--transport", "stdio"],
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
-      type: "http",
-      url: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-    },
-  },
+      "type": "http",
+      "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    }
+  }
 }
 ```
 
@@ -832,17 +832,17 @@ You will see the MCP servers listed in the Extensions sidebar under "MCP Servers
 
 Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
 
-```json5
+```json
 {
-  mcpServers: {
+  "mcpServers": {
     "deephaven-systems": {
-      command: "dh-mcp-systems-server",
-      args: ["--transport", "stdio"],
+      "command": "dh-mcp-systems-server",
+      "args": ["--transport", "stdio"]
     },
     "deephaven-docs": {
-      serverUrl: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-    },
-  },
+      "serverUrl": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+    }
+  }
 }
 ```
 
@@ -864,7 +864,7 @@ reading the value from an environment variable to keep the secret out of it:
 ```json5
 // ~/.deephaven/ai/config/server.json
 {
-  psk: "${env:DH_MCP_PSK}",
+  "psk": "${env:DH_MCP_PSK}"
 }
 ```
 
@@ -878,14 +878,14 @@ dh-mcp-systems-server --transport http --port 8000
 Point your AI tool at the running server, sending the PSK on every request.
 Cursor and Windsurf both resolve `${env:NAME}` inside `headers`:
 
-```json5
+```json
 {
-  mcpServers: {
+  "mcpServers": {
     "deephaven-systems": {
-      url: "http://127.0.0.1:8000/mcp",
-      headers: { "X-Deephaven-PSK": "${env:DH_MCP_PSK}" },
-    },
-  },
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "X-Deephaven-PSK": "${env:DH_MCP_PSK}" }
+    }
+  }
 }
 ```
 
