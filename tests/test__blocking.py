@@ -361,22 +361,31 @@ async def test_a_stalled_open_does_not_consume_a_shared_executor_worker():
 
 
 @pytest.mark.asyncio
-async def test_run_is_bounded_by_one_deadline_not_two():
-    """A stalled use followed by a stalled close stays within the budget."""
-    stuck = threading.Event()
-
-    def stalled_close(_r):
-        stuck.wait(timeout=30)
-
-    blocking = BlockingResource(DummyResource, stalled_close)
+async def test_run_gives_cleanup_only_what_the_operation_left(monkeypatch):
+    """One deadline covers the operation and the close, not one budget each."""
+    budget = 0.2
+    spent = 0.12
+    granted: list[float] = []
     loop = asyncio.get_running_loop()
-    started = loop.time()
+    now = loop.time()
+    monkeypatch.setattr(loop, "time", lambda: now)
 
-    try:
-        with pytest.raises(TimeoutError):
-            await blocking.run(lambda _r: stuck.wait(timeout=30), timeout_seconds=0.2)
-        elapsed = loop.time() - started
-    finally:
-        stuck.set()
+    async def fake_run_blocking(fn, name, timeout_seconds):
+        nonlocal now
+        granted.append(timeout_seconds)
+        if len(granted) == 1:
+            now += spent
+            raise TimeoutError
+        return None
 
-    assert elapsed < 0.35, f"cleanup extended the deadline: {elapsed:.3f}s"
+    monkeypatch.setattr(_blocking, "run_blocking", fake_run_blocking)
+
+    with pytest.raises(TimeoutError):
+        await BlockingResource(DummyResource, lambda _r: None).run(
+            lambda _r: None, timeout_seconds=budget
+        )
+
+    assert granted == [
+        budget,
+        pytest.approx(budget - spent),
+    ], "the close must get the remainder of the budget, not a fresh one"

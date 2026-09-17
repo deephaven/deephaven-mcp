@@ -125,6 +125,17 @@ def test_open_plugin_returns_connected_client():
         assert _open_plugin(_session_with_factory()) is plugin
 
 
+def test_open_plugin_translates_a_vendor_timeout():
+    """A vendor TimeoutError must not reach the caller's deadline handler."""
+    boom = TimeoutError("connect deadline exceeded")
+    with patch("deephaven_mcp.client._webclientdata.PluginClient", side_effect=boom):
+        with pytest.raises(
+            WebClientDataError, match="widget stream timed out"
+        ) as excinfo:
+            _open_plugin(_session_with_factory())
+    assert excinfo.value.__cause__ is boom
+
+
 # ===== _request_table =====
 
 
@@ -142,6 +153,16 @@ def test_request_table_skips_responses_without_payload_or_exports():
     plugin = DummyPluginClient([(b"", []), (b"", _exported(table))])
     result = _request_table(plugin, WebClientDataTable.CATALOG, "iris", 30.0)
     assert result is table
+
+
+def test_request_table_translates_a_vendor_timeout():
+    """A vendor TimeoutError must not reach the caller's deadline handler."""
+    boom = TimeoutError("stream deadline exceeded")
+    plugin = DummyPluginClient([])
+    plugin.req_stream.write = MagicMock(side_effect=boom)
+    with pytest.raises(WebClientDataError, match="widget timed out") as excinfo:
+        _request_table(plugin, WebClientDataTable.CATALOG, "iris", 30.0)
+    assert excinfo.value.__cause__ is boom
 
 
 def test_request_table_surfaces_a_refusal():
