@@ -57,6 +57,35 @@ async def test_a_result_nobody_waited_for_is_disposed_of():
     assert disposed == ["the session"]
 
 
+def test_a_result_arriving_after_the_loop_closed_is_still_disposed_of():
+    """No loop-thread callback can run at shutdown, so the thread must dispose."""
+    release = threading.Event()
+    disposed = threading.Event()
+
+    def slow():
+        release.wait(30)
+        return "the session"
+
+    async def abandon():
+        with pytest.raises(BlockingDeadlineExceeded):
+            await run_blocking(
+                slow,
+                "probe-closedloop",
+                0.01,
+                on_abandoned_result=lambda _value: disposed.set(),
+            )
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(abandon())
+    finally:
+        loop.close()
+
+    # Not on a running loop here, so a blocking wait is safe.
+    release.set()
+    assert disposed.wait(10), "the result was stranded when the loop went away"
+
+
 @pytest.mark.asyncio
 async def test_disposal_runs_off_the_event_loop():
     """Disposal blocks, so running it on the loop thread would stall the server."""

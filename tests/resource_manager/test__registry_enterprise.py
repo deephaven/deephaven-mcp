@@ -24,6 +24,8 @@ MutableSessionRegistry and tested via test__registry.py.
 """
 
 import asyncio
+import logging
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,6 +49,7 @@ from deephaven_mcp.resource_manager._manager import (
     EnterpriseSessionManager,
 )
 from deephaven_mcp.resource_manager._registry_enterprise import (
+    _close_session_detached,
     _FactoryQueryError,
     _FactoryQueryResult,
     _FactorySnapshot,
@@ -1636,6 +1639,74 @@ async def test_web_client_data_session_drops_the_cache_when_a_borrower_is_cancel
     async with registry.web_client_data_session():
         pass
     assert factory_instance.connect_to_persistent_query.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_closes_a_session_a_failed_borrow_discarded():
+    """A completed failure leaves nothing running, so the session must be closed."""
+    session = MagicMock(spec=CorePlusSession)
+    session.is_alive = AsyncMock(return_value=True)
+    session.close = AsyncMock()
+    registry, _ = _wcd_registry_with_session(session)
+
+    with pytest.raises(RuntimeError, match="bad filter"):
+        async with registry.web_client_data_session():
+            raise RuntimeError("bad filter")
+
+    assert registry._web_client_data_session is None
+    # The vendor retains every session it built until it is closed.
+    session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_web_client_data_session_drops_and_closes_on_a_canceled_probe():
+    """Cancellation bypasses `except Exception`, so the probe needs its own handler."""
+    cached = MagicMock(spec=CorePlusSession)
+    cached.is_alive = AsyncMock(side_effect=asyncio.CancelledError)
+    registry, _ = _wcd_registry_with_session(cached)
+    registry._web_client_data_session = cached
+
+    with (
+        patch(
+            "deephaven_mcp.resource_manager._registry_enterprise._close_session_detached"
+        ) as closer,
+        pytest.raises(asyncio.CancelledError),
+    ):
+        async with registry.web_client_data_session():
+            pass
+
+    assert registry._web_client_data_session is None
+    closer.assert_called_once_with(cached)
+
+
+def test_close_session_detached_closes_the_vendor_session():
+    """Callers that cannot await still have to release the vendor's session."""
+    session = MagicMock(spec=CorePlusSession)
+    session.wrapped = MagicMock()
+    _close_session_detached(session)
+    for _ in range(500):
+        if session.wrapped.close.called:
+            break
+        time.sleep(0.01)
+    session.wrapped.close.assert_called_once_with()
+
+
+def test_close_session_detached_logs_a_failure(caplog):
+    """A close that refuses must not kill the thread attempting it."""
+    session = MagicMock(spec=CorePlusSession)
+    session.wrapped = MagicMock()
+    session.wrapped.close.side_effect = RuntimeError("refused")
+
+    with caplog.at_level(
+        logging.WARNING, logger="deephaven_mcp.resource_manager._registry_enterprise"
+    ):
+        _close_session_detached(session)
+        for _ in range(500):
+            if any("error closing" in r.message for r in caplog.records):
+                break
+            time.sleep(0.01)
+
+    assert any("error closing" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio

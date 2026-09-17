@@ -51,11 +51,12 @@ Enterprise refresh is a four-phase operation:
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import override
+from typing import Any, override
 
 from deephaven_mcp._exception_utils import exception_summary
 from deephaven_mcp._exceptions import (
@@ -87,6 +88,30 @@ from ._registry import (
 from ._session_id import QualifiedSessionId, SessionId
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _close_session_detached(session: CorePlusSession) -> None:
+    """Close ``session`` on a thread of its own, for callers that cannot await.
+
+    The close is safe even while an abandoned thread is still using the
+    session: the vendor serializes on its own lock, and closing is what ends a
+    blocked read.
+
+    Args:
+        session (CorePlusSession): The session no borrower will receive again.
+    """
+
+    def _close() -> None:
+        wrapped: Any = session.wrapped
+        try:
+            wrapped.close()
+        except Exception as e:
+            _LOGGER.warning(
+                f"[_close_session_detached] error closing '{WEB_CLIENT_DATA_PQ}' "
+                f"session: {exception_summary(e)}"
+            )
+
+    threading.Thread(target=_close, name="dh-mcp-wcd-close", daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -417,10 +442,25 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             session = await self._connect_web_client_data()
             try:
                 yield session
-            except BaseException:
-                if self._web_client_data_session is session:
-                    self._web_client_data_session = None
+            except asyncio.CancelledError:
+                self._discard_web_client_data(session)
+                # A canceled task cannot be relied on to await, and the vendor
+                # holds the session until it is closed.
+                _close_session_detached(session)
                 raise
+            except BaseException:
+                self._discard_web_client_data(session)
+                await self._close_web_client_data_session(session)
+                raise
+
+    def _discard_web_client_data(self, session: CorePlusSession) -> None:
+        """Drop ``session`` from the cache if it is still the cached one.
+
+        Args:
+            session (CorePlusSession): The session a borrower finished with.
+        """
+        if self._web_client_data_session is session:
+            self._web_client_data_session = None
 
     async def _connect_web_client_data(self) -> CorePlusSession:
         """Return the cached WebClientData session, reconnecting if it is dead.
@@ -450,6 +490,12 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 ):
                     return cached
                 raise RuntimeError("is_alive() returned False")
+            except asyncio.CancelledError:
+                # Bypasses the handler below, and the probe's thread may still
+                # be on this session, so no later borrower may have it.
+                self._web_client_data_session = None
+                _close_session_detached(cached)
+                raise
             except Exception as e:
                 _LOGGER.warning(
                     f"[{self.__class__.__name__}] cached '{WEB_CLIENT_DATA_PQ}' session "

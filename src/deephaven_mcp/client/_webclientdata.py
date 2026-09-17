@@ -216,7 +216,7 @@ def _request_table(
 
     raise WebClientDataError(
         f"The '{_TABLE_FACTORY_FIELD}' widget returned no table for "
-        f"'{table}' within {deadline_seconds:.0f}s."
+        f"'{table}' within {deadline_seconds:g}s."
     )
 
 

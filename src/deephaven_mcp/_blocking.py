@@ -77,6 +77,7 @@ def _report_to_loop(
     deliver: Callable[[Any], None],
     value: Any,
     name: str,
+    dispose: Callable[[Any], None] | None = None,
 ) -> None:
     """Hand ``value`` to ``deliver`` on ``loop``, tolerating a closed loop.
 
@@ -86,6 +87,8 @@ def _report_to_loop(
             outcome.
         value (Any): The result or exception to report.
         name (str): Thread name, for the discard log.
+        dispose (Callable[[Any], None] | None): Releases ``value`` when the
+            loop is gone, since no loop-thread callback can run to do it.
     """
     try:
         loop.call_soon_threadsafe(deliver, value)
@@ -96,6 +99,9 @@ def _report_to_loop(
             f"[run_blocking] {name!r} finished after its loop closed; "
             f"result discarded"
         )
+        # Already off the loop here, so dispose inline rather than spawning.
+        if dispose is not None:
+            _dispose_abandoned(dispose, value, name)
 
 
 def _dispose_abandoned(dispose: Callable[[Any], None], value: Any, name: str) -> None:
@@ -210,7 +216,7 @@ async def run_blocking[T](
         except BaseException as e:  # noqa: BLE001 - reported through the future
             _report_to_loop(loop, _deliver_error, e, name)
         else:
-            _report_to_loop(loop, _deliver_result, result, name)
+            _report_to_loop(loop, _deliver_result, result, name, on_abandoned_result)
 
     threading.Thread(target=_worker, name=name, daemon=True).start()
     try:
