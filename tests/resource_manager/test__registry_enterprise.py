@@ -1612,6 +1612,33 @@ async def test_web_client_data_session_reuses_live_cached_session():
 
 
 @pytest.mark.asyncio
+async def test_web_client_data_session_drops_the_cache_when_a_borrower_is_canceled():
+    """A canceled borrower leaves a thread on the session; nobody else may get it."""
+    session = MagicMock(spec=CorePlusSession)
+    session.is_alive = AsyncMock(return_value=True)
+    registry, factory_instance = _wcd_registry_with_session(session)
+    entered = asyncio.Event()
+
+    async def borrow_forever():
+        async with registry.web_client_data_session():
+            entered.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(borrow_forever())
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert registry._web_client_data_session is None
+    # The next borrower must connect again rather than share a session that
+    # an abandoned thread may still be using.
+    async with registry.web_client_data_session():
+        pass
+    assert factory_instance.connect_to_persistent_query.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_web_client_data_session_replaces_dead_cached_session():
     dead = MagicMock(spec=CorePlusSession)
     dead.is_alive = AsyncMock(return_value=False)

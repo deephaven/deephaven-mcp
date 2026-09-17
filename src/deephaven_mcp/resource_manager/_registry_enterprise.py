@@ -396,6 +396,11 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         with non-overlapping calls, and every borrower shares this one
         instance. Concurrent reads on a system are therefore serialized.
 
+        Canceling a borrower unwinds this context while the thread running its
+        blocking call keeps using the session, so the session is dropped from
+        the cache rather than handed to the next borrower. It is not closed:
+        a canceled task cannot be relied on to await one.
+
         Yields:
             CorePlusSession: A live session on the ``WebClientData`` persistent
                 query, usable for any system-scoped read such as the catalog.
@@ -408,7 +413,13 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
                 system where that PQ is not running cannot serve these tables.
         """
         async with self._web_client_data_lock:
-            yield await self._connect_web_client_data()
+            session = await self._connect_web_client_data()
+            try:
+                yield session
+            except asyncio.CancelledError:
+                if self._web_client_data_session is session:
+                    self._web_client_data_session = None
+                raise
 
     async def _connect_web_client_data(self) -> CorePlusSession:
         """Return the cached WebClientData session, reconnecting if it is dead.
