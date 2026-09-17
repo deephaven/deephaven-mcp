@@ -11,7 +11,7 @@ reinvent them.
 
 from __future__ import annotations
 
-__all__ = ["BlockingResource"]
+__all__ = ["BlockingResource", "run_blocking"]
 
 import asyncio
 import logging
@@ -20,10 +20,56 @@ from collections.abc import Callable
 
 _LOGGER = logging.getLogger(__name__)
 
+_ABANDONED_LOCK = threading.Lock()
+_abandoned_threads = 0
+"""Live count of threads whose caller stopped waiting, for the log messages below."""
 
-async def _run_on_own_thread[T](
-    fn: Callable[[], T], name: str, timeout_seconds: float
-) -> T:
+
+def _note_abandoned(name: str, timeout_seconds: float) -> None:
+    """Report a thread the caller has stopped waiting for.
+
+    Python cannot kill a thread, so an uninterruptible call that overruns its
+    deadline keeps running and keeps everything it captured alive. Nothing here
+    can prevent that; the running total exists so a wedged dependency shows up
+    as a trend in the logs instead of silently growing RSS.
+
+    Args:
+        name (str): The abandoned thread's name.
+        timeout_seconds (float): The deadline that expired.
+    """
+    global _abandoned_threads
+    with _ABANDONED_LOCK:
+        _abandoned_threads += 1
+        live = _abandoned_threads
+    _LOGGER.warning(
+        f"[run_blocking] {name!r} overran {timeout_seconds}s and was abandoned; "
+        f"it keeps running and retains what it captured. "
+        f"Abandoned threads now live: {live}."
+    )
+
+
+def _note_late_arrival(name: str, abandoned: bool) -> None:
+    """Report a thread that finished after nobody was waiting for it.
+
+    Args:
+        name (str): The thread's name.
+        abandoned (bool): Whether this call's own deadline abandoned it. False
+            when the caller was canceled from outside, which never incremented
+            the total and so must not decrement it.
+    """
+    global _abandoned_threads
+    if not abandoned:
+        return
+    with _ABANDONED_LOCK:
+        _abandoned_threads -= 1
+        live = _abandoned_threads
+    _LOGGER.info(
+        f"[run_blocking] Abandoned {name!r} finished and released what it held. "
+        f"Abandoned threads still live: {live}."
+    )
+
+
+async def run_blocking[T](fn: Callable[[], T], name: str, timeout_seconds: float) -> T:
     """Run ``fn`` on a dedicated daemon thread, bounded by ``timeout_seconds``.
 
     Deliberately not ``asyncio.to_thread``: that shares one process-wide
@@ -32,6 +78,11 @@ async def _run_on_own_thread[T](
     damage local, and being a daemon it cannot hold up interpreter exit. The
     wait itself runs entirely on the event loop, so the deadline holds however
     busy the machine is.
+
+    The deadline bounds the *wait*, never the work: on expiry the thread is
+    abandoned, not stopped, and is logged by :func:`_note_abandoned`. Capping
+    how many may accumulate would only reintroduce the starvation this avoids,
+    since the cleanup that frees them runs through here too.
 
     Args:
         fn (Callable[[], T]): The blocking work to run.
@@ -47,14 +98,21 @@ async def _run_on_own_thread[T](
     """
     loop = asyncio.get_running_loop()
     done: asyncio.Future[T] = loop.create_future()
+    abandoned = False
 
-    # An abandoned thread still reports back, hence the done() checks.
+    # An abandoned thread still reports back, hence the done() checks. Both
+    # these and the assignment below run on the loop thread, so the flag needs
+    # no lock.
     def _deliver_result(value: T) -> None:
-        if not done.done():
+        if done.done():
+            _note_late_arrival(name, abandoned)
+        else:
             done.set_result(value)
 
     def _deliver_error(error: BaseException) -> None:
-        if not done.done():
+        if done.done():
+            _note_late_arrival(name, abandoned)
+        else:
             done.set_exception(error)
 
     def _worker() -> None:
@@ -66,7 +124,12 @@ async def _run_on_own_thread[T](
             loop.call_soon_threadsafe(_deliver_result, result)
 
     threading.Thread(target=_worker, name=name, daemon=True).start()
-    return await asyncio.wait_for(done, timeout=timeout_seconds)
+    try:
+        return await asyncio.wait_for(done, timeout=timeout_seconds)
+    except TimeoutError:
+        abandoned = True
+        _note_abandoned(name, timeout_seconds)
+        raise
 
 
 class _AbandonedError(Exception):
@@ -131,7 +194,7 @@ class BlockingResource[R]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
         try:
-            return await _run_on_own_thread(
+            return await run_blocking(
                 lambda: self._open_and_use(use),
                 "dh-mcp-blocking-use",
                 timeout_seconds,
@@ -146,9 +209,7 @@ class BlockingResource[R]:
             # stretch the call to twice the advertised budget.
             remaining = max(0.0, deadline - loop.time())
             try:
-                await _run_on_own_thread(
-                    self._release, "dh-mcp-blocking-cleanup", remaining
-                )
+                await run_blocking(self._release, "dh-mcp-blocking-cleanup", remaining)
             except TimeoutError:
                 _LOGGER.warning(
                     f"[BlockingResource:run] Close did not finish within the "

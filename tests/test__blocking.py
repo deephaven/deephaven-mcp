@@ -1,12 +1,84 @@
 """Tests for deephaven_mcp._blocking."""
 
 import asyncio
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from deephaven_mcp._blocking import BlockingResource
+from deephaven_mcp import _blocking
+from deephaven_mcp._blocking import BlockingResource, run_blocking
+
+
+def _live_abandoned():
+    """Current count of threads whose caller stopped waiting."""
+    return _blocking._abandoned_threads
+
+
+async def _drain(before):
+    """Wait for the abandoned-thread total to fall back to ``before``."""
+    for _ in range(500):
+        if _live_abandoned() == before:
+            return
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_abandoning_a_thread_warns_with_a_running_total(caplog):
+    """A wedge must leave a trace; silent retention is the worst failure mode."""
+    release = threading.Event()
+    before = _live_abandoned()
+
+    with caplog.at_level(logging.WARNING, logger="deephaven_mcp._blocking"):
+        with pytest.raises(TimeoutError):
+            await run_blocking(lambda: release.wait(30), "probe-a", 0.01)
+
+    assert _live_abandoned() == before + 1
+    warning = "".join(r.message for r in caplog.records if r.levelno == logging.WARNING)
+    assert "'probe-a'" in warning and "abandoned" in warning.lower()
+
+    release.set()
+    await _drain(before)
+    assert (
+        _live_abandoned() == before
+    ), "the total never dropped when the thread returned"
+
+
+@pytest.mark.asyncio
+async def test_abandoned_total_drains_when_the_late_thread_raises():
+    """The total must drain whether the late thread returns or raises."""
+    release = threading.Event()
+    before = _live_abandoned()
+
+    def boom():
+        release.wait(30)
+        raise RuntimeError("late failure")
+
+    with pytest.raises(TimeoutError):
+        await run_blocking(boom, "probe-b", 0.01)
+    assert _live_abandoned() == before + 1
+
+    release.set()
+    await _drain(before)
+    assert _live_abandoned() == before
+
+
+@pytest.mark.asyncio
+async def test_outer_cancellation_is_not_counted_as_abandonment():
+    """Only our own deadline abandons; an outer cancel must not skew the total."""
+    release = threading.Event()
+    before = _live_abandoned()
+
+    task = asyncio.create_task(run_blocking(lambda: release.wait(30), "probe-c", 30.0))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    release.set()
+    await asyncio.sleep(0.3)
+    assert _live_abandoned() == before, "cancellation must not drive the total negative"
 
 
 class DummyResource:

@@ -430,11 +430,11 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         cached = self._web_client_data_session
         if cached is not None:
             try:
-                # Bounded: an unbounded probe would hold the lock and stall
-                # every catalog request for this system.
-                if await asyncio.wait_for(
-                    cached.is_alive(),
-                    timeout=self._timeouts.quick_operation_timeout_seconds,
+                # Bounded inside the session: an unbounded probe would hold the
+                # lock, and an outer wait_for would abandon a shared-executor
+                # worker rather than stopping the vendor call.
+                if await cached.is_alive(
+                    timeout_seconds=self._timeouts.quick_operation_timeout_seconds
                 ):
                     return cached
                 raise RuntimeError("is_alive() returned False")
@@ -502,9 +502,8 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             session (CorePlusSession): The session to close.
         """
         try:
-            await asyncio.wait_for(
-                session.close(),
-                timeout=self._timeouts.quick_operation_timeout_seconds,
+            await session.close(
+                timeout_seconds=self._timeouts.quick_operation_timeout_seconds
             )
         except Exception as e:
             _LOGGER.warning(

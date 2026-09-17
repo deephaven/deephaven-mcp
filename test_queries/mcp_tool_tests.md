@@ -75,7 +75,7 @@ Test table listing and schema retrieval on a Deephaven Community session. Do the
 
 Pre-cleanup (idempotent): Call session_community_delete with id="community:community:mcp-test-tables". Ignore any error — this just ensures a clean starting state.
 
-Setup:
+Setup: 
 - Call session_community_create with session_name="mcp-test-tables", launch_method="python", auth_type="anonymous". Verify success==true.
 - Call session_script_run with id="community:community:mcp-test-tables" and this script:
   from deephaven import new_table

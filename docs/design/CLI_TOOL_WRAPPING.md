@@ -59,12 +59,12 @@ belongs with the runtime sessions.
 There is no single "auth" concept to model as one noun. Four orthogonal
 mechanisms exist, each owned by the entity it secures:
 
-| Concept                 | Secures                               | Owner / where it lives                                 |
-| ----------------------- | ------------------------------------- | ------------------------------------------------------ |
-| PSK                     | client → daemon (HTTP gate)           | the daemon (`server.json`)                             |
-| Community credentials   | daemon → community worker             | a community session def (`community/sessions/*.json`)  |
-| Enterprise credentials  | daemon → enterprise system            | an enterprise system def (`enterprise/systems/*.json`) |
-| Browser-login retrieval | hand a human a live session URL+token | a running session (runtime, security-gated)            |
+| Concept | Secures | Owner / where it lives |
+|---------|---------|------------------------|
+| PSK | client → daemon (HTTP gate) | the daemon (`server.json`) |
+| Community credentials | daemon → community worker | a community session def (`community/sessions/*.json`) |
+| Enterprise credentials | daemon → enterprise system | an enterprise system def (`enterprise/systems/*.json`) |
+| Browser-login retrieval | hand a human a live session URL+token | a running session (runtime, security-gated) |
 
 So the CLI has no monolithic `auth` noun. Future auth/setup operations
 attach to their owning entity (PSK under `daemon`/`config`, system
@@ -247,14 +247,14 @@ runs the drift check on `_tools/**` or `cli/_commands/**` edits).
 
 ## Command catalog
 
-| Group     | Verbs → MCP tool(s)                                                                                                                                                                                                                                                                                                   |
+| Group | Verbs → MCP tool(s) |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `session` | `list`→`sessions_list`; `show`→`session_details`; `create --system`→`session_community_create`\|`session_enterprise_create`; `delete`→`session_community_delete`\|`session_enterprise_delete`; `exec`→`session_script_run`; `pip-list`→`session_pip_list`; `credentials`/`url`/`open`→`session_community_credentials` |
-| `system`  | `list`→`list_systems`; `status`→`enterprise_systems_status`                                                                                                                                                                                                                                                           |
-| `table`   | `list`→`session_tables_list`; `schema`→`session_table_schema`; `data`→`session_table_data`                                                                                                                                                                                                                            |
+| `system` | `list`→`list_systems`; `status`→`enterprise_systems_status` |
+| `table` | `list`→`session_tables_list`; `schema`→`session_table_schema`; `data`→`session_table_data` |
 | `catalog` | (Enterprise only) `tables`→`catalog_tables_list`; `namespaces`→`catalog_namespaces_list`                                                                                                                                                                                                                              |
-| `pq`      | (Enterprise only) `list`/`details`/`create`/`modify`/`delete`/`start`/`stop`/`restart`/`name-to-id` → `pq_*`                                                                                                                                                                                                          |
-| `docs`    | (Direct-URL; docs server at `docs.url`, no daemon) `ask`→`docs_chat`; `status`→ connectivity probe (no tool binding)                                                                                                                                                                                                  |
+| `pq` | (Enterprise only) `list`/`details`/`create`/`modify`/`delete`/`start`/`stop`/`restart`/`name-to-id` → `pq_*` |
+| `docs` | (Direct-URL; docs server at `docs.url`, no daemon) `ask`→`docs_chat`; `status`→ connectivity probe (no tool binding) |
 
 Every group above is implemented, each complete (all of a noun's verbs
 are wrapped). Any tool is still reachable directly via `dhcli tool call`

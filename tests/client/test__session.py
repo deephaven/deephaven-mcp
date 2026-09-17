@@ -189,6 +189,52 @@ async def test_close_other_error(core_session):
 
 
 @pytest.mark.asyncio
+async def test_close_with_timeout_runs_off_the_shared_executor(core_session):
+    """A bounded close must not occupy a default-executor worker."""
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        await core_session.close(timeout_seconds=5.0)
+    assert runner.call_args[0][0] == core_session.wrapped.close
+    assert runner.call_args[0][2] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_close_timeout_propagates_rather_than_becoming_session_error(
+    core_session,
+):
+    """TimeoutError must reach the caller, not be rewrapped as SessionError."""
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = TimeoutError
+        with pytest.raises(TimeoutError):
+            await core_session.close(timeout_seconds=0.01)
+
+
+@pytest.mark.asyncio
+async def test_is_alive_with_timeout_runs_off_the_shared_executor(core_session):
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.return_value = True
+        assert await core_session.is_alive(timeout_seconds=5.0) is True
+    assert runner.call_args[0][2] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_is_alive_timeout_propagates_rather_than_becoming_session_error(
+    core_session,
+):
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = TimeoutError
+        with pytest.raises(TimeoutError):
+            await core_session.is_alive(timeout_seconds=0.01)
+
+
+@pytest.mark.asyncio
 async def test_is_alive_success(core_session):
     assert await core_session.is_alive()
 

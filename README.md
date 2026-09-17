@@ -607,20 +607,20 @@ After this command, `dhcli`, `dh-mcp-systems-server`, and `dh-mcp-docs-server` a
 
 **Where tools are installed:**
 
-| Platform    | Scripts (on PATH)        | Tool environment                         |
-| ----------- | ------------------------ | ---------------------------------------- |
-| macOS/Linux | `~/.local/bin/`          | `~/.local/share/uv/tools/deephaven-mcp/` |
-| Windows     | `%LOCALAPPDATA%\uv\bin\` | `%APPDATA%\uv\tools\deephaven-mcp\`      |
+| Platform | Scripts (on PATH) | Tool environment |
+|----------|-------------------|-----------------|
+| macOS/Linux | `~/.local/bin/` | `~/.local/share/uv/tools/deephaven-mcp/` |
+| Windows | `%LOCALAPPDATA%\uv\bin\` | `%APPDATA%\uv\tools\deephaven-mcp\` |
 
 Run `uv tool dir` to find the tool environment root on your system.
 
 Community Core session creation and Enterprise (Core+) connectivity are part of the base install — no extras are required for either. The optional extras cover development tooling only:
 
-| Extra    | Provides                                                |
-| -------- | ------------------------------------------------------- |
-| `[test]` | Testing framework and utilities                         |
+| Extra | Provides |
+|-------|----------|
+| `[test]` | Testing framework and utilities |
 | `[lint]` | Code quality tools (linting, formatting, type checking) |
-| `[dev]`  | Full development environment (all of the above)         |
+| `[dev]` | Full development environment (all of the above) |
 
 New to [`uv`](https://github.com/astral-sh/uv)? See the [`uv` crash course](docs/UV.md) for a quick orientation.
 
@@ -941,21 +941,21 @@ Before diving into detailed troubleshooting, try these common solutions:
 
 ### Common Error Messages
 
-| Error                                                    | Where You'll See This                                            | Solution                                                                                                                                                                                                                                           |
-| -------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `spawn mcp-proxy ENOENT`                                 | AI tool logs                                                     | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
-| `Connection failed`                                      | MCP server logs                                                  | Check internet connection and server URLs                                                                                                                                                                                                          |
-| `Config directory not found` / permissions audit failure | MCP server startup                                               | Verify the directory passed via `--config-dir` (or derived from `DH_AI_DATA_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX).                                                                              |
-| `Permission denied`                                      | Command execution                                                | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path                                                                                                                                                                   |
-| `Python version error`                                   | uv tool install                                                  | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...`                                                                                                                                                         |
-| `JSON parse error`                                       | IDE/AI assistant logs                                            | Fix JSON syntax errors in configuration files                                                                                                                                                                                                      |
-| `Module not found: deephaven_mcp`                        | MCP server logs                                                  | Re-run `uv tool install --python-preference managed "deephaven-mcp"`                                                                                                                                                                               |
-| `Invalid id format`                                      | MCP tool responses                                               | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}`                                                                                                                                                             |
-| `Invalid id`                                             | MCP tool responses                                               | PQ ids are `enterprise:<system>:<serial>` where `<serial>` is a non-negative integer.                                                                                                                                                              |
-| `Enterprise system 'foo' is not configured`              | MCP tool responses                                               | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems.                                                                                                                                     |
-| HTTP `401`/`403` from the server                         | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK.                                                                                                                                 |
-| HTTP server refuses to start with a loopback error       | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead.                                                                         |
-| `config_invalid`                                         | `dhcli` commands                                                 | A file under the configuration directory failed validation. Run `dhcli config files` to find which one; the message names the file and field. An unresolved `${env:VAR}` reference counts — export the variable in the shell you are running from. |
+| Error | Where You'll See This | Solution |
+|-------|----------------------|----------|
+| `spawn mcp-proxy ENOENT` | AI tool logs | Run `uv tool install --python-preference managed mcp-proxy` first; if the tool still can't find it, locate it with `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` / `Get-Command mcp-proxy` (Windows) and use the full path as the `command` |
+| `Connection failed` | MCP server logs | Check internet connection and server URLs |
+| `Config directory not found` / permissions audit failure | MCP server startup | Verify the directory passed via `--config-dir` (or derived from `DH_AI_DATA_DIR`) exists and that every file is `chmod 600` and the directory is `chmod 700` (POSIX). |
+| `Permission denied` | Command execution | Ensure executable has proper permissions; run `chmod +x` on the `mcp-proxy` path |
+| `Python version error` | uv tool install | Deephaven MCP requires Python 3.12+; use `uv tool install --python-preference managed ...` |
+| `JSON parse error` | IDE/AI assistant logs | Fix JSON syntax errors in configuration files |
+| `Module not found: deephaven_mcp` | MCP server logs | Re-run `uv tool install --python-preference managed "deephaven-mcp"` |
+| `Invalid id format` | MCP tool responses | Community: `community:community:{name}`; Enterprise: `enterprise:{system_name}:{name}` |
+| `Invalid id` | MCP tool responses | PQ ids are `enterprise:<system>:<serial>` where `<serial>` is a non-negative integer. |
+| `Enterprise system 'foo' is not configured` | MCP tool responses | The `system` argument does not match any file under `enterprise/systems/`. The error lists configured systems. |
+| HTTP `401`/`403` from the server | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | The `X-Deephaven-PSK` header is missing or does not match `server.json`. Restart the server after editing the PSK. |
+| HTTP server refuses to start with a loopback error | [Advanced HTTP setup](#advanced-share-one-server-over-http) only | `--host` was set to a non-loopback address. The HTTP transport binds only to `127.0.0.1` / `::1` / `localhost`; terminate TLS at a reverse proxy on the same host instead. |
+| `config_invalid` | `dhcli` commands | A file under the configuration directory failed validation. Run `dhcli config files` to find which one; the message names the file and field. An unresolved `${env:VAR}` reference counts — export the variable in the shell you are running from. |
 
 > **For scripts and AI agents**: `dhcli` failures print a structured
 > `{error, error_code, exit_code, command}` object in the JSON output
