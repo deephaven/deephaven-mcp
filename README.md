@@ -40,7 +40,7 @@
 
 ### Why Deephaven MCP?
 
-Working with real-time data usually means giving up the simple, interactive workflow you get with static tables. Deephaven's live dataframes remove that trade-off: write queries as if your data were static and they keep updating automatically as new data streams in — at millisecond speeds, and all through natural language.
+Working with real-time data usually means giving up the simple, interactive workflow you get with static tables. Deephaven's live dataframes remove that trade-off: write queries as if your data were static and they keep updating automatically as new data streams in, all through natural language.
 
 **What makes this different:**
 
@@ -628,11 +628,23 @@ If you prefer a manual venv (for example, when developing or testing):
 ```sh
 # Create virtual environment with Python 3.12+
 uv venv .venv -p 3.12
+```
 
-# Activate it (do this in every new terminal)
-source .venv/bin/activate        # macOS / Linux
-# .venv\Scripts\activate         # Windows
+Optional: activate it in each new terminal if you want to use `python` or `pip` directly without `uv run`.
 
+Unix / macOS:
+
+```sh
+source .venv/bin/activate
+```
+
+Windows (PowerShell or Command Prompt):
+
+```powershell
+.venv\Scripts\activate
+```
+
+```sh
 # Install deephaven-mcp
 uv pip install "deephaven-mcp"
 ```
@@ -641,11 +653,21 @@ Or with standard pip:
 
 ```sh
 python3.12 -m venv .venv
+```
 
-# Activate it (do this in every new terminal)
-source .venv/bin/activate        # macOS / Linux
-# .venv\Scripts\activate         # Windows
+Unix / macOS:
 
+```sh
+source .venv/bin/activate
+```
+
+Windows (PowerShell or Command Prompt):
+
+```powershell
+.venv\Scripts\activate
+```
+
+```sh
 pip install "deephaven-mcp"
 ```
 

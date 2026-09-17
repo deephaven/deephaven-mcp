@@ -1015,7 +1015,7 @@ async def test_examples_ai_config_loads_end_to_end(
     # sample points at a host-specific /etc/deephaven path that does not
     # exist on the machine running the test.
     keyfile = config_dir / "priv-staging.base64.txt"
-    keyfile.write_text("-----BEGIN FAKE KEY-----\nx\n-----END FAKE KEY-----\n")
+    keyfile.write_text("FAKEPRIVATEKEYPAIRDATA1234567890+/=\n")
     keyfile.chmod(0o600)
     staging_path = config_dir / "enterprise" / "systems" / "staging.json"
     staging_path.write_text(
@@ -1051,5 +1051,5 @@ async def test_examples_ai_config_loads_end_to_end(
     staging = cfg.enterprise.systems["staging"]
     assert isinstance(staging.auth.credentials, PrivateKeyCredentials)
     assert staging.auth.credentials.key_text.get_secret_value().startswith(
-        "-----BEGIN FAKE KEY-----"
+        "FAKEPRIVATEKEYPAIRDATA"
     )

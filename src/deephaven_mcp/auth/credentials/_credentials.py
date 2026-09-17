@@ -14,8 +14,8 @@ Class hierarchy
 - :class:`PSKCredentials` — Deephaven Community pre-shared key.
 - :class:`PasswordCredentials` — username/password, with optional
   ``effective_user`` operate-as identity.
-- :class:`PrivateKeyCredentials` — UTF-8 text of a PEM private-key
-  file (Enterprise private-key auth).
+- :class:`PrivateKeyCredentials` — UTF-8 text of a Deephaven private
+  key file (Enterprise private-key auth).
 - :class:`CustomTokenCredentials` — escape hatch for arbitrary Java
   auth-handler class names.
 
