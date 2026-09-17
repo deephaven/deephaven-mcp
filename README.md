@@ -77,7 +77,7 @@ while you focus on insights.
 
 Deephaven MCP ships as a single package, and one `dh-mcp-systems-server` reads **one configuration directory tree**. That tree can hold a `community/` section, an `enterprise/` section, or **both at once** — the single server hosts everything it finds, simultaneously. Each section is optional; you are never locked into one deployment type.
 
-The fastest on-ramp is the [Community Core quickstart](#community-core-quick-start) below. Once that works, [add Enterprise](#enterprise-quick-start) with one more command against the _same_ config tree — no second install, no second server. (If you only need Enterprise, start there instead; the steps stand alone.)
+The fastest on-ramp is the [Community Core quickstart](#community-core-quick-start) below. Once that works, [add Enterprise](#enterprise-quick-start) with one more command against the *same* config tree — no second install, no second server. (If you only need Enterprise, start there instead; the steps stand alone.)
 
 Install once (below), then configure whichever sections you need.
 
@@ -474,24 +474,24 @@ All tools below are exposed by the single multiplexed
 system take a required `system` argument; PQ tools encode the system
 in the PQ id (form `enterprise:<system>:<serial>`).
 
-_System discovery:_
+*System discovery:*
 
 - `list_systems` - List every configured Community session and Enterprise system as `(name, type)` pairs
 - `enterprise_systems_status(system)` - Report a configured DHE system's health (liveness) and any discovery errors
 - `enterprise_controller_reconnect(system)` - Force an immediate reconnect attempt for one DHE system's wedged controller subscription; returns instantly without waiting for the attempt
 
-_Community sessions:_
+*Community sessions:*
 
 - `session_community_create` - Dynamically launch Community Core sessions
 - `session_community_delete(id)` - Delete a dynamically created session
 - `session_community_credentials(id)` - Retrieve session credentials (subject to `security.credential_retrieval_mode`)
 
-_Enterprise sessions:_
+*Enterprise sessions:*
 
 - `session_enterprise_create(system, ...)` - Create a worker session in the named DHE system
 - `session_enterprise_delete(id)` - Delete a dynamically created enterprise session and the PQ backing it
 
-_Persistent Query (PQ) Management:_
+*Persistent Query (PQ) Management:*
 
 - `pq_name_to_id(system, name)` - Convert a PQ name to its canonical `id`
 - `pq_list(system)` - List all persistent queries in a system
@@ -505,12 +505,12 @@ _Persistent Query (PQ) Management:_
 
 **Parallel Batch Operations**: `pq_start`, `pq_stop`, `pq_restart`, and `pq_delete` accept a list of ids and operate on them in parallel, reporting success or failure per item rather than failing the whole batch. The concurrency cap is operator-configurable via `pq_tools.default_max_concurrent` in `enterprise/settings.json` — see [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 
-_Catalog discovery:_
+*Catalog discovery:*
 
 - `catalog_tables_list(system, ...)` - List catalog tables
 - `catalog_namespaces_list(system, ...)` - Browse catalog namespaces
 
-_Session & table operations (any session, community or enterprise):_
+*Session & table operations (any session, community or enterprise):*
 
 - `sessions_list` - List all sessions
 - `session_details(id)` - Get detailed session information
@@ -541,7 +541,7 @@ graph TD
     E2 --> ES("PQ workers (staging)")
 ```
 
-_A single `dh-mcp-systems-server` process composes one community child registry (when `community/sessions/` is non-empty) and one enterprise child registry per file under `enterprise/systems/`. Tools route to the right child based on either a `system` argument or the parsed prefix of a session/PQ id._
+*A single `dh-mcp-systems-server` process composes one community child registry (when `community/sessions/` is non-empty) and one enterprise child registry per file under `enterprise/systems/`. Tools route to the right child based on either a `system` argument or the parsed prefix of a session/PQ id.*
 
 ### Docs Server Architecture
 
@@ -553,7 +553,7 @@ graph TD
     B --"Accesses"--> E["Deephaven Documentation Corpus via Inkeep API"]
 ```
 
-_The hosted Docs Server speaks streamable-HTTP. Clients with native HTTP MCP support connect directly; stdio-only clients (e.g. Claude Desktop) bridge through [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy)._
+*The hosted Docs Server speaks streamable-HTTP. Clients with native HTTP MCP support connect directly; stdio-only clients (e.g. Claude Desktop) bridge through [`mcp-proxy`](https://github.com/modelcontextprotocol/mcp-proxy).*
 
 ---
 
@@ -977,7 +977,7 @@ Before diving into detailed troubleshooting, try these common solutions:
   - Verify files exist at the specified paths
 
 - **Environment Variable Issues:**
-  - `DH_AI_DATA_DIR` must point to a valid user-data root _directory_ (under which `config/` and `runtime/` live), or be unset to use the platform default
+  - `DH_AI_DATA_DIR` must point to a valid user-data root *directory* (under which `config/` and `runtime/` live), or be unset to use the platform default
   - Environment variables in `env` block must use correct names
   - Sensitive values should use environment variables, not hardcoded strings
 

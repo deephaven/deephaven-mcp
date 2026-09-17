@@ -771,9 +771,17 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
         While the BaseSession implements __del__ to attempt cleanup during garbage collection,
         explicit closure is strongly recommended as garbage collection timing is unpredictable.
 
+        Args:
+            timeout_seconds (float | None): Bound on the close. Supply one
+                rather than wrapping this call in ``asyncio.wait_for``: the
+                vendor close is uninterruptible, so an outer cancellation
+                would abandon the worker running it. Bounded here, that worker
+                is a private thread rather than a shared-executor one.
+
         Raises:
+            TimeoutError: If ``timeout_seconds`` elapses first.
             DeephavenConnectionError: If a network or connection error occurs during close,
-                                    such as connection timeouts or network disruptions.
+                                    such as network disruptions.
             SessionError: If the session cannot be closed for non-connection reasons,
                         such as server errors, invalid session state, or permission issues.
 

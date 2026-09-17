@@ -99,17 +99,22 @@ async def run_blocking[T](fn: Callable[[], T], name: str, timeout_seconds: float
     loop = asyncio.get_running_loop()
     done: asyncio.Future[T] = loop.create_future()
     abandoned = False
+    delivered = False
 
     # An abandoned thread still reports back, hence the done() checks. Both
-    # these and the assignment below run on the loop thread, so the flag needs
+    # these and the assignment below run on the loop thread, so the flags need
     # no lock.
     def _deliver_result(value: T) -> None:
+        nonlocal delivered
+        delivered = True
         if done.done():
             _note_late_arrival(name, abandoned)
         else:
             done.set_result(value)
 
     def _deliver_error(error: BaseException) -> None:
+        nonlocal delivered
+        delivered = True
         if done.done():
             _note_late_arrival(name, abandoned)
         else:
@@ -127,8 +132,11 @@ async def run_blocking[T](fn: Callable[[], T], name: str, timeout_seconds: float
     try:
         return await asyncio.wait_for(done, timeout=timeout_seconds)
     except TimeoutError:
-        abandoned = True
-        _note_abandoned(name, timeout_seconds)
+        # A TimeoutError from ``fn`` itself leaves no thread behind, so only an
+        # unreported one means the deadline expired.
+        if not delivered:
+            abandoned = True
+            _note_abandoned(name, timeout_seconds)
         raise
 
 

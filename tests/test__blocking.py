@@ -65,6 +65,21 @@ async def test_abandoned_total_drains_when_the_late_thread_raises():
 
 
 @pytest.mark.asyncio
+async def test_timeout_error_from_fn_is_not_counted_as_abandonment():
+    """A TimeoutError means the deadline expired unless the work raised it."""
+    before = _live_abandoned()
+
+    def boom():
+        raise TimeoutError("the vendor call reported its own timeout")
+
+    with pytest.raises(TimeoutError, match="vendor call"):
+        await run_blocking(boom, "probe-d", 30.0)
+
+    # Nothing is left running, so nothing will ever arrive to drain a count.
+    assert _live_abandoned() == before, "a finished thread was counted as abandoned"
+
+
+@pytest.mark.asyncio
 async def test_outer_cancellation_is_not_counted_as_abandonment():
     """Only our own deadline abandons; an outer cancel must not skew the total."""
     release = threading.Event()

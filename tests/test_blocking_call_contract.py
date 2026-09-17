@@ -16,6 +16,12 @@ never grow: a new entry means a new instance of the bug.
 import ast
 import pathlib
 
+import pytest
+
+# Project-wide convention enforcement over every module in the package, not a
+# mirror of one source file (``ref-python-coding-practices`` rule 5).
+pytestmark = pytest.mark.guardrail
+
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "deephaven_mcp"
 
 LEGACY_WAIT_FOR_TO_THREAD: frozenset[tuple[str, int]] = frozenset(
