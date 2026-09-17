@@ -329,7 +329,7 @@ when present.
 | `anonymous`   | —                            | No bearer material.                                              |
 | `psk`         | `token`                      | Pre-shared key for Deephaven Community PSK.                      |
 | `password`    | `username`, `password`       | Optional `effective_user` for sudo-style delegation.             |
-| `private_key` | `key_text`                   | Enterprise private-key auth; `key_text` is the Deephaven private key contents (proprietary base64 keypair format, typically `priv-<keyname>.base64.txt`, not a PEM file). |
+| `private_key` | `key_text`                   | Enterprise private-key auth; `key_text` is the [Deephaven private key](https://deephaven.io/enterprise/docs/sys-admin/admin-glossary/#private-key-login-keypair-files) contents. |
 | `custom`      | `auth_type`, `auth_token`    | Escape hatch for arbitrary Java auth handlers.                   |
 
 Every secret field accepts `${env:NAME}` indirection. Every file

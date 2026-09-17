@@ -2360,7 +2360,7 @@ async def _add_system_entity(
         password (str | None): Password for ``auth="password"``.
         effective_user (str | None): Optional operate-as identity for
             ``auth="password"``.
-        key (str | None): Deephaven private-key material for
+        key (str | None): Deephaven private key for
             ``auth="private_key"``.
         max_sessions (int | None): Optional concurrent-session cap.
         heap_gb (float | None): Optional default JVM heap size in GB.
@@ -2526,9 +2526,8 @@ async def _add_system_entity(
     "--key",
     default=None,
     help=(
-        "Deephaven private-key material for --auth private_key "
-        "(proprietary base64 keypair format, typically "
-        "priv-<keyname>.base64.txt, not a PEM file). The key lives in a "
+        "Deephaven private key for --auth private_key, typically the "
+        "contents of a priv-<keyname>.base64.txt file. The key lives in a "
         "file, so a templating ref is the practical form: "
         "'${file:/path/to/priv-<keyname>.base64.txt}'."
     ),

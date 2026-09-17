@@ -251,9 +251,8 @@ dhcli config system add prod \
   --auth password --username iris --password '${env:DH_PROD_PASSWORD}'
 ```
 
-**Private-key auth** — the key lives in a file, so reference it. This is
-your Deephaven private key (proprietary base64 keypair format, typically
-named `priv-<keyname>.base64.txt`), **not** a PEM or OpenSSH key file:
+**Private-key auth** — the key lives in a file, so reference it. This is your
+[Deephaven private key](https://deephaven.io/enterprise/docs/sys-admin/admin-glossary/#private-key-login-keypair-files):
 
 ```bash
 dhcli config system add prod \

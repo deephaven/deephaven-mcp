@@ -261,13 +261,13 @@ def test_read_local_script_expands_tilde(
 
 def test_read_local_script_dash_reads_stdin() -> None:
     stream = io.StringIO("print('stdin')\n")
-    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
+    with patch.object(_wrapping.sys, "stdin", stream):
         assert read_local_script("-") == "print('stdin')\n"
 
 
 def test_read_local_script_empty_stdin_raises_missing_argument() -> None:
     stream = io.StringIO("")
-    with patch.object(_wrapping.click, "get_text_stream", return_value=stream):
+    with patch.object(_wrapping.sys, "stdin", stream):
         with pytest.raises(CliError) as exc:
             read_local_script("-")
     assert exc.value.code is ErrorCode.MISSING_ARGUMENT
