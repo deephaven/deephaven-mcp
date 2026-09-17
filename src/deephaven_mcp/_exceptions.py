@@ -41,6 +41,8 @@ __all__ = [
     "McpError",
     "InternalError",
     "UnsupportedOperationError",
+    # Blocking-call exceptions
+    "BlockingDeadlineExceeded",
     # Session exceptions
     "SessionCreationError",
     "SessionError",
@@ -636,6 +638,37 @@ class UnsupportedOperationError(McpError):
         This is distinct from NotImplementedError, which indicates planned but unimplemented
         features. UnsupportedOperationError indicates operations that are fundamentally
         incompatible with the current context.
+    """
+
+    pass
+
+
+# Blocking-Call Exceptions
+
+
+class BlockingDeadlineExceeded(McpError, TimeoutError):
+    """A bounded blocking call ran past its deadline and was abandoned.
+
+    Distinguishes the deadline from a ``TimeoutError`` the called work raised
+    itself, which the two cannot otherwise be told apart by. The distinction is
+    load-bearing: the abandoned thread is still running and still holds every
+    resource it captured, so anything it touched — a session, a stream — must
+    not be handed to another caller, whereas work that raised its own
+    ``TimeoutError`` has finished and left nothing behind.
+
+    Subclasses :class:`TimeoutError` so existing handlers keep working; catch
+    this instead where the difference matters.
+
+    Usage:
+        ```python
+        try:
+            await run_blocking(fn, "probe", 5.0)
+        except BlockingDeadlineExceeded:
+            registry.invalidate(session)  # a thread may still be using it
+            raise
+        except TimeoutError:
+            raise SessionError("the server reported a timeout") from None
+        ```
     """
 
     pass

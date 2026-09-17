@@ -41,7 +41,7 @@ from pydeephaven.experimental.plugin_client import PluginClient
 from pydeephaven.table import Table
 
 from deephaven_mcp._blocking import BlockingResource
-from deephaven_mcp._exceptions import WebClientDataError
+from deephaven_mcp._exceptions import BlockingDeadlineExceeded, WebClientDataError
 
 from ._base import describe_exception_chain
 from ._session import CorePlusSession
@@ -128,7 +128,7 @@ def _open_plugin(session: DndSession) -> PluginClient:
 
     Raises:
         WebClientDataError: If the widget is not exported under the expected
-            scope field, or opening the stream times out.
+            scope field.
     """
     try:
         factory_obj = session.exportable_objects[_TABLE_FACTORY_FIELD]
@@ -140,15 +140,7 @@ def _open_plugin(session: DndSession) -> PluginClient:
         ) from e
 
     # PluginClient sends the initial ConnectRequest.
-    try:
-        return PluginClient(session, factory_obj)
-    except TimeoutError as e:
-        # The caller signals its own deadline with TimeoutError; a vendor one
-        # reaching it would be reported as that deadline and lose this cause.
-        raise WebClientDataError(
-            f"Opening the '{_TABLE_FACTORY_FIELD}' widget stream timed out: "
-            f"{describe_exception_chain(e)}"
-        ) from e
+    return PluginClient(session, factory_obj)
 
 
 def _close_plugin(plugin: PluginClient) -> None:
@@ -197,38 +189,30 @@ def _request_table(
 
     Raises:
         WebClientDataError: If the widget refuses the request, returns a
-            non-table object, times out on the wire, or produces no table
-            before ``deadline_seconds`` elapses.
+            non-table object, or produces no table before ``deadline_seconds``
+            elapses.
     """
-    try:
-        plugin.req_stream.write(_request_payload(table, operate_as), references=[])
+    plugin.req_stream.write(_request_payload(table, operate_as), references=[])
 
-        deadline = time.monotonic() + deadline_seconds
-        for payload, exported in plugin.resp_stream:
-            if exported:
-                fetched = exported[0].fetch()
-                if not isinstance(fetched, Table):
-                    raise WebClientDataError(
-                        f"The '{_TABLE_FACTORY_FIELD}' widget returned a "
-                        f"{type(fetched).__name__} for table '{table}'; expected a table."
-                    )
-                return fetched
-            # A refusal carries a payload and exports nothing. Reading on would
-            # block until the stream closes, so the deadline below never fires.
-            if payload:
+    deadline = time.monotonic() + deadline_seconds
+    for payload, exported in plugin.resp_stream:
+        if exported:
+            fetched = exported[0].fetch()
+            if not isinstance(fetched, Table):
                 raise WebClientDataError(
-                    f"The '{_TABLE_FACTORY_FIELD}' widget refused the request for "
-                    f"'{table}' as user '{operate_as}': {_refusal_reason(payload)}"
+                    f"The '{_TABLE_FACTORY_FIELD}' widget returned a "
+                    f"{type(fetched).__name__} for table '{table}'; expected a table."
                 )
-            if time.monotonic() > deadline:
-                break
-    except TimeoutError as e:
-        # The caller signals its own deadline with TimeoutError; a vendor one
-        # reaching it would be reported as that deadline and lose this cause.
-        raise WebClientDataError(
-            f"Fetching '{table}' from the '{_TABLE_FACTORY_FIELD}' widget "
-            f"timed out: {describe_exception_chain(e)}"
-        ) from e
+            return fetched
+        # A refusal carries a payload and exports nothing. Reading on would
+        # block until the stream closes, so the deadline below never fires.
+        if payload:
+            raise WebClientDataError(
+                f"The '{_TABLE_FACTORY_FIELD}' widget refused the request for "
+                f"'{table}' as user '{operate_as}': {_refusal_reason(payload)}"
+            )
+        if time.monotonic() > deadline:
+            break
 
     raise WebClientDataError(
         f"The '{_TABLE_FACTORY_FIELD}' widget returned no table for "
@@ -279,7 +263,7 @@ async def fetch_web_client_data_table(
             lambda plugin: _request_table(plugin, table, operate_as, timeout_seconds),
             timeout_seconds=timeout_seconds,
         )
-    except TimeoutError:
+    except BlockingDeadlineExceeded:
         # The abandoned worker is blocked on the response stream; the close
         # BlockingResource performs is what ends that read.
         _LOGGER.error(

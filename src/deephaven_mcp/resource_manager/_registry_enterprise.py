@@ -396,10 +396,11 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
         with non-overlapping calls, and every borrower shares this one
         instance. Concurrent reads on a system are therefore serialized.
 
-        Canceling a borrower unwinds this context while the thread running its
-        blocking call keeps using the session, so the session is dropped from
-        the cache rather than handed to the next borrower. It is not closed:
-        a canceled task cannot be relied on to await one.
+        Canceling a borrower, or a widget read that overruns its deadline,
+        leaves the thread running that call still using the session, so a
+        failed borrow drops it from the cache rather than handing it to the
+        next borrower. It is not closed: the thread still holds it, and a
+        canceled task cannot be relied on to await a close.
 
         Yields:
             CorePlusSession: A live session on the ``WebClientData`` persistent
@@ -416,7 +417,7 @@ class EnterpriseSessionRegistry(MutableSessionRegistry):
             session = await self._connect_web_client_data()
             try:
                 yield session
-            except asyncio.CancelledError:
+            except BaseException:
                 if self._web_client_data_session is session:
                     self._web_client_data_session = None
                 raise

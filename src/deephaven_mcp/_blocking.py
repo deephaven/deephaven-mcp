@@ -17,6 +17,9 @@ import asyncio
 import logging
 import threading
 from collections.abc import Callable
+from typing import Any
+
+from deephaven_mcp._exceptions import BlockingDeadlineExceeded
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +72,80 @@ def _note_late_arrival(name: str, abandoned: bool) -> None:
     )
 
 
-async def run_blocking[T](fn: Callable[[], T], name: str, timeout_seconds: float) -> T:
+def _report_to_loop(
+    loop: asyncio.AbstractEventLoop,
+    deliver: Callable[[Any], None],
+    value: Any,
+    name: str,
+) -> None:
+    """Hand ``value`` to ``deliver`` on ``loop``, tolerating a closed loop.
+
+    Args:
+        loop (asyncio.AbstractEventLoop): The loop the caller waited on.
+        deliver (Callable[[Any], None]): Loop-thread callback recording the
+            outcome.
+        value (Any): The result or exception to report.
+        name (str): Thread name, for the discard log.
+    """
+    try:
+        loop.call_soon_threadsafe(deliver, value)
+    except RuntimeError:
+        # An abandoned thread can outlive the loop it was started from, and
+        # nobody is waiting on it by then.
+        _LOGGER.debug(
+            f"[run_blocking] {name!r} finished after its loop closed; "
+            f"result discarded"
+        )
+
+
+def _dispose_abandoned(dispose: Callable[[Any], None], value: Any, name: str) -> None:
+    """Run ``dispose`` on ``value``, logging rather than raising on failure.
+
+    Args:
+        dispose (Callable[[Any], None]): Releases the abandoned result.
+        value (Any): The result nobody was waiting for.
+        name (str): Thread name, for the log.
+    """
+    try:
+        dispose(value)
+    except Exception as e:
+        _LOGGER.warning(
+            f"[run_blocking] Failed to dispose of {name!r}'s abandoned "
+            f"result: {e!r}"
+        )
+    else:
+        _LOGGER.info(f"[run_blocking] Disposed of {name!r}'s abandoned result")
+
+
+def _release_abandoned(
+    dispose: Callable[[Any], None] | None, value: Any, name: str
+) -> None:
+    """Hand ``value`` to ``dispose`` on a thread of its own, if there is one.
+
+    Args:
+        dispose (Callable[[Any], None] | None): Releases the result, or
+            ``None`` to leave it to the garbage collector.
+        value (Any): The result nobody was waiting for.
+        name (str): Thread name, for the log and the disposal thread's name.
+    """
+    if dispose is None:
+        return
+    # Disposal blocks, and the caller of this is the loop thread.
+    threading.Thread(
+        target=_dispose_abandoned,
+        args=(dispose, value, name),
+        name=f"{name}-dispose",
+        daemon=True,
+    ).start()
+
+
+async def run_blocking[T](
+    fn: Callable[[], T],
+    name: str,
+    timeout_seconds: float,
+    *,
+    on_abandoned_result: Callable[[T], None] | None = None,
+) -> T:
     """Run ``fn`` on a dedicated daemon thread, bounded by ``timeout_seconds``.
 
     Deliberately not ``asyncio.to_thread``: that shares one process-wide
@@ -88,13 +164,20 @@ async def run_blocking[T](fn: Callable[[], T], name: str, timeout_seconds: float
         fn (Callable[[], T]): The blocking work to run.
         name (str): Thread name, for diagnosis in stack dumps.
         timeout_seconds (float): How long to wait before abandoning the thread.
+        on_abandoned_result (Callable[[T], None] | None): Releases a result
+            that arrives after the deadline, which nobody receives and which
+            would otherwise be retained for the process's lifetime by anything
+            the vendor registers it with. Runs on its own daemon thread, so it
+            may block; failures are logged, not raised.
 
     Returns:
         T: Whatever ``fn`` returned.
 
     Raises:
-        TimeoutError: If ``fn`` does not finish within ``timeout_seconds``.
-        BaseException: Anything ``fn`` raised propagates unchanged.
+        BlockingDeadlineExceeded: If ``fn`` does not finish within
+            ``timeout_seconds``.
+        BaseException: Anything ``fn`` raised propagates unchanged, including a
+            ``TimeoutError`` of its own.
     """
     loop = asyncio.get_running_loop()
     done: asyncio.Future[T] = loop.create_future()
@@ -109,6 +192,7 @@ async def run_blocking[T](fn: Callable[[], T], name: str, timeout_seconds: float
         delivered = True
         if done.done():
             _note_late_arrival(name, abandoned)
+            _release_abandoned(on_abandoned_result, value, name)
         else:
             done.set_result(value)
 
@@ -124,20 +208,23 @@ async def run_blocking[T](fn: Callable[[], T], name: str, timeout_seconds: float
         try:
             result = fn()
         except BaseException as e:  # noqa: BLE001 - reported through the future
-            loop.call_soon_threadsafe(_deliver_error, e)
+            _report_to_loop(loop, _deliver_error, e, name)
         else:
-            loop.call_soon_threadsafe(_deliver_result, result)
+            _report_to_loop(loop, _deliver_result, result, name)
 
     threading.Thread(target=_worker, name=name, daemon=True).start()
     try:
         return await asyncio.wait_for(done, timeout=timeout_seconds)
     except TimeoutError:
-        # A TimeoutError from ``fn`` itself leaves no thread behind, so only an
-        # unreported one means the deadline expired.
-        if not delivered:
-            abandoned = True
-            _note_abandoned(name, timeout_seconds)
-        raise
+        # A TimeoutError from ``fn`` itself arrives through the future and
+        # leaves no thread behind, so it keeps its own meaning.
+        if delivered:
+            raise
+        abandoned = True
+        _note_abandoned(name, timeout_seconds)
+        raise BlockingDeadlineExceeded(
+            f"{name!r} did not finish within {timeout_seconds}s"
+        ) from None
 
 
 class _AbandonedError(Exception):

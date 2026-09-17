@@ -9,6 +9,7 @@ import pytest
 
 from deephaven_mcp import _blocking
 from deephaven_mcp._blocking import BlockingResource, run_blocking
+from deephaven_mcp._exceptions import BlockingDeadlineExceeded
 
 
 def _live_abandoned():
@@ -22,6 +23,88 @@ async def _drain(before):
         if _live_abandoned() == before:
             return
         await asyncio.sleep(0.01)
+
+
+async def _settles(event, timeout=10.0):
+    """Wait for ``event`` without blocking the loop the callbacks run on."""
+    for _ in range(int(timeout / 0.01)):
+        if event.is_set():
+            return True
+        await asyncio.sleep(0.01)
+    return event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_result_nobody_waited_for_is_disposed_of():
+    """The vendor may retain it forever, so an abandoned result must be released."""
+    release = threading.Event()
+    disposed = []
+    closed = threading.Event()
+
+    def dispose(value):
+        disposed.append(value)
+        closed.set()
+
+    def slow():
+        release.wait(30)
+        return "the session"
+
+    with pytest.raises(BlockingDeadlineExceeded):
+        await run_blocking(slow, "probe-dispose", 0.01, on_abandoned_result=dispose)
+
+    release.set()
+    assert await _settles(closed), "the abandoned result was never disposed of"
+    assert disposed == ["the session"]
+
+
+@pytest.mark.asyncio
+async def test_disposal_runs_off_the_event_loop():
+    """Disposal blocks, so running it on the loop thread would stall the server."""
+    release = threading.Event()
+    ran_on = []
+    done = threading.Event()
+    loop_thread = threading.current_thread()
+
+    def dispose(_value):
+        ran_on.append(threading.current_thread())
+        done.set()
+
+    with pytest.raises(BlockingDeadlineExceeded):
+        await run_blocking(
+            lambda: release.wait(30), "probe-thread", 0.01, on_abandoned_result=dispose
+        )
+
+    release.set()
+    assert await _settles(done)
+    assert ran_on[0] is not loop_thread
+
+
+@pytest.mark.asyncio
+async def test_a_failed_disposal_is_logged_not_raised(caplog):
+    """A close that fails must not take down the thread that attempted it."""
+    release = threading.Event()
+    attempted = threading.Event()
+
+    def dispose(_value):
+        attempted.set()
+        raise RuntimeError("close refused")
+
+    with caplog.at_level(logging.WARNING, logger="deephaven_mcp._blocking"):
+        with pytest.raises(BlockingDeadlineExceeded):
+            await run_blocking(
+                lambda: release.wait(30),
+                "probe-badclose",
+                0.01,
+                on_abandoned_result=dispose,
+            )
+        release.set()
+        assert await _settles(attempted)
+        for _ in range(500):
+            if any("Failed to dispose" in r.message for r in caplog.records):
+                break
+            await asyncio.sleep(0.01)
+
+    assert any("Failed to dispose" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio

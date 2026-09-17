@@ -82,6 +82,7 @@ from pydeephaven.table import InputTable, Table
 
 from deephaven_mcp._blocking import run_blocking
 from deephaven_mcp._exceptions import (
+    BlockingDeadlineExceeded,
     DeephavenConnectionError,
     QueryError,
     ResourceError,
@@ -779,11 +780,12 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 is a private thread rather than a shared-executor one.
 
         Raises:
-            TimeoutError: If ``timeout_seconds`` elapses first.
+            BlockingDeadlineExceeded: If ``timeout_seconds`` elapses first.
             DeephavenConnectionError: If a network or connection error occurs during close,
                                     such as network disruptions.
             SessionError: If the session cannot be closed for non-connection reasons,
-                        such as server errors, invalid session state, or permission issues.
+                        such as server errors, invalid session state, permission issues,
+                        or a timeout the server itself reported.
 
         Example - Basic usage:
             ```python
@@ -821,7 +823,7 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                     self.wrapped.close, "dh-mcp-session-close", timeout_seconds
                 )
             _LOGGER.debug("[CoreSession:close] Session closed successfully")
-        except TimeoutError:
+        except BlockingDeadlineExceeded:
             raise
         except ConnectionError as e:
             _LOGGER.error(f"[CoreSession:close] Connection error closing session: {e}")
@@ -1061,9 +1063,10 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
             True if the session is alive, False otherwise
 
         Raises:
-            TimeoutError: If ``timeout_seconds`` elapses first.
+            BlockingDeadlineExceeded: If ``timeout_seconds`` elapses first.
             DeephavenConnectionError: If there is a network or connection error
-            SessionError: If there's an error checking session status
+            SessionError: If there's an error checking session status, including
+                a timeout the server itself reported
         """
         _LOGGER.debug("[CoreSession:is_alive] Called")
         try:
@@ -1074,7 +1077,7 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 "dh-mcp-session-is-alive",
                 timeout_seconds,
             )
-        except TimeoutError:
+        except BlockingDeadlineExceeded:
             raise
         except ConnectionError as e:
             _LOGGER.error(
