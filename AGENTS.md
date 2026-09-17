@@ -25,6 +25,15 @@ These operations are slow by nature, not hung — set generous timeouts:
 - **Carve-out for entailed surfaces**: a surface the approved change *requires* is in scope. A requested command brings its flags, its error codes, and its output fields; a requested config field brings its key. What needs approval is a surface that stands on its own, not the parts the request already implies.
 - Environment variables are the most-violated case: `docs/ENV.md` is the canonical inventory and every entry in it is deliberate. Apply `ref-configuration-conventions` before changing env-var behavior, plus `cli-command-add` for CLI code.
 
+## Reviewing a pull request
+
+These apply when reviewing a change, including automated review. They bound *what a comment may demand*, never what it may observe — a real defect is always worth raising; the question is whether fixing it is this change's job.
+
+- **A change answers for what it does, not for what it inherits.** A defect that is present identically on the base branch is out of scope. Raise it once for the record, state that it predates the change, and do not make it a merge condition.
+- **Distinguish introducing from inheriting.** Extending, relocating, or renaming existing code does not adopt its pre-existing defects. A change *does* own an inherited defect it makes materially worse or newly reachable — say which of the two it is, because that is the whole basis for asking.
+- **Prefer the smallest correct remedy.** When the proposed fix is larger than the defect — a new abstraction, a new configuration surface, a subsystem rewrite — offer it as follow-up rather than as a blocker, and say what the minimal fix would be instead.
+- **A stated trade-off is not a finding.** Where the code or its docstring gives the reason for an approach, engage that reason or leave it alone; repeating the concern without addressing the stated rationale is noise.
+
 ## Agent Skills
 
 Skills live in `.agents/skills/`, surfaced to each agent through thin wiring shims (a `.claude/skills` symlink and a `CLAUDE.md` that imports `@AGENTS.md` for Claude Code). `ref-skill-authoring-standards` *Cross-agent portability* owns that cross-agent wiring contract.

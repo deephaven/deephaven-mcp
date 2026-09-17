@@ -35,7 +35,7 @@ Note:
 """
 
 from ._auth_client import CorePlusAuthClient
-from ._base import ClientObjectWrapper, describe_exception_chain
+from ._base import ClientObjectWrapper
 from ._controller_client import (
     CONTROLLER_SUBSCRIBING_ERROR_CODE,
     CorePlusControllerClient,
@@ -81,7 +81,6 @@ __all__ = [
     "CorePlusSessionFactory",
     "WEB_CLIENT_DATA_PQ",
     "WebClientDataTable",
-    "describe_exception_chain",
     "fetch_web_client_data_table",
     "wire_to_env_var_entries",
 ]

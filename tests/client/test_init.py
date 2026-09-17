@@ -66,7 +66,6 @@ def test___all__():
         "PQ_STATES",
         "WEB_CLIENT_DATA_PQ",
         "WebClientDataTable",
-        "describe_exception_chain",
         "fetch_web_client_data_table",
         "wire_to_env_var_entries",
     }
@@ -96,7 +95,6 @@ def test_import_star_behavior():
         "PQ_STATES",
         "WEB_CLIENT_DATA_PQ",
         "WebClientDataTable",
-        "describe_exception_chain",
         "fetch_web_client_data_table",
         "wire_to_env_var_entries",
     }

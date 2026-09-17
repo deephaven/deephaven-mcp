@@ -303,7 +303,7 @@ async def _extract_meta_table(table: Table, context: str) -> pyarrow.Table:
     Extract meta_table from a Deephaven table and convert to Arrow format.
 
     This internal helper consolidates the common pattern of extracting and converting
-    a table's meta_table to Arrow format, used by both session and catalog meta table functions.
+    a table's meta_table to Arrow format.
 
     Args:
         table (Table): A Deephaven table object with a meta_table property.

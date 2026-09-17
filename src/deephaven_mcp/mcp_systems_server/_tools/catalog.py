@@ -17,7 +17,7 @@ import logging
 from mcp.server.fastmcp import Context, FastMCP
 
 from deephaven_mcp import queries
-from deephaven_mcp.client import describe_exception_chain
+from deephaven_mcp._exception_utils import describe_exception
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     check_response_size,
     error_response,
@@ -53,7 +53,7 @@ def _catalog_failure_error(
         exc_info=True,
     )
     return error_response(
-        f"Catalog operation failed for system '{system}': {describe_exception_chain(e)}"
+        f"Catalog operation failed for system '{system}': {describe_exception(e)}"
     )
 
 
