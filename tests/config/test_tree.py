@@ -1011,10 +1011,9 @@ async def test_examples_ai_config_loads_end_to_end(
     config_dir = tmp_path / "config"
     shutil.copytree(src, config_dir)
 
-    # Retarget the ${file:...} placeholder at a real, readable file
-    # *inside* the configuration directory. The templating engine
-    # refuses ``${file:...}`` references that resolve outside the
-    # audited configuration root.
+    # Retarget the ${file:...} placeholder at a real, readable file: the
+    # sample points at a host-specific /etc/deephaven path that does not
+    # exist on the machine running the test.
     keyfile = config_dir / "priv-staging.base64.txt"
     keyfile.write_text("-----BEGIN FAKE KEY-----\nx\n-----END FAKE KEY-----\n")
     keyfile.chmod(0o600)

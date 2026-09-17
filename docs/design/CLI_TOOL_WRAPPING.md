@@ -116,10 +116,10 @@ command surface must make that place unmistakable:
 - **The server.** The flag is an identifier in a server-side namespace
   and is forwarded verbatim — e.g. `pq --git-script-path` (a path into
   the controller's Git-backed script repository, read at PQ start) or
-  `pq --python-venv` (a venv name configured on the Enterprise server).
-  The flag name and help must say so; a bare name like `--script-path`
-  on a server-side flag reads as a local file and was renamed for
-  exactly that reason.
+  `pq --class-path` (a classpath entry resolved on the Enterprise
+  server's filesystem). The flag name and help must say so; a bare name
+  like `--script-path` on a server-side flag reads as a local file and
+  was renamed for exactly that reason.
 
 The daemon is deliberately **never** a file-resolution locus for the CLI
 surface: it is a background process whose working directory and lifetime

@@ -1207,8 +1207,7 @@ def test_files_relative_config_dir_emits_absolute_paths(
 ) -> None:
     """A relative --config-dir is normalized so payload paths stay absolute."""
     monkeypatch.chdir(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(
+    result = CliRunner().invoke(
         cli, ["--config-dir", "reldir", "-o", "json", "config", "files"]
     )
     assert result.exit_code == 0, result.output

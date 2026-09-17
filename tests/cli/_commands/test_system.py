@@ -269,6 +269,58 @@ def test_status_tool_failure_exits_3(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# reconnect
+# ---------------------------------------------------------------------------
+
+_RECONNECT_PAYLOAD = {
+    "success": True,
+    "system": "prod",
+    "reconnect_requested": True,
+    "detail": "Reconnect requested for enterprise system 'prod'.",
+}
+
+
+def test_reconnect_success_json(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    acquire_p, call_p = _patch(_result(_RECONNECT_PAYLOAD))
+    with acquire_p, call_p as call:
+        result = _invoke(["-o", "json", "system", "reconnect", "prod"], rt)
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["system"] == "prod"
+    assert payload["reconnect_requested"] is True
+    name, args = call.await_args.args[2], call.await_args.args[3]
+    assert name == "enterprise_controller_reconnect"
+    assert args == {"system": "prod"}
+
+
+def test_reconnect_falls_back_to_context_system(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    rt.context_store.set(ContextKey.SYSTEM, "prod")
+    acquire_p, call_p = _patch(_result(_RECONNECT_PAYLOAD))
+    with acquire_p, call_p as call:
+        result = _invoke(["system", "reconnect"], rt)
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {"system": "prod"}
+
+
+def test_reconnect_no_system_and_no_context_fails(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    result = _invoke(["system", "reconnect"], rt, standalone_mode=False)
+    assert result.exception.code.value == "context_not_set"
+
+
+def test_reconnect_tool_error_exits_3(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    failure = {"success": False, "error": "unknown system", "isError": True}
+    acquire_p, call_p = _patch(_result(failure))
+    with acquire_p, call_p:
+        result = _invoke(["system", "reconnect", "bogus"], rt)
+    assert result.exit_code == 3
+    assert "unknown system" in result.output
+
+
+# ---------------------------------------------------------------------------
 # url / open
 # ---------------------------------------------------------------------------
 
