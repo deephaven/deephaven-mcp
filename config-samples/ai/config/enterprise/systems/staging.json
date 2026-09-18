@@ -4,7 +4,7 @@
   "auth": {
     "credentials": {
       "type": "private_key",
-      "key_text": "${file:/etc/deephaven/staging-key.pem}"
+      "key_text": "${file:/etc/deephaven/priv-staging.base64.txt}"
     }
   },
   "session_creation": {

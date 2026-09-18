@@ -1011,16 +1011,17 @@ async def test_examples_ai_config_loads_end_to_end(
     config_dir = tmp_path / "config"
     shutil.copytree(src, config_dir)
 
-    # Retarget the ${file:...} placeholder at a real, readable file
-    # *inside* the configuration directory. The templating engine
-    # refuses ``${file:...}`` references that resolve outside the
-    # audited configuration root.
-    keyfile = config_dir / "staging-key.pem"
-    keyfile.write_text("-----BEGIN FAKE KEY-----\nx\n-----END FAKE KEY-----\n")
+    # Retarget the ${file:...} placeholder at a real, readable file: the
+    # sample points at a host-specific /etc/deephaven path that does not
+    # exist on the machine running the test.
+    keyfile = config_dir / "priv-staging.base64.txt"
+    keyfile.write_text("FAKEPRIVATEKEYPAIRDATA1234567890+/=\n")
     keyfile.chmod(0o600)
     staging_path = config_dir / "enterprise" / "systems" / "staging.json"
     staging_path.write_text(
-        staging_path.read_text().replace("/etc/deephaven/staging-key.pem", str(keyfile))
+        staging_path.read_text().replace(
+            "/etc/deephaven/priv-staging.base64.txt", str(keyfile)
+        )
     )
 
     # Provide the env vars the example references via ${env:...}.
@@ -1050,5 +1051,5 @@ async def test_examples_ai_config_loads_end_to_end(
     staging = cfg.enterprise.systems["staging"]
     assert isinstance(staging.auth.credentials, PrivateKeyCredentials)
     assert staging.auth.credentials.key_text.get_secret_value().startswith(
-        "-----BEGIN FAKE KEY-----"
+        "FAKEPRIVATEKEYPAIRDATA"
     )

@@ -40,7 +40,7 @@
 
 ### Why Deephaven MCP?
 
-Most data tools force you to choose: **fast** or **real-time**. With Deephaven's revolutionary live dataframes, you get both. Process streaming data at millisecond speeds while your AI assistant helps you build, query, and analyze — all through natural language.
+Working with real-time data usually means giving up the simple, interactive workflow you get with static tables. Deephaven's live dataframes remove that trade-off: write queries as if your data were static and they keep updating automatically as new data streams in, all through natural language.
 
 **What makes this different:**
 
@@ -254,12 +254,13 @@ dhcli config system add prod \
   --auth password --username iris --password '${env:DH_PROD_PASSWORD}'
 ```
 
-**Private-key auth** — PEM text is multi-line, so reference the file:
+**Private-key auth** — the key lives in a file, so reference it. This is your
+[Deephaven private key](https://deephaven.io/enterprise/docs/sys-admin/admin-glossary/#private-key-login-keypair-files):
 
 ```bash
 dhcli config system add prod \
   --url https://dhe.example.com/iris/connection.json \
-  --auth private_key --key '${file:/etc/deephaven/prod-key.pem}'
+  --auth private_key --key '${file:/etc/deephaven/priv-prod.base64.txt}'
 ```
 
 Omit any flag to be prompted for it on a terminal. Then verify:
@@ -631,7 +632,23 @@ If you prefer a manual venv (for example, when developing or testing):
 ```sh
 # Create virtual environment with Python 3.12+
 uv venv .venv -p 3.12
+```
 
+Optional: activate it in each new terminal if you want to use `python` or `pip` directly without `uv run`.
+
+Unix / macOS:
+
+```sh
+source .venv/bin/activate
+```
+
+Windows (PowerShell or Command Prompt):
+
+```powershell
+.venv\Scripts\activate
+```
+
+```sh
 # Install deephaven-mcp
 uv pip install "deephaven-mcp"
 ```
@@ -640,10 +657,25 @@ Or with standard pip:
 
 ```sh
 python3.12 -m venv .venv
-.venv/bin/pip install "deephaven-mcp"
 ```
 
-When using a venv, use the full path to executables (e.g., `.venv/bin/dh-mcp-systems-server`).
+Unix / macOS:
+
+```sh
+source .venv/bin/activate
+```
+
+Windows (PowerShell or Command Prompt):
+
+```powershell
+.venv\Scripts\activate
+```
+
+```sh
+pip install "deephaven-mcp"
+```
+
+When wiring your AI tool to a venv install, use the full path to executables (e.g., `.venv/bin/dh-mcp-systems-server`), since your AI tool does not activate the environment for you.
 
 #### Alternative: Standalone binaries (no Python required)
 
