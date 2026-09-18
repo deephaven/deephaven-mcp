@@ -64,6 +64,9 @@ def test___all__():
         "CorePlusQueryInfo",
         "CorePlusToken",
         "PQ_STATES",
+        "WEB_CLIENT_DATA_PQ",
+        "WebClientDataTable",
+        "fetch_web_client_data_table",
         "wire_to_env_var_entries",
     }
     assert isinstance(client.__all__, list)
@@ -90,6 +93,9 @@ def test_import_star_behavior():
         "CorePlusQueryInfo",
         "CorePlusToken",
         "PQ_STATES",
+        "WEB_CLIENT_DATA_PQ",
+        "WebClientDataTable",
+        "fetch_web_client_data_table",
         "wire_to_env_var_entries",
     }
     ns = {}

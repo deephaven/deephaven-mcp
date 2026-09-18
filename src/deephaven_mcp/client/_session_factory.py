@@ -68,6 +68,7 @@ from typing import Any
 import pydeephaven
 from deephaven_enterprise.client.session_manager import SessionManager
 
+from deephaven_mcp._blocking import run_blocking
 from deephaven_mcp._exceptions import (
     AuthenticationError,
     DeephavenConnectionError,
@@ -94,6 +95,16 @@ from ._timeouts import EnterpriseClientTimeouts
 
 # Define the logger for this module
 _LOGGER = logging.getLogger(__name__)
+
+
+def _close_abandoned_session(session: Any) -> None:
+    """Close a worker session that finished connecting after its deadline.
+
+    Args:
+        session (Any): The vendor ``DndSession`` nobody received. Untyped
+            because the vendor does not annotate ``close``.
+    """
+    session.close()
 
 
 class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
@@ -993,14 +1004,18 @@ class CorePlusSessionFactory(ClientObjectWrapper[SessionManager]):
             _LOGGER.debug(
                 f"[CorePlusSessionFactory:connect_to_persistent_query] Connecting to persistent query (name={name}, serial={serial})"
             )
-            session = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.wrapped.connect_to_persistent_query,
+            session = await run_blocking(
+                lambda: self.wrapped.connect_to_persistent_query(
                     name=name,
                     serial=serial,
                     session_arguments=session_arguments,
                 ),
-                timeout=timeout_seconds,
+                "dh-mcp-pq-connect",
+                timeout_seconds,
+                # The vendor registers every session it builds in
+                # SessionManager.active_sessions, so one that arrives late is
+                # never collected and holds its worker connection open.
+                on_abandoned_result=_close_abandoned_session,
             )
             _LOGGER.debug(
                 "[CorePlusSessionFactory:connect_to_persistent_query] Successfully connected to persistent query"

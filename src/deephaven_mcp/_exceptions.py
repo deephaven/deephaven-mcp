@@ -41,6 +41,8 @@ __all__ = [
     "McpError",
     "InternalError",
     "UnsupportedOperationError",
+    # Blocking-call exceptions
+    "BlockingDeadlineExceeded",
     # Session exceptions
     "SessionCreationError",
     "SessionError",
@@ -50,6 +52,8 @@ __all__ = [
     "AuthenticationError",
     # Query exceptions
     "QueryError",
+    # Web client data exceptions
+    "WebClientDataError",
     # Connection exceptions
     "DeephavenConnectionError",
     # Resource exceptions
@@ -332,6 +336,38 @@ class QueryError(McpError):
     pass
 
 
+# Web Client Data Exceptions
+
+
+class WebClientDataError(McpError):
+    """Exception raised when a WebClientData system table cannot be obtained.
+
+    Raised by the ``WebClientData`` table-factory widget protocol for any
+    failure to obtain the requested per-user table, including failing to open
+    the widget stream and exceeding the configured timeout.
+
+    Examples:
+        - The widget stream could not be opened
+        - The table-factory widget is not exported under the expected scope field
+        - The widget refused the request (unknown table name, or the caller may
+          not request tables for the named user)
+        - The widget returned an object that is not a table
+        - No table arrived before the configured widget timeout elapsed
+
+    Usage:
+        ```python
+        try:
+            table = await fetch_web_client_data_table(
+                session, WebClientDataTable.CATALOG, operate_as="jdoe", timeout_seconds=30.0
+            )
+        except WebClientDataError as e:
+            logger.error(f"WebClientData fetch failed: {e}")
+        ```
+    """
+
+    pass
+
+
 # Connection Exceptions
 
 
@@ -602,6 +638,37 @@ class UnsupportedOperationError(McpError):
         This is distinct from NotImplementedError, which indicates planned but unimplemented
         features. UnsupportedOperationError indicates operations that are fundamentally
         incompatible with the current context.
+    """
+
+    pass
+
+
+# Blocking-Call Exceptions
+
+
+class BlockingDeadlineExceeded(McpError, TimeoutError):
+    """A bounded blocking call ran past its deadline and was abandoned.
+
+    Distinguishes the deadline from a ``TimeoutError`` the called work raised
+    itself, which the two cannot otherwise be told apart by. The distinction is
+    load-bearing: the abandoned thread is still running and still holds every
+    resource it captured, so anything it touched — a session, a stream — must
+    not be handed to another caller, whereas work that raised its own
+    ``TimeoutError`` has finished and left nothing behind.
+
+    Subclasses :class:`TimeoutError` so existing handlers keep working; catch
+    this instead where the difference matters.
+
+    Usage:
+        ```python
+        try:
+            await run_blocking(fn, "probe", 5.0)
+        except BlockingDeadlineExceeded:
+            registry.invalidate(session)  # a thread may still be using it
+            raise
+        except TimeoutError:
+            raise SessionError("the server reported a timeout") from None
+        ```
     """
 
     pass

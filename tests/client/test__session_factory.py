@@ -9,7 +9,10 @@ import pytest
 import deephaven_mcp._exceptions as exc
 from deephaven_mcp.client._auth_client import CorePlusAuthClient
 from deephaven_mcp.client._controller_client import CorePlusControllerClient
-from deephaven_mcp.client._session_factory import CorePlusSessionFactory
+from deephaven_mcp.client._session_factory import (
+    CorePlusSessionFactory,
+    _close_abandoned_session,
+)
 from deephaven_mcp.client._timeouts import EnterpriseClientTimeouts
 
 
@@ -636,6 +639,41 @@ async def test_connect_to_persistent_query_timeout(
     with pytest.raises(exc.DeephavenConnectionError) as exc_info:
         await coreplus_session_manager.connect_to_persistent_query(name="test")
     assert "timed out" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_connect_to_persistent_query_closes_a_late_session(
+    coreplus_session_manager, dummy_session_manager
+):
+    """The vendor keeps every session it builds, so a late one must be closed."""
+    import time
+
+    late = MagicMock()
+
+    def slow_connect(*args, **kwargs):
+        time.sleep(0.05)
+        return late
+
+    dummy_session_manager.connect_to_persistent_query.side_effect = slow_connect
+    coreplus_session_manager._timeouts = coreplus_session_manager._timeouts.model_copy(
+        update={"pq_connection_timeout_seconds": 0.01}
+    )
+
+    with pytest.raises(exc.DeephavenConnectionError):
+        await coreplus_session_manager.connect_to_persistent_query(name="test")
+
+    for _ in range(500):
+        if late.close.called:
+            break
+        await asyncio.sleep(0.01)
+    late.close.assert_called_once_with()
+
+
+def test_close_abandoned_session_closes_it():
+    """The adapter exists because the vendor does not annotate close."""
+    session = MagicMock()
+    _close_abandoned_session(session)
+    session.close.assert_called_once_with()
 
 
 def _patches_for_from_url(side_effect=None):

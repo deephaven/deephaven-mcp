@@ -230,7 +230,7 @@ available:
 - **Fix it in place**: `dhcli config set` / `dhcli config unset`
   rewrite one field, `dhcli config edit <path>` opens the whole
   file in your editor (`$VISUAL`, else `$EDITOR`), and `dhcli config
-  get` reads raw on-disk contents even from a partial or invalid tree.
+get` reads raw on-disk contents even from a partial or invalid tree.
 - **Stuck daemon**: read `daemon.json` directly under
   `<runtime_dir>/daemon/`, then `kill <pid>`. Optionally `rm`
   the registry file once the process is gone.
@@ -299,36 +299,36 @@ Example (JSON5; `//` comments are accepted):
 
 ```json5
 {
-  "output": {
-    "format": "json"
+  output: {
+    format: "json",
   },
-  "daemon": {
-    "auto_start": true,
-    "reuse": {
-      "version": "refuse",        // ignore | warn | restart | refuse
-      "venv": "refuse",
-      "fingerprint": "warn"
+  daemon: {
+    auto_start: true,
+    reuse: {
+      version: "refuse", // ignore | warn | restart | refuse
+      venv: "refuse",
+      fingerprint: "warn",
     },
-    "timeouts": {
-      "startup_deadline_seconds": 30,
-      "kill_after_seconds": 10
-    }
+    timeouts: {
+      startup_deadline_seconds: 30,
+      kill_after_seconds: 10,
+    },
   },
-  "request": {
-    "timeouts": {
-      "default_seconds": 30
-    }
+  request: {
+    timeouts: {
+      default_seconds: 30,
+    },
   },
-  "docs": {
-    "url": "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
-    "timeouts": {
-      "request_seconds": 120
-    }
+  docs: {
+    url: "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp",
+    timeouts: {
+      request_seconds: 120,
+    },
   },
-  "context": {
-    "enabled": true,
-    "confirm_destructive": false  // ask before acting on a context-supplied target
-  }
+  context: {
+    enabled: true,
+    confirm_destructive: false, // ask before acting on a context-supplied target
+  },
 }
 ```
 
@@ -592,31 +592,25 @@ dhcli table data community:community:dev trades | jq '.row_count, .is_complete'
 
 ### `dhcli catalog`
 
-**Enterprise (Core+) only.** Queries an enterprise session's catalog
-(database); `ID` must name an enterprise session.
+**Enterprise (Core+) only.** Queries an enterprise data catalog (database).
+
+`tables` and `namespaces` take a `SYSTEM` and need no worker of your own: they
+read the listing through the system's shared `WebClientData` persistent query,
+which builds the catalog with the ACLs of the Enterprise principal the server
+is configured with for that system. That is not your CLI identity — every
+caller of a given system sees the same listing. `WebClientData` must be
+running on the system.
 
 | Verb                                  | Purpose                                                                               |
 |---------------------------------------|---------------------------------------------------------------------------------------|
-| `tables [ID]`                         | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
-| `namespaces [ID]`                     | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
-| `schema <id> <namespace> <table>`     | Column definitions for one catalog table: name and type per column, plus `column_type` where meaningful. Wraps `catalog_table_schema`. |
-| `sample <id> <namespace> <table>`    | Sample rows. `--max-rows` (default 100), `--head/--tail`, `--filter` (repeatable). Wraps `catalog_table_sample`. |
+| `tables [SYSTEM]`     | Lists `{namespace, table_name}` entries. `--max-rows`, `--filter` (repeatable). When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_tables_list`. |
+| `namespaces [SYSTEM]` | Lists the catalog's namespace names. Same options as `tables`. When the list is truncated by `--max-rows`, a warning is written to stderr. Wraps `catalog_namespaces_list`. |
 
-As with `table`, `schema` and `sample` require an explicit `ID`
-(a namespace and table name follow it), while `tables` and
-`namespaces` fall back to the sticky context.
-
-`sample` is a preview, not a query. Partitioned tables would return
-nothing without a partition filter, so with no `--filter` the tool
-detects the table's partition columns and samples the most recent
-partition holding data; passing `--filter` replaces that with your own
-expressions. `catalog schema` marks partition columns with
-`column_type: Partitioning`.
+Both verbs fall back to the sticky context system when `SYSTEM` is omitted.
 
 ```bash
-dhcli catalog tables enterprise:prod:42
-dhcli catalog schema enterprise:prod:42 Market Trades
-dhcli catalog sample enterprise:prod:42 Market Trades --max-rows 20
+dhcli catalog tables prod
+dhcli catalog namespaces prod
 ```
 
 ### `dhcli pq`
@@ -812,9 +806,9 @@ given — the command proceeds without asking rather than failing, so
 enabling the setting never breaks a script. In practice an interactive
 human gets the prompt and a non-interactive caller does not.
 
-Five verbs keep a **required** leading positional despite the fallback:
-`table schema`, `table data`, `catalog schema`, `catalog sample` (each an
-`ID`), and `pq name-to-id` (a `SYSTEM`). Each takes a further required
+Three verbs keep a **required** leading positional despite the fallback:
+`table schema`, `table data` (each an `ID`), and `pq name-to-id` (a
+`SYSTEM`). Each takes a further required
 positional after it, and a leading optional argument followed by a
 required one is ambiguous to parse, so the first stays mandatory. The
 verb tables above mark this difference: bracketed (`[ID]`) means the
@@ -1096,7 +1090,7 @@ to get human output everywhere).
   indented form but costs the fewest tokens in an agent's context. Pipe
   through `jq .` to eyeball it, or use `json-pretty`.
 - `json-pretty` — the same document via `json.dumps(..., indent=2,
-  sort_keys=True)`: indented and key-sorted, for human reading and
+sort_keys=True)`: indented and key-sorted, for human reading and
   line-oriented diffs.
 - `human` — terminal-friendly. Row/tabular data and `tool list` render
   as aligned, header-topped tables (sized to the terminal width, falling back to

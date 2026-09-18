@@ -180,7 +180,7 @@ to manage.
 
 **For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
-```json5
+```json
 {
   "mcpServers": {
     "deephaven-systems": {
@@ -189,7 +189,10 @@ to manage.
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
     }
   }
 }
@@ -322,7 +325,7 @@ to manage.
 
 **For Claude Desktop**, open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
-```json5
+```json
 {
   "mcpServers": {
     "deephaven-systems": {
@@ -331,7 +334,10 @@ to manage.
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
     }
   }
 }
@@ -501,10 +507,8 @@ in the PQ id (form `enterprise:<system>:<serial>`).
 
 *Catalog discovery:*
 
-- `catalog_tables_list(id, ...)` - List catalog tables
-- `catalog_namespaces_list(id, ...)` - Browse catalog namespaces
-- `catalog_table_schema(id, ...)` - Get one catalog table's schema
-- `catalog_table_sample(id, ...)` - Sample catalog table data
+- `catalog_tables_list(system, ...)` - List catalog tables
+- `catalog_namespaces_list(system, ...)` - Browse catalog namespaces
 
 *Session & table operations (any session, community or enterprise):*
 
@@ -733,7 +737,7 @@ so it reaches the hosted docs server through `mcp-proxy`.
 
 Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** and add:
 
-```json5
+```json
 {
   "mcpServers": {
     "deephaven-systems": {
@@ -742,7 +746,10 @@ Open **Claude Desktop** → **Settings** → **Developer** → **Edit Config** a
     },
     "deephaven-docs": {
       "command": "mcp-proxy",
-      "args": ["--transport=streamablehttp", "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"]
+      "args": [
+        "--transport=streamablehttp",
+        "https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io/mcp"
+      ]
     }
   }
 }
@@ -771,7 +778,7 @@ Create or edit an MCP configuration file:
 - **Project-specific**: `.cursor/mcp.json` in your project root
 - **Global**: `~/.cursor/mcp.json` for all projects
 
-```json5
+```json
 {
   "mcpServers": {
     "deephaven-systems": {
@@ -798,7 +805,7 @@ manually in your project root.
 
 Configure your servers:
 
-```json5
+```json
 {
   "servers": {
     "deephaven-systems": {
@@ -825,7 +832,7 @@ You will see the MCP servers listed in the Extensions sidebar under "MCP Servers
 
 Go to **Windsurf Settings** > **Cascade** > **MCP Servers** > **Manage MCPs** > **View Raw Config** to open `~/.codeium/windsurf/mcp_config.json` for editing.
 
-```json5
+```json
 {
   "mcpServers": {
     "deephaven-systems": {
@@ -871,7 +878,7 @@ dh-mcp-systems-server --transport http --port 8000
 Point your AI tool at the running server, sending the PSK on every request.
 Cursor and Windsurf both resolve `${env:NAME}` inside `headers`:
 
-```json5
+```json
 {
   "mcpServers": {
     "deephaven-systems": {
@@ -997,7 +1004,7 @@ Before diving into detailed troubleshooting, try these common solutions:
     - The MCP server from connecting to your Deephaven instances on their specified hosts and ports.
     - Your MCP client from reaching the systems server's HTTP endpoint (e.g., `http://127.0.0.1:8000/mcp`) — only if you set up the [Advanced HTTP path](#advanced-share-one-server-over-http).
     - Your MCP client from reaching the Docs Server at `https://deephaven-mcp-docs-prod.dhc-demo.deephaven.io`.
-  - Test basic network connectivity (e.g., using [`ping`](https://en.wikipedia.org/wiki/Ping_(networking_utility)) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
+  - Test basic network connectivity (e.g., using [`ping`](<https://en.wikipedia.org/wiki/Ping_(networking_utility)>) or [`curl`](https://curl.se/docs/manpage.html) from the relevant machine) if connections are failing.
 
 ### Command and Path Issues
 

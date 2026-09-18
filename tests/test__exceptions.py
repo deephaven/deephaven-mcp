@@ -29,6 +29,7 @@ from deephaven_mcp._exceptions import (
     SystemNotConfiguredError,
     TemplateResolutionError,
     UnsupportedOperationError,
+    WebClientDataError,
 )
 
 
@@ -86,6 +87,7 @@ class TestExceptionParameterized:
             (SessionError, [McpError], "session error"),
             (AuthenticationError, [McpError], "authentication error"),
             (QueryError, [McpError], "query error"),
+            (WebClientDataError, [McpError], "web client data error"),
             (DeephavenConnectionError, [McpError], "connection error"),
             (ResourceError, [McpError], "resource error"),
             (ConfigurationError, [McpError], "configuration error"),

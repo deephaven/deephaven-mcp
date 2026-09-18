@@ -80,7 +80,9 @@ from pydeephaven import Session
 from pydeephaven.query import Query
 from pydeephaven.table import InputTable, Table
 
+from deephaven_mcp._blocking import run_blocking
 from deephaven_mcp._exceptions import (
+    BlockingDeadlineExceeded,
     DeephavenConnectionError,
     QueryError,
     ResourceError,
@@ -748,7 +750,7 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
 
     # ===== Session Management =====
 
-    async def close(self) -> None:
+    async def close(self, timeout_seconds: float | None = None) -> None:
         """
         Asynchronously close the session and release all associated server resources.
 
@@ -770,11 +772,20 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
         While the BaseSession implements __del__ to attempt cleanup during garbage collection,
         explicit closure is strongly recommended as garbage collection timing is unpredictable.
 
+        Args:
+            timeout_seconds (float | None): Bound on the close. Supply one
+                rather than wrapping this call in ``asyncio.wait_for``: the
+                vendor close is uninterruptible, so an outer cancellation
+                would abandon the worker running it. Bounded here, that worker
+                is a private thread rather than a shared-executor one.
+
         Raises:
+            BlockingDeadlineExceeded: If ``timeout_seconds`` elapses first.
             DeephavenConnectionError: If a network or connection error occurs during close,
-                                    such as connection timeouts or network disruptions.
+                                    such as network disruptions.
             SessionError: If the session cannot be closed for non-connection reasons,
-                        such as server errors, invalid session state, or permission issues.
+                        such as server errors, invalid session state, permission issues,
+                        or a timeout the server itself reported.
 
         Example - Basic usage:
             ```python
@@ -805,8 +816,15 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
         """
         _LOGGER.debug("[CoreSession:close] Called")
         try:
-            await asyncio.to_thread(self.wrapped.close)
+            if timeout_seconds is None:
+                await asyncio.to_thread(self.wrapped.close)
+            else:
+                await run_blocking(
+                    self.wrapped.close, "dh-mcp-session-close", timeout_seconds
+                )
             _LOGGER.debug("[CoreSession:close] Session closed successfully")
+        except BlockingDeadlineExceeded:
+            raise
         except ConnectionError as e:
             _LOGGER.error(f"[CoreSession:close] Connection error closing session: {e}")
             raise DeephavenConnectionError(
@@ -1030,23 +1048,37 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 f"Failed to list tables: {describe_exception_chain(e)}"
             ) from e
 
-    async def is_alive(self) -> bool:
+    async def is_alive(self, timeout_seconds: float | None = None) -> bool:
         """
         Asynchronously check if the session is still alive.
 
-        This method wraps the potentially blocking session refresh operation in a
-        background thread to prevent blocking the event loop.
+        Args:
+            timeout_seconds (float | None): Bound on the probe. Supply one
+                rather than wrapping this call in ``asyncio.wait_for``: the
+                vendor refresh is uninterruptible, so an outer cancellation
+                would abandon the worker running it. Bounded here, that worker
+                is a private thread rather than a shared-executor one.
 
         Returns:
             True if the session is alive, False otherwise
 
         Raises:
+            BlockingDeadlineExceeded: If ``timeout_seconds`` elapses first.
             DeephavenConnectionError: If there is a network or connection error
-            SessionError: If there's an error checking session status
+            SessionError: If there's an error checking session status, including
+                a timeout the server itself reported
         """
         _LOGGER.debug("[CoreSession:is_alive] Called")
         try:
-            return await asyncio.to_thread(lambda: self.wrapped.is_alive)
+            if timeout_seconds is None:
+                return await asyncio.to_thread(lambda: self.wrapped.is_alive)
+            return await run_blocking(
+                lambda: self.wrapped.is_alive,
+                "dh-mcp-session-is-alive",
+                timeout_seconds,
+            )
+        except BlockingDeadlineExceeded:
+            raise
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CoreSession:is_alive] Connection error checking session status: {e}"

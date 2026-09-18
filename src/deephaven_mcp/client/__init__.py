@@ -54,6 +54,11 @@ from ._protobuf import (
 from ._session import BaseSession, CorePlusSession, CoreSession
 from ._session_factory import CorePlusSessionFactory
 from ._timeouts import CommunityClientTimeouts, EnterpriseClientTimeouts
+from ._webclientdata import (
+    WEB_CLIENT_DATA_PQ,
+    WebClientDataTable,
+    fetch_web_client_data_table,
+)
 
 __all__ = [
     "CommunityClientTimeouts",
@@ -74,5 +79,8 @@ __all__ = [
     "CoreSession",
     "CorePlusSession",
     "CorePlusSessionFactory",
+    "WEB_CLIENT_DATA_PQ",
+    "WebClientDataTable",
+    "fetch_web_client_data_table",
     "wire_to_env_var_entries",
 ]

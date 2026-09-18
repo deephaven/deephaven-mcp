@@ -10,6 +10,7 @@ import pydantic
 import pytest
 
 from deephaven_mcp._exceptions import (
+    BlockingDeadlineExceeded,
     DeephavenConnectionError,
     QueryError,
     ResourceError,
@@ -186,6 +187,74 @@ async def test_close_other_error(core_session):
     core_session.wrapped.close = MagicMock(side_effect=Exception("fail"))
     with pytest.raises(SessionError):
         await core_session.close()
+
+
+@pytest.mark.asyncio
+async def test_close_with_timeout_runs_off_the_shared_executor(core_session):
+    """A bounded close must not occupy a default-executor worker."""
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        await core_session.close(timeout_seconds=5.0)
+    assert runner.call_args[0][0] == core_session.wrapped.close
+    assert runner.call_args[0][2] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_close_timeout_propagates_rather_than_becoming_session_error(
+    core_session,
+):
+    """The deadline must reach the caller, not be rewrapped as SessionError."""
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = BlockingDeadlineExceeded
+        with pytest.raises(BlockingDeadlineExceeded):
+            await core_session.close(timeout_seconds=0.01)
+
+
+@pytest.mark.asyncio
+async def test_close_vendor_timeout_becomes_a_session_error(core_session):
+    """A timeout the server reported is an ordinary failure, not our deadline."""
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = TimeoutError("server said so")
+        with pytest.raises(SessionError, match="server said so"):
+            await core_session.close(timeout_seconds=0.01)
+
+
+@pytest.mark.asyncio
+async def test_is_alive_with_timeout_runs_off_the_shared_executor(core_session):
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.return_value = True
+        assert await core_session.is_alive(timeout_seconds=5.0) is True
+    assert runner.call_args[0][2] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_is_alive_timeout_propagates_rather_than_becoming_session_error(
+    core_session,
+):
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = BlockingDeadlineExceeded
+        with pytest.raises(BlockingDeadlineExceeded):
+            await core_session.is_alive(timeout_seconds=0.01)
+
+
+@pytest.mark.asyncio
+async def test_is_alive_vendor_timeout_becomes_a_session_error(core_session):
+    """A timeout the server reported is an ordinary failure, not our deadline."""
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = TimeoutError("server said so")
+        with pytest.raises(SessionError, match="server said so"):
+            await core_session.is_alive(timeout_seconds=0.01)
 
 
 @pytest.mark.asyncio
