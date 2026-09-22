@@ -1,3 +1,0 @@
-{
-  "psk": "${env:DH_MCP_PSK}"
-}
