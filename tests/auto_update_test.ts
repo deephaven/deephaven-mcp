@@ -1,58 +1,100 @@
 import { assert, assertStringIncludes } from "@std/assert";
 import { serveDir } from "@std/http/file-server";
-import { join } from "@std/path";
-import { BINARY_NAME, build } from "../scripts/build.ts";
+import { fromFileUrl, join } from "@std/path";
+import { build } from "../scripts/build.ts";
 import { VERSION } from "../src/version.ts";
 
 const NEXT = "9.9.9";
+const INSTALL_SH = fromFileUrl(new URL("../install.sh", import.meta.url));
 
 async function run(exe: string, args: string[], env: Record<string, string>) {
   const out = await new Deno.Command(exe, { args, env }).output();
   const decode = (b: Uint8Array) => new TextDecoder().decode(b);
-  return { stdout: decode(out.stdout), stderr: decode(out.stderr) };
+  return {
+    success: out.success,
+    stdout: decode(out.stdout),
+    stderr: decode(out.stderr),
+  };
 }
 
-Deno.test("compiled dh updates itself to the published version", async () => {
-  const tmp = await Deno.makeTempDir({ prefix: "dh-update-test-" });
-  const published = join(tmp, "published");
-  const server = Deno.serve(
+/** Serves `root` with GitHub's `releases/latest` redirects pointing at `latest.tag`. */
+function fakeGitHub(root: string, latest: { tag: string }) {
+  return Deno.serve(
     { hostname: "127.0.0.1", port: 0, onListen() {} },
-    (req) => serveDir(req, { fsRoot: published, quiet: true }),
+    (req) => {
+      const url = new URL(req.url);
+      const path = url.pathname;
+      if (path === "/releases/latest") {
+        return Response.redirect(new URL(`/releases/tag/${latest.tag}`, url));
+      }
+      if (path.startsWith("/releases/tag/")) return new Response("release");
+      const asset = path.match(/^\/releases\/latest\/download\/(.+)$/);
+      if (asset) {
+        const to = `/releases/download/${latest.tag}/${asset[1]}`;
+        return Response.redirect(new URL(to, url));
+      }
+      return serveDir(req, { fsRoot: root, quiet: true });
+    },
   );
-  try {
-    await build(join(tmp, "installed"));
+}
 
-    const exe = join(tmp, "installed", BINARY_NAME);
-    const env = {
-      DH_UPDATE_URL: `http://127.0.0.1:${server.addr.port}/manifest.json`,
-      DH_DEBUG: "1",
-    };
-    const now = { ...env, DH_UPDATE_INTERVAL: "0" };
-    const version = async () => (await run(exe, ["--version"], env)).stdout;
+Deno.test({
+  name: "dh installed with install.sh updates itself from GitHub releases",
+  ignore: Deno.build.os === "windows",
+  async fn() {
+    const tmp = await Deno.makeTempDir({ prefix: "dh-update-test-" });
+    const latest = { tag: `v${VERSION}` };
+    const server = fakeGitHub(tmp, latest);
+    const repo = `http://127.0.0.1:${server.addr.port}`;
+    const release = (tag: string) => join(tmp, "releases", "download", tag);
+    const baseUrl = (tag: string) => `${repo}/releases/download/${tag}/`;
+    try {
+      await build(release(latest.tag), { baseUrl: baseUrl(latest.tag) });
 
-    assertStringIncludes(await version(), VERSION);
+      const bin = join(tmp, "bin");
+      const install = await run("sh", [INSTALL_SH], {
+        DH_INSTALL_REPO_URL: repo,
+        DH_INSTALL_DIR: bin,
+      });
+      assert(install.success, install.stderr);
+      assertStringIncludes(install.stdout, `Installed dh v${VERSION}`);
 
-    // Nothing published yet: this check fails, but still starts the interval.
-    const early = await run(exe, [], env);
-    assertStringIncludes(early.stderr, "auto-update failed");
+      const exe = join(bin, "dh");
+      const env = {
+        DH_UPDATE_URL: `${repo}/releases/latest/download/manifest.json`,
+        DH_DEBUG: "1",
+      };
+      const now = { ...env, DH_UPDATE_INTERVAL: "0" };
+      const version = async () => (await run(exe, ["--version"], env)).stdout;
 
-    await build(published, NEXT);
+      assertStringIncludes(await version(), VERSION);
 
-    const throttled = await run(exe, [], env);
-    assert(!throttled.stderr.includes("Updated dh"), throttled.stderr);
-    assertStringIncludes(await version(), VERSION, "within interval");
+      // Tag exists but its assets aren't uploaded: the check fails, but still starts the interval.
+      latest.tag = `v${NEXT}`;
+      const early = await run(exe, [], env);
+      assertStringIncludes(early.stderr, "auto-update failed");
 
-    await run(exe, [], { ...now, DH_AUTO_UPDATE: "off" });
-    assertStringIncludes(await version(), VERSION, "DH_AUTO_UPDATE=off");
+      await build(release(latest.tag), {
+        version: NEXT,
+        baseUrl: baseUrl(latest.tag),
+      });
 
-    const first = await run(exe, [], now);
-    assertStringIncludes(first.stderr, `Updated dh ${VERSION} -> ${NEXT}`);
-    assertStringIncludes(await version(), NEXT);
+      const throttled = await run(exe, [], env);
+      assert(!throttled.stderr.includes("Updated dh"), throttled.stderr);
+      assertStringIncludes(await version(), VERSION, "within interval");
 
-    const second = await run(exe, [], now);
-    assert(!second.stderr.includes("Updated dh"), second.stderr);
-  } finally {
-    await server.shutdown();
-    await Deno.remove(tmp, { recursive: true });
-  }
+      await run(exe, [], { ...now, DH_AUTO_UPDATE: "off" });
+      assertStringIncludes(await version(), VERSION, "DH_AUTO_UPDATE=off");
+
+      const first = await run(exe, [], now);
+      assertStringIncludes(first.stderr, `Updated dh ${VERSION} -> ${NEXT}`);
+      assertStringIncludes(await version(), NEXT);
+
+      const second = await run(exe, [], now);
+      assert(!second.stderr.includes("Updated dh"), second.stderr);
+    } finally {
+      await server.shutdown();
+      await Deno.remove(tmp, { recursive: true });
+    }
+  },
 });

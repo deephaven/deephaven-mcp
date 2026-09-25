@@ -1,9 +1,9 @@
 {
-  "version": "0.1.0",
+  "version": "3.0.0",
   "tasks": {
     "dev": "deno run --allow-env --allow-net --allow-read --allow-write src/main.ts",
     "build": "deno run --allow-all scripts/build.ts",
-    "demo:update": "deno run --allow-all scripts/demo_update.ts",
+    "release": "deno run --allow-all scripts/release.ts",
     "test": "deno test --allow-all tests",
     "check": "deno fmt --check && deno lint && deno check src scripts tests"
   },

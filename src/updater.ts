@@ -3,14 +3,16 @@ import { basename } from "@std/path";
 import { greaterThan, parse } from "@std/semver";
 import { VERSION } from "./version.ts";
 
-// TODO: point at the real central update location.
-const DEFAULT_UPDATE_URL = "https://updates.example.com/dh/manifest.json";
+export const RELEASES_URL =
+  "https://github.com/deephaven/deephaven-mcp/releases";
+// Baked into every shipped binary; keep this URL and the manifest format stable.
+const DEFAULT_UPDATE_URL = `${RELEASES_URL}/latest/download/manifest.json`;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const DEFAULT_INTERVAL_HOURS = 24;
 
 export interface Manifest {
   version: string;
-  /** Keyed by `Deno.build.target`; `url` is relative to the manifest. */
+  /** Keyed by `Deno.build.target`; `url` may be relative to the manifest. */
   binaries: Record<string, { url: string; sha256: string }>;
 }
 
@@ -23,9 +25,13 @@ function assertTrusted(url: URL): void {
 async function fetchOk(url: URL, timeoutMs: number): Promise<Response> {
   assertTrusted(url);
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-  if (!res.ok) {
+  try {
+    // fetch follows redirects, so the final URL needs checking too.
+    assertTrusted(new URL(res.url));
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+  } catch (e) {
     await res.body?.cancel();
-    throw new Error(`HTTP ${res.status} fetching ${url}`);
+    throw e;
   }
   return res;
 }
@@ -62,9 +68,13 @@ async function claimCheck(): Promise<boolean> {
 }
 
 export async function autoUpdate(): Promise<void> {
-  if (Deno.env.get("DH_AUTO_UPDATE") === "off") return;
   // Running from source via `deno run`; never replace the deno executable.
   if (/^deno(\.exe)?$/i.test(basename(Deno.execPath()))) return;
+  if (Deno.build.os === "windows") {
+    // Left by the previous update; deletable once that process has exited.
+    await Deno.remove(`${Deno.execPath()}.old`).catch(() => {});
+  }
+  if (Deno.env.get("DH_AUTO_UPDATE") === "off") return;
   if (!await claimCheck()) return;
 
   const manifestUrl = new URL(

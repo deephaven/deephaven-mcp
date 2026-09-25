@@ -1,37 +1,44 @@
 # dh — Deephaven CLI
 
-A single compiled binary, built with Deno, that updates itself from a central
-manifest.
+A single compiled binary, built with Deno, that updates itself from GitHub
+releases.
 
 ```sh
-deno task build          # compile for this platform -> dist/
-deno task test           # compiles two versions and proves the binary updates itself
-deno task demo:update    # same, but leaves a server running so you can try it by hand
+curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.sh | sh
+```
+
+This installs to `~/.local/bin/dh` (override with `DH_INSTALL_DIR`). The
+directory must be writable by the user, or `dh` can't update itself.
+
+```sh
+deno task build          # compile for this platform -> dist/ (--all for every target)
+deno task test           # installs via install.sh from a fake GitHub and proves dh updates itself
 deno task check          # fmt + lint + type-check
 ```
 
 ## Auto-update
 
-After a run, `dh` fetches the manifest, at most once per `DH_UPDATE_INTERVAL`
-(default 24 hours). If the manifest lists a newer version for this platform,
-`dh` downloads it, checks the SHA-256, and swaps the new binary in place of its
-own executable. The time of the last check is kept in
-`<executable>.last-update-check`.
+After a run, `dh` fetches
+`https://github.com/deephaven/deephaven-mcp/releases/latest/download/manifest.json`,
+at most once per `DH_UPDATE_INTERVAL` (default 24 hours). If the manifest lists
+a newer version for this platform, `dh` downloads it, checks the SHA-256, and
+swaps the new binary in place of its own executable. The time of the last check
+is kept in `<executable>.last-update-check`.
 
 ```json
 {
-  "version": "0.2.0",
+  "version": "3.0.1",
   "binaries": {
     "aarch64-apple-darwin": {
-      "url": "dh-aarch64-apple-darwin",
+      "url": "https://github.com/deephaven/deephaven-mcp/releases/download/v3.0.1/dh-aarch64-apple-darwin",
       "sha256": "..."
     }
   }
 }
 ```
 
-`deno task build` writes `dist/manifest.json` next to the binary. To publish,
-upload both files to the update location.
+Every shipped binary reads this URL and format, so keep both backward
+compatible.
 
 | Env var              | Effect                                                |
 | -------------------- | ----------------------------------------------------- |
@@ -42,3 +49,27 @@ upload both files to the update location.
 
 Update URLs must use HTTPS, except `localhost`/`127.0.0.1`. When `dh` runs from
 source (`deno task dev`), it never updates itself.
+
+## Releasing
+
+Bump `version` in `deno.json`, then push a matching tag:
+
+```sh
+git tag v3.0.1 && git push origin v3.0.1
+```
+
+`.github/workflows/release.yml` runs the checks and tests, cross-compiles every
+target (`deno task release <tag>`), and publishes the binaries, `manifest.json`,
+`SHA256SUMS` and `install.sh` as a GitHub release.
+
+Tags with a suffix (`v3.0.1-rc.1`) are published as prereleases, which
+`releases/latest` ignores. Use them to test against real GitHub without
+affecting users:
+
+```sh
+DH_UPDATE_URL=https://github.com/deephaven/deephaven-mcp/releases/download/v3.0.1-rc.1/manifest.json \
+  DH_UPDATE_INTERVAL=0 DH_DEBUG=1 dh
+```
+
+Any later release not meant for `dh` (e.g. a v2.x Python patch) must be
+published with `--latest=false`, or `dh` will stop finding its manifest.
