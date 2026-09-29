@@ -5,7 +5,21 @@ import { build } from "../scripts/build.ts";
 import { VERSION } from "../src/version.ts";
 
 const NEXT = "9.9.9";
-const INSTALL_SH = fromFileUrl(new URL("../install.sh", import.meta.url));
+const WINDOWS = Deno.build.os === "windows";
+const installer = (name: string) =>
+  fromFileUrl(new URL(`../${name}`, import.meta.url));
+const INSTALL = WINDOWS
+  ? {
+    cmd: "powershell",
+    args: [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      installer("install.ps1"),
+    ],
+  }
+  : { cmd: "sh", args: [installer("install.sh")] };
 
 async function run(exe: string, args: string[], env: Record<string, string>) {
   const out = await new Deno.Command(exe, { args, env }).output();
@@ -39,8 +53,8 @@ function fakeGitHub(root: string, latest: { tag: string }) {
 }
 
 Deno.test({
-  name: "dh installed with install.sh updates itself from GitHub releases",
-  ignore: Deno.build.os === "windows",
+  name:
+    "dh installed with the install script updates itself from GitHub releases",
   async fn() {
     const tmp = await Deno.makeTempDir({ prefix: "dh-update-test-" });
     const latest = { tag: `v${VERSION}` };
@@ -52,14 +66,15 @@ Deno.test({
       await build(release(latest.tag), { baseUrl: baseUrl(latest.tag) });
 
       const bin = join(tmp, "bin");
-      const install = await run("sh", [INSTALL_SH], {
+      const install = await run(INSTALL.cmd, INSTALL.args, {
         DH_INSTALL_REPO_URL: repo,
         DH_INSTALL_DIR: bin,
+        DH_INSTALL_NO_MODIFY_PATH: "1",
       });
       assert(install.success, install.stderr);
       assertStringIncludes(install.stdout, `Installed dh v${VERSION}`);
 
-      const exe = join(bin, "dh");
+      const exe = join(bin, WINDOWS ? "dh.exe" : "dh");
       const env = {
         DH_UPDATE_URL: `${repo}/releases/latest/download/manifest.json`,
         DH_DEBUG: "1",
@@ -92,6 +107,10 @@ Deno.test({
 
       const second = await run(exe, [], now);
       assert(!second.stderr.includes("Updated dh"), second.stderr);
+      if (WINDOWS) {
+        const old = await Deno.stat(`${exe}.old`).catch(() => null);
+        assert(!old, "dh.exe.old should be cleaned up on the next run");
+      }
     } finally {
       await server.shutdown();
       await Deno.remove(tmp, { recursive: true });

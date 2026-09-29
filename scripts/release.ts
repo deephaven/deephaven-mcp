@@ -24,13 +24,15 @@ await build(outDir, {
   baseUrl: `${releasesUrl(repository)}/download/${tag}/`,
 });
 
-const script = await Deno.readTextFile(join(ROOT, "install.sh"));
 const upstream = `github.com/${config.repository}`;
-if (!script.includes(upstream)) {
-  throw new Error(`install.sh does not reference ${upstream}`);
+for (const name of ["install.sh", "install.ps1"]) {
+  const script = await Deno.readTextFile(join(ROOT, name));
+  if (!script.includes(upstream)) {
+    throw new Error(`${name} does not reference ${upstream}`);
+  }
+  await Deno.writeTextFile(
+    join(outDir, name),
+    script.replaceAll(upstream, `github.com/${repository}`),
+  );
 }
-await Deno.writeTextFile(
-  join(outDir, "install.sh"),
-  script.replaceAll(upstream, `github.com/${repository}`),
-);
 console.log(`release assets for ${repository} ${tag} in ${outDir}`);

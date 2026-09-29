@@ -7,7 +7,15 @@ releases.
 curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.sh | sh
 ```
 
-This installs to `~/.local/bin/dh` (override with `DH_INSTALL_DIR`). The
+On Windows (PowerShell):
+
+```powershell
+irm https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.ps1 | iex
+```
+
+This installs to `~/.local/bin/dh` (Windows:
+`%LOCALAPPDATA%\Programs\dh\dh.exe`, added to the user `PATH` unless
+`DH_INSTALL_NO_MODIFY_PATH` is set). Override with `DH_INSTALL_DIR`. The
 directory must be writable by the user, or `dh` can't update itself.
 
 To install a specific release (including prereleases), set `DH_INSTALL_VERSION`.
@@ -19,7 +27,7 @@ curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/i
 
 ```sh
 deno task build          # compile for this platform -> dist/ (--all for every target)
-deno task test           # installs via install.sh from a fake GitHub and proves dh updates itself
+deno task test           # installs via install.sh/install.ps1 from a fake GitHub and proves dh updates itself
 deno task check          # fmt + lint + type-check
 ```
 
