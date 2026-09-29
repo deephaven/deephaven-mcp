@@ -10,6 +10,13 @@ curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/i
 This installs to `~/.local/bin/dh` (override with `DH_INSTALL_DIR`). The
 directory must be writable by the user, or `dh` can't update itself.
 
+To install a specific release (including prereleases), set `DH_INSTALL_VERSION`.
+`dh` still updates itself to the latest release unless `DH_AUTO_UPDATE=off`:
+
+```sh
+curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.sh | DH_INSTALL_VERSION=3.0.1 sh
+```
+
 ```sh
 deno task build          # compile for this platform -> dist/ (--all for every target)
 deno task test           # installs via install.sh from a fake GitHub and proves dh updates itself

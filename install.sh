@@ -19,8 +19,12 @@ esac
 NAME="dh-$TARGET"
 
 # Pin one tag so the binary and checksums come from the same release.
-latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest")
-TAG="${latest##*/}"
+if [ -n "${DH_INSTALL_VERSION:-}" ]; then
+  TAG="v${DH_INSTALL_VERSION#v}"
+else
+  latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest")
+  TAG="${latest##*/}"
+fi
 BASE="$REPO_URL/releases/download/$TAG"
 
 tmp=$(mktemp -d)
