@@ -33,7 +33,16 @@
     Write-Host "Downloading dh v$($manifest.version) for $target..."
     $exe = Join-Path $tmp 'dh.exe'
     Invoke-WebRequest $url -OutFile $exe -UseBasicParsing
-    if ((Get-FileHash $exe -Algorithm SHA256).Hash -ne $asset.sha256) {
+    # Not Get-FileHash: it's missing in PowerShell 5.1 when launched from pwsh 7 (inherited PSModulePath).
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($exe)
+    try {
+      $hash = [BitConverter]::ToString($sha256.ComputeHash($stream)) -replace '-', ''
+    } finally {
+      $stream.Dispose()
+      $sha256.Dispose()
+    }
+    if ($hash -ne $asset.sha256) {
       throw "Checksum mismatch for $url"
     }
 
