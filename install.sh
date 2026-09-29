@@ -18,13 +18,20 @@ case "$(uname -s)-$(uname -m)" in
 esac
 NAME="dh-$TARGET"
 
-# Every redirect hop must stay on HTTPS (plain HTTP is only for a local test server).
-fetch() {
-  case "$REPO_URL" in
-    https://*) curl --proto '=https' --proto-redir '=https' "$@" ;;
-    *) curl "$@" ;;
-  esac
+# HTTPS for every hop; plain HTTP only for a loopback test server, matching the updater.
+insecure() {
+  echo "dh: refusing to install over insecure URL $REPO_URL" >&2
+  exit 1
 }
+case "$REPO_URL" in
+  https://*) fetch() { curl --proto '=https' --proto-redir '=https' "$@"; } ;;
+  # Userinfo can disguise the real host, e.g. http://127.0.0.1:x@example.com.
+  http://*@*) insecure ;;
+  http://127.0.0.1 | http://127.0.0.1[:/]* | http://localhost | http://localhost[:/]* | "http://[::1]" | "http://[::1]"[:/]*)
+    fetch() { curl "$@"; }
+    ;;
+  *) insecure ;;
+esac
 
 # Pin one tag so the binary and checksums come from the same release.
 if [ -n "${DH_INSTALL_VERSION:-}" ]; then

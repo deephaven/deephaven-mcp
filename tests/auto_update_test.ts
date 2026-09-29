@@ -1,7 +1,7 @@
 import { assert, assertStringIncludes } from "@std/assert";
 import { serveDir } from "@std/http/file-server";
 import { fromFileUrl, join } from "@std/path";
-import { build } from "../scripts/build.ts";
+import { binaryName, build } from "../scripts/build.ts";
 import { VERSION } from "../src/version.ts";
 
 const NEXT = "9.9.9";
@@ -66,10 +66,20 @@ Deno.test({
       await build(release(latest.tag), { baseUrl: baseUrl(latest.tag) });
 
       const bin = join(tmp, "bin");
-      const install = await run(INSTALL.cmd, INSTALL.args, {
-        DH_INSTALL_REPO_URL: repo,
+      const installEnv = {
         DH_INSTALL_DIR: bin,
         DH_INSTALL_NO_MODIFY_PATH: "1",
+      };
+      const insecure = await run(INSTALL.cmd, INSTALL.args, {
+        ...installEnv,
+        DH_INSTALL_REPO_URL: "http://example.com/dh",
+      });
+      assert(!insecure.success, "installer accepted a plaintext remote URL");
+      assertStringIncludes(insecure.stderr, "insecure URL");
+
+      const install = await run(INSTALL.cmd, INSTALL.args, {
+        ...installEnv,
+        DH_INSTALL_REPO_URL: repo,
       });
       assert(install.success, install.stderr);
       assertStringIncludes(install.stdout, `Installed dh v${VERSION}`);
@@ -100,6 +110,16 @@ Deno.test({
 
       await run(exe, [], { ...now, DH_AUTO_UPDATE: "off" });
       assertStringIncludes(await version(), VERSION, "DH_AUTO_UPDATE=off");
+
+      const asset = join(release(latest.tag), binaryName(Deno.build.target));
+      const good = await Deno.readFile(asset);
+      const corrupt = good.slice();
+      corrupt[0] ^= 0xff;
+      await Deno.writeFile(asset, corrupt);
+      const tampered = await run(exe, [], now);
+      assertStringIncludes(tampered.stderr, "Checksum mismatch");
+      assertStringIncludes(await version(), VERSION, "corrupt binary");
+      await Deno.writeFile(asset, good);
 
       const first = await run(exe, [], now);
       assertStringIncludes(first.stderr, `Updated dh ${VERSION} -> ${NEXT}`);

@@ -8,6 +8,11 @@
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
   $repoUrl = if ($env:DH_INSTALL_REPO_URL) { $env:DH_INSTALL_REPO_URL } else { 'https://github.com/deephaven/deephaven-mcp' }
+  # HTTPS only; plain HTTP only for a loopback test server, matching the updater.
+  $repo = [Uri]$repoUrl
+  if ($repo.Scheme -ne 'https' -and -not ($repo.Scheme -eq 'http' -and $repo.IsLoopback)) {
+    throw "Refusing to install over insecure URL $repoUrl"
+  }
   # Must be user-writable, or auto-update can't replace the binary.
   $dir = if ($env:DH_INSTALL_DIR) { $env:DH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\dh' }
   # x64 also runs on Windows on ARM under emulation.
