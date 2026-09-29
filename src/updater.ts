@@ -42,14 +42,21 @@ async function replaceExecutable(binary: Uint8Array): Promise<void> {
   const exe = Deno.execPath();
   const staged = `${exe}.new`;
   await Deno.writeFile(staged, binary, { mode: 0o755 });
-  if (Deno.build.os === "windows") {
-    // A running .exe can't be overwritten, but it can be renamed.
-    await Deno.remove(`${exe}.old`).catch(() => {});
-    await Deno.rename(exe, `${exe}.old`);
-  } else {
+  if (Deno.build.os !== "windows") {
     await Deno.chmod(staged, 0o755);
+    await Deno.rename(staged, exe);
+    return;
   }
-  await Deno.rename(staged, exe);
+  // A running .exe can't be overwritten, but it can be renamed.
+  const old = `${exe}.old`;
+  await Deno.remove(old).catch(() => {});
+  await Deno.rename(exe, old);
+  try {
+    await Deno.rename(staged, exe);
+  } catch (e) {
+    await Deno.rename(old, exe);
+    throw e;
+  }
 }
 
 function intervalMs(): number {
