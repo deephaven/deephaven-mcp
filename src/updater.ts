@@ -1,5 +1,4 @@
 import { encodeHex } from "@std/encoding/hex";
-import { basename } from "@std/path";
 import { greaterThan, parse } from "@std/semver";
 import { REPOSITORY, VERSION } from "./version.ts";
 
@@ -11,6 +10,7 @@ const DEFAULT_UPDATE_URL = `${
 }/latest/download/manifest.json`;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const DEFAULT_INTERVAL_HOURS = 24;
+const MAX_REDIRECTS = 5;
 
 export interface Manifest {
   version: string;
@@ -24,18 +24,25 @@ function assertTrusted(url: URL): void {
   throw new Error(`Refusing to update over insecure URL: ${url}`);
 }
 
+/** Fetches `url`, following redirects by hand so every hop must be trusted. */
 async function fetchOk(url: URL, timeoutMs: number): Promise<Response> {
-  assertTrusted(url);
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-  try {
-    // fetch follows redirects, so the final URL needs checking too.
-    assertTrusted(new URL(res.url));
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
-  } catch (e) {
-    await res.body?.cancel();
-    throw e;
+  const signal = AbortSignal.timeout(timeoutMs);
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    assertTrusted(url);
+    const res = await fetch(url, { signal, redirect: "manual" });
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      await res.body?.cancel();
+      url = new URL(location, url);
+      continue;
+    }
+    if (!res.ok) {
+      await res.body?.cancel();
+      throw new Error(`HTTP ${res.status} fetching ${url}`);
+    }
+    return res;
   }
-  return res;
+  throw new Error(`Too many redirects fetching ${url}`);
 }
 
 async function replaceExecutable(binary: Uint8Array): Promise<void> {
@@ -77,8 +84,8 @@ async function claimCheck(): Promise<boolean> {
 }
 
 export async function autoUpdate(): Promise<void> {
-  // Running from source via `deno run`; never replace the deno executable.
-  if (/^deno(\.exe)?$/i.test(basename(Deno.execPath()))) return;
+  // Only compiled `dh` binaries update; from source, execPath is the deno runtime.
+  if (!Deno.build.standalone) return;
   if (Deno.build.os === "windows") {
     // Left by the previous update; deletable once that process has exited.
     await Deno.remove(`${Deno.execPath()}.old`).catch(() => {});

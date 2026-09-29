@@ -18,11 +18,19 @@ case "$(uname -s)-$(uname -m)" in
 esac
 NAME="dh-$TARGET"
 
+# Every redirect hop must stay on HTTPS (plain HTTP is only for a local test server).
+fetch() {
+  case "$REPO_URL" in
+    https://*) curl --proto '=https' --proto-redir '=https' "$@" ;;
+    *) curl "$@" ;;
+  esac
+}
+
 # Pin one tag so the binary and checksums come from the same release.
 if [ -n "${DH_INSTALL_VERSION:-}" ]; then
   TAG="v${DH_INSTALL_VERSION#v}"
 else
-  latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest")
+  latest=$(fetch -fsSLI -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest")
   TAG="${latest##*/}"
 fi
 BASE="$REPO_URL/releases/download/$TAG"
@@ -32,8 +40,8 @@ trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
 
 echo "Downloading dh $TAG for $TARGET..."
-curl -fsSL -o "$NAME" "$BASE/$NAME"
-curl -fsSL -o SHA256SUMS "$BASE/SHA256SUMS"
+fetch -fsSL -o "$NAME" "$BASE/$NAME"
+fetch -fsSL -o SHA256SUMS "$BASE/SHA256SUMS"
 
 if ! grep " $NAME\$" SHA256SUMS >expected; then
   echo "dh: $TAG has no binary for $TARGET" >&2
