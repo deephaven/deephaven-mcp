@@ -3,6 +3,14 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to create (e.g. v3.0.1); must match deno.json on the chosen branch
+        required: true
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -11,17 +19,30 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Check tag is new
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists"
+            exit 1
+          fi
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
       - run: deno task check
       - run: deno task test
-      - run: deno task release "$GITHUB_REF_NAME" dist
+      - run: deno task release "$TAG" dist
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         # Tags with a suffix (v3.0.1-rc.1) are prereleases, which releases/latest ignores.
         run: |
-          flags="--verify-tag --generate-notes"
-          case "$GITHUB_REF_NAME" in *-*) flags="$flags --prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* $flags
+          flags="--generate-notes"
+          case "$TAG" in *-*) flags="$flags --prerelease" ;; esac
+          # Manual runs create the tag; tags made with GITHUB_TOKEN don't retrigger this workflow.
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            flags="$flags --target $GITHUB_SHA"
+          else
+            flags="$flags --verify-tag"
+          fi
+          gh release create "$TAG" dist/* $flags

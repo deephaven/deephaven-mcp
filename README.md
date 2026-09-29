@@ -52,11 +52,15 @@ source (`deno task dev`), it never updates itself.
 
 ## Releasing
 
-Bump `version` in `deno.json`, then push a matching tag:
+Bump `version` in `deno.json`, then either push a matching tag:
 
 ```sh
 git tag v3.0.1 && git push origin v3.0.1
 ```
+
+or, on GitHub, open **Actions → Release → Run workflow**, pick the branch and
+enter the tag. The run creates the tag on that branch's latest commit. GitHub
+only shows this button for workflows on the default branch.
 
 `.github/workflows/release.yml` runs the checks and tests, cross-compiles every
 target (`deno task release <tag>`), and publishes the binaries, `manifest.json`,
