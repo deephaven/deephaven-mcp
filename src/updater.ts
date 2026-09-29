@@ -73,7 +73,8 @@ async function replaceExecutable(binary: Uint8Array): Promise<void> {
 }
 
 function intervalMs(): number {
-  const hours = Number(Deno.env.get("DH_UPDATE_INTERVAL") ?? NaN);
+  const raw = Deno.env.get("DH_UPDATE_INTERVAL");
+  const hours = raw ? Number(raw) : NaN;
   const valid = Number.isFinite(hours) && hours >= 0;
   return (valid ? hours : DEFAULT_INTERVAL_HOURS) * 3_600_000;
 }

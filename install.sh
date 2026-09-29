@@ -18,28 +18,36 @@ case "$(uname -s)-$(uname -m)" in
 esac
 NAME="dh-$TARGET"
 
-# HTTPS for every hop; plain HTTP only for a loopback test server, matching the updater.
+# HTTPS only; plain HTTP only for a loopback test server, matching the updater.
 insecure() {
   echo "dh: refusing to install over insecure URL $REPO_URL" >&2
   exit 1
 }
 case "$REPO_URL" in
-  https://*) fetch() { curl --proto '=https' --proto-redir '=https' "$@"; } ;;
+  https://*) ;;
   # Userinfo can disguise the real host, e.g. http://127.0.0.1:x@example.com.
   http://*@*) insecure ;;
-  http://127.0.0.1 | http://127.0.0.1[:/]* | http://localhost | http://localhost[:/]* | "http://[::1]" | "http://[::1]"[:/]*)
-    fetch() { curl "$@"; }
-    ;;
+  http://127.0.0.1 | http://127.0.0.1[:/]* | http://localhost | http://localhost[:/]* | "http://[::1]" | "http://[::1]"[:/]*) ;;
   *) insecure ;;
 esac
+# Redirects may only lead to HTTPS, wherever they start.
+fetch() { curl --proto '=http,https' --proto-redir '=https' "$@"; }
 
 # Pin one tag so the binary and checksums come from the same release.
 if [ -n "${DH_INSTALL_VERSION:-}" ]; then
   TAG="v${DH_INSTALL_VERSION#v}"
 else
-  latest=$(fetch -fsSLI -o /dev/null -w '%{url_effective}' "$REPO_URL/releases/latest")
+  # Read the tag from the first redirect (.../releases/tag/vX) without following it.
+  latest=$(fetch -fsSI -o /dev/null -w '%{redirect_url}' "$REPO_URL/releases/latest")
   TAG="${latest##*/}"
 fi
+case "$TAG" in
+  v*) ;;
+  *)
+    echo "dh: no release found at $REPO_URL/releases" >&2
+    exit 1
+    ;;
+esac
 BASE="$REPO_URL/releases/download/$TAG"
 
 tmp=$(mktemp -d)

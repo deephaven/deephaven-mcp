@@ -62,8 +62,9 @@ compatible.
 | `DH_AUTO_UPDATE=off` | Disable auto-update                                     |
 | `DH_DEBUG=1`         | Print update errors (otherwise updates fail silently)   |
 
-Update URLs must use HTTPS, except `localhost`/`127.0.0.1`. When `dh` runs from
-source (`deno task dev`), it never updates itself.
+Update and install URLs, including every redirect, must use HTTPS; plain HTTP is
+allowed only for loopback (`localhost`, `127.0.0.1`, `[::1]`). When `dh` runs
+from source (`deno task dev`), it never updates itself.
 
 ## Releasing
 

@@ -5,6 +5,14 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Two runs could both pass the "tag is new" check and race to publish.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml

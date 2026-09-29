@@ -41,7 +41,6 @@ function fakeGitHub(root: string, latest: { tag: string }) {
       if (path === "/releases/latest") {
         return Response.redirect(new URL(`/releases/tag/${latest.tag}`, url));
       }
-      if (path.startsWith("/releases/tag/")) return new Response("release");
       const asset = path.match(/^\/releases\/latest\/download\/(.+)$/);
       if (asset) {
         const to = `/releases/download/${latest.tag}/${asset[1]}`;
