@@ -58,9 +58,10 @@ Bump `version` in `deno.json`, then either push a matching tag:
 git tag v3.0.1 && git push origin v3.0.1
 ```
 
-or, on GitHub, open **Actions → Release → Run workflow**, pick the branch and
-enter the tag. The run creates the tag on that branch's latest commit. GitHub
-only shows this button for workflows on the default branch.
+or, on GitHub, open **Actions → Release → Run workflow** and pick the branch.
+The run tags that branch's latest commit as `v<version from deno.json>`, and
+fails if that tag already exists. GitHub only shows this button for workflows on
+the default branch.
 
 `.github/workflows/release.yml` runs the checks and tests, cross-compiles every
 target (`deno task release <tag>`), and publishes the binaries, `manifest.json`,

@@ -4,13 +4,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Tag to create (e.g. v3.0.1); must match deno.json on the chosen branch
-        required: true
-
-env:
-  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -19,13 +12,18 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Check tag is new
-        if: github.event_name == 'workflow_dispatch'
+      - name: Resolve tag
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
-            echo "::error::$TAG already exists"
-            exit 1
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            tag="v$(jq -r .version deno.json)"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              echo "::error::$tag already exists; bump version in deno.json"
+              exit 1
+            fi
+          else
+            tag="$GITHUB_REF_NAME"
           fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
