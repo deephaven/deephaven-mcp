@@ -78,9 +78,10 @@ The run tags that branch's latest commit as `v<version from deno.json>`, and
 fails if that tag already exists. GitHub only shows this button for workflows on
 the default branch.
 
-`.github/workflows/release.yml` runs the checks and tests, cross-compiles every
-target (`deno task release <tag>`), and publishes the binaries, `manifest.json`,
-`SHA256SUMS` and `install.sh` as a GitHub release.
+`.github/workflows/release.yml` runs CI (`.github/workflows/ci.yml`, which also
+runs on pull requests and pushes to `main`), cross-compiles every target
+(`deno task release <tag>`), and publishes the binaries, `manifest.json`,
+`SHA256SUMS`, `install.sh` and `install.ps1` as a GitHub release.
 
 Tags with a suffix (`v3.0.1-rc.1`) are published as prereleases, which
 `releases/latest` ignores. Use them to test against real GitHub without
@@ -91,8 +92,10 @@ DH_UPDATE_URL=https://github.com/deephaven/deephaven-mcp/releases/download/v3.0.
   DH_UPDATE_INTERVAL=0 DH_DEBUG=1 dh
 ```
 
-Any later release not meant for `dh` (e.g. a v2.x Python patch) must be
-published with `--latest=false`, or `dh` will stop finding its manifest.
+Python v2.x patches are tagged from the Python code, which doesn't contain
+`release.yml` (GitHub runs the workflows of the tagged commit), so they never
+trigger a `dh` release. They must still be published with `--latest=false`, or
+`dh` will stop finding its manifest.
 
 ### Testing on a fork
 

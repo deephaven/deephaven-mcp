@@ -47,21 +47,27 @@ async function fetchOk(url: URL, timeoutMs: number): Promise<Response> {
 
 async function replaceExecutable(binary: Uint8Array): Promise<void> {
   const exe = Deno.execPath();
-  const staged = `${exe}.new`;
+  // Per-process name, so concurrent updates never rename each other's half-written file.
+  const staged = `${exe}.${Deno.pid}.new`;
   await Deno.writeFile(staged, binary, { mode: 0o755 });
-  if (Deno.build.os !== "windows") {
-    await Deno.chmod(staged, 0o755);
-    await Deno.rename(staged, exe);
-    return;
-  }
-  // A running .exe can't be overwritten, but it can be renamed.
-  const old = `${exe}.old`;
-  await Deno.remove(old).catch(() => {});
-  await Deno.rename(exe, old);
   try {
-    await Deno.rename(staged, exe);
+    if (Deno.build.os !== "windows") {
+      await Deno.chmod(staged, 0o755);
+      await Deno.rename(staged, exe);
+      return;
+    }
+    // A running .exe can't be overwritten, but it can be renamed.
+    const old = `${exe}.old`;
+    await Deno.remove(old).catch(() => {});
+    await Deno.rename(exe, old);
+    try {
+      await Deno.rename(staged, exe);
+    } catch (e) {
+      await Deno.rename(old, exe);
+      throw e;
+    }
   } catch (e) {
-    await Deno.rename(old, exe);
+    await Deno.remove(staged).catch(() => {});
     throw e;
   }
 }
