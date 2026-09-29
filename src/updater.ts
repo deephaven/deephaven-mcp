@@ -1,12 +1,14 @@
 import { encodeHex } from "@std/encoding/hex";
 import { basename } from "@std/path";
 import { greaterThan, parse } from "@std/semver";
-import { VERSION } from "./version.ts";
+import { REPOSITORY, VERSION } from "./version.ts";
 
-export const RELEASES_URL =
-  "https://github.com/deephaven/deephaven-mcp/releases";
+export const releasesUrl = (repository: string): string =>
+  `https://github.com/${repository}/releases`;
 // Baked into every shipped binary; keep this URL and the manifest format stable.
-const DEFAULT_UPDATE_URL = `${RELEASES_URL}/latest/download/manifest.json`;
+const DEFAULT_UPDATE_URL = `${
+  releasesUrl(REPOSITORY)
+}/latest/download/manifest.json`;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const DEFAULT_INTERVAL_HOURS = 24;
 

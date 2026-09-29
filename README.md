@@ -40,12 +40,12 @@ is kept in `<executable>.last-update-check`.
 Every shipped binary reads this URL and format, so keep both backward
 compatible.
 
-| Env var              | Effect                                                |
-| -------------------- | ----------------------------------------------------- |
-| `DH_UPDATE_URL`      | Manifest URL (default in `src/updater.ts`)            |
-| `DH_UPDATE_INTERVAL` | Hours between update checks (default 24; 0 = always)  |
-| `DH_AUTO_UPDATE=off` | Disable auto-update                                   |
-| `DH_DEBUG=1`         | Print update errors (otherwise updates fail silently) |
+| Env var              | Effect                                                  |
+| -------------------- | ------------------------------------------------------- |
+| `DH_UPDATE_URL`      | Manifest URL (default from `repository` in `deno.json`) |
+| `DH_UPDATE_INTERVAL` | Hours between update checks (default 24; 0 = always)    |
+| `DH_AUTO_UPDATE=off` | Disable auto-update                                     |
+| `DH_DEBUG=1`         | Print update errors (otherwise updates fail silently)   |
 
 Update URLs must use HTTPS, except `localhost`/`127.0.0.1`. When `dh` runs from
 source (`deno task dev`), it never updates itself.
@@ -73,3 +73,11 @@ DH_UPDATE_URL=https://github.com/deephaven/deephaven-mcp/releases/download/v3.0.
 
 Any later release not meant for `dh` (e.g. a v2.x Python patch) must be
 published with `--latest=false`, or `dh` will stop finding its manifest.
+
+### Testing on a fork
+
+The release workflow takes the repo from `GITHUB_REPOSITORY`, so a tag pushed to
+a fork (with Actions enabled) produces binaries, a manifest and `install.sh`
+that all point at the fork. Install from the fork's
+`releases/latest/download/install.sh`, push a newer tag, and run
+`DH_UPDATE_INTERVAL=0 DH_DEBUG=1 dh` to see it update, with no other overrides.

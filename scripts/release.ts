@@ -1,12 +1,13 @@
 /** Builds every target for a GitHub release: `deno task release <tag> [outDir]`. */
-import { copy } from "@std/fs";
 import { fromFileUrl, join, resolve } from "@std/path";
 import config from "../deno.json" with { type: "json" };
-import { RELEASES_URL } from "../src/updater.ts";
+import { releasesUrl } from "../src/updater.ts";
 import { build, TARGETS } from "./build.ts";
 
 const ROOT = fromFileUrl(new URL("..", import.meta.url));
 const [tag, out] = Deno.args;
+// Set by GitHub Actions, so a fork's release installs and updates from the fork.
+const repository = Deno.env.get("GITHUB_REPOSITORY") ?? config.repository;
 
 if (tag !== `v${config.version}`) {
   console.error(
@@ -18,10 +19,18 @@ if (tag !== `v${config.version}`) {
 const outDir = resolve(out ?? join(ROOT, "dist"));
 // Tagged URLs, so a release published mid-update can't mix binaries.
 await build(outDir, {
+  repository,
   targets: TARGETS,
-  baseUrl: `${RELEASES_URL}/download/${tag}/`,
+  baseUrl: `${releasesUrl(repository)}/download/${tag}/`,
 });
-await copy(join(ROOT, "install.sh"), join(outDir, "install.sh"), {
-  overwrite: true,
-});
-console.log(`release assets for ${tag} in ${outDir}`);
+
+const script = await Deno.readTextFile(join(ROOT, "install.sh"));
+const upstream = `github.com/${config.repository}`;
+if (!script.includes(upstream)) {
+  throw new Error(`install.sh does not reference ${upstream}`);
+}
+await Deno.writeTextFile(
+  join(outDir, "install.sh"),
+  script.replaceAll(upstream, `github.com/${repository}`),
+);
+console.log(`release assets for ${repository} ${tag} in ${outDir}`);

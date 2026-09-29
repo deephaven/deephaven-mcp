@@ -20,6 +20,8 @@ export function binaryName(target: string): string {
 
 export interface BuildOptions {
   version?: string;
+  /** GitHub `owner/repo` baked in as the default update source. */
+  repository?: string;
   targets?: string[];
   /** Prefix for binary URLs in the manifest; names stay relative if omitted. */
   baseUrl?: string;
@@ -28,17 +30,22 @@ export interface BuildOptions {
 /** Compiles dh into `outDir` with a `manifest.json` and `SHA256SUMS`. */
 export async function build(
   outDir: string,
-  { version, targets = [Deno.build.target], baseUrl = "" }: BuildOptions = {},
+  { version, repository, targets = [Deno.build.target], baseUrl = "" }:
+    BuildOptions = {},
 ): Promise<void> {
-  // VERSION is read from deno.json at compile time, so other versions build from a copy.
+  // deno.json is embedded at compile time, so overrides build from a copy.
   let root = ROOT;
-  if (version) {
+  if (version || repository) {
     root = await Deno.makeTempDir({ prefix: "dh-build-" });
     await copy(join(ROOT, "src"), join(root, "src"));
     await copy(join(ROOT, "deno.lock"), join(root, "deno.lock"));
     await Deno.writeTextFile(
       join(root, "deno.json"),
-      JSON.stringify({ ...config, version }),
+      JSON.stringify({
+        ...config,
+        version: version ?? config.version,
+        repository: repository ?? config.repository,
+      }),
     );
   }
 
