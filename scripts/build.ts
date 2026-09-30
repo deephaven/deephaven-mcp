@@ -35,21 +35,21 @@ export async function build(
 ): Promise<void> {
   // deno.json is embedded at compile time, so overrides build from a copy.
   let root = ROOT;
-  if (version || repository) {
-    root = await Deno.makeTempDir({ prefix: "dh-build-" });
-    await copy(join(ROOT, "src"), join(root, "src"));
-    await copy(join(ROOT, "deno.lock"), join(root, "deno.lock"));
-    await Deno.writeTextFile(
-      join(root, "deno.json"),
-      JSON.stringify({
-        ...config,
-        version: version ?? config.version,
-        repository: repository ?? config.repository,
-      }),
-    );
-  }
-
   try {
+    if (version || repository) {
+      root = await Deno.makeTempDir({ prefix: "dh-build-" });
+      await copy(join(ROOT, "src"), join(root, "src"));
+      await copy(join(ROOT, "deno.lock"), join(root, "deno.lock"));
+      await Deno.writeTextFile(
+        join(root, "deno.json"),
+        JSON.stringify({
+          ...config,
+          version: version ?? config.version,
+          repository: repository ?? config.repository,
+        }),
+      );
+    }
+
     await ensureDir(outDir);
     const manifest: Manifest = {
       version: version ?? config.version,
