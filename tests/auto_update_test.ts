@@ -5,6 +5,8 @@ import { binaryName, build } from "../scripts/build.ts";
 import { VERSION } from "../src/version.ts";
 
 const NEXT = "9.9.9";
+// Every asset of this release redirects to plain HTTP (never resolves: .invalid).
+const INSECURE_TAG = "v0.0.0-insecure";
 const WINDOWS = Deno.build.os === "windows";
 const installer = (name: string) =>
   fromFileUrl(new URL(`../${name}`, import.meta.url));
@@ -46,6 +48,9 @@ function fakeGitHub(root: string, latest: { tag: string }) {
         const to = `/releases/download/${latest.tag}/${asset[1]}`;
         return Response.redirect(new URL(to, url));
       }
+      if (path.startsWith(`/releases/download/${INSECURE_TAG}/`)) {
+        return Response.redirect(`http://example.invalid${path}`);
+      }
       return serveDir(req, { fsRoot: root, quiet: true });
     },
   );
@@ -75,6 +80,17 @@ Deno.test({
       });
       assert(!insecure.success, "installer accepted a plaintext remote URL");
       assertStringIncludes(insecure.stderr, "insecure URL");
+
+      const redirected = await run(INSTALL.cmd, INSTALL.args, {
+        ...installEnv,
+        DH_INSTALL_REPO_URL: repo,
+        DH_INSTALL_VERSION: INSECURE_TAG,
+      });
+      assert(!redirected.success, "installer followed a redirect to HTTP");
+      assertStringIncludes(
+        redirected.stderr,
+        WINDOWS ? "insecure URL" : 'Protocol "http" disabled',
+      );
 
       const install = await run(INSTALL.cmd, INSTALL.args, {
         ...installEnv,
@@ -130,6 +146,14 @@ Deno.test({
         const old = await Deno.stat(`${exe}.old`).catch(() => null);
         assert(!old, "dh.exe.old should be cleaned up on the next run");
       }
+
+      const redirect = await run(exe, [], {
+        ...now,
+        DH_UPDATE_URL:
+          `${repo}/releases/download/${INSECURE_TAG}/manifest.json`,
+      });
+      assertStringIncludes(redirect.stderr, "insecure URL");
+      assertStringIncludes(await version(), NEXT, "redirect to HTTP");
     } finally {
       await server.shutdown();
       await Deno.remove(tmp, { recursive: true });
