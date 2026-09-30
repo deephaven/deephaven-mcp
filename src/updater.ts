@@ -49,8 +49,8 @@ async function replaceExecutable(binary: Uint8Array): Promise<void> {
   const exe = Deno.execPath();
   // Per-process name, so concurrent updates never rename each other's half-written file.
   const staged = `${exe}.${Deno.pid}.new`;
-  await Deno.writeFile(staged, binary, { mode: 0o755 });
   try {
+    await Deno.writeFile(staged, binary, { mode: 0o755 });
     if (Deno.build.os !== "windows") {
       await Deno.chmod(staged, 0o755);
       await Deno.rename(staged, exe);

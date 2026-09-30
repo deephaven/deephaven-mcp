@@ -5,6 +5,8 @@ set -eu
 REPO_URL="${DH_INSTALL_REPO_URL:-https://github.com/deephaven/deephaven-mcp}"
 # Must be user-writable, or auto-update can't replace the binary.
 DIR="${DH_INSTALL_DIR:-$HOME/.local/bin}"
+# Made absolute now, because the script later cd's into a temp directory.
+case "$DIR" in /*) ;; *) DIR="$PWD/$DIR" ;; esac
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;

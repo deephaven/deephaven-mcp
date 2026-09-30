@@ -4,7 +4,8 @@ For installing and using `dh`, see the [README](../README.md).
 
 ## Prerequisites
 
-[Deno](https://deno.com) 2.x.
+[Deno](https://deno.com) 2.3 or later (for `Deno.build.standalone` and lockfile
+v5).
 
 ## Common tasks
 

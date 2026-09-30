@@ -40,6 +40,8 @@
   Assert-Trusted $repoUrl
   # Must be user-writable, or auto-update can't replace the binary.
   $dir = if ($env:DH_INSTALL_DIR) { $env:DH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\dh' }
+  # Absolute against PowerShell's location (not .NET's cwd), since it's persisted in PATH.
+  $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
   # x64 also runs on Windows on ARM under emulation.
   $target = 'x86_64-pc-windows-msvc'
 
