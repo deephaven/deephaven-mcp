@@ -89,7 +89,8 @@ Deno.test({
       assert(!redirected.success, "installer followed a redirect to HTTP");
       assertStringIncludes(
         redirected.stderr,
-        WINDOWS ? "insecure URL" : 'Protocol "http" disabled',
+        // curl's wording varies by version; both start with this.
+        WINDOWS ? "insecure URL" : 'Protocol "http"',
       );
 
       const install = await run(INSTALL.cmd, INSTALL.args, {
