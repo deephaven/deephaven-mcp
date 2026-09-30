@@ -37,8 +37,10 @@ curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/i
 | `DH_AUTO_UPDATE=off` | Disable auto-update                                   |
 | `DH_DEBUG=1`         | Print update errors (otherwise updates fail silently) |
 
-Update and install URLs, including every redirect, must use HTTPS; plain HTTP is
-allowed only for loopback (`localhost`, `127.0.0.1`, `[::1]`).
+Update and install URLs, including every redirect, must use HTTPS. Plain HTTP is
+allowed only for loopback (`localhost`, `127.0.0.1`, `[::1]`) test servers;
+`install.sh` allows it only for the starting URL, so its redirects must still be
+HTTPS.
 
 ## Development
 

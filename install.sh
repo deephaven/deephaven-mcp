@@ -20,7 +20,7 @@ case "$(uname -s)-$(uname -m)" in
 esac
 NAME="dh-$TARGET"
 
-# HTTPS only; plain HTTP only for a loopback test server, matching the updater.
+# HTTPS only; plain HTTP only as the starting URL of a loopback test server.
 insecure() {
   echo "dh: refusing to install over insecure URL $REPO_URL" >&2
   exit 1
@@ -32,7 +32,7 @@ case "$REPO_URL" in
   http://127.0.0.1 | http://127.0.0.1[:/]* | http://localhost | http://localhost[:/]* | "http://[::1]" | "http://[::1]"[:/]*) ;;
   *) insecure ;;
 esac
-# Redirects may only lead to HTTPS, wherever they start.
+# Redirects must be HTTPS even from loopback; release downloads never need more.
 fetch() { curl --proto '=http,https' --proto-redir '=https' "$@"; }
 
 # Pin one tag so the binary and checksums come from the same release.
