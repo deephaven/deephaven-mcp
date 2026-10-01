@@ -5,19 +5,20 @@ is saved as a profile, and one profile is the default.
 
 ## Commands
 
-| Command                           | Behavior                                                                                                      |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `dh auth`                         | List profiles. Mark the default.                                                                              |
-| `dh auth login [server]`          | Sign in. Save the profile. First profile → default; otherwise prompt (§ Login).                               |
-| `dh auth use [profile]`           | Set the default. Picker if no profile is given.                                                               |
-| `dh auth rename <profile> <name>` | Rename a profile.                                                                                             |
-| `dh auth logout [profile]`        | Revoke the key on the server and remove the profile. Picker if no profile is given and there are 2+ profiles. |
-| `dh auth logout --all`            | Same, for every profile.                                                                                      |
-| `dh auth status`                  | Check the profile against its server.                                                                         |
-| `dh auth import [--from <path>]`  | Import legacy config.                                                                                         |
+| Command                           | Behavior                                                                                                                            |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `dh auth`                         | List profiles. Mark the default.                                                                                                    |
+| `dh auth login [server]`          | Sign in. Save the profile. First profile → default; otherwise prompt (§ Login).                                                     |
+| `dh auth use [profile]`           | Set the default. Picker if no profile is given.                                                                                     |
+| `dh auth rename <profile> <name>` | Rename a profile.                                                                                                                   |
+| `dh auth logout [profile]`        | Revoke the key on the server if `dh` generated it, and remove the profile. Picker if no profile is given and there are 2+ profiles. |
+| `dh auth logout --all`            | Same, for every profile.                                                                                                            |
+| `dh auth status`                  | Check the profile against its server.                                                                                               |
+| `dh auth import [--from <path>]`  | Import legacy config.                                                                                                               |
 
 Global flags: `--profile <name>` (env `DH_PROFILE`), `-o json`, `--no-input`.
-Env: `DH_TIMEOUT` (connect + login, default 30 s → `server_unreachable`).
+Env: `DH_TIMEOUT` (connect + non-SSO login, default 30 s →
+`server_unreachable`).
 
 ## Login
 
@@ -43,7 +44,7 @@ Run `dh --help` to learn more.
 
 - Server choices: imported config, previous logins, and **Other…**.
 - The method prompt only appears if the server offers 2+ methods.
-- SSO times out after `--timeout` (default 300 s).
+- SSO wait: `--timeout` (default 300 s). Not bounded by `DH_TIMEOUT`.
 - DHE: after SSO or password login, upload a key. Later logins use the key. The
   password is not saved.
 - DHE rejects the key upload → `key_upload_denied`.
@@ -70,8 +71,9 @@ $ dh auth login
 
 - Input: a host, a URL, or a URL copied from the browser.
 - No scheme → `https://` (`http://` for localhost). Drop the path.
-- No port → try 443, 8000, 8123 and 80 (plus 10000 for localhost). Use the first
-  Deephaven server that answers.
+- No port → try, in order, and use the first Deephaven server that answers:
+  - `https`: 443, 8000, 8123.
+  - `http` (localhost or explicit `http://`): 10000, 8000, 8123, 80.
 - No server found → `server_unreachable`, listing the addresses tried.
 - Never downgrade `https` to `http` for a non-local host.
 - `--ca-cert <file>`: trust this CA for the server. The path is saved with the
@@ -85,7 +87,9 @@ $ dh auth login
   two names collide. Names can be renamed.
 - Profile used by a command: `--profile` → `DH_PROFILE` → `DH_SERVER` (§
   Environment-only auth) → default. None of them → `auth_required`.
-- Re-login replaces the profile's key and deletes the old key on the server.
+- Re-login replaces a `dh`-generated key and deletes the old one on the server.
+- Only `dh`-generated keys are revoked or deleted. `--private-key-file` keys are
+  never touched on the server.
 - Logging out of the default makes another profile the default: one on the same
   server first, otherwise the first remaining.
 - Logout: if revoking the key fails, warn and still remove the profile locally.
@@ -97,17 +101,20 @@ $ dh auth login
 | DHC anonymous            | Nothing                                                                  |
 | DHC PSK                  | The PSK, or an env var name (`--psk-env`)                                |
 | DHC username/password    | The password (warning shown once), or an env var name (`--password-env`) |
+| DHC custom               | Handler and token, or an env var name (`--token-env`)                    |
 
 - Directory: `~/.deephaven/cli/` (`%APPDATA%\Deephaven\cli\` on Windows).
   Override with `DH_CONFIG_DIR`.
 - `config.json`: servers and profiles.
-- `credentials.json`: secrets, mode 0600. Refused if others can read it.
+- `credentials.json`: secrets, owner-only (mode 0600; Windows: owner-only ACL).
+  Refused if others can read it.
 
 ## Errors
 
 | Code                     | Cause                                 | Hint                             |
 | ------------------------ | ------------------------------------- | -------------------------------- |
 | `auth_required`          | No profile                            | `dh auth login`                  |
+| `auth_failed`            | Server rejected credentials at login  | Check the credentials            |
 | `auth_expired`           | Server rejected the stored credential | `dh auth login --profile <name>` |
 | `credential_unavailable` | Profile's env var or key file missing | The var or path                  |
 | `key_upload_denied`      | DHE rejected the key upload           | Ask an administrator             |
@@ -129,6 +136,7 @@ Exit codes: 0 ok, 1 internal error, 2 usage, 3 cancelled, 4 auth, 5 server. With
 | `--username <u>`                                                      | Username                                        |
 | `--password-stdin`, `--password-env <VAR>`                            | Password                                        |
 | `--psk-stdin`, `--psk-env <VAR>`                                      | PSK                                             |
+| `--handler <class>`, `--token-stdin`, `--token-env <VAR>`             | DHC custom handler and token                    |
 | `--private-key-file <path>`, `--copy-key`                             | Existing DHE key: store the path / the contents |
 | `--ca-cert <file>`                                                    | CA cert for the server                          |
 | `--timeout <seconds>`                                                 | SSO wait (default 300)                          |
@@ -143,8 +151,9 @@ Exit codes: 0 ok, 1 internal error, 2 usage, 3 cancelled, 4 auth, 5 server. With
 
 ### Environment-only auth
 
-For CI and containers. With `DH_SERVER` set, use only these variables. Nothing
-is read from or written to the config directory.
+For CI and containers. Applies when `DH_SERVER` is the selected source (§
+Profiles). Then only these variables are used, and the config directory is not
+read or written.
 
 | Var                   | Purpose                                 |
 | --------------------- | --------------------------------------- |
@@ -153,6 +162,8 @@ is read from or written to the config directory.
 | `DH_PASSWORD`         | Password (DHE or DHC)                   |
 | `DH_PSK`              | DHC PSK                                 |
 | `DH_PRIVATE_KEY_FILE` | DHE key file                            |
+| `DH_AUTH_HANDLER`     | DHC custom handler class                |
+| `DH_AUTH_TOKEN`       | DHC custom token                        |
 | `DH_OPERATE_AS`       | DHE operate-as user                     |
 | `DH_CA_CERT`          | CA cert file                            |
 
@@ -208,16 +219,20 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`,
 - jsapi:
   - Load it as ESM.
   - Load it only from the resolved origin, over TLS or loopback.
-  - Cache it per host.
+  - Cache it per origin.
+  - Runs with `dh`'s permissions. Logging in to a server trusts it to run code,
+    as the web UI does.
 - Login rejections aren't `Error`s. Map any rejection to an auth code.
 - After a failed login, discard the client. `disconnect()` throws.
-- `credentials.json`: atomic writes, in a directory with mode 0700.
-- Config writes: read-modify-write under a lock file (`config.lock`).
+- `credentials.json`: atomic writes, in an owner-only directory (0700; Windows:
+  owner-only ACL).
+- `config.json` and `credentials.json`: read-modify-write under one lock
+  (`config.lock`).
 - CA cert and proxy: apply to address probing, jsapi download, and the jsapi
   transport (`fetch` via `Deno.createHttpClient`; node `http2`/`ws` options for
   the transport).
-- Timeouts: race connect + login against `DH_TIMEOUT`. On timeout, discard the
-  client.
+- Timeouts: race connect + non-SSO login against `DH_TIMEOUT`, and the SSO wait
+  against `--timeout`. On timeout, discard the client.
 - Command name: `"bin"` in `deno.json`, the only place it is set.
 - Build: add `--allow-run` and `--allow-sys=hostname`.
 
@@ -240,7 +255,7 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`,
 - [ ] Ink prompts work on all 5 targets.
 - [ ] No prompt without a TTY. Every prompt has a flag.
 - [ ] No DHE password is stored. No secret appears in output.
-- [ ] `logout` revokes the server key.
+- [ ] `logout` revokes `dh`-generated keys only.
 - [ ] The v1 and v2 fixtures from `main` import.
 - [ ] CI: DHC anonymous and PSK against a real server.
 - [ ] DHE test server: SSO, password, key login and revocation.
