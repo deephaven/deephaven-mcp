@@ -24,7 +24,7 @@ Env: `DH_TIMEOUT` (connect + login, default 30 s → `server_unreachable`).
 ```text
 $ dh auth login
 ? What server do you want to log in to?
-❯ https://dev-gplus.int.illumon.com:8123   (Enterprise · dhcli "prod")
+❯ https://dhe.example.com:8123   (Enterprise · dhcli "prod")
   Other…
 
 ? How do you want to sign in?
@@ -32,12 +32,12 @@ $ dh auth login
   Username and password
 
 Opening browser. If it doesn't open:
-  https://dev-gplus.int.illumon.com:9032/dh-saml/?key=…
+  https://dhe.example.com:9032/dh-saml/?key=…
 Waiting for sign-in… (Ctrl-C to cancel)
-✔ Signed in as user-a@illumon.com
+✔ Signed in as user-a@example.com
 ✔ Authorized this computer (key "dh CLI · my-laptop · 2026-10-01")
 
-Logged in. Default profile: dev-gplus.int.illumon.com:user-a@illumon.com
+Logged in. Default profile: dhe.example.com:user-a@example.com
 Run `dh --help` to learn more.
 ```
 
@@ -57,8 +57,8 @@ Already logged in:
 
 ```text
 $ dh auth login
-  ● dev-gplus.int.illumon.com:user-a   (default)
-    qa-gplus.int.illumon.com:user-a
+  ● dhe.example.com:user-a   (default)
+    dhe-qa.example.com:user-a
 ? What would you like to do?
 ❯ Log in to another server
   Log in as a different user
@@ -123,19 +123,19 @@ Exit codes: 0 ok, 1 internal error, 2 usage, 3 cancelled, 4 auth, 5 server. With
   flags.
 - Secrets only from stdin or an env var, never from argv.
 
-| `dh auth login` flag                                                  | Purpose                                     |
-| --------------------------------------------------------------------- | ------------------------------------------- |
-| `--method saml\|password\|private-key\|psk\|basic\|anonymous\|custom` | Sign-in method                              |
-| `--username <u>`                                                      | Username                                    |
-| `--password-stdin`, `--password-env <VAR>`                            | Password                                    |
-| `--psk-stdin`, `--psk-env <VAR>`                                      | PSK                                         |
+| `dh auth login` flag                                                  | Purpose                                         |
+| --------------------------------------------------------------------- | ----------------------------------------------- |
+| `--method saml\|password\|private-key\|psk\|basic\|anonymous\|custom` | Sign-in method                                  |
+| `--username <u>`                                                      | Username                                        |
+| `--password-stdin`, `--password-env <VAR>`                            | Password                                        |
+| `--psk-stdin`, `--psk-env <VAR>`                                      | PSK                                             |
 | `--private-key-file <path>`, `--copy-key`                             | Existing DHE key: store the path / the contents |
-| `--ca-cert <file>`                                                    | CA cert for the server                      |
-| `--timeout <seconds>`                                                 | SSO wait (default 300)                      |
-| `--operate-as <u>`                                                    | DHE operate-as user                         |
-| `--no-browser`                                                        | Print the SSO URL without opening a browser |
-| `--default`, `--no-default`                                           | Set / don't set as default; skip the prompt |
-| `--yes`                                                               | Accept confirmation prompts                 |
+| `--ca-cert <file>`                                                    | CA cert for the server                          |
+| `--timeout <seconds>`                                                 | SSO wait (default 300)                          |
+| `--operate-as <u>`                                                    | DHE operate-as user                             |
+| `--no-browser`                                                        | Print the SSO URL without opening a browser     |
+| `--default`, `--no-default`                                           | Set / don't set as default; skip the prompt     |
+| `--yes`                                                               | Accept confirmation prompts                     |
 
 - Library logs only appear with `DH_DEBUG`.
 - `dh` (no args): help and login status.
@@ -146,20 +146,19 @@ Exit codes: 0 ok, 1 internal error, 2 usage, 3 cancelled, 4 auth, 5 server. With
 For CI and containers. With `DH_SERVER` set, use only these variables. Nothing
 is read from or written to the config directory.
 
-| Var                   | Purpose                                     |
-| --------------------- | ------------------------------------------- |
-| `DH_SERVER`           | Server address (§ Server address rules)     |
-| `DH_USERNAME`         | Username                                    |
-| `DH_PASSWORD`         | Password (DHE or DHC)                       |
-| `DH_PSK`              | DHC PSK                                     |
-| `DH_PRIVATE_KEY_FILE` | DHE key file                                |
-| `DH_OPERATE_AS`       | DHE operate-as user                         |
-| `DH_CA_CERT`          | CA cert file                                |
+| Var                   | Purpose                                 |
+| --------------------- | --------------------------------------- |
+| `DH_SERVER`           | Server address (§ Server address rules) |
+| `DH_USERNAME`         | Username                                |
+| `DH_PASSWORD`         | Password (DHE or DHC)                   |
+| `DH_PSK`              | DHC PSK                                 |
+| `DH_PRIVATE_KEY_FILE` | DHE key file                            |
+| `DH_OPERATE_AS`       | DHE operate-as user                     |
+| `DH_CA_CERT`          | CA cert file                            |
 
 - Method: from the secret var that is set. None set → anonymous.
 - More than one secret var set → usage error.
-- DHE password: logs in with the password on every command. No key is
-  uploaded.
+- DHE password: logs in with the password on every command. No key is uploaded.
 
 ## Legacy config import
 
@@ -171,18 +170,18 @@ is read from or written to the config directory.
   `--yes` imports everything.
 - Legacy files are not modified.
 
-| Legacy                                              | Result                                                                                                                           |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| DHE `connection_json_url`                           | Server (drop `/iris/connection.json`)                                                                                            |
-| DHE `password` (+ `effective_user`)                 | Log in once, generate a key. `effective_user` → operate-as.                                                                      |
+| Legacy                                              | Result                                                                                                                                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| DHE `connection_json_url`                           | Server (drop `/iris/connection.json`)                                                                                                                                                      |
+| DHE `password` (+ `effective_user`)                 | Log in once, generate a key. `effective_user` → operate-as.                                                                                                                                |
 | DHE `private_key` (`key_text` / `private_key_path`) | Key file lines `user`/`operateas`/`public`/`private`. `EC:` prefix → strip it and use the key. No prefix (DSA) → needs re-login. `private_key_path` → path reference; `key_text` → copied. |
-| DHC `anonymous` / v1 `Anonymous`                    | Anonymous                                                                                                                        |
-| DHC `psk` / v1 `PSK`                                | PSK. `${env:VAR}` and `auth_token_env_var` → env var reference.                                                                  |
-| DHC `password` / v1 `Basic user:pass`               | Username/password                                                                                                                |
-| DHC `custom` / v1 Java class                        | Custom handler and token                                                                                                         |
-| `${file:/path}`                                     | The file's contents                                                                                                              |
-| v2 `context.json` default system                    | Default profile                                                                                                                  |
-| Session creation, Docker, timeouts                  | Not imported                                                                                                                     |
+| DHC `anonymous` / v1 `Anonymous`                    | Anonymous                                                                                                                                                                                  |
+| DHC `psk` / v1 `PSK`                                | PSK. `${env:VAR}` and `auth_token_env_var` → env var reference.                                                                                                                            |
+| DHC `password` / v1 `Basic user:pass`               | Username/password                                                                                                                                                                          |
+| DHC `custom` / v1 Java class                        | Custom handler and token                                                                                                                                                                   |
+| `${file:/path}`                                     | The file's contents                                                                                                                                                                        |
+| v2 `context.json` default system                    | Default profile                                                                                                                                                                            |
+| Session creation, Docker, timeouts                  | Not imported                                                                                                                                                                               |
 
 ## Implementation
 
@@ -214,11 +213,11 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`,
 - After a failed login, discard the client. `disconnect()` throws.
 - `credentials.json`: atomic writes, in a directory with mode 0700.
 - Config writes: read-modify-write under a lock file (`config.lock`).
-- CA cert and proxy: apply to address probing, jsapi download, and the
-  jsapi transport (`fetch` via `Deno.createHttpClient`; node `http2`/`ws`
-  options for the transport).
-- Timeouts: race connect + login against `DH_TIMEOUT`. On timeout, discard
-  the client.
+- CA cert and proxy: apply to address probing, jsapi download, and the jsapi
+  transport (`fetch` via `Deno.createHttpClient`; node `http2`/`ws` options for
+  the transport).
+- Timeouts: race connect + login against `DH_TIMEOUT`. On timeout, discard the
+  client.
 - Command name: `"bin"` in `deno.json`, the only place it is set.
 - Build: add `--allow-run` and `--allow-sys=hostname`.
 
@@ -244,7 +243,7 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`,
 - [ ] `logout` revokes the server key.
 - [ ] The v1 and v2 fixtures from `main` import.
 - [ ] CI: DHC anonymous and PSK against a real server.
-- [ ] dev-gplus: DHE SSO, password, key login and revocation.
+- [ ] DHE test server: SSO, password, key login and revocation.
 - [ ] `--ca-cert` and proxy env vars apply to the address check, the jsapi
       download and the connection.
 - [ ] Environment-only auth works with no config directory.
