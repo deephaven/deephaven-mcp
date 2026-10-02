@@ -3,7 +3,7 @@
 //   deno task dhe probe <url>
 //     No login. Load irisapi, read the auth config, and check that a SAML
 //     login for a nonce nobody has signed in with waits rather than failing.
-//   deno task dhe saml <url> [--keep-key]
+//   deno task dhe saml <url> [--keep-key] [--no-browser]
 //     Browser SSO (one waiting login() call), then a key round trip.
 //   read -s P; printf %s "$P" | DH_USER=<user> deno task dhe password <url> [--keep-key]
 //     Password login, then a key round trip.
@@ -32,11 +32,14 @@ const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
 
 const [mode = "probe", rawUrl] = Deno.args.filter((a) => !a.startsWith("--"));
 if (!rawUrl || !["probe", "saml", "password"].includes(mode)) {
-  console.error("usage: dhe <probe|saml|password> <serverUrl> [--keep-key]");
+  console.error(
+    "usage: dhe <probe|saml|password> <serverUrl> [--keep-key] [--no-browser]",
+  );
   Deno.exit(2);
 }
 const serverUrl = new URL(rawUrl);
 const keepKey = Deno.args.includes("--keep-key");
+const noBrowser = Deno.args.includes("--no-browser");
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -215,29 +218,41 @@ if (mode === "probe") {
   const nonce = samlNonce();
   const url = new URL(loginUrl!, serverUrl);
   url.searchParams.set("key", nonce);
-  console.log(`\nSign in here (opening browser):\n  ${url}\n`);
-  const opener = Deno.build.os === "darwin"
-    ? ["open", url.href]
-    : Deno.build.os === "windows"
-    ? ["cmd", "/c", "start", "", url.href]
-    : ["xdg-open", url.href];
-  await new Deno.Command(opener[0], { args: opener.slice(1) }).output()
-    .catch(() => console.log("NOTE could not open a browser"));
+  console.log(
+    `\nSign in here${noBrowser ? "" : " (opening browser)"}:\n  ${url}\n`,
+  );
+  if (!noBrowser) {
+    const opener = Deno.build.os === "darwin"
+      ? ["open", url.href]
+      : Deno.build.os === "windows"
+      ? ["cmd", "/c", "start", "", url.href]
+      : ["xdg-open", url.href];
+    await new Deno.Command(opener[0], { args: opener.slice(1) }).output()
+      .catch(() => console.log("NOTE could not open a browser"));
+  }
 
   const authed: Any = await check(
-    "wait for SAML sign-in (single login call)",
+    "wait for SAML sign-in",
     async () => {
-      const result = await tryLogin(
-        first,
-        { type: "saml", token: nonce },
-        SIGN_IN_TIMEOUT_MS,
-      );
-      if (result !== "ACCEPTED") throw new Error(result);
-      return first;
+      // The server caps each wait (SAML waitforusertimeoutmillis, default 60 s).
+      // A sign-in that lands after a rejected wait is picked up by a new call.
+      const deadline = Date.now() + SIGN_IN_TIMEOUT_MS;
+      let client = first;
+      for (let attempt = 1;; attempt++) {
+        const result = await tryLogin(
+          client,
+          { type: "saml", token: nonce },
+          Math.max(deadline - Date.now(), 0),
+        );
+        if (result === "ACCEPTED") return { client, attempt };
+        if (Date.now() >= deadline) throw new Error(result);
+        console.log(`NOTE attempt ${attempt} ${result}; retrying`);
+        client = await connect();
+      }
     },
-    () => "signed in",
-    SIGN_IN_TIMEOUT_MS + 5_000,
-  );
+    ({ attempt }) => `signed in (attempt ${attempt})`,
+    SIGN_IN_TIMEOUT_MS + 30_000,
+  ).then((r) => r?.client);
   if (authed) {
     const user: Any = await check(
       "getUserInfo",

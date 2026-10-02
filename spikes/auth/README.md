@@ -29,15 +29,16 @@ leaves it on the server.
 
 ## Options
 
-| Flag / env       | Check                 | Effect                                                 |
-| ---------------- | --------------------- | ------------------------------------------------------ |
-| `DH_PSK`         | `dhc`                 | PSK for PSK servers                                    |
-| `--groovy`       | `dhc`                 | Groovy session (default Python)                        |
-| `--http2`        | `dhc`                 | Node HTTP/2 gRPC transport                             |
-| `--cjs`          | `dhc`                 | Load the jsapi as CJS (fails under Deno; ESM required) |
-| `DH_USER`, stdin | `dhe password`        | Username; password on stdin                            |
-| `--keep-key`     | `dhe saml`/`password` | Don't delete the uploaded key                          |
-| `DH_TIMEOUT`     | all                   | Per-check timeout in seconds (default 30)              |
+| Flag / env       | Check                 | Effect                                                        |
+| ---------------- | --------------------- | ------------------------------------------------------------- |
+| `DH_PSK`         | `dhc`                 | PSK for PSK servers                                           |
+| `--groovy`       | `dhc`                 | Groovy session (default Python)                               |
+| `--http2`        | `dhc`                 | Node HTTP/2 gRPC transport                                    |
+| `--cjs`          | `dhc`                 | Load the jsapi as CJS (fails under Deno; ESM required)        |
+| `DH_USER`, stdin | `dhe password`        | Username; password on stdin                                   |
+| `--keep-key`     | `dhe saml`/`password` | Don't delete the uploaded key                                 |
+| `--no-browser`   | `dhe saml`            | Print the sign-in URL only (e.g. open it in a private window) |
+| `DH_TIMEOUT`     | all                   | Per-check timeout in seconds (default 30)                     |
 
 ## Examples
 
