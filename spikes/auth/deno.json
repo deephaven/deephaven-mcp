@@ -1,0 +1,24 @@
+{
+  "tasks": {
+    "crypto": "deno run -A crypto.ts",
+    "dhc": "deno run -A dhc.ts",
+    "dhe": "deno run -A dhe.ts",
+    "ink": "deno run -A ink.tsx",
+    "compile": "deno run -A compile.ts"
+  },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "lib": ["deno.window", "dom"]
+  },
+  "imports": {
+    "@deephaven-enterprise/auth-nodejs": "npm:@deephaven-enterprise/auth-nodejs@2026.1.59",
+    "@deephaven-enterprise/client-utils": "npm:@deephaven-enterprise/client-utils@2026.1.59",
+    "@deephaven-enterprise/jsapi-nodejs": "npm:@deephaven-enterprise/jsapi-nodejs@2026.1.59",
+    "@deephaven/jsapi-nodejs": "npm:@deephaven/jsapi-nodejs@^1.29.0",
+    "@std/path": "jsr:@std/path@^1.1.6",
+    "ink": "npm:ink@^7.1.1",
+    "react": "npm:react@^19.2.0",
+    "@types/react": "npm:@types/react@^19.2.0"
+  }
+}
