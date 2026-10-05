@@ -1,4 +1,4 @@
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { serveDir } from "@std/http/file-server";
 import { fromFileUrl, join } from "@std/path";
 import { binaryName, build } from "../scripts/build.ts";
@@ -99,6 +99,27 @@ Deno.test({
       });
       assert(install.success, install.stderr);
       assertStringIncludes(install.stdout, `Installed dh v${VERSION}`);
+
+      if (!WINDOWS) {
+        // A temp HOME/ZDOTDIR keeps this away from the real shell config.
+        const home = join(tmp, "home");
+        await Deno.mkdir(home);
+        const pathEnv = {
+          ...installEnv,
+          DH_INSTALL_REPO_URL: repo,
+          DH_INSTALL_NO_MODIFY_PATH: "",
+          HOME: home,
+          ZDOTDIR: home,
+          SHELL: "/bin/zsh",
+        };
+        for (let i = 0; i < 2; i++) {
+          const again = await run(INSTALL.cmd, INSTALL.args, pathEnv);
+          assert(again.success, again.stderr);
+        }
+        const rc = await Deno.readTextFile(join(home, ".zshrc"));
+        const line = `export PATH="${bin}:$PATH"`;
+        assertEquals(rc.split(line).length - 1, 1, rc);
+      }
 
       const exe = join(bin, WINDOWS ? "dh.exe" : "dh");
       const env = {
