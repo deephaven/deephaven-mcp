@@ -1,6 +1,6 @@
 import { encodeHex } from "@std/encoding/hex";
 import { greaterThan, parse } from "@std/semver";
-import { REPOSITORY, VERSION } from "./version.ts";
+import { BIN, REPOSITORY, VERSION } from "./version.ts";
 
 export const releasesUrl = (repository: string): string =>
   `https://github.com/${repository}/releases`;
@@ -91,7 +91,7 @@ async function claimCheck(): Promise<boolean> {
 }
 
 export async function autoUpdate(): Promise<void> {
-  // Only compiled `dh` binaries update; from source, execPath is the deno runtime.
+  // Only compiled binaries update; from source, execPath is the deno runtime.
   if (!Deno.build.standalone) return;
   if (Deno.build.os === "windows") {
     // Left by the previous update; deletable once that process has exited.
@@ -119,5 +119,10 @@ export async function autoUpdate(): Promise<void> {
   }
 
   await replaceExecutable(binary);
-  console.error(`Updated dh ${VERSION} -> ${manifest.version}`);
+  // Not console: it is silenced while the Deephaven client libraries run.
+  Deno.stderr.writeSync(
+    new TextEncoder().encode(
+      `Updated ${BIN} ${VERSION} -> ${manifest.version}\n`,
+    ),
+  );
 }

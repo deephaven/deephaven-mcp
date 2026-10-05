@@ -36,7 +36,7 @@ Opening browser. If it doesn't open:
   https://dhe.example.com:9032/dh-saml/?key=…
 Waiting for sign-in… (Ctrl-C to cancel)
 ✔ Signed in as user-a@example.com
-✔ Authorized this computer (key "dh CLI · my-laptop · 2026-10-01")
+✔ Authorized this computer (key "dh CLI - my-laptop - 2026-10-01")
 
 Logged in. Default profile: dhe.example.com:user-a@example.com
 Run `dh --help` to learn more.
@@ -50,8 +50,8 @@ Run `dh --help` to learn more.
 - DHE rejects the key upload → `key_upload_denied`.
 - DHC methods: anonymous, PSK, username/password, custom handler.
 - The profile is saved only after a successful login.
-- SSO account confirmation: a warning the browser is going to open and the 
-  server's confirmation page if it advertises one. Otherwise 
+- SSO account confirmation: a warning the browser is going to open and the
+  server's confirmation page if it advertises one. Otherwise
   `Use user-a@example.com? (Y/n)` in the terminal. No → nothing saved.
 - Default: first profile → default. Otherwise `Make this the default? (y/N)`.
   `--default` / `--no-default` skip the prompt. No TTY and no flag → not
@@ -206,8 +206,8 @@ read or written.
 | `src/commands/auth/` | Cliffy commands                                       |
 | `src/ui/`            | Ink prompts (TTY only, lazy-loaded)                   |
 
-Dependencies: `@deephaven-enterprise/auth-nodejs`,
-`@deephaven-enterprise/jsapi-nodejs`, `@deephaven/jsapi-nodejs`, `ink`.
+Dependencies: `@deephaven-enterprise/auth-nodejs`, `@deephaven/jsapi-nodejs`
+(gRPC transport only), `ink`.
 
 - SSO:
   - The login URL comes from the server's auth config. It may be on another
@@ -219,9 +219,10 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`,
   - Target: the ACL writer host from `getServerConfigValues()`.
   - Check the HTTP status.
   - Log in with the new key before saving it.
-- Key label: `dh CLI · <hostname> · <date>`.
+- Key label: `dh CLI - <hostname> - <date>`. Printable ASCII only (server
+  rejects others with HTTP 400).
 - jsapi:
-  - Load it as ESM.
+  - Download it with `fetch` and load it as ESM. CJS doesn't load in Deno.
   - Load it only from the resolved origin, over TLS or loopback.
   - Cache it per origin.
   - Runs with `dh`'s permissions. Logging in to a server trusts it to run code,
@@ -232,9 +233,9 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`,
   owner-only ACL).
 - `config.json` and `credentials.json`: read-modify-write under one lock
   (`config.lock`).
-- CA cert and proxy: apply to address probing, jsapi download, and the jsapi
-  transport (`fetch` via `Deno.createHttpClient`; node `http2`/`ws` options for
-  the transport).
+- CA cert: re-run `dh` with `DENO_CERT` set, which covers `fetch` and the
+  transport.
+- Proxy: `fetch` honors `HTTPS_PROXY`; the transport doesn't yet.
 - Timeouts: race connect + non-SSO login against `DH_TIMEOUT`, and the SSO wait
   against `--timeout`. On timeout, discard the client.
 - Command name: `"bin"` in `deno.json`, the only place it is set.

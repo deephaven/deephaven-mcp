@@ -21,7 +21,7 @@ Sign in as user-a@example.com?
 
 - Shown after the IdP response validates, before the key is bound.
 - Continue → bind the key → success page.
-- Use a different account → restart at `<samlConfirmUrl>?key=<key>`.
+- Use a different account → restart the IdP sign-in for the same key.
 - Cancel → fail the key. The waiting login fails immediately.
 - Not confirmed within the browser session lifetime → the key fails.
 
@@ -51,19 +51,21 @@ Sign in as user-a@example.com?
 
 ## Implementation (iris)
 
-| Path                                                                | Change                                                                                                                                                                        |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `saml/saml-auth-module/.../servlets/LoginRequest.java`              | Extract the request-building logic, taking `forceAuthn` and `confirm`. `/dh-saml/` calls it with the server default and `false`.                                              |
-| `saml/saml-auth-module/.../servlets/ConfirmLoginRequest.java` (new) | `GET /dh-saml/confirm?key=`. Calls the shared logic with `forceAuthn=true, confirm=true`. Marks the request ID as confirm in the HttpSession.                                 |
-| `saml/saml-auth-module/.../servlets/AssertionConsumer.java`         | Request ID marked confirm: store pending `{key, irisId, expiration}` in the HttpSession and render the page, with no `addNewKey` and no group sync yet. Otherwise: unchanged. |
-| `saml/saml-auth-module/.../servlets/ConfirmLogin.java` (new)        | `POST /dh-saml/confirm/decision`. Continue → group sync, `addNewKey`, success page. Cancel → `failNewKey`. Different account → redirect to `/dh-saml/confirm?key=`.           |
-| `saml/saml-auth-module/.../SAMLAuthModule.java`                     | Register both servlets. Publish `confirm.url`.                                                                                                                                |
-| `saml/saml-common/.../SAMLConstants.java`                           | Paths and the client config property.                                                                                                                                         |
-| `saml/saml-auth-module/src/main/resources/webapp/static/saml.css`   | Page styles.                                                                                                                                                                  |
+| Path                                                                | Change                                                                                                                                                                                                         |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `saml/saml-auth-module/.../servlets/LoginRequest.java`              | Extract the request-building logic, taking `forceAuthn` and `confirm`. `/dh-saml/` calls it with the server default and `false`.                                                                               |
+| `saml/saml-auth-module/.../servlets/ConfirmLoginRequest.java` (new) | `GET /dh-saml/confirm?key=`. Calls the shared logic with `forceAuthn=true, confirm=true`. Marks the request ID as confirm in the HttpSession.                                                                  |
+| `saml/saml-auth-module/.../servlets/AssertionConsumer.java`         | Request ID marked confirm: store pending `{key, irisId, expiration}` in the HttpSession and render the page, with no `addNewKey` and no group sync yet. Otherwise: unchanged.                                  |
+| `saml/saml-auth-module/.../servlets/ConfirmLogin.java` (new)        | `POST /dh-saml/confirm/decision`. Continue → group sync, `addNewKey`, success page. Cancel → `failNewKey`. Different account → new AuthnRequest for the same key (`replaceKnownRequest`), redirect to the IdP. |
+| `saml/saml-auth-module/.../servlets/PendingConfirmation.java` (new) | Session attribute. Single-use `claim()`; unbound unclaimed (session ended) → `failNewKey`.                                                                                                                     |
+| `saml/saml-auth-module/.../SAMLAuthModule.java`                     | Register both servlets. `replaceKnownRequest(key, oldId, newId)`.                                                                                                                                              |
+| `saml/saml-common/.../SAMLConstants.java`                           | Paths, form fields, `CONF_CONFIRM_URL`, `escapeHtml`.                                                                                                                                                          |
+| `saml/saml-auth-module/src/main/resources/webapp/static/saml.css`   | Page styles.                                                                                                                                                                                                   |
+| Helm and podman SAML props, `docs/.../saml-auth.md`                 | `authentication.client.samlauth.confirm.url`, added to `authentication.client.configuration.list`.                                                                                                             |
 
 - The assertion comes back to the existing ACS URL. The confirm marker lives
   only in the HttpSession and is never a client parameter.
-- POST only, with a CSRF token bound to the HttpSession.
+- POST only. The pending entry's random token is the CSRF token.
 - `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
 - HTML-escape the user name.
 - Pending entry: one per key, single use, removed on any outcome.
