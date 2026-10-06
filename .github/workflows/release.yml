@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs could both pass the "tag is new" check and race to publish.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Keep the write token out of .git/config; later steps run repo code with --allow-all.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Resolve tag
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            tag="v$(jq -r .version deno.json)"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              echo "::error::$tag already exists; bump version in deno.json"
+              exit 1
+            fi
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno task release "$TAG" dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Tags with a suffix (v3.0.1-rc.1) are prereleases, which releases/latest ignores.
+        run: |
+          flags="--generate-notes"
+          case "$TAG" in *-*) flags="$flags --prerelease" ;; esac
+          # Manual runs create the tag; tags made with GITHUB_TOKEN don't retrigger this workflow.
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            flags="$flags --target $GITHUB_SHA"
+          else
+            flags="$flags --verify-tag"
+          fi
+          gh release create "$TAG" dist/* $flags
