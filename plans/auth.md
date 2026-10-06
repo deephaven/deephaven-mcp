@@ -47,7 +47,8 @@ Run `dh --help` to learn more.
 - SSO wait: `--timeout` (default 300 s). Not bounded by `DH_TIMEOUT`.
 - DHE: after SSO or password login, upload a key. Later logins use the key. The
   password is not saved.
-- DHE rejects the key upload → `key_upload_denied`.
+- Key upload fails → `key_upload_failed`, with the server's reason or the ACL
+  write server address that couldn't be reached.
 - DHC methods: anonymous, PSK, username/password, custom handler.
 - The profile is saved only after a successful login.
 - SSO account confirmation: a warning the browser is going to open and the
@@ -120,7 +121,7 @@ $ dh auth login
 | `auth_failed`            | Server rejected credentials at login  | Check the credentials            |
 | `auth_expired`           | Server rejected the stored credential | `dh auth login --profile <name>` |
 | `credential_unavailable` | Profile's env var or key file missing | The var or path                  |
-| `key_upload_denied`      | DHE rejected the key upload           | Ask an administrator             |
+| `key_upload_failed`      | Key upload failed or was rejected     | Server's reason / ACL write host |
 | `server_unreachable`     | Network or TLS failure                | The URL and the cause            |
 
 Exit codes: 0 ok, 1 internal error, 2 usage, 3 cancelled, 4 auth, 5 server. With

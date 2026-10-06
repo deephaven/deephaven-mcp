@@ -19,7 +19,10 @@ export const ERROR_CODES = {
     exit: 4,
     description: "Profile's env var or key file missing",
   },
-  key_upload_denied: { exit: 4, description: "DHE rejected the key upload" },
+  key_upload_failed: {
+    exit: 4,
+    description: "Uploading this computer's key to DHE failed",
+  },
   server_unreachable: { exit: 5, description: "Network or TLS failure" },
   server_unsupported: {
     exit: 5,

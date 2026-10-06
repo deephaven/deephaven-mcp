@@ -196,6 +196,27 @@ export interface UploadedKey extends KeyPair {
   comment: string;
 }
 
+/** Where key uploads go; reported when they fail. */
+async function aclWriter(conn: EnterpriseConnection): Promise<string> {
+  try {
+    const { dbAclWriterHost, dbAclWriterPort } = await conn.client
+      .getServerConfigValues();
+    return `${dbAclWriterHost}:${dbAclWriterPort}`;
+  } catch {
+    return "its ACL write server";
+  }
+}
+
+function uploadHint(status: number, body: string, user: string): string {
+  if (status === 401) {
+    return "The ACL write server didn't accept this session's token. This is a server configuration problem; tell an administrator.";
+  }
+  if (status === 403) {
+    return `The ACL write server didn't allow adding a key for ${user}.`;
+  }
+  return body || "The server gave no reason.";
+}
+
 /** Generates a key pair and uploads its public key for `username`. */
 export async function createKey(
   conn: EnterpriseConnection,
@@ -218,17 +239,17 @@ export async function createKey(
     });
   } catch (e) {
     throw new DhError(
-      "key_upload_denied",
-      `Could not upload a key to ${conn.origin}`,
-      describe(e),
+      "key_upload_failed",
+      `Could not reach ${await aclWriter(conn)} to upload this computer's key`,
+      `${describe(e)}. That address must be reachable from this computer.`,
     );
   }
   const body = (await res.text().catch(() => "")).trim().slice(0, 300);
   if (!res.ok) {
     throw new DhError(
-      "key_upload_denied",
-      `${conn.origin} rejected the key upload (HTTP ${res.status})`,
-      body || "Ask an administrator to allow key uploads.",
+      "key_upload_failed",
+      `${conn.origin} rejected this computer's key (HTTP ${res.status})`,
+      uploadHint(res.status, body, username),
     );
   }
   return { ...keyPair, comment };

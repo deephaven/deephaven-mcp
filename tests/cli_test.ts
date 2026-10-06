@@ -141,7 +141,7 @@ Deno.test("cli: agents lists commands and every error code", async () => {
       "auth_failed",
       "auth_expired",
       "credential_unavailable",
-      "key_upload_denied",
+      "key_upload_failed",
       "server_unreachable",
     ]
   ) {

@@ -100,7 +100,7 @@ export async function authorizeComputer(
   } catch (e) {
     await deleteKey(conn, session.user, key).catch(() => {});
     throw new DhError(
-      "key_upload_denied",
+      "key_upload_failed",
       `${session.origin} accepted the key upload but not a login with it`,
       e instanceof Error ? e.message : undefined,
     );
