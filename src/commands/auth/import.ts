@@ -27,6 +27,7 @@ import type { Credential, Method } from "../../auth/store.ts";
 import { Store } from "../../auth/store.ts";
 import { note, result } from "../../output.ts";
 import { getPrompter, type Prompter } from "../../ui/prompt.ts";
+import { BIN } from "../../version.ts";
 import { globals } from "../common.ts";
 
 export interface ImportOptions {
@@ -47,19 +48,34 @@ function secretCredential(ref: SecretRef, value: string): Credential {
     : { type: "secret", value };
 }
 
+function importedFrom(item: LegacyItem): string {
+  return `dhcli:${item.source}`;
+}
+
+function reason(item: LegacyItem, e: unknown): string {
+  if (e instanceof DhError && e.code === "server_unreachable") {
+    return `can't reach ${new URL(item.origin).host} (${e.hint ?? e.message})`;
+  }
+  return e instanceof DhError && e.hint
+    ? `${e.message} (${e.hint})`
+    : describe(e);
+}
+
+/** `waiting` is told what the import is about to wait on, before each server call. */
 async function importItem(
   store: Store,
   item: LegacyItem,
+  waiting: (what: string) => void,
 ): Promise<{ profile: string; detail: string }> {
   if (item.caCert && Deno.env.get("DENO_CERT") !== item.caCert) {
     throw new DhError(
       "usage",
-      `uses a custom CA; run \`auth login ${item.origin} --ca-cert ${item.caCert}\``,
+      `uses a custom CA; run \`${BIN} auth login ${item.origin} --ca-cert ${item.caCert}\``,
     );
   }
   const cache = store.cacheDir;
   const timeout = timeoutMs();
-  const importedFrom = `dhcli:${item.source}`;
+  const host = new URL(item.origin).host;
   const plan = item.plan;
   const save = async (
     user: string,
@@ -71,7 +87,7 @@ async function importItem(
       origin: item.origin,
       kind: item.kind,
       caCert: item.caCert,
-      importedFrom,
+      importedFrom: importedFrom(item),
       user,
       method,
       credential,
@@ -88,6 +104,9 @@ async function importItem(
           : "no saved password",
       );
     }
+    waiting(
+      `signing in to ${host} as ${plan.username}, then authorizing this computer`,
+    );
     const session = await connectAndLogin(
       item.origin,
       {
@@ -115,6 +134,7 @@ async function importItem(
       ? await readKeyFile(plan.keyPath)
       : parseKeyFile(plan.keyText ?? "", item.source);
     if (!key.user) throw new DhError("usage", "key file has no user line");
+    waiting(`signing in to ${host} as ${key.user} with the key`);
     const conn = await connectEnterprise(item.origin, cache, timeout);
     await loginKey(
       conn,
@@ -178,6 +198,7 @@ async function importItem(
   const login = { method: plan.method, handler, username, secret };
   let detail = describePlan(item);
   if (secret !== undefined || plan.method === "anonymous") {
+    waiting(`signing in to ${host} (${describePlan(item)})`);
     const conn = await connectCommunity(item.origin, cache, timeout);
     await loginCommunity(conn, login, timeout, "auth_failed");
     disconnect(conn.client);
@@ -204,10 +225,19 @@ export async function runImport(
   if (!legacy || legacy.items.length === 0) return undefined;
   if (offered && !options.yes && !prompt.interactive) return undefined;
   note(`Found a dhcli config at ${legacy.path}.`);
-  let items = legacy.items;
+  const { config: current } = await store.read();
+  const done = legacy.items.filter((i) =>
+    current.servers[i.origin]?.importedFrom === importedFrom(i)
+  );
+  for (const i of done) note(`  – ${i.name}: already imported`);
+  let items = legacy.items.filter((i) => !done.includes(i));
+  if (items.length === 0) return 0;
+  note(
+    "Importing signs in to each server to check its credentials, so the servers must be reachable now (for example, on VPN).",
+  );
   if (!options.yes) {
     items = await prompt.multiSelect(
-      "Import it?",
+      "Which servers do you want to import?",
       items.map((i) => ({
         label: `${i.name.padEnd(12)} ${new URL(i.origin).host}`,
         hint: describePlan(i),
@@ -219,16 +249,30 @@ export async function runImport(
   for (const n of legacy.notImported) note(`  – ${n}: not used, not imported`);
 
   const outcomes: Imported[] = [];
+  const seconds = timeoutMs() / 1000;
   for (const item of items) {
     try {
-      const { profile, detail } = await importItem(store, item);
+      const { profile, detail } = await importItem(
+        store,
+        item,
+        (what) =>
+          note(
+            `  … ${item.name}: ${what} (gives up after ${seconds}s if unreachable)`,
+          ),
+      );
       outcomes.push({ item: item.name, profile, detail, ok: true });
       note(`  ✔ ${item.name} → ${profile}  ${detail}`);
     } catch (e) {
-      const detail = describe(e);
+      const detail = reason(item, e);
       outcomes.push({ item: item.name, detail, ok: false });
       note(`  ! ${item.name}: ${detail}`);
     }
+  }
+  const failed = outcomes.filter((o) => !o.ok).length;
+  if (failed) {
+    note(
+      `${failed} not imported. Fix the problems above (for example, connect to the servers' network), then run \`${BIN} auth import\` to retry. Imported servers are skipped.`,
+    );
   }
 
   const anyOk = outcomes.some((o) => o.ok);
