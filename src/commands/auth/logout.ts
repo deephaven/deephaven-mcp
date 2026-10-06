@@ -109,18 +109,34 @@ export async function logout(
     removed.push({ profile: p.name, server: p.server, revoked });
   }
 
+  // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
+  const resaved: string[] = [];
   const nextDefault = await store.update((state) => {
     let next = state.config.defaultProfile;
     for (const id of ids) {
+      const now = state.credentials.credentials[id];
+      if (JSON.stringify(now) !== JSON.stringify(credentials.credentials[id])) {
+        resaved.push(id);
+        continue;
+      }
       next = removeProfile(state.config, id);
       delete state.credentials.credentials[id];
     }
     return next ? state.config.profiles[next]?.name : undefined;
   });
+  for (const id of resaved) {
+    const name = config.profiles[id].name;
+    note(
+      `! Kept ${name}: it was signed in again during logout. Run \`${BIN} auth logout ${name}\` again.`,
+    );
+  }
+  const gone = removed.filter((r) =>
+    !resaved.some((id) => config.profiles[id].name === r.profile)
+  );
 
   result(
     () => [
-      ...removed.map((r) =>
+      ...gone.map((r) =>
         r.revoked
           ? `✔ Revoked key on ${
             new URL(r.server).host
@@ -130,8 +146,8 @@ export async function logout(
       nextDefault ? `Default profile: ${nextDefault}` : "No profiles left.",
     ],
     {
-      removed,
-      kept: kept.map((id) => config.profiles[id].name),
+      removed: gone,
+      kept: [...kept, ...resaved].map((id) => config.profiles[id].name),
       default: nextDefault ?? null,
     },
   );

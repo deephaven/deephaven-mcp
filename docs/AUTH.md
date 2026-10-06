@@ -171,7 +171,8 @@ key stays on the server. An administrator can list and delete keys with
 `sudo -u irisadmin`). Keys made by `dh` have comments starting with `dh CLI -`.
 
 `dh auth logout --all` keeps any profile whose server needs a different CA
-certificate from the others, and names it. Log out of it on its own.
+certificate from the others, and names it. Log out of it on its own. A profile
+that is signed in again while logout runs is also kept, with its new key.
 
 Signing in again to an existing Enterprise profile replaces its key and deletes
 the old one.
