@@ -23,7 +23,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Keep the write token out of .git/config; later steps run repo code with --allow-all.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Resolve tag
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
