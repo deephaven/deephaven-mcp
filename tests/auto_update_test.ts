@@ -2,7 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { serveDir } from "@std/http/file-server";
 import { fromFileUrl, join } from "@std/path";
 import { binaryName, build } from "../scripts/build.ts";
-import { VERSION } from "../src/version.ts";
+import { BIN, VERSION } from "../src/version.ts";
 
 const NEXT = "9.9.9";
 // Every asset of this release redirects to plain HTTP (never resolves: .invalid).
@@ -98,7 +98,7 @@ Deno.test({
         DH_INSTALL_REPO_URL: repo,
       });
       assert(install.success, install.stderr);
-      assertStringIncludes(install.stdout, `Installed dh v${VERSION}`);
+      assertStringIncludes(install.stdout, `Installed ${BIN} v${VERSION}`);
 
       if (!WINDOWS) {
         // A temp HOME/ZDOTDIR keeps this away from the real shell config.
@@ -121,10 +121,11 @@ Deno.test({
         assertEquals(rc.split(line).length - 1, 1, rc);
       }
 
-      const exe = join(bin, WINDOWS ? "dh.exe" : "dh");
+      const exe = join(bin, WINDOWS ? `${BIN}.exe` : BIN);
       const env = {
         DH_UPDATE_URL: `${repo}/releases/latest/download/manifest.json`,
         DH_DEBUG: "1",
+        DH_CONFIG_DIR: join(tmp, "config"),
       };
       const now = { ...env, DH_UPDATE_INTERVAL: "0" };
       const version = async () => (await run(exe, ["--version"], env)).stdout;
@@ -142,7 +143,7 @@ Deno.test({
       });
 
       const throttled = await run(exe, [], env);
-      assert(!throttled.stderr.includes("Updated dh"), throttled.stderr);
+      assert(!throttled.stderr.includes(`Updated ${BIN}`), throttled.stderr);
       assertStringIncludes(await version(), VERSION, "within interval");
 
       await run(exe, [], { ...now, DH_AUTO_UPDATE: "off" });
@@ -159,14 +160,17 @@ Deno.test({
       await Deno.writeFile(asset, good);
 
       const first = await run(exe, [], now);
-      assertStringIncludes(first.stderr, `Updated dh ${VERSION} -> ${NEXT}`);
+      assertStringIncludes(
+        first.stderr,
+        `Updated ${BIN} ${VERSION} -> ${NEXT}`,
+      );
       assertStringIncludes(await version(), NEXT);
 
       const second = await run(exe, [], now);
-      assert(!second.stderr.includes("Updated dh"), second.stderr);
+      assert(!second.stderr.includes(`Updated ${BIN}`), second.stderr);
       if (WINDOWS) {
         const old = await Deno.stat(`${exe}.old`).catch(() => null);
-        assert(!old, "dh.exe.old should be cleaned up on the next run");
+        assert(!old, `${BIN}.exe.old should be cleaned up on the next run`);
       }
 
       const redirect = await run(exe, [], {

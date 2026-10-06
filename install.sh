@@ -1,6 +1,9 @@
 #!/bin/sh
-# Installs dh: curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.sh | sh
+# Installs the Deephaven CLI: curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.sh | sh
 set -eu
+
+# Rewritten from deno.json "bin" by scripts/release.ts.
+BIN=dh
 
 REPO_URL="${DH_INSTALL_REPO_URL:-https://github.com/deephaven/deephaven-mcp}"
 # Must be user-writable, or auto-update can't replace the binary.
@@ -14,15 +17,15 @@ case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) TARGET=x86_64-unknown-linux-gnu ;;
   Linux-aarch64 | Linux-arm64) TARGET=aarch64-unknown-linux-gnu ;;
   *)
-    echo "dh: unsupported platform $(uname -sm)" >&2
+    echo "$BIN: unsupported platform $(uname -sm)" >&2
     exit 1
     ;;
 esac
-NAME="dh-$TARGET"
+NAME="$BIN-$TARGET"
 
 # HTTPS only; plain HTTP only as the starting URL of a loopback test server.
 insecure() {
-  echo "dh: refusing to install over insecure URL $REPO_URL" >&2
+  echo "$BIN: refusing to install over insecure URL $REPO_URL" >&2
   exit 1
 }
 case "$REPO_URL" in
@@ -46,7 +49,7 @@ fi
 case "$TAG" in
   v*) ;;
   *)
-    echo "dh: no release found at $REPO_URL/releases" >&2
+    echo "$BIN: no release found at $REPO_URL/releases" >&2
     exit 1
     ;;
 esac
@@ -56,12 +59,12 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
 
-echo "Downloading dh $TAG for $TARGET..."
+echo "Downloading $BIN $TAG for $TARGET..."
 fetch -fsSL -o "$NAME" "$BASE/$NAME"
 fetch -fsSL -o SHA256SUMS "$BASE/SHA256SUMS"
 
 if ! grep " $NAME\$" SHA256SUMS >expected; then
-  echo "dh: $TAG has no binary for $TARGET" >&2
+  echo "$BIN: $TAG has no binary for $TARGET" >&2
   exit 1
 fi
 if command -v sha256sum >/dev/null 2>&1; then
@@ -72,14 +75,14 @@ fi
 
 mkdir -p "$DIR"
 chmod 755 "$NAME"
-mv "$NAME" "$DIR/dh"
-echo "Installed dh $TAG to $DIR/dh"
+mv "$NAME" "$DIR/$BIN"
+echo "Installed $BIN $TAG to $DIR/$BIN"
 
 # Adds DIR to PATH in the user's shell startup file, once.
 add_to_path() {
   # These would break (or inject into) the generated shell line.
   case "$DIR" in *'"'* | *'$'* | *'`'* | *'\'*)
-    echo "Add $DIR to your PATH to run dh."
+    echo "Add $DIR to your PATH to run $BIN."
     return
     ;;
   esac
@@ -98,7 +101,7 @@ add_to_path() {
   esac
   if ! { [ -f "$rc" ] && grep -qxF "$line" "$rc"; }; then
     mkdir -p "$(dirname "$rc")"
-    printf '\n# Added by the dh installer\n%s\n' "$line" >>"$rc"
+    printf '\n# Added by the %s installer\n%s\n' "$BIN" "$line" >>"$rc"
   fi
   echo "Added $DIR to PATH in $rc. Open a new terminal, or run: $line"
 }
@@ -107,7 +110,7 @@ case ":$PATH:" in
   *":$DIR:"*) ;;
   *)
     if [ -n "${DH_INSTALL_NO_MODIFY_PATH:-}" ]; then
-      echo "Add $DIR to your PATH to run dh."
+      echo "Add $DIR to your PATH to run $BIN."
     else
       add_to_path
     fi

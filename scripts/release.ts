@@ -25,14 +25,24 @@ await build(outDir, {
 });
 
 const upstream = `github.com/${config.repository}`;
-for (const name of ["install.sh", "install.ps1"]) {
+// The scripts declare the command name once, as `BIN=` / `$bin =`.
+const binLine = {
+  "install.sh": [/^BIN=.*$/m, `BIN=${config.bin}`],
+  "install.ps1": [/^ {2}\$bin = .*$/m, `  $bin = '${config.bin}'`],
+} as const;
+for (const [name, [pattern, line]] of Object.entries(binLine)) {
   const script = await Deno.readTextFile(join(ROOT, name));
   if (!script.includes(upstream)) {
     throw new Error(`${name} does not reference ${upstream}`);
   }
+  if (!pattern.test(script)) {
+    throw new Error(`${name} does not declare the command name`);
+  }
   await Deno.writeTextFile(
     join(outDir, name),
-    script.replaceAll(upstream, `github.com/${repository}`),
+    script
+      .replaceAll(upstream, `github.com/${repository}`)
+      .replace(pattern, () => line),
   );
 }
 console.log(`release assets for ${repository} ${tag} in ${outDir}`);

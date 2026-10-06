@@ -15,7 +15,7 @@ export const TARGETS = [
 ];
 
 export function binaryName(target: string): string {
-  return `dh-${target}${target.includes("windows") ? ".exe" : ""}`;
+  return `${config.bin}-${target}${target.includes("windows") ? ".exe" : ""}`;
 }
 
 export interface BuildOptions {
@@ -27,7 +27,7 @@ export interface BuildOptions {
   baseUrl?: string;
 }
 
-/** Compiles dh into `outDir` with a `manifest.json` and `SHA256SUMS`. */
+/** Compiles the CLI into `outDir` with a `manifest.json` and `SHA256SUMS`. */
 export async function build(
   outDir: string,
   { version, repository, targets = [Deno.build.target], baseUrl = "" }:
@@ -67,6 +67,8 @@ export async function build(
           "--allow-net",
           "--allow-read",
           "--allow-write",
+          "--allow-run",
+          "--allow-sys=hostname",
           "--target",
           target,
           "--output",

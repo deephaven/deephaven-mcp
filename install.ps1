@@ -1,7 +1,9 @@
-# Installs dh: irm https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.ps1 | iex
+# Installs the Deephaven CLI: irm https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.ps1 | iex
 # Wrapped in a script block so `iex` doesn't leak variables or exit the caller's shell.
 & {
   $ErrorActionPreference = 'Stop'
+  # Rewritten from deno.json "bin" by scripts/release.ts.
+  $bin = 'dh'
   [Net.ServicePointManager]::SecurityProtocol =
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
@@ -39,7 +41,7 @@
   $repoUrl = if ($env:DH_INSTALL_REPO_URL) { $env:DH_INSTALL_REPO_URL } else { 'https://github.com/deephaven/deephaven-mcp' }
   Assert-Trusted $repoUrl
   # Must be user-writable, or auto-update can't replace the binary.
-  $dir = if ($env:DH_INSTALL_DIR) { $env:DH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\dh' }
+  $dir = if ($env:DH_INSTALL_DIR) { $env:DH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\$bin" }
   # Absolute against PowerShell's location (not .NET's cwd), since it's persisted in PATH.
   $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
   # x64 also runs on Windows on ARM under emulation.
@@ -51,7 +53,7 @@
     "$repoUrl/releases/latest/download/manifest.json"
   }
 
-  $tmp = Join-Path ([IO.Path]::GetTempPath()) "dh-install-$([Guid]::NewGuid())"
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) "$bin-install-$([Guid]::NewGuid())"
   New-Item -ItemType Directory -Force $tmp | Out-Null
   try {
     # The manifest pins a tagged URL and checksum, so this can't mix releases.
@@ -59,11 +61,11 @@
     Save-Trusted $manifestUrl $manifestFile
     $manifest = Get-Content -Raw $manifestFile | ConvertFrom-Json
     $asset = $manifest.binaries.$target
-    if (-not $asset) { throw "dh v$($manifest.version) has no binary for $target" }
+    if (-not $asset) { throw "$bin v$($manifest.version) has no binary for $target" }
     $url = [Uri]::new([Uri]$manifestUrl, $asset.url)
 
-    Write-Host "Downloading dh v$($manifest.version) for $target..."
-    $exe = Join-Path $tmp 'dh.exe'
+    Write-Host "Downloading $bin v$($manifest.version) for $target..."
+    $exe = Join-Path $tmp "$bin.exe"
     Save-Trusted $url $exe
     # Not Get-FileHash: it's missing in PowerShell 5.1 when launched from pwsh 7 (inherited PSModulePath).
     $sha256 = [Security.Cryptography.SHA256]::Create()
@@ -79,16 +81,16 @@
     }
 
     New-Item -ItemType Directory -Force $dir | Out-Null
-    Move-Item -Force $exe (Join-Path $dir 'dh.exe')
+    Move-Item -Force $exe (Join-Path $dir "$bin.exe")
   } finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp
   }
-  Write-Host "Installed dh v$($manifest.version) to $dir\dh.exe"
+  Write-Host "Installed $bin v$($manifest.version) to $dir\$bin.exe"
 
   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
   if (($userPath -split ';') -notcontains $dir) {
     if ($env:DH_INSTALL_NO_MODIFY_PATH) {
-      Write-Host "Add $dir to your PATH to run dh."
+      Write-Host "Add $dir to your PATH to run $bin."
     } else {
       $newPath = (@($userPath, $dir) | Where-Object { $_ }) -join ';'
       [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')

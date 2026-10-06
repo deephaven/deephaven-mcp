@@ -27,6 +27,18 @@ To install a specific release (including prereleases), set `DH_INSTALL_VERSION`.
 curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.sh | DH_INSTALL_VERSION=3.0.1 sh
 ```
 
+## Signing in
+
+```sh
+dh auth login dhe.example.com      # Enterprise: SSO in the browser, once
+dh auth login localhost:10000      # Community
+dh auth                            # list profiles
+```
+
+Each sign-in is saved as a profile, and later commands use the default one.
+Methods, profiles, scripting and CI, JSON output and error codes are covered in
+[Signing in with `dh auth`](docs/AUTH.md).
+
 ## Auto-update
 
 `dh` checks for a newer release at most once per `DH_UPDATE_INTERVAL` (default

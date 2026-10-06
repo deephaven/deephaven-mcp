@@ -1,0 +1,12 @@
+{
+  "session_name": "local_dev",
+  "host": "localhost",
+  "port": 10000,
+  "programming_language": "Python",
+  "auth": {
+    "credentials": {
+      "type": "psk",
+      "token": "${env:DH_LOCAL_DEV_PSK}"
+    }
+  }
+}
