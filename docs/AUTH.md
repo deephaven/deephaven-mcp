@@ -293,6 +293,9 @@ prints what it's waiting on for each server:
 - An Enterprise password is used once to upload a key, then discarded.
 - A secret written as `${env:VAR}` stays an environment-variable reference. If
   the variable isn't set, the profile is saved without being checked.
+- An old Basic profile whose variable holds `user:password` keeps reading that
+  variable. It must keep the same user, or the profile fails with
+  `credential_unavailable`.
 - Servers with a custom CA certificate are skipped. Sign in to them with
   `dh auth login <server> --ca-cert <file>`.
 - Session creation, Docker and timeout settings aren't used by `dh`; they are
