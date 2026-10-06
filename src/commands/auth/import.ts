@@ -23,7 +23,7 @@ import {
   resolveSecret,
   type SecretRef,
 } from "../../auth/legacy.ts";
-import { connectAndLogin } from "../../auth/session.ts";
+import { connectAndLogin, type Session } from "../../auth/session.ts";
 import type { Credential, Method } from "../../auth/store.ts";
 import { Store } from "../../auth/store.ts";
 import { note, result } from "../../output.ts";
@@ -157,7 +157,6 @@ async function importItem(
       timeout,
       "auth_failed",
     );
-    disconnectEnterprise(conn);
     const credential: Credential = plan.keyPath
       ? { type: "keyFile", path: plan.keyPath }
       : {
@@ -167,11 +166,28 @@ async function importItem(
         privateKey: key.keyPair.privateKey,
         generated: false,
       };
-    const profile = (await save(key.user, "private-key", credential, {
-      operateAs: key.operateAs,
-    })).name;
+    let saved;
+    try {
+      saved = await save(key.user, "private-key", credential, {
+        operateAs: key.operateAs,
+      });
+      const session: Session = {
+        origin: item.origin,
+        kind: "enterprise",
+        user: key.user,
+        operateAs: key.operateAs,
+        enterprise: conn,
+      };
+      await revokeWith(session, saved.previous).catch((e) =>
+        note(
+          `  ! ${item.name}: could not delete the previous key: ${describe(e)}`,
+        )
+      );
+    } finally {
+      disconnectEnterprise(conn);
+    }
     return {
-      profile,
+      profile: saved.name,
       detail: plan.keyPath ? `uses ${plan.keyPath}` : "key copied",
     };
   }

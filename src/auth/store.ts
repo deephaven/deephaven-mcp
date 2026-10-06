@@ -135,7 +135,9 @@ export class Store {
     if (!existed) await Deno.mkdir(this.dir, { recursive: true });
     if (!WINDOWS) await Deno.chmod(this.dir, 0o700);
     // Editing ACLs races with other processes' writes, so not on every update.
-    else if (!existed || resecure) await restrictWindowsAcl(this.dir, existed);
+    else if (!existed || resecure) {
+      await restrictWindowsAcl(this.dir, existed ? "reset-dir" : "dir");
+    }
   }
 
   private async assertPrivate(): Promise<void> {
@@ -188,6 +190,8 @@ async function writeAtomic(
       file.close();
     }
     if (!WINDOWS) await Deno.chmod(tmp, mode);
+    // The temp file is this process's own, so its ACL can change without racing other writers.
+    else if (mode === 0o600) await restrictWindowsAcl(tmp, "file");
     await Deno.rename(tmp, path);
   } catch (e) {
     await Deno.remove(tmp).catch(() => {});
@@ -195,19 +199,26 @@ async function writeAtomic(
   }
 }
 
-/** Owner-only, inherited by new files in `dir`; `reset` first drops explicit grants on it. */
-async function restrictWindowsAcl(dir: string, reset: boolean): Promise<void> {
+/**
+ * Owner-only. `dir`: inherited by new files; `reset-dir`: also drops explicit
+ * grants on an existing folder first. `file`: just that file.
+ */
+async function restrictWindowsAcl(
+  path: string,
+  kind: "dir" | "reset-dir" | "file",
+): Promise<void> {
   const user = Deno.env.get("USERNAME");
   const icacls = async (args: string[]) =>
     (await new Deno.Command("icacls", {
-      args: [dir, ...args, "/Q"],
+      args: [path, ...args, "/Q"],
       stdout: "null",
       stderr: "null",
     }).output()).success;
-  const ok = (!reset || await icacls(["/reset"])) &&
-    await icacls(["/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`]);
+  const grant = kind === "file" ? `${user}:F` : `${user}:(OI)(CI)F`;
+  const ok = (kind !== "reset-dir" || await icacls(["/reset"])) &&
+    await icacls(["/inheritance:r", "/grant:r", grant]);
   if (!ok) {
-    throw new DhError("internal", `Could not restrict access to ${dir}`);
+    throw new DhError("internal", `Could not restrict access to ${path}`);
   }
 }
 
