@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { fromFileUrl } from "@std/path";
 import { BIN } from "../version.ts";
 import {
@@ -138,7 +139,16 @@ function readSecret(cred: Credential, profile: Profile): string | undefined {
       `Set ${cred.env}, or run \`${BIN} auth login --profile ${profile.name}\`.`,
     );
   }
-  return cred.basicToken ? value.slice(value.indexOf(":") + 1) : value;
+  if (!cred.basicToken) return value;
+  const at = value.indexOf(":");
+  if (at < 0 || value.slice(0, at) !== profile.user) {
+    throw new DhError(
+      "credential_unavailable",
+      `Profile "${profile.name}" needs ${cred.env} to be "${profile.user}:<password>"`,
+      `Fix ${cred.env}, or run \`${BIN} auth login --profile ${profile.name}\`.`,
+    );
+  }
+  return value.slice(at + 1);
 }
 
 export async function specForProfile(
@@ -169,19 +179,6 @@ export async function specForProfile(
     keyPair,
     password: keyPair ? undefined : readSecret(cred, profile),
   };
-}
-
-/** A fresh owner-only directory, removed on exit; a shared temp path could be planted. */
-async function envCacheRoot(): Promise<string> {
-  const dir = await Deno.makeTempDir({ prefix: `${BIN}-jsapi-` });
-  globalThis.addEventListener("unload", () => {
-    try {
-      Deno.removeSync(dir, { recursive: true });
-    } catch {
-      // Best effort.
-    }
-  });
-  return dir;
 }
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
@@ -247,12 +244,8 @@ async function envSession(): Promise<Session> {
     }
     spec = { kind, login };
   }
-  return await connectAndLogin(
-    origin,
-    spec,
-    await envCacheRoot(),
-    "auth_failed",
-  );
+  // The jsapi loader makes this run's own owner-only folder inside it.
+  return await connectAndLogin(origin, spec, tmpdir(), "auth_failed");
 }
 
 async function profileSession(

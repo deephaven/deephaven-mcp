@@ -5,6 +5,8 @@ import { isLocal } from "./resolve.ts";
 // deno-lint-ignore no-explicit-any
 export type Api = any;
 
+const MAX_REDIRECTS = 5;
+
 let quieted = false;
 
 /** The client libraries log to console and leave stray rejections; keep both out of our output. */
@@ -33,11 +35,11 @@ function quietLibraries(cacheRoot: string): void {
   });
 }
 
-function assertTrusted(origin: URL): void {
-  if (origin.protocol === "https:" || isLocal(origin)) return;
+function assertTrusted(url: URL): void {
+  if (url.protocol === "https:" || isLocal(url)) return;
   throw new DhError(
     "server_unsupported",
-    `Refusing to load client code over plain HTTP from ${origin.origin}`,
+    `Refusing to load client code over plain HTTP from ${url.origin}`,
     "Use https://, or a local server.",
   );
 }
@@ -48,15 +50,27 @@ async function download(
   timeout: number,
   optional = false,
 ): Promise<void> {
+  const signal = AbortSignal.timeout(timeout);
   let res: Response;
-  try {
-    res = await fetch(url, { signal: AbortSignal.timeout(timeout) });
-  } catch (e) {
-    throw new DhError(
-      "server_unreachable",
-      `Could not fetch ${url}`,
-      describe(e),
-    );
+  // Redirects are followed by hand so every hop must pass `assertTrusted`.
+  for (let hop = 0;; hop++) {
+    assertTrusted(url);
+    try {
+      res = await fetch(url, { signal, redirect: "manual" });
+    } catch (e) {
+      throw new DhError(
+        "server_unreachable",
+        `Could not fetch ${url}`,
+        describe(e),
+      );
+    }
+    const location = res.headers.get("location");
+    if (res.status < 300 || res.status >= 400 || !location) break;
+    await res.body?.cancel();
+    if (hop === MAX_REDIRECTS) {
+      throw new DhError("server_unsupported", `Too many redirects for ${url}`);
+    }
+    url = new URL(location, url);
   }
   if (optional && res.status === 404) {
     await res.body?.cancel();
@@ -73,9 +87,35 @@ async function download(
   await Deno.writeTextFile(dest, await res.text());
 }
 
+const runDirs = new Map<string, Promise<string>>();
+
+/** This process's own folder under `cacheRoot`, removed on exit, so concurrent runs never share files. */
+function runDir(cacheRoot: string): Promise<string> {
+  let dir = runDirs.get(cacheRoot);
+  if (!dir) {
+    dir = (async () => {
+      await Deno.mkdir(cacheRoot, { recursive: true });
+      const created = await Deno.makeTempDir({
+        dir: cacheRoot,
+        prefix: "run-",
+      });
+      globalThis.addEventListener("unload", () => {
+        try {
+          Deno.removeSync(created, { recursive: true });
+        } catch {
+          // Best effort.
+        }
+      });
+      return created;
+    })();
+    runDirs.set(cacheRoot, dir);
+  }
+  return dir;
+}
+
 async function originDir(cacheRoot: string, origin: URL): Promise<string> {
   // Reversible, so two origins can never share a directory (or a cached module).
-  const dir = join(cacheRoot, encodeURIComponent(origin.origin));
+  const dir = join(await runDir(cacheRoot), encodeURIComponent(origin.origin));
   await Deno.mkdir(dir, { recursive: true });
   return dir;
 }

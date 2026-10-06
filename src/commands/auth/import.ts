@@ -49,8 +49,9 @@ function secretCredential(ref: SecretRef, value: string): Credential {
     : { type: "secret", value };
 }
 
-function importedFrom(item: LegacyItem): string {
-  return `dhcli:${item.source}`;
+/** Which config file and entry a profile came from; `#` separates the two. */
+function importedFrom(path: string, item: LegacyItem): string {
+  return `dhcli:${path}#${item.source}`;
 }
 
 function reason(item: LegacyItem, e: unknown): string {
@@ -65,6 +66,7 @@ function reason(item: LegacyItem, e: unknown): string {
 /** `waiting` is told what the import is about to wait on, before each server call. */
 async function importItem(
   store: Store,
+  legacyPath: string,
   item: LegacyItem,
   waiting: (what: string) => void,
 ): Promise<{ profile: string; detail: string }> {
@@ -87,7 +89,7 @@ async function importItem(
     origin: item.origin,
     kind: item.kind,
     caCert: item.caCert,
-    importedFrom: importedFrom(item),
+    importedFrom: importedFrom(legacyPath, item),
     user,
     method,
     credential,
@@ -245,7 +247,7 @@ export async function runImport(
   const { config: current } = await store.read();
   const done = legacy.items.filter((i) =>
     Object.values(current.profiles).some((p) =>
-      p.importedFrom === importedFrom(i)
+      p.server === i.origin && p.importedFrom === importedFrom(legacy.path, i)
     )
   );
   for (const i of done) note(`  – ${i.name}: already imported`);
@@ -273,6 +275,7 @@ export async function runImport(
     try {
       const { profile, detail } = await importItem(
         store,
+        legacy.path,
         item,
         (what) =>
           note(

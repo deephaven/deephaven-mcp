@@ -421,7 +421,7 @@ async function pickTarget(
           label: origin,
           value: origin,
           hint: `(${s.kind === "enterprise" ? "Enterprise" : "Community"}${
-            s.importedFrom ? ` · ${s.importedFrom}` : ""
+            s.importedFrom ? ` · ${s.importedFrom.split("#").pop()}` : ""
           })`,
         })),
         { label: "Other…", value: OTHER },
