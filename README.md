@@ -14,8 +14,10 @@ irm https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.
 ```
 
 This installs to `~/.local/bin/dh` (Windows:
-`%LOCALAPPDATA%\Programs\dh\dh.exe`, added to the user `PATH` unless
-`DH_INSTALL_NO_MODIFY_PATH` is set). Override with `DH_INSTALL_DIR`. The
+`%LOCALAPPDATA%\Programs\dh\dh.exe`; override with `DH_INSTALL_DIR`) and adds
+that directory to your `PATH`: on macOS/Linux via your shell's startup file
+(`.zshrc`, `.bashrc`/`.bash_profile`, fish `config.fish`, or `.profile`), on
+Windows via the user `PATH`. Set `DH_INSTALL_NO_MODIFY_PATH=1` to skip that. The
 directory must be writable by the user, or `dh` can't update itself.
 
 To install a specific release (including prereleases), set `DH_INSTALL_VERSION`.

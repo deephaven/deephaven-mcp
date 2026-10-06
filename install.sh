@@ -78,7 +78,41 @@ chmod 755 "$NAME"
 mv "$NAME" "$DIR/$BIN"
 echo "Installed $BIN $TAG to $DIR/$BIN"
 
+# Adds DIR to PATH in the user's shell startup file, once.
+add_to_path() {
+  # These would break (or inject into) the generated shell line.
+  case "$DIR" in *'"'* | *'$'* | *'`'* | *'\'*)
+    echo "Add $DIR to your PATH to run $BIN."
+    return
+    ;;
+  esac
+  line="export PATH=\"$DIR:\$PATH\""
+  case "$(basename "${SHELL:-sh}")" in
+    zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash)
+      # macOS terminals start login shells, which read .bash_profile instead.
+      if [ "$(uname -s)" = Darwin ]; then rc="$HOME/.bash_profile"; else rc="$HOME/.bashrc"; fi
+      ;;
+    fish)
+      rc="$HOME/.config/fish/config.fish"
+      line="fish_add_path \"$DIR\""
+      ;;
+    *) rc="$HOME/.profile" ;;
+  esac
+  if ! { [ -f "$rc" ] && grep -qxF "$line" "$rc"; }; then
+    mkdir -p "$(dirname "$rc")"
+    printf '\n# Added by the %s installer\n%s\n' "$BIN" "$line" >>"$rc"
+  fi
+  echo "Added $DIR to PATH in $rc. Open a new terminal, or run: $line"
+}
+
 case ":$PATH:" in
   *":$DIR:"*) ;;
-  *) echo "Add $DIR to your PATH to run $BIN." ;;
+  *)
+    if [ -n "${DH_INSTALL_NO_MODIFY_PATH:-}" ]; then
+      echo "Add $DIR to your PATH to run $BIN."
+    else
+      add_to_path
+    fi
+    ;;
 esac
