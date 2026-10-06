@@ -115,7 +115,7 @@ export class Store {
 
   /** Read-modify-write of both files under one lock. */
   async update<T>(fn: (state: State) => T | Promise<T>): Promise<T> {
-    await this.ensureDir();
+    await this.makeDir(false);
     return await withLock(join(this.dir, "config.lock"), async () => {
       const state = await this.read();
       const value = await fn(state);
@@ -125,11 +125,17 @@ export class Store {
     });
   }
 
-  /** Makes the directory owner-only, every time. Call before anything writes into it. */
+  /** Owner-only directory, re-securing an existing one. Call once per command, before writing. */
   async ensureDir(): Promise<void> {
-    await Deno.mkdir(this.dir, { recursive: true });
-    if (WINDOWS) await restrictWindowsAcl(this.dir);
-    else await Deno.chmod(this.dir, 0o700);
+    await this.makeDir(true);
+  }
+
+  private async makeDir(resecure: boolean): Promise<void> {
+    const existed = await Deno.stat(this.dir).then(() => true, () => false);
+    if (!existed) await Deno.mkdir(this.dir, { recursive: true });
+    if (!WINDOWS) await Deno.chmod(this.dir, 0o700);
+    // Editing ACLs races with other processes' writes, so not on every update.
+    else if (!existed || resecure) await restrictWindowsAcl(this.dir, existed);
   }
 
   private async assertPrivate(): Promise<void> {
@@ -189,8 +195,8 @@ async function writeAtomic(
   }
 }
 
-/** Owner-only, inherited by everything in `dir`; drops any other grants. */
-async function restrictWindowsAcl(dir: string): Promise<void> {
+/** Owner-only, inherited by new files in `dir`; `reset` first drops explicit grants on it. */
+async function restrictWindowsAcl(dir: string, reset: boolean): Promise<void> {
   const user = Deno.env.get("USERNAME");
   const icacls = async (args: string[]) =>
     (await new Deno.Command("icacls", {
@@ -198,8 +204,7 @@ async function restrictWindowsAcl(dir: string): Promise<void> {
       stdout: "null",
       stderr: "null",
     }).output()).success;
-  // Reset leaves only inherited entries (children included); then drop those.
-  const ok = await icacls(["/reset", "/T"]) &&
+  const ok = (!reset || await icacls(["/reset"])) &&
     await icacls(["/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`]);
   if (!ok) {
     throw new DhError("internal", `Could not restrict access to ${dir}`);
