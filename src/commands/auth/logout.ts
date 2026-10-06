@@ -5,11 +5,12 @@ import {
   removeProfile,
   sortedProfiles,
 } from "../../auth/profile.ts";
+import { ensureCa } from "../../auth/session.ts";
 import { Store } from "../../auth/store.ts";
 import { note, result } from "../../output.ts";
 import { getPrompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
-import { globals } from "../common.ts";
+import { globals, profileName as selectedProfile } from "../common.ts";
 
 export interface LogoutOptions {
   all?: boolean;
@@ -31,7 +32,8 @@ export async function logout(
   }
 
   let ids: string[];
-  const name = profileName ?? g.profile;
+  let extraArgs: string[] = [];
+  const name = profileName ?? selectedProfile(g);
   if (options.all) {
     ids = profiles.map(([id]) => id);
   } else if (name) {
@@ -57,7 +59,30 @@ export async function logout(
       "<profile> or --all",
     );
     ids = picked === ALL ? profiles.map(([id]) => id) : [picked];
+    extraArgs = picked === ALL ? ["--all"] : [config.profiles[picked].name];
   }
+
+  // Revoking needs each server's CA, and a process can trust only one extra CA.
+  const caOf = (id: string) => {
+    const cred = credentials.credentials[id];
+    return cred?.type === "keyPair" && cred.generated
+      ? config.servers[config.profiles[id].server]?.caCert
+      : undefined;
+  };
+  const cas = new Set(ids.map(caOf).filter((ca) => ca !== undefined));
+  if (cas.size === 1) await ensureCa([...cas][0], extraArgs);
+  const trusted = Deno.env.get("DENO_CERT");
+  const kept = ids.filter((id) => {
+    const ca = caOf(id);
+    return ca !== undefined && ca !== trusted;
+  });
+  for (const id of kept) {
+    const keptName = config.profiles[id].name;
+    note(
+      `! Kept ${keptName}: its server uses a different CA certificate. Run \`${BIN} auth logout ${keptName}\`.`,
+    );
+  }
+  ids = ids.filter((id) => !kept.includes(id));
 
   const removed: { profile: string; server: string; revoked: boolean }[] = [];
   for (const id of ids) {
@@ -104,6 +129,10 @@ export async function logout(
       ),
       nextDefault ? `Default profile: ${nextDefault}` : "No profiles left.",
     ],
-    { removed, default: nextDefault ?? null },
+    {
+      removed,
+      kept: kept.map((id) => config.profiles[id].name),
+      default: nextDefault ?? null,
+    },
   );
 }

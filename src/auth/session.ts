@@ -1,5 +1,4 @@
-import { tmpdir } from "node:os";
-import { fromFileUrl, join } from "@std/path";
+import { fromFileUrl } from "@std/path";
 import { BIN } from "../version.ts";
 import {
   type CommunityConnection,
@@ -139,7 +138,7 @@ function readSecret(cred: Credential, profile: Profile): string | undefined {
       `Set ${cred.env}, or run \`${BIN} auth login --profile ${profile.name}\`.`,
     );
   }
-  return value;
+  return cred.basicToken ? value.slice(value.indexOf(":") + 1) : value;
 }
 
 export async function specForProfile(
@@ -172,8 +171,17 @@ export async function specForProfile(
   };
 }
 
-function envCacheRoot(): string {
-  return join(tmpdir(), `${BIN}-jsapi-cache`);
+/** A fresh owner-only directory, removed on exit; a shared temp path could be planted. */
+async function envCacheRoot(): Promise<string> {
+  const dir = await Deno.makeTempDir({ prefix: `${BIN}-jsapi-` });
+  globalThis.addEventListener("unload", () => {
+    try {
+      Deno.removeSync(dir, { recursive: true });
+    } catch {
+      // Best effort.
+    }
+  });
+  return dir;
 }
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
@@ -214,6 +222,12 @@ async function envSession(): Promise<Session> {
       password: env("DH_PASSWORD"),
     };
   } else {
+    if (env("DH_PRIVATE_KEY_FILE")) {
+      throw new DhError(
+        "usage",
+        "DH_PRIVATE_KEY_FILE is only for Enterprise servers",
+      );
+    }
     const login: CommunityLogin = env("DH_PSK")
       ? { method: "psk", secret: env("DH_PSK") }
       : env("DH_PASSWORD")
@@ -233,7 +247,12 @@ async function envSession(): Promise<Session> {
     }
     spec = { kind, login };
   }
-  return await connectAndLogin(origin, spec, envCacheRoot(), "auth_failed");
+  return await connectAndLogin(
+    origin,
+    spec,
+    await envCacheRoot(),
+    "auth_failed",
+  );
 }
 
 async function profileSession(

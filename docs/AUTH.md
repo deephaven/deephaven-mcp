@@ -170,6 +170,9 @@ key stays on the server. An administrator can list and delete keys with
 `dhconfig acl publickey` (run as the Deephaven admin user, e.g.
 `sudo -u irisadmin`). Keys made by `dh` have comments starting with `dh CLI -`.
 
+`dh auth logout --all` keeps any profile whose server needs a different CA
+certificate from the others, and names it. Log out of it on its own.
+
 Signing in again to an existing Enterprise profile replaces its key and deletes
 the old one.
 
@@ -202,15 +205,15 @@ $ dh auth login --no-input
 With `-o json`, stdout holds exactly one JSON value. Progress messages and
 errors go to stderr.
 
-| Command          | stdout                                                       |
-| ---------------- | ------------------------------------------------------------ |
-| `dh auth`        | `[{"name", "server", "kind", "user", "method", "default"}]`  |
-| `dh auth login`  | `{"profile", "server", "user", "default"}`                   |
-| `dh auth status` | `{"profile", "server", "kind", "user", "operateAs"}`         |
-| `dh auth use`    | `{"default"}`                                                |
-| `dh auth rename` | `{"from", "to"}`                                             |
-| `dh auth logout` | `{"removed": [{"profile", "server", "revoked"}], "default"}` |
-| `dh auth import` | `{"imported"}`                                               |
+| Command          | stdout                                                               |
+| ---------------- | -------------------------------------------------------------------- |
+| `dh auth`        | `[{"name", "server", "kind", "user", "method", "default"}]`          |
+| `dh auth login`  | `{"profile", "server", "user", "default"}`                           |
+| `dh auth status` | `{"profile", "server", "kind", "user", "operateAs"}`                 |
+| `dh auth use`    | `{"default"}`                                                        |
+| `dh auth rename` | `{"from", "to"}`                                                     |
+| `dh auth logout` | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}` |
+| `dh auth import` | `{"imported"}`                                                       |
 
 `profile` is `null` in `status` when signed in from environment variables.
 

@@ -3,6 +3,7 @@ import {
   createKey,
   deleteKey,
   disconnect as disconnectEnterprise,
+  type EnterpriseConnection,
   loginKey,
 } from "./enterprise.ts";
 import { disconnect as disconnectCommunity } from "./community.ts";
@@ -43,6 +44,7 @@ export async function saveProfile(
     const id = existing?.[0] ?? newProfileId();
     const name = existing?.[1].name ??
       defaultName(config, p.origin, p.user, p.operateAs);
+    const importedFrom = p.importedFrom ?? existing?.[1].importedFrom;
     const previous = credentials.credentials[id];
     const server = config.servers[p.origin];
     config.servers[p.origin] = {
@@ -58,6 +60,7 @@ export async function saveProfile(
       method: p.method,
       operateAs: p.operateAs,
       handler: p.handler,
+      ...(importedFrom ? { importedFrom } : {}),
       createdAt: existing?.[1].createdAt ?? new Date().toISOString(),
     };
     credentials.credentials[id] = p.credential;
@@ -87,8 +90,9 @@ export async function authorizeComputer(
   const conn = session.enterprise!;
   const key = await createKey(conn, session.user);
   const timeout = timeoutMs();
-  const check = await connectEnterprise(session.origin, cacheRoot, timeout);
+  let check: EnterpriseConnection | undefined;
   try {
+    check = await connectEnterprise(session.origin, cacheRoot, timeout);
     await loginKey(
       check,
       session.user,
@@ -99,13 +103,14 @@ export async function authorizeComputer(
     );
   } catch (e) {
     await deleteKey(conn, session.user, key).catch(() => {});
+    if (!check) throw e;
     throw new DhError(
       "key_upload_failed",
       `${session.origin} accepted the key upload but not a login with it`,
       e instanceof Error ? e.message : undefined,
     );
   } finally {
-    disconnectEnterprise(check);
+    if (check) disconnectEnterprise(check);
   }
   return {
     credential: {

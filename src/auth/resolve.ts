@@ -10,6 +10,8 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const HTTPS_PORTS = [443, 8000, 8123];
 const HTTP_PORTS = [10000, 8000, 8123, 80];
 const PROBE_TIMEOUT_MS = 2_000;
+/** A leading `scheme://`; without one, the input is a bare host. */
+const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 export function isLocal(url: URL): boolean {
   return LOCAL_HOSTS.has(url.hostname);
@@ -18,7 +20,7 @@ export function isLocal(url: URL): boolean {
 /** Origins to probe for `input`, in preference order. */
 export function candidates(input: string): URL[] {
   const text = input.trim();
-  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+  const hasScheme = SCHEME.test(text);
   let url: URL;
   try {
     url = new URL(hasScheme ? text : `https://${text}`);
@@ -29,7 +31,11 @@ export function candidates(input: string): URL[] {
     throw new DhError("usage", `Unsupported scheme: ${url.protocol}`);
   }
   if (!hasScheme && isLocal(url)) url.protocol = "http:";
-  if (url.port) return [new URL(url.origin)];
+  // http(s) URLs drop a default port (`:443`, `:80`); a custom scheme keeps it.
+  const typed = new URL(
+    hasScheme ? text.replace(SCHEME, "dh://") : `dh://${text}`,
+  );
+  if (typed.port) return [new URL(url.origin)];
   const ports = url.protocol === "https:" ? HTTPS_PORTS : HTTP_PORTS;
   return ports.map((port) => {
     const candidate = new URL(url.origin);

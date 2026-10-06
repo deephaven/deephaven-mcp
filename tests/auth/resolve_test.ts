@@ -29,6 +29,17 @@ Deno.test("candidates: localhost defaults to http and the Community port first",
   assertEquals(origins("localhost:10123"), ["http://localhost:10123"]);
 });
 
+Deno.test("candidates: an explicit default port is tried alone", () => {
+  assertEquals(origins("https://dhe.example.com:443"), [
+    "https://dhe.example.com",
+  ]);
+  assertEquals(origins("dhe.example.com:443"), ["https://dhe.example.com"]);
+  assertEquals(origins("http://dhc.example.com:80"), [
+    "http://dhc.example.com",
+  ]);
+  assertEquals(origins("localhost:80"), ["http://localhost"]);
+});
+
 Deno.test("candidates: explicit http stays http; https is never downgraded", () => {
   assertEquals(
     origins("http://dhc.example.com")[0],

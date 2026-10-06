@@ -12,6 +12,7 @@ import { describe, DhError, timeoutMs } from "../../auth/errors.ts";
 import {
   authorizeComputer,
   closeSession,
+  revokeWith,
   saveProfile,
 } from "../../auth/flows.ts";
 import { parseKeyFile, readKeyFile } from "../../auth/keyfile.ts";
@@ -82,17 +83,16 @@ async function importItem(
     method: Method,
     credential: Credential,
     extra: { operateAs?: string; handler?: string } = {},
-  ) =>
-    (await saveProfile(store, {
-      origin: item.origin,
-      kind: item.kind,
-      caCert: item.caCert,
-      importedFrom: importedFrom(item),
-      user,
-      method,
-      credential,
-      ...extra,
-    })).name;
+  ) => (await saveProfile(store, {
+    origin: item.origin,
+    kind: item.kind,
+    caCert: item.caCert,
+    importedFrom: importedFrom(item),
+    user,
+    method,
+    credential,
+    ...extra,
+  }));
 
   if (plan.method === "password") {
     const password = await resolveSecret(plan.password);
@@ -120,10 +120,21 @@ async function importItem(
     );
     try {
       const { credential } = await authorizeComputer(session, cache);
-      const profile = await save(plan.username, "password", credential, {
-        operateAs: plan.operateAs,
-      });
-      return { profile, detail: "authorized this computer" };
+      let saved;
+      try {
+        saved = await save(plan.username, "password", credential, {
+          operateAs: plan.operateAs,
+        });
+      } catch (e) {
+        await revokeWith(session, credential).catch(() => {});
+        throw e;
+      }
+      await revokeWith(session, saved.previous).catch((e) =>
+        note(
+          `  ! ${item.name}: could not delete the previous key: ${describe(e)}`,
+        )
+      );
+      return { profile: saved.name, detail: "authorized this computer" };
     } finally {
       closeSession(session);
     }
@@ -154,9 +165,9 @@ async function importItem(
         privateKey: key.keyPair.privateKey,
         generated: false,
       };
-    const profile = await save(key.user, "private-key", credential, {
+    const profile = (await save(key.user, "private-key", credential, {
       operateAs: key.operateAs,
-    });
+    })).name;
     return {
       profile,
       detail: plan.keyPath ? `uses ${plan.keyPath}` : "key copied",
@@ -185,7 +196,8 @@ async function importItem(
       }
       username = secret.slice(0, at);
       secret = secret.slice(at + 1);
-      ref = { literal: secret };
+      // An env var keeps holding user:password; the password is split off at use.
+      if (!("env" in ref!)) ref = { literal: secret };
     }
   }
   if (ref) {
@@ -193,6 +205,11 @@ async function importItem(
       throw new DhError("credential_unavailable", "no saved secret");
     }
     credential = secretCredential(ref, secret ?? "");
+    if (
+      credential.type === "envRef" && plan.method === "basic" && !plan.username
+    ) {
+      credential.basicToken = true;
+    }
   }
   const handler = plan.method === "custom" ? plan.handler : undefined;
   const login = { method: plan.method, handler, username, secret };
@@ -210,7 +227,7 @@ async function importItem(
     : plan.method === "custom"
     ? handler!.split(".").pop()!
     : plan.method;
-  const profile = await save(user, plan.method, credential, { handler });
+  const profile = (await save(user, plan.method, credential, { handler })).name;
   return { profile, detail };
 }
 
@@ -227,7 +244,9 @@ export async function runImport(
   note(`Found a dhcli config at ${legacy.path}.`);
   const { config: current } = await store.read();
   const done = legacy.items.filter((i) =>
-    current.servers[i.origin]?.importedFrom === importedFrom(i)
+    Object.values(current.profiles).some((p) =>
+      p.importedFrom === importedFrom(i)
+    )
   );
   for (const i of done) note(`  – ${i.name}: already imported`);
   let items = legacy.items.filter((i) => !done.includes(i));

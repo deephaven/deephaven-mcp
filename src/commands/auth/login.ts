@@ -23,6 +23,7 @@ import {
   closeSession,
   type NewProfile,
   revokeWith,
+  type Saved,
   saveProfile,
 } from "../../auth/flows.ts";
 import { readKeyFile } from "../../auth/keyfile.ts";
@@ -44,7 +45,7 @@ import {
 import { note, result } from "../../output.ts";
 import { type Choice, getPrompter, type Prompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
-import { globals, secretFrom } from "../common.ts";
+import { globals, profileName, secretFrom } from "../common.ts";
 import { runImport } from "./import.ts";
 import { logout, type LogoutOptions } from "./logout.ts";
 
@@ -93,12 +94,20 @@ interface Target {
   username?: string;
   operateAs?: string;
   handler?: string;
+  /** Key file of a profile being re-authenticated. */
+  keyFile?: string;
 }
 
 interface Result {
   session: Session;
   method: Method;
   credential: Credential;
+  handler?: string;
+}
+
+interface MethodChoice {
+  method: Method;
+  /** Community custom handler class. */
   handler?: string;
 }
 
@@ -110,23 +119,51 @@ function methodFlagError(method: Method, available: Method[]): DhError {
   );
 }
 
+/** `keyFile`: Enterprise, where an existing key file always works. */
 async function chooseMethod(
   prompt: Prompter,
   options: LoginOptions,
   target: Target,
-  choices: Choice<Method>[],
-): Promise<Method> {
-  const available = choices.map((c) => c.value);
+  choices: Choice<MethodChoice>[],
+  keyFile: boolean,
+): Promise<MethodChoice> {
+  const offered = choices.map((c) => c.value);
+  const available = offered.map((o) => o.method);
+  if (!keyFile && options.privateKeyFile) {
+    throw new DhError(
+      "usage",
+      "--private-key-file is only for Enterprise servers",
+    );
+  }
   const wanted = options.method ??
     (options.privateKeyFile ? "private-key" : undefined);
-  if (wanted) {
-    if (wanted !== "private-key" && !available.includes(wanted)) {
-      throw methodFlagError(wanted, available);
-    }
-    return wanted;
+  if (keyFile && wanted === "private-key") return { method: wanted };
+  // Servers don't advertise key login; keep a re-authenticated key profile on it.
+  if (keyFile && !wanted && target.method === "private-key") {
+    return { method: "private-key" };
   }
-  if (target.method && available.includes(target.method)) return target.method;
-  if (available.length === 1) return available[0];
+  const handler = options.handler ?? target.handler;
+  const pick = (method: Method) => {
+    const matches = offered.filter((o) => o.method === method);
+    return matches.find((o) => o.handler === handler) ?? matches[0];
+  };
+  if (wanted) {
+    const found = pick(wanted);
+    if (!found) throw methodFlagError(wanted, available);
+    return wanted === "custom" && options.handler
+      ? { method: wanted, handler: options.handler }
+      : found;
+  }
+  if (offered.length === 0) {
+    throw new DhError(
+      "server_unsupported",
+      "This server offers no sign-in method dh supports",
+      keyFile ? "Sign in with an existing key: --private-key-file" : undefined,
+    );
+  }
+  const previous = target.method && pick(target.method);
+  if (previous) return previous;
+  if (offered.length === 1) return offered[0];
   return await prompt.select(
     "How do you want to sign in?",
     choices,
@@ -150,20 +187,32 @@ async function enterpriseLogin(
     disconnectEnterprise(conn);
     throw e;
   }
-  const choices: Choice<Method>[] = [
+  const choices: Choice<MethodChoice>[] = [
     ...(auth.saml
-      ? [{ label: `${auth.saml.providerName} (SSO)`, value: "saml" as const }]
+      ? [{
+        label: `${auth.saml.providerName} (SSO)`,
+        value: { method: "saml" as const },
+      }]
       : []),
     ...(auth.passwordsEnabled
-      ? [{ label: "Username and password", value: "password" as const }]
+      ? [{
+        label: "Username and password",
+        value: { method: "password" as const },
+      }]
       : []),
   ];
-  const method = await chooseMethod(prompt, options, target, choices);
+  let method: Method;
+  try {
+    ({ method } = await chooseMethod(prompt, options, target, choices, true));
+  } catch (e) {
+    disconnectEnterprise(conn);
+    throw e;
+  }
   const operateAs = options.operateAs ?? target.operateAs;
 
   if (method === "private-key") {
     const path = resolve(
-      options.privateKeyFile ??
+      options.privateKeyFile ?? target.keyFile ??
         await prompt.text("Key file", "--private-key-file"),
     );
     const key = await readKeyFile(path);
@@ -278,19 +327,17 @@ async function communityLogin(
   };
   const choices = offered.map((o) => ({
     label: o.method === "custom" ? o.handler : labels[o.method],
-    value: o.method,
+    value: o,
   }));
-  let method: Method;
+  let chosen: MethodChoice;
   try {
-    method = await chooseMethod(prompt, options, target, choices);
+    chosen = await chooseMethod(prompt, options, target, choices, false);
   } catch (e) {
     disconnectCommunity(conn.client);
     throw e;
   }
-  const handler = method === "custom"
-    ? options.handler ?? target.handler ??
-      offered.find((o) => o.method === "custom")?.handler
-    : undefined;
+  const { method } = chosen;
+  const handler = method === "custom" ? chosen.handler : undefined;
   const login: CommunityLogin = { method, handler };
   let credential = { type: "none" } as Credential;
   const store = (source: { value: string; env?: string }) => {
@@ -443,6 +490,7 @@ async function menu(
 
 function targetOf(state: State, id: string): Target {
   const p = state.config.profiles[id];
+  const cred = state.credentials.credentials[id];
   return {
     origin: p.server,
     kind: state.config.servers[p.server]?.kind ?? "community",
@@ -453,6 +501,7 @@ function targetOf(state: State, id: string): Target {
       : undefined,
     operateAs: p.operateAs,
     handler: p.handler,
+    keyFile: cred?.type === "keyFile" ? cred.path : undefined,
   };
 }
 
@@ -480,12 +529,14 @@ export async function login(
   }
 
   let reauth: Target | undefined;
-  if (g.profile) {
-    const found = findByName(state.config, g.profile);
+  // An explicit server outranks DH_PROFILE, but not --profile.
+  const name = g.profile ?? (serverArg ? undefined : profileName(g));
+  if (name) {
+    const found = findByName(state.config, name);
     if (!found) {
       throw new DhError(
         "usage",
-        `No profile named "${g.profile}"`,
+        `No profile named "${name}"`,
         `Run \`${BIN} auth\` to list profiles.`,
       );
     }
@@ -506,6 +557,7 @@ export async function login(
     ? await enterpriseLogin(prompt, options, target, cache)
     : await communityLogin(prompt, options, target, cache);
 
+  let saved: Saved | undefined;
   try {
     state = await store.read();
     const same = findByIdentity(
@@ -533,26 +585,31 @@ export async function login(
       handler,
       credential,
     };
-    const saved = await saveProfile(store, profile, makeDefault);
+    saved = await saveProfile(store, profile, makeDefault);
     try {
       await revokeWith(session, saved.previous);
     } catch (e) {
       note(`! Could not delete the previous key: ${describe(e)}`);
     }
+    const { name, isDefault } = saved;
     result(
       () => [
-        saved.isDefault
-          ? `Logged in. Default profile: ${saved.name}`
-          : `Logged in. Profile: ${saved.name}`,
+        isDefault
+          ? `Logged in. Default profile: ${name}`
+          : `Logged in. Profile: ${name}`,
         `Run \`${BIN} --help\` to learn more.`,
       ],
       {
-        profile: saved.name,
+        profile: name,
         server: session.origin,
         user: session.user,
-        default: saved.isDefault,
+        default: isDefault,
       },
     );
+  } catch (e) {
+    // Nothing references a generated key until it's saved.
+    if (!saved) await revokeWith(session, credential).catch(() => {});
+    throw e;
   } finally {
     closeSession(session);
   }

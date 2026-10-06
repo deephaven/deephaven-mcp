@@ -74,7 +74,8 @@ async function download(
 }
 
 async function originDir(cacheRoot: string, origin: URL): Promise<string> {
-  const dir = join(cacheRoot, origin.origin.replace(/[^a-z0-9.-]+/gi, "_"));
+  // Reversible, so two origins can never share a directory (or a cached module).
+  const dir = join(cacheRoot, encodeURIComponent(origin.origin));
   await Deno.mkdir(dir, { recursive: true });
   return dir;
 }

@@ -11,6 +11,11 @@ export function globals(options: unknown): GlobalOptions {
   return options as GlobalOptions;
 }
 
+/** `--profile`, then `DH_PROFILE`. */
+export function profileName(g: GlobalOptions): string | undefined {
+  return g.profile ?? (Deno.env.get("DH_PROFILE") || undefined);
+}
+
 let stdinUsed = false;
 
 async function readStdin(flag: string): Promise<string> {

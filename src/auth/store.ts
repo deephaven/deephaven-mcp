@@ -25,6 +25,8 @@ export interface Profile {
   operateAs?: string;
   /** DHC custom auth handler class. */
   handler?: string;
+  /** Legacy config entry this profile was imported from. */
+  importedFrom?: string;
   createdAt: string;
 }
 
@@ -40,7 +42,8 @@ export type Credential =
   }
   | { type: "keyFile"; path: string }
   | { type: "secret"; value: string }
-  | { type: "envRef"; env: string };
+  /** `basicToken`: the variable holds `user:password` (legacy v1 Basic). */
+  | { type: "envRef"; env: string; basicToken?: boolean };
 
 export interface Config {
   version: 1;
@@ -122,12 +125,11 @@ export class Store {
     });
   }
 
-  /** Creates the directory owner-only. Call before anything writes into it. */
+  /** Makes the directory owner-only, every time. Call before anything writes into it. */
   async ensureDir(): Promise<void> {
-    const existed = await Deno.stat(this.dir).then(() => true, () => false);
-    if (!existed) await Deno.mkdir(this.dir, { recursive: true });
-    if (!WINDOWS) await Deno.chmod(this.dir, 0o700);
-    else if (!existed) await restrictWindowsAcl(this.dir);
+    await Deno.mkdir(this.dir, { recursive: true });
+    if (WINDOWS) await restrictWindowsAcl(this.dir);
+    else await Deno.chmod(this.dir, 0o700);
   }
 
   private async assertPrivate(): Promise<void> {
@@ -167,9 +169,14 @@ async function writeAtomic(
   try {
     const file = await Deno.open(tmp, { createNew: true, write: true, mode });
     try {
-      await file.write(
-        new TextEncoder().encode(JSON.stringify(value, null, 2) + "\n"),
+      const data = new TextEncoder().encode(
+        JSON.stringify(value, null, 2) + "\n",
       );
+      for (let written = 0; written < data.length;) {
+        const n = await file.write(data.subarray(written));
+        if (n === 0) throw new Error(`Short write to ${tmp}`);
+        written += n;
+      }
       await file.sync();
     } finally {
       file.close();
@@ -182,15 +189,19 @@ async function writeAtomic(
   }
 }
 
-/** Owner-only, inherited by everything created in `dir`. */
+/** Owner-only, inherited by everything in `dir`; drops any other grants. */
 async function restrictWindowsAcl(dir: string): Promise<void> {
   const user = Deno.env.get("USERNAME");
-  const { success } = await new Deno.Command("icacls", {
-    args: [dir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`],
-    stdout: "null",
-    stderr: "null",
-  }).output();
-  if (!success) {
+  const icacls = async (args: string[]) =>
+    (await new Deno.Command("icacls", {
+      args: [dir, ...args, "/Q"],
+      stdout: "null",
+      stderr: "null",
+    }).output()).success;
+  // Reset leaves only inherited entries (children included); then drop those.
+  const ok = await icacls(["/reset", "/T"]) &&
+    await icacls(["/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`]);
+  if (!ok) {
     throw new DhError("internal", `Could not restrict access to ${dir}`);
   }
 }
