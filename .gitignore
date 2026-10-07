@@ -1,3 +1,4 @@
 dist/
 
 .venv
+*.local.code-workspace

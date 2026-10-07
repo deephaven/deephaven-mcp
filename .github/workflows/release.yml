@@ -20,28 +20,39 @@ jobs:
   release:
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Publishing a release auto-updates every installed dh instance. Configure this
+    # environment in repo settings to gate the job (required reviewers, allowed branches/tags).
+    environment: release
     permissions:
       contents: write
     steps:
       # Keep the write token out of .git/config; later steps run repo code with --allow-all.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Resolve tag
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             tag="v$(jq -r .version deno.json)"
-            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            # --exit-code: 0 = found, 2 = not found, anything else = couldn't check.
+            rc=0
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || rc=$?
+            if [ "$rc" -eq 0 ]; then
               echo "::error::$tag already exists; bump version in deno.json"
+              exit 1
+            elif [ "$rc" -ne 2 ]; then
+              echo "::error::could not check whether $tag exists"
               exit 1
             fi
           else
             tag="$GITHUB_REF_NAME"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
-      - uses: denoland/setup-deno@v2
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
+      - run: deno install --frozen
       - run: deno task release "$TAG" dist
       - name: Publish
         env:
