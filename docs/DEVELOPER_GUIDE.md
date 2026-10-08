@@ -4,8 +4,8 @@ For installing and using `dh`, see the [README](../README.md).
 
 ## Prerequisites
 
-[Deno](https://deno.com) 2.3 or later (for `Deno.build.standalone` and lockfile
-v5).
+[Deno](https://deno.com) 2.4 or later. CI's `check` job runs on 2.4 to keep this
+true.
 
 ## Common tasks
 
@@ -46,7 +46,9 @@ compatible.
 
 ## Releasing
 
-Bump `version` in `deno.json`, then either push a matching tag:
+Bump `version` in `deno.json`, commit it, and push the commit to the branch
+first, so the tag points at a commit that's on the remote. Then either push a
+matching tag:
 
 ```sh
 git tag v3.0.1 && git push origin v3.0.1

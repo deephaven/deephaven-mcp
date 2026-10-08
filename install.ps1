@@ -7,7 +7,8 @@
 
   # HTTPS only; plain HTTP only for a loopback test server, matching the updater.
   function Assert-Trusted([Uri]$uri) {
-    if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) {
+    $loopback = 'localhost', '127.0.0.1', '[::1]'
+    if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $loopback -contains $uri.Host)) {
       throw "Refusing to install over insecure URL $uri"
     }
   }
@@ -85,15 +86,27 @@
   }
   Write-Host "Installed dh v$($manifest.version) to $dir\dh.exe"
 
-  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  if (($userPath -split ';') -notcontains $dir) {
-    if ($env:DH_INSTALL_NO_MODIFY_PATH) {
-      Write-Host "Add $dir to your PATH to run dh."
-    } else {
-      $newPath = (@($userPath, $dir) | Where-Object { $_ }) -join ';'
-      [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-      $env:Path = "$env:Path;$dir"
-      Write-Host "Added $dir to your user PATH; other open terminals need a restart."
+  # Read and write the raw registry value, so %VAR% entries stay unexpanded.
+  $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+  try {
+    $userPath = [string]$envKey.GetValue('Path', '',
+      [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $entries = [Environment]::ExpandEnvironmentVariables($userPath) -split ';'
+    if ($entries -notcontains $dir) {
+      if ($env:DH_INSTALL_NO_MODIFY_PATH) {
+        Write-Host "Add $dir to your PATH to run dh."
+      } else {
+        $newPath = (@($userPath, $dir) | Where-Object { $_ }) -join ';'
+        $envKey.SetValue('Path', $newPath,
+          [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        # Changing any user variable this way broadcasts WM_SETTINGCHANGE, so new terminals see the PATH.
+        [Environment]::SetEnvironmentVariable('DH_INSTALL_PATH_CHANGED', '1', 'User')
+        [Environment]::SetEnvironmentVariable('DH_INSTALL_PATH_CHANGED', $null, 'User')
+        $env:Path = "$env:Path;$dir"
+        Write-Host "Added $dir to your user PATH; other open terminals need a restart."
+      }
     }
+  } finally {
+    $envKey.Close()
   }
 }

@@ -10,7 +10,14 @@ case "$DIR" in /*) ;; *) DIR="$PWD/$DIR" ;; esac
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=aarch64-apple-darwin ;;
-  Darwin-x86_64) TARGET=x86_64-apple-darwin ;;
+  Darwin-x86_64)
+    # Under Rosetta, uname reports x86_64 on Apple silicon; install the native build.
+    if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+      TARGET=aarch64-apple-darwin
+    else
+      TARGET=x86_64-apple-darwin
+    fi
+    ;;
   Linux-x86_64) TARGET=x86_64-unknown-linux-gnu ;;
   Linux-aarch64 | Linux-arm64) TARGET=aarch64-unknown-linux-gnu ;;
   *)
