@@ -33,6 +33,38 @@ async function run(exe: string, args: string[], env: Record<string, string>) {
   };
 }
 
+const ENV_KEY =
+  "$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')";
+
+/** The registry user PATH, unexpanded, with its value kind ("" if unset). */
+async function userPath(): Promise<{ value: string; kind: string }> {
+  const out = await run("powershell", [
+    "-NoProfile",
+    "-Command",
+    `${ENV_KEY}
+    $kind = if ($null -ne $k.GetValue('Path')) { "$($k.GetValueKind('Path'))" } else { '' }
+    $value = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+    @{ value = $value; kind = $kind } | ConvertTo-Json -Compress`,
+  ], {});
+  assert(out.success, out.stderr);
+  return JSON.parse(out.stdout);
+}
+
+async function setUserPath(path: { value: string; kind: string }) {
+  const out = await run("powershell", [
+    "-NoProfile",
+    "-Command",
+    `${ENV_KEY}
+    if ($env:DH_TEST_PATH_KIND) {
+      $k.SetValue('Path', [string]$env:DH_TEST_PATH_VALUE, $env:DH_TEST_PATH_KIND)
+    } else { $k.DeleteValue('Path', $false) }`,
+  ], {
+    DH_TEST_PATH_VALUE: path.value,
+    DH_TEST_PATH_KIND: path.kind,
+  });
+  assert(out.success, out.stderr);
+}
+
 /** Serves `root` with GitHub's `releases/latest` redirects pointing at `latest.tag`. */
 function fakeGitHub(root: string, latest: { tag: string }) {
   return Deno.serve(
@@ -119,6 +151,28 @@ Deno.test({
         const rc = await Deno.readTextFile(join(home, ".zshrc"));
         const line = `export PATH="${bin}:$PATH"`;
         assertEquals(rc.split(line).length - 1, 1, rc);
+      } else if (Deno.env.get("CI")) {
+        // This edits the real user PATH, so it only runs on throwaway CI runners.
+        const original = await userPath();
+        const seeded = [original.value, "%USERPROFILE%\\dh-test"]
+          .filter(Boolean).join(";");
+        try {
+          await setUserPath({ value: seeded, kind: "ExpandString" });
+          for (let i = 0; i < 2; i++) {
+            const again = await run(INSTALL.cmd, INSTALL.args, {
+              ...installEnv,
+              DH_INSTALL_REPO_URL: repo,
+              DH_INSTALL_NO_MODIFY_PATH: "",
+            });
+            assert(again.success, again.stderr);
+          }
+          assertEquals(await userPath(), {
+            value: `${seeded};${bin}`,
+            kind: "ExpandString",
+          });
+        } finally {
+          await setUserPath(original);
+        }
       }
 
       const exe = join(bin, WINDOWS ? "dh.exe" : "dh");
