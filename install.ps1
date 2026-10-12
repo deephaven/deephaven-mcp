@@ -91,15 +91,18 @@
   try {
     $userPath = [string]$envKey.GetValue('Path', '',
       [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-    $entries = [Environment]::ExpandEnvironmentVariables($userPath) -split ';'
+    # Keep an existing Path's kind (REG_SZ vs REG_EXPAND_SZ); only a new one is expandable.
+    $kind = if ($null -ne $envKey.GetValue('Path')) { $envKey.GetValueKind('Path') }
+      else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+    $expandable = $kind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString
+    $entries = $(if ($expandable) { [Environment]::ExpandEnvironmentVariables($userPath) } else { $userPath }) -split ';'
     if ($entries -notcontains $dir) {
-      # ';' would split into bogus entries and '%' would expand in this REG_EXPAND_SZ value.
+      # ';' would split into bogus entries and '%' would expand in a REG_EXPAND_SZ value.
       if ($env:DH_INSTALL_NO_MODIFY_PATH -or $dir -match '[;%]') {
         Write-Host "Add $dir to your PATH to run dh."
       } else {
         $newPath = (@($userPath, $dir) | Where-Object { $_ }) -join ';'
-        $envKey.SetValue('Path', $newPath,
-          [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $envKey.SetValue('Path', $newPath, $kind)
         # Changing any user variable this way broadcasts WM_SETTINGCHANGE, so new terminals see the PATH.
         [Environment]::SetEnvironmentVariable('DH_INSTALL_PATH_CHANGED', '1', 'User')
         [Environment]::SetEnvironmentVariable('DH_INSTALL_PATH_CHANGED', $null, 'User')

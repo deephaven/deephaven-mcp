@@ -196,6 +196,22 @@ test("dh installed with the install script updates itself from GitHub releases",
       const rc = await readFile(join(home, ".zshrc"), "utf8");
       const line = `export PATH="${bin}:$PATH"`;
       expect(rc.split(line).length - 1).toBe(1);
+
+      // ':' separates PATH entries, so such a directory gets the manual hint instead.
+      const colonHome = join(tmp, "colon-home");
+      await mkdir(colonHome);
+      const colon = ok(
+        await run(INSTALL.cmd, INSTALL.args, {
+          ...pathEnv,
+          DH_INSTALL_DIR: join(tmp, "with:colon"),
+          HOME: colonHome,
+          ZDOTDIR: colonHome,
+        }),
+      );
+      expect(colon.stdout).toContain("to your PATH to run dh");
+      expect(
+        await stat(join(colonHome, ".zshrc")).catch(() => null),
+      ).toBeNull();
     } else if (process.env.CI) {
       // This edits the real user PATH, so it only runs on throwaway CI runners.
       const original = await userPath();
@@ -203,20 +219,20 @@ test("dh installed with the install script updates itself from GitHub releases",
         .filter(Boolean)
         .join(";");
       try {
-        await setUserPath({ value: seeded, kind: "ExpandString" });
-        for (let i = 0; i < 2; i++) {
-          ok(
-            await run(INSTALL.cmd, INSTALL.args, {
-              ...installEnv,
-              DH_INSTALL_REPO_URL: repo,
-              DH_INSTALL_NO_MODIFY_PATH: "",
-            }),
-          );
+        // Both registry kinds must survive: rewriting REG_SZ as REG_EXPAND_SZ changes %NAME% text.
+        for (const kind of ["ExpandString", "String"]) {
+          await setUserPath({ value: seeded, kind });
+          for (let i = 0; i < 2; i++) {
+            ok(
+              await run(INSTALL.cmd, INSTALL.args, {
+                ...installEnv,
+                DH_INSTALL_REPO_URL: repo,
+                DH_INSTALL_NO_MODIFY_PATH: "",
+              }),
+            );
+          }
+          expect(await userPath()).toEqual({ value: `${seeded};${bin}`, kind });
         }
-        expect(await userPath()).toEqual({
-          value: `${seeded};${bin}`,
-          kind: "ExpandString",
-        });
       } finally {
         await setUserPath(original);
       }

@@ -84,8 +84,8 @@ echo "Installed dh $TAG to $DIR/dh"
 
 # Adds DIR to PATH in the user's shell startup file, once.
 add_to_path() {
-  # These would break (or inject into) the generated shell line.
-  case "$DIR" in *'"'* | *'$'* | *'`'* | *'\'*)
+  # These would break (or inject into) the generated shell line; ':' would split the PATH entry.
+  case "$DIR" in *'"'* | *'$'* | *'`'* | *'\'* | *:*)
     echo "Add $DIR to your PATH to run dh."
     return
     ;;
