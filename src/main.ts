@@ -11,10 +11,12 @@ import { BIN, VERSION } from "./version.ts";
 
 const blue = (s: string) => styleText("blue", s);
 
-/** Known before parsing, so even argument errors honor `-o json`. */
+/** Known before parsing, so even argument errors honor `-o json`. Last one wins, as in commander. */
 function formatFromArgs(args: string[]): "human" | "json" {
+  let format: "human" | "json" = "human";
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? "";
+    if (a === "--") break;
     const value =
       a === "-o" || a === "--output"
         ? args[i + 1]
@@ -23,9 +25,9 @@ function formatFromArgs(args: string[]): "human" | "json" {
           : a.startsWith("-o") && a.length > 2
             ? a.slice(2)
             : undefined;
-    if (value === "json") return "json";
+    if (value === "json" || value === "human") format = value;
   }
-  return "human";
+  return format;
 }
 
 async function rootStatus(command: Command): Promise<void> {

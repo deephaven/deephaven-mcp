@@ -2,9 +2,17 @@ import { expect, test } from "bun:test";
 import {
   defaultName,
   findByIdentity,
+  newProfileId,
   removeProfile,
 } from "../../src/auth/profile.ts";
 import { type Config, emptyState, type Profile } from "../../src/auth/store.ts";
+
+test("newProfileId: skips ids already taken", () => {
+  let tries = 0;
+  const id = newProfileId(() => ++tries < 4);
+  expect(tries).toBe(4);
+  expect(id).toMatch(/^p_[0-9a-f]{8}$/);
+});
 
 function profile(name: string, server: string, user: string): Profile {
   return { name, server, user, method: "password", createdAt: "" };

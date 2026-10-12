@@ -6,7 +6,9 @@ import {
   rename,
   rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { DhError, isErrno, reasonOf } from "./errors.ts";
 
@@ -34,8 +36,8 @@ export interface Profile {
   operateAs?: string;
   /** DHC custom auth handler class. */
   handler?: string;
-  /** Legacy config entry this profile was imported from. */
-  importedFrom?: string;
+  /** Legacy config entries this profile was migrated from (a string in older configs). */
+  importedFrom?: string[];
   createdAt: string;
 }
 
@@ -241,17 +243,22 @@ async function restrictWindowsAcl(
   }
 }
 
+/** The lock file names its holder, so only the holder removes it and a dead holder's lock can be broken. */
 async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const token = `${hostname()} ${process.pid} ${crypto.randomUUID()}`;
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
-      await (await open(path, "wx")).close();
+      await writeFile(path, token, { flag: "wx" });
       break;
     } catch (e) {
       if (!isErrno(e, "EEXIST")) throw e;
-      const mtime = (await stat(path).catch(() => null))?.mtime;
-      if (mtime && Date.now() - mtime.getTime() > LOCK_STALE_MS) {
-        await rm(path, { force: true }).catch(() => {});
+      const stale = await staleLock(path);
+      if (stale !== undefined) {
+        // Only if unchanged: another process may have broken it and locked since.
+        if ((await readFile(path, "utf8").catch(() => undefined)) === stale) {
+          await rm(path, { force: true }).catch(() => {});
+        }
         continue;
       }
       if (Date.now() > deadline) {
@@ -267,6 +274,34 @@ async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } finally {
-    await rm(path, { force: true }).catch(() => {});
+    // Only our own: another process may have broken ours and taken the lock.
+    if ((await readFile(path, "utf8").catch(() => "")) === token) {
+      await rm(path, { force: true }).catch(() => {});
+    }
+  }
+}
+
+/**
+ * The lock's contents if its holder on this computer has exited, or if another
+ * computer's lock is old; undefined if it's live or already gone.
+ */
+async function staleLock(path: string): Promise<string | undefined> {
+  const info = await stat(path).catch(() => null);
+  const text = await readFile(path, "utf8").catch(() => undefined);
+  if (!info || text === undefined) return undefined;
+  const [host, pid] = text.split(" ");
+  if (host === hostname() && Number(pid) > 0) {
+    return isRunning(Number(pid)) ? undefined : text;
+  }
+  // Still being written, or from another computer sharing the folder.
+  return Date.now() - info.mtime.getTime() > LOCK_STALE_MS ? text : undefined;
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return isErrno(e, "EPERM");
   }
 }

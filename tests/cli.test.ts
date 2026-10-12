@@ -112,6 +112,15 @@ test("cli: usage errors exit 2, with JSON on stderr", async () => {
   expect(unknown.code).toBe(2);
 });
 
+test("cli: -o follows commander: the last one wins, and nothing after --", async () => {
+  const { run } = await setup();
+  const last = await run(["auth", "-o", "json", "-o", "human"]);
+  expect(last.stdout).toContain("No profiles.");
+  const literal = await run(["auth", "use", "--", "--output=json"]);
+  expect(literal.code).toBe(4);
+  expect(literal.stderr).toStartWith("✖");
+});
+
 test("cli: bare dh -o json prints one JSON value", async () => {
   const { run, configDir } = await setup();
   const none = await run(["-o", "json"]);

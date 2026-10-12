@@ -292,7 +292,7 @@ export async function runMigrate(
     Object.values(current.profiles).some(
       (p) =>
         p.server === i.origin &&
-        p.importedFrom === importedFrom(legacy.path, i),
+        [p.importedFrom ?? []].flat().includes(importedFrom(legacy.path, i)),
     ),
   );
   for (const i of done) note(`  – ${i.name}: already migrated`);

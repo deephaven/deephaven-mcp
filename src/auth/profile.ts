@@ -1,10 +1,12 @@
 import type { Config, Profile } from "./store.ts";
 
-export function newProfileId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(4));
-  return (
-    "p_" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
-  );
+/** A short random id not already `taken`. */
+export function newProfileId(taken: (id: string) => boolean): string {
+  for (;;) {
+    const bytes = crypto.getRandomValues(new Uint8Array(4));
+    const id = `p_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+    if (!taken(id)) return id;
+  }
 }
 
 /** `<host>:<user>[/<operateAs>]`, adding the port and then a suffix on collision. */

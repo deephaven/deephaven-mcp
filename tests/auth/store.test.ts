@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
-import { chmod, readFile, stat } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { saveProfile } from "../../src/auth/flows.ts";
 import { Store } from "../../src/auth/store.ts";
 import { run, tempDir, WINDOWS } from "../helpers.ts";
 
@@ -126,4 +128,38 @@ test("store: concurrent processes don't lose writes", async () => {
   const results = await Promise.all([worker(1), worker(2), worker(3)]);
   for (const r of results) expect(r.code, r.stderr).toBe(0);
   expect(Object.keys((await store.read()).config.servers).length).toBe(30);
+});
+
+test("store: a lock left by an exited process is broken at once", async () => {
+  const store = await tempStore();
+  const gone = Bun.spawn([process.execPath, "--version"], { stdout: "ignore" });
+  await gone.exited;
+  await mkdir(store.dir, { recursive: true });
+  const lock = join(store.dir, "config.lock");
+  await writeFile(lock, `${hostname()} ${gone.pid} old`);
+  const started = Date.now();
+  await store.update(() => {});
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(await stat(lock).catch(() => null)).toBeNull();
+});
+
+test("saveProfile: keeps every legacy entry merged into one profile", async () => {
+  const store = await tempStore();
+  const save = (importedFrom: string) =>
+    saveProfile(store, {
+      origin: "http://localhost:10000",
+      kind: "community",
+      user: "psk",
+      method: "psk",
+      importedFrom,
+      credential: { type: "none" },
+    });
+  const first = await save("dhcli:a#one");
+  const second = await save("dhcli:a#two");
+  expect(second.id).toBe(first.id);
+  const { config } = await store.read();
+  expect(config.profiles[first.id]?.importedFrom).toEqual([
+    "dhcli:a#one",
+    "dhcli:a#two",
+  ]);
 });

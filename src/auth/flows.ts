@@ -41,10 +41,19 @@ export async function saveProfile(
 ): Promise<Saved> {
   return await store.update(({ config, credentials }) => {
     const existing = findByIdentity(config, p.origin, p.user, p.operateAs);
-    const id = existing?.[0] ?? newProfileId();
+    const id =
+      existing?.[0] ??
+      newProfileId(
+        (id) => id in config.profiles || id in credentials.credentials,
+      );
     const name =
       existing?.[1].name ?? defaultName(config, p.origin, p.user, p.operateAs);
-    const importedFrom = p.importedFrom ?? existing?.[1].importedFrom;
+    // Several legacy entries can be the same identity; remember them all.
+    const importedFrom = [
+      ...new Set(
+        [existing?.[1].importedFrom ?? [], p.importedFrom ?? []].flat(),
+      ),
+    ];
     const previous = credentials.credentials[id];
     const server = config.servers[p.origin];
     config.servers[p.origin] = {
@@ -60,7 +69,7 @@ export async function saveProfile(
       method: p.method,
       operateAs: p.operateAs,
       handler: p.handler,
-      ...(importedFrom ? { importedFrom } : {}),
+      ...(importedFrom.length ? { importedFrom } : {}),
       createdAt: existing?.[1].createdAt ?? new Date().toISOString(),
     };
     credentials.credentials[id] = p.credential;
