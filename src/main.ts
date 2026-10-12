@@ -1,9 +1,9 @@
 import { writeSync } from "node:fs";
 import { styleText } from "node:util";
 import { Command, CommanderError, Help } from "commander";
-import { DhError } from "./auth/errors.ts";
-import { attach, GLOBAL_OPTIONS } from "./cli/command.ts";
-import { dh } from "./commands/root.ts";
+import { GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
+import { rootCommand } from "./commands/root.ts";
+import { DhError } from "./errors.ts";
 import { err, reportError, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
 import { BIN, VERSION } from "./version.ts";
@@ -58,7 +58,7 @@ const root = new Command()
   .exitOverride();
 for (const option of GLOBAL_OPTIONS) root.addOption(option);
 // After the settings above, so subcommands inherit them.
-attach(root, dh);
+registerCommand(root, rootCommand);
 
 setFormat(formatFromArgs(process.argv.slice(2)));
 let code = 0;

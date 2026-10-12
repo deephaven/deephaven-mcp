@@ -1,5 +1,5 @@
 import { writeSync } from "node:fs";
-import { DhError, ERROR_CODES } from "./auth/errors.ts";
+import { DhError, ERROR_CODES } from "./errors.ts";
 
 export type Format = "human" | "json";
 

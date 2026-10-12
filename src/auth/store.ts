@@ -8,7 +8,7 @@ import {
   stat,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { DhError, isErrno, reasonOf } from "./errors.ts";
+import { DhError, isErrno, reasonOf } from "../errors.ts";
 import { withFileLock } from "./lock.ts";
 
 export type Kind = "enterprise" | "community";

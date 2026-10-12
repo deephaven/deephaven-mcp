@@ -1,18 +1,18 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DhError, isErrno, reasonOf } from "../errors.ts";
 import { note } from "../output.ts";
 import { BIN, STANDALONE } from "../version.ts";
-import { DhError, isErrno, reasonOf } from "./errors.ts";
 import { keyPairOf } from "./flows.ts";
 import { readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
 import { candidates, type ResolvedServer, resolveServer } from "./resolve.ts";
 import {
-  connect,
-  disconnect,
+  connectServer,
+  disconnectServer,
   type Session,
-  type SignIn,
+  type SignInRequest,
   signIn,
 } from "./signin.ts";
 import {
@@ -25,18 +25,18 @@ import {
 } from "./store.ts";
 
 /** Connects to `origin` and signs in; the connection is closed if sign-in fails. */
-async function open(
+async function connectAndSignIn(
   origin: string,
   kind: Kind,
-  how: SignIn,
+  request: SignInRequest,
   cacheRoot: string,
   rejected: "auth_failed" | "auth_expired",
 ): Promise<Session> {
-  const server = await connect(origin, kind, cacheRoot);
+  const server = await connectServer(origin, kind, cacheRoot);
   try {
-    return await signIn(server, how, rejected);
+    return await signIn(server, request, rejected);
   } catch (e) {
-    disconnect(server);
+    disconnectServer(server);
     throw e;
   }
 }
@@ -106,7 +106,7 @@ const KIND_LABEL: Record<Kind, string> = {
  * Trusts `caCert` (re-running with `rerun` appended if it must), then finds
  * the server `input` names: a saved one, else by probing it.
  */
-export async function findServer(
+export async function trustAndResolveServer(
   input: string,
   servers: Config["servers"],
   caCert: string | undefined,
@@ -126,7 +126,7 @@ export async function findServer(
   return found;
 }
 
-function readSecret(cred: Credential, profile: Profile): string | undefined {
+function savedSecret(cred: Credential, profile: Profile): string | undefined {
   if (cred.type === "secret") return cred.value;
   if (cred.type !== "envRef") return undefined;
   const value = process.env[cred.env];
@@ -150,17 +150,17 @@ function readSecret(cred: Credential, profile: Profile): string | undefined {
 }
 
 /** How a saved profile signs in. */
-export async function signInFor(
+export async function signInRequestFor(
   profile: Profile,
   kind: Kind,
   cred: Credential,
-): Promise<SignIn> {
+): Promise<SignInRequest> {
   if (kind === "community") {
     return {
       method: profile.method as "psk" | "basic" | "custom" | "anonymous",
       handler: profile.handler,
       username: profile.method === "basic" ? profile.user : undefined,
-      secret: readSecret(cred, profile),
+      secret: savedSecret(cred, profile),
     };
   }
   const keyPair =
@@ -172,7 +172,11 @@ export async function signInFor(
   const who = { username: profile.user, operateAs: profile.operateAs };
   return keyPair
     ? { method: "private-key", ...who, keyPair }
-    : { method: "password", ...who, password: readSecret(cred, profile) ?? "" };
+    : {
+        method: "password",
+        ...who,
+        password: savedSecret(cred, profile) ?? "",
+      };
 }
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
@@ -191,7 +195,7 @@ async function envSession(): Promise<Session> {
   const { origin, kind } = await resolveServer(env("DH_SERVER")!);
   const username = env("DH_USERNAME");
   const operateAs = env("DH_OPERATE_AS");
-  let how: SignIn;
+  let request: SignInRequest;
   if (kind === "enterprise") {
     const keyFile = env("DH_PRIVATE_KEY_FILE");
     const key = keyFile ? await readKeyFile(keyFile) : undefined;
@@ -203,7 +207,7 @@ async function envSession(): Promise<Session> {
       );
     }
     const who = { username: user, operateAs: operateAs ?? key?.operateAs };
-    how = key
+    request = key
       ? { method: "private-key", ...who, keyPair: key.keyPair }
       : { method: "password", ...who, password: env("DH_PASSWORD") ?? "" };
   } else {
@@ -213,7 +217,7 @@ async function envSession(): Promise<Session> {
         "DH_PRIVATE_KEY_FILE is only for Enterprise servers",
       );
     }
-    const login: SignIn = env("DH_PSK")
+    const login: SignInRequest = env("DH_PSK")
       ? { method: "psk", secret: env("DH_PSK") }
       : env("DH_PASSWORD")
         ? { method: "basic", username, secret: env("DH_PASSWORD") }
@@ -230,10 +234,10 @@ async function envSession(): Promise<Session> {
     if (login.method === "custom" && !login.handler) {
       throw new DhError("usage", "DH_AUTH_TOKEN needs DH_AUTH_HANDLER");
     }
-    how = login;
+    request = login;
   }
   // The jsapi loader makes this run's own owner-only folder inside it.
-  return await open(origin, kind, how, tmpdir(), "auth_failed");
+  return await connectAndSignIn(origin, kind, request, tmpdir(), "auth_failed");
 }
 
 async function profileSession(
@@ -247,12 +251,12 @@ async function profileSession(
   const cred = state.credentials.credentials[id] ?? { type: "none" };
   await ensureCa(server?.caCert);
   const kind = server?.kind ?? "community";
-  const how = await signInFor(profile, kind, cred);
+  const request = await signInRequestFor(profile, kind, cred);
   try {
-    const session = await open(
+    const session = await connectAndSignIn(
       profile.server,
       kind,
-      how,
+      request,
       store.cacheDir,
       "auth_expired",
     );

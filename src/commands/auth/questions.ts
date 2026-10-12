@@ -4,8 +4,7 @@
  * network or the config directory.
  */
 import { resolve } from "node:path";
-import { DhError } from "../../auth/errors.ts";
-import { keyPairOf, noProfile, type ToSave } from "../../auth/flows.ts";
+import { keyPairOf, noProfile, type ProfileToSave } from "../../auth/flows.ts";
 import { type KeyFile, type KeyPair, readKeyFile } from "../../auth/keyfile.ts";
 import { describePlan, type LegacyItem } from "../../auth/legacy.ts";
 import {
@@ -13,7 +12,11 @@ import {
   findByName,
   sortedProfiles,
 } from "../../auth/profile.ts";
-import type { Offer, Session, SignIn } from "../../auth/signin.ts";
+import type {
+  OfferedMethod,
+  Session,
+  SignInRequest,
+} from "../../auth/signin.ts";
 import type {
   Config,
   Credential,
@@ -21,6 +24,8 @@ import type {
   Method,
   State,
 } from "../../auth/store.ts";
+import { readSecret, type Secret } from "../../cli/secret.ts";
+import { DhError } from "../../errors.ts";
 import { note } from "../../output.ts";
 import type { Prompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
@@ -29,12 +34,12 @@ import type { LoginOptions } from "./login.ts";
 // ── login ───────────────────────────────────────────────────────────────
 
 /** Where to sign in. `rerun`: the flags giving the same answers, for a re-run. */
-export type Where =
+export type LoginTarget =
   | { server: string; profile?: string; rerun: string[] }
   | "remove";
 
-/** What's known about the identity from a profile being signed in again. */
-export interface Known {
+/** What a profile being signed in again already says about its identity. */
+export interface PriorSignIn {
   method?: Method;
   username?: string;
   operateAs?: string;
@@ -47,13 +52,13 @@ export interface Known {
 const OTHER = "__other__";
 
 /** `profileName`: sign in again as that profile. Otherwise the server, or the menu. */
-export async function askWhere(
+export async function askLoginTarget(
   ui: Prompter,
   state: State,
   serverArg: string | undefined,
   profileName: string | undefined,
   opts: LoginOptions,
-): Promise<Where> {
+): Promise<LoginTarget> {
   const { config } = state;
   if (profileName) {
     const found = findByName(config, profileName);
@@ -66,7 +71,7 @@ export async function askWhere(
     ui.interactive &&
     !opts.method &&
     !opts.privateKeyFile;
-  const action = menu ? await askMenuAction(ui, config) : "server";
+  const action = menu ? await askLoginMenuChoice(ui, config) : "server";
   if (action === "remove") return "remove";
   if (action === "reauth") {
     const id = await ui.select(
@@ -85,11 +90,11 @@ export async function askWhere(
           Object.keys(config.servers).map((o) => ({ label: o, value: o })),
           "<server>",
         )
-      : await askServer(ui, config);
+      : await askServerAddress(ui, config);
   return { server, rerun: ["--", server] };
 }
 
-async function askMenuAction(
+async function askLoginMenuChoice(
   ui: Prompter,
   config: Config,
 ): Promise<"server" | "user" | "reauth" | "remove"> {
@@ -112,7 +117,7 @@ async function askMenuAction(
   );
 }
 
-async function askServer(ui: Prompter, config: Config): Promise<string> {
+async function askServerAddress(ui: Prompter, config: Config): Promise<string> {
   const known = Object.entries(config.servers);
   const picked =
     known.length === 0
@@ -136,7 +141,7 @@ async function askServer(ui: Prompter, config: Config): Promise<string> {
     : picked;
 }
 
-export function knownIdentity(state: State, id: string | undefined): Known {
+export function priorSignIn(state: State, id: string | undefined): PriorSignIn {
   const p = id ? state.config.profiles[id] : undefined;
   if (!id || !p) return {};
   const cred = state.credentials.credentials[id];
@@ -153,16 +158,19 @@ export function knownIdentity(state: State, id: string | undefined): Known {
   };
 }
 
-const KEY_FILE: Offer = { method: "private-key", label: "Key file" };
+const KEY_FILE_METHOD: OfferedMethod = {
+  method: "private-key",
+  label: "Key file",
+};
 
-/** `--method`, then the profile's method, then the only one, else asks. */
-export async function askMethod(
+/** `--method`, then the profile's method, then the only one offered, else asks. */
+export async function askSignInMethod(
   ui: Prompter,
   kind: Kind,
-  offered: Offer[],
-  known: Known,
+  offered: OfferedMethod[],
+  prior: PriorSignIn,
   opts: LoginOptions,
-): Promise<Offer> {
+): Promise<OfferedMethod> {
   // Enterprise key login always works, though servers don't advertise it.
   const keyLogin = kind === "enterprise";
   if (!keyLogin && opts.privateKeyFile) {
@@ -173,9 +181,11 @@ export async function askMethod(
   }
   const wanted =
     opts.method ?? (opts.privateKeyFile ? "private-key" : undefined);
-  if (keyLogin && wanted === "private-key") return KEY_FILE;
-  if (keyLogin && !wanted && known.method === "private-key") return KEY_FILE;
-  const handler = opts.handler ?? known.handler;
+  if (keyLogin && wanted === "private-key") return KEY_FILE_METHOD;
+  if (keyLogin && !wanted && prior.method === "private-key") {
+    return KEY_FILE_METHOD;
+  }
+  const handler = opts.handler ?? prior.handler;
   const pick = (method: Method) => {
     const matches = offered.filter((o) => o.method === method);
     return matches.find((o) => o.handler === handler) ?? matches[0];
@@ -200,7 +210,7 @@ export async function askMethod(
       keyLogin ? "Sign in with an existing key: --private-key-file" : undefined,
     );
   }
-  const previous = known.method && pick(known.method);
+  const previous = prior.method && pick(prior.method);
   if (previous) return previous;
   const [only] = offered;
   if (only && offered.length === 1) return only;
@@ -211,55 +221,55 @@ export async function askMethod(
   );
 }
 
-/** The secrets and names `offer` needs: how to sign in, and what to save. */
-export async function askCredentials(
+/** The names and secrets `chosen` needs: the sign-in request, and what to save. */
+export async function askSignInCredentials(
   ui: Prompter,
-  offer: Offer,
-  known: Known,
+  chosen: OfferedMethod,
+  prior: PriorSignIn,
   opts: LoginOptions,
-): Promise<{ how: SignIn; save: ToSave }> {
-  const operateAs = opts.operateAs ?? known.operateAs;
+): Promise<{ request: SignInRequest; toSave: ProfileToSave }> {
+  const operateAs = opts.operateAs ?? prior.operateAs;
   const username = async () =>
     opts.username ??
-    known.username ??
+    prior.username ??
     (await ui.text("Username", "--username"));
   const password = () =>
-    secretFrom("password", opts.passwordStdin, opts.passwordEnv, () =>
+    readSecret("password", opts.passwordStdin, opts.passwordEnv, () =>
       ui.secret("Password", "--password-stdin"),
     );
 
-  switch (offer.method) {
+  switch (chosen.method) {
     case "saml":
       return {
-        how: {
+        request: {
           method: "saml",
-          saml: offer.saml,
+          saml: chosen.saml,
           waitMs: (opts.timeout ?? 300) * 1000,
           browser: opts.browser !== false,
         },
-        save: { method: "saml", credential: "new-key" },
+        toSave: { method: "saml", credential: "new-key" },
       };
 
     case "password":
       return {
-        how: {
+        request: {
           method: "password",
           username: await username(),
           password: (await password()).value,
           operateAs,
         },
-        save: { method: "password", credential: "new-key" },
+        toSave: { method: "password", credential: "new-key" },
       };
 
     case "private-key": {
       let path: string | undefined;
       let key: KeyFile;
-      if (!opts.privateKeyFile && known.copiedKey) {
-        key = { keyPair: known.copiedKey };
+      if (!opts.privateKeyFile && prior.copiedKey) {
+        key = { keyPair: prior.copiedKey };
       } else {
         path = resolve(
           opts.privateKeyFile ??
-            known.keyFile ??
+            prior.keyFile ??
             (await ui.text("Key file", "--private-key-file")),
         );
         key = await readKeyFile(path);
@@ -267,7 +277,7 @@ export async function askCredentials(
       const user =
         opts.username ??
         key.user ??
-        known.username ??
+        prior.username ??
         (await ui.text("Username", "--username"));
       const credential: Credential =
         path && !opts.copyKey
@@ -280,29 +290,29 @@ export async function askCredentials(
               generated: false,
             };
       return {
-        how: {
+        request: {
           method: "private-key",
           username: user,
           keyPair: key.keyPair,
           operateAs: operateAs ?? key.operateAs,
         },
-        save: { method: "private-key", credential },
+        toSave: { method: "private-key", credential },
       };
     }
 
     case "anonymous":
       return {
-        how: { method: "anonymous" },
-        save: { method: "anonymous", credential: { type: "none" } },
+        request: { method: "anonymous" },
+        toSave: { method: "anonymous", credential: { type: "none" } },
       };
 
     case "psk": {
-      const psk = await secretFrom("psk", opts.pskStdin, opts.pskEnv, () =>
+      const psk = await readSecret("psk", opts.pskStdin, opts.pskEnv, () =>
         ui.secret("Pre-shared key", "--psk-stdin"),
       );
       return {
-        how: { method: "psk", secret: psk.value },
-        save: { method: "psk", credential: saved(psk) },
+        request: { method: "psk", secret: psk.value },
+        toSave: { method: "psk", credential: credentialFor(psk) },
       };
     }
 
@@ -315,43 +325,44 @@ export async function askCredentials(
         );
       }
       return {
-        how: { method: "basic", username: user, secret: pw.value },
-        save: { method: "basic", credential: saved(pw) },
+        request: { method: "basic", username: user, secret: pw.value },
+        toSave: { method: "basic", credential: credentialFor(pw) },
       };
     }
 
     case "custom": {
-      const handler = offer.handler;
+      const handler = chosen.handler;
       if (!handler) throw new DhError("usage", "Input needed: pass --handler");
-      const token = await secretFrom(
+      const token = await readSecret(
         "token",
         opts.tokenStdin,
         opts.tokenEnv,
         () => ui.secret("Token", "--token-stdin"),
       );
       return {
-        how: { method: "custom", handler, secret: token.value },
-        save: { method: "custom", handler, credential: saved(token) },
+        request: { method: "custom", handler, secret: token.value },
+        toSave: { method: "custom", handler, credential: credentialFor(token) },
       };
     }
   }
 }
 
-function saved(source: SecretSource): Credential {
-  return source.env
-    ? { type: "envRef", env: source.env }
-    : { type: "secret", value: source.value };
+/** A secret from `--*-env` is saved as the variable's name, else as the value. */
+function credentialFor(secret: Secret): Credential {
+  return secret.env
+    ? { type: "envRef", env: secret.env }
+    : { type: "secret", value: secret.value };
 }
 
 /** SSO picks the account in the browser; check it's the intended one. */
-export async function confirmAccount(
+export async function confirmSsoAccount(
   ui: Prompter,
   session: Session,
-  offer: Offer,
+  chosen: OfferedMethod,
   opts: LoginOptions,
 ): Promise<void> {
-  if (offer.method !== "saml") return;
-  const saml = offer.saml;
+  if (chosen.method !== "saml") return;
+  const saml = chosen.saml;
   if (opts.expectUser) {
     if (opts.expectUser === session.user) return;
     throw new DhError(
@@ -370,7 +381,7 @@ export async function confirmAccount(
 }
 
 /** `--[no-]default`; else asks when another profile is the default. Undefined: only if none is. */
-export async function askDefault(
+export async function askMakeDefault(
   ui: Prompter,
   config: Config,
   session: Session,
@@ -423,7 +434,7 @@ export async function askProfilesToRemove(
   return picked === ALL ? everyId : [picked];
 }
 
-export async function askNewDefault(
+export async function askDefaultProfile(
   ui: Prompter,
   config: Config,
 ): Promise<string> {
@@ -440,7 +451,7 @@ export async function askNewDefault(
 
 // ── migrate ─────────────────────────────────────────────────────────────
 
-export async function askMigrateItems(
+export async function askLegacyEntriesToMigrate(
   ui: Prompter,
   pending: LegacyItem[],
   yes: boolean | undefined,
@@ -455,41 +466,4 @@ export async function askMigrateItems(
     })),
     "--yes",
   );
-}
-
-// ── secrets ─────────────────────────────────────────────────────────────
-
-let stdinUsed = false;
-
-async function readStdin(flag: string): Promise<string> {
-  if (stdinUsed) {
-    throw new DhError("usage", `Only one --*-stdin flag can be used (${flag})`);
-  }
-  stdinUsed = true;
-  const text = await Bun.stdin.text();
-  const value = text.replace(/\r?\n$/, "");
-  if (!value) throw new DhError("usage", `${flag}: stdin was empty`);
-  return value;
-}
-
-interface SecretSource {
-  value: string;
-  /** Env var name, if the secret came from `--*-env`. */
-  env?: string;
-}
-
-/** `--<name>-stdin`, then `--<name>-env <VAR>`, then a masked prompt. */
-async function secretFrom(
-  name: string,
-  stdin: boolean | undefined,
-  env: string | undefined,
-  ask: () => Promise<string>,
-): Promise<SecretSource> {
-  if (stdin) return { value: await readStdin(`--${name}-stdin`) };
-  if (env) {
-    const value = process.env[env];
-    if (!value) throw new DhError("usage", `--${name}-env: ${env} is not set`);
-    return { value, env };
-  }
-  return { value: await ask() };
 }

@@ -3,6 +3,7 @@
  * server kind or method. Nothing here asks the user anything.
  */
 
+import { DhError, timeoutMs } from "../errors.ts";
 import { note } from "../output.ts";
 import {
   type CommunityConnection,
@@ -24,7 +25,6 @@ import {
   loginSaml,
   userName,
 } from "./enterprise.ts";
-import { DhError, timeoutMs } from "./errors.ts";
 import type { KeyPair } from "./keyfile.ts";
 import { openBrowser, samlNonce, signInUrl } from "./saml.ts";
 import type { Kind, Method } from "./store.ts";
@@ -49,7 +49,7 @@ export interface Session extends Server {
 }
 
 /** A sign-in method the server advertises. */
-export type Offer =
+export type OfferedMethod =
   | { method: "saml"; label: string; saml: Saml; handler?: undefined }
   | {
       method: Exclude<Method, "saml">;
@@ -59,7 +59,7 @@ export type Offer =
     };
 
 /** Everything one sign-in needs; `method` says which server kind it's for. */
-export type SignIn =
+export type SignInRequest =
   | { method: "saml"; saml: Saml; waitMs: number; browser: boolean }
   | {
       method: "password";
@@ -75,7 +75,7 @@ export type SignIn =
     }
   | (CommunityLogin & { method: "psk" | "basic" | "custom" | "anonymous" });
 
-export async function connect(
+export async function connectServer(
   origin: string,
   kind: Kind,
   cacheRoot: string,
@@ -103,7 +103,7 @@ const COMMUNITY_LABELS: Partial<Record<Method, string>> = {
 };
 
 /** What the server advertises. Enterprise key login always works but isn't advertised. */
-export async function offers(server: Server): Promise<Offer[]> {
+export async function offeredMethods(server: Server): Promise<OfferedMethod[]> {
   if (server.community) {
     return communityMethods(server.community.handlers).map((o) => ({
       method: o.method as Exclude<Method, "saml">,
@@ -111,7 +111,10 @@ export async function offers(server: Server): Promise<Offer[]> {
       label: COMMUNITY_LABELS[o.method] ?? o.handler,
     }));
   }
-  const auth = await enterpriseAuthConfig(enterpriseOf(server), timeoutMs());
+  const auth = await enterpriseAuthConfig(
+    enterpriseConnection(server),
+    timeoutMs(),
+  );
   return [
     ...(auth.saml
       ? [
@@ -134,38 +137,46 @@ export async function offers(server: Server): Promise<Offer[]> {
  */
 export async function signIn(
   server: Server,
-  how: SignIn,
+  request: SignInRequest,
   rejected: "auth_failed" | "auth_expired" = "auth_failed",
 ): Promise<Session> {
   const timeout = timeoutMs();
   if (server.community) {
-    const login = how as CommunityLogin;
+    const login = request as CommunityLogin;
     await loginCommunity(server.community, login, timeout, rejected);
     return { ...server, user: communityUser(login) };
   }
-  const conn = enterpriseOf(server);
-  switch (how.method) {
+  const conn = enterpriseConnection(server);
+  switch (request.method) {
     case "private-key":
       await loginKey(
         conn,
-        how.username,
-        how.keyPair,
-        how.operateAs,
+        request.username,
+        request.keyPair,
+        request.operateAs,
         timeout,
         rejected,
       );
-      return { ...server, user: how.username, operateAs: how.operateAs };
+      return {
+        ...server,
+        user: request.username,
+        operateAs: request.operateAs,
+      };
     case "password":
       await loginPassword(
         conn,
-        how.username,
-        how.password,
-        how.operateAs,
+        request.username,
+        request.password,
+        request.operateAs,
         timeout,
       );
-      return { ...server, user: how.username, operateAs: how.operateAs };
+      return {
+        ...server,
+        user: request.username,
+        operateAs: request.operateAs,
+      };
     case "saml": {
-      const signedIn = await waitForSaml(server, conn, how);
+      const signedIn = await waitForSaml(server, conn, request);
       return {
         ...server,
         enterprise: signedIn,
@@ -175,7 +186,7 @@ export async function signIn(
     default:
       throw new DhError(
         "internal",
-        `${how.method} is not an Enterprise method`,
+        `${request.method} is not an Enterprise method`,
       );
   }
 }
@@ -183,11 +194,14 @@ export async function signIn(
 async function waitForSaml(
   server: Server,
   conn: EnterpriseConnection,
-  how: SignIn & { method: "saml" },
+  request: SignInRequest & { method: "saml" },
 ): Promise<EnterpriseConnection> {
   const nonce = samlNonce();
-  const url = signInUrl(how.saml.confirmUrl ?? how.saml.loginUrl, nonce);
-  if (how.browser) {
+  const url = signInUrl(
+    request.saml.confirmUrl ?? request.saml.loginUrl,
+    nonce,
+  );
+  if (request.browser) {
     note(
       `Opening your browser to sign in. If it doesn't open, go to:\n  ${url}`,
     );
@@ -200,11 +214,11 @@ async function waitForSaml(
     conn,
     () => connectEnterprise(server.origin, server.cacheRoot, timeoutMs()),
     nonce,
-    how.waitMs,
+    request.waitMs,
   );
 }
 
-function enterpriseOf(server: Server): EnterpriseConnection {
+function enterpriseConnection(server: Server): EnterpriseConnection {
   if (!server.enterprise) {
     throw new DhError("internal", `${server.origin} is not Enterprise`);
   }
@@ -212,7 +226,7 @@ function enterpriseOf(server: Server): EnterpriseConnection {
 }
 
 /** Safe to call more than once, and on a server whose sign-in failed. */
-export function disconnect(server: Server): void {
+export function disconnectServer(server: Server): void {
   if (server.enterprise) disconnectEnterprise(server.enterprise);
   if (server.community) disconnectCommunity(server.community.client);
 }

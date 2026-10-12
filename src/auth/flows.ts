@@ -1,3 +1,4 @@
+import { DhError, describe, reasonOf, timeoutMs } from "../errors.ts";
 import { BIN } from "../version.ts";
 import {
   connectEnterprise,
@@ -7,7 +8,6 @@ import {
   type EnterpriseConnection,
   loginKey,
 } from "./enterprise.ts";
-import { DhError, describe, reasonOf, timeoutMs } from "./errors.ts";
 import type { KeyPair } from "./keyfile.ts";
 import {
   defaultName,
@@ -48,7 +48,7 @@ export interface Saved {
 }
 
 /** How to save a signed-in session; `"new-key"` authorizes this computer with a new Enterprise key. */
-export interface ToSave {
+export interface ProfileToSave {
   method: Method;
   credential: Credential | "new-key";
   handler?: string;
@@ -56,7 +56,7 @@ export interface ToSave {
   importedFrom?: string;
 }
 
-export interface Committed extends Saved {
+export interface SavedSignIn extends Saved {
   /** The new key's comment, if one was made. */
   key?: string;
   /** Old keys that couldn't be deleted (they're retried later). */
@@ -71,9 +71,9 @@ export interface Committed extends Saved {
 export async function commitSignIn(
   store: Store,
   session: Session,
-  save: ToSave,
+  save: ProfileToSave,
   makeDefault?: boolean,
-): Promise<Committed> {
+): Promise<SavedSignIn> {
   let credential: Credential;
   let key: string | undefined;
   if (save.credential === "new-key") {

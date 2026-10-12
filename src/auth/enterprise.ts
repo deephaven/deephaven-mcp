@@ -7,8 +7,8 @@ import {
   loginClientWithKeyPair,
   uploadPublicKey,
 } from "@deephaven-enterprise/auth-nodejs";
+import { DhError, describe, reasonOf, withTimeout } from "../errors.ts";
 import { BIN } from "../version.ts";
-import { DhError, describe, reasonOf, withTimeout } from "./errors.ts";
 import { type Api, loadEnterpriseApi } from "./jsapi.ts";
 import type { KeyPair } from "./keyfile.ts";
 

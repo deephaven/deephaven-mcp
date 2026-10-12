@@ -1,4 +1,4 @@
-import { DhError, describe } from "./errors.ts";
+import { DhError, describe } from "../errors.ts";
 import type { Kind } from "./store.ts";
 
 export interface ResolvedServer {

@@ -1,5 +1,5 @@
 import { requireAuth } from "../../auth/session.ts";
-import { disconnect } from "../../auth/signin.ts";
+import { disconnectServer } from "../../auth/signin.ts";
 import { defineCommand } from "../../cli/command.ts";
 
 export const status = defineCommand({
@@ -8,7 +8,7 @@ export const status = defineCommand({
 
   async run(ctx) {
     const session = await requireAuth(ctx.profileFlag, ctx.store);
-    disconnect(session);
+    disconnectServer(session);
     const operating =
       session.operateAs && session.operateAs !== session.user
         ? ` (operating as ${session.operateAs})`

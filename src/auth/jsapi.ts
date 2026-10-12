@@ -2,7 +2,7 @@ import { rmSync, writeSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DhError, describe } from "./errors.ts";
+import { DhError, describe } from "../errors.ts";
 import { isLocal } from "./resolve.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: the jsapi is untyped.

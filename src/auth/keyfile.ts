@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { DhError, isErrno } from "./errors.ts";
+import { DhError, isErrno } from "../errors.ts";
 
 export interface KeyPair {
   type: string;

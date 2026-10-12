@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { DhError, isErrno, reasonOf } from "./errors.ts";
+import { DhError, isErrno, reasonOf } from "../errors.ts";
 import type { Kind } from "./store.ts";
 
 export type SecretRef =

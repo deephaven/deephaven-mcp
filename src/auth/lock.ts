@@ -1,6 +1,6 @@
 import { dlopen, FFIType } from "bun:ffi";
 import { closeSync, openSync } from "node:fs";
-import { DhError } from "./errors.ts";
+import { DhError } from "../errors.ts";
 
 const WAIT_STEP_MS = 25;
 

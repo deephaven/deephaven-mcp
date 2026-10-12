@@ -1,7 +1,7 @@
 import process from "node:process";
 import { Box, render, Text, useApp, useInput } from "ink";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { DhError } from "../auth/errors.ts";
+import { DhError } from "../errors.ts";
 import type { Choice, Prompter } from "./prompt.ts";
 
 type Finish<T> = (value: T) => void;

@@ -1,4 +1,4 @@
-import { DhError, describe, reasonOf, withTimeout } from "./errors.ts";
+import { DhError, describe, reasonOf, withTimeout } from "../errors.ts";
 import { type Api, loadCommunityApi } from "./jsapi.ts";
 import type { Method } from "./store.ts";
 

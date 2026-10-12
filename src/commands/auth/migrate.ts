@@ -1,17 +1,17 @@
 import { Option } from "commander";
-import { timeoutMs } from "../../auth/errors.ts";
 import { findLegacy } from "../../auth/legacy.ts";
 import {
   type Migrated,
-  migrateItem,
+  migrateLegacyEntry,
   recordMigration,
   splitMigrated,
 } from "../../auth/migrate.ts";
 import type { State } from "../../auth/store.ts";
 import { type Context, defineCommand, type Output } from "../../cli/command.ts";
+import { timeoutMs } from "../../errors.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
-import { askMigrateItems } from "./questions.ts";
+import { askLegacyEntriesToMigrate } from "./questions.ts";
 
 export interface MigrateOptions {
   from?: string;
@@ -37,7 +37,7 @@ export const migrate = defineCommand<MigrateOptions>({
 });
 
 /** Login offers to migrate until the user has profiles or has answered once. */
-export function isFirstRun(state: State): boolean {
+export function shouldOfferMigration(state: State): boolean {
   return (
     Object.keys(state.config.profiles).length === 0 &&
     !state.config.legacyImport
@@ -65,16 +65,20 @@ export async function migrateLegacy(
   note(
     "Migrating signs in to each server to check its credentials, so the servers must be reachable now (for example, on VPN).",
   );
-  const chosen = await askMigrateItems(ctx.ui, pending, opts.yes);
+  const chosen = await askLegacyEntriesToMigrate(ctx.ui, pending, opts.yes);
   for (const n of legacy.notImported) note(`  – ${n}: not used, not migrated`);
 
   const outcomes: Migrated[] = [];
   const seconds = timeoutMs() / 1000;
   for (const item of chosen) {
-    const outcome = await migrateItem(ctx.store, legacy.path, item, (what) =>
-      note(
-        `  … ${item.name}: ${what} (gives up after ${seconds}s if unreachable)`,
-      ),
+    const outcome = await migrateLegacyEntry(
+      ctx.store,
+      legacy.path,
+      item,
+      (what) =>
+        note(
+          `  … ${item.name}: ${what} (gives up after ${seconds}s if unreachable)`,
+        ),
     );
     outcomes.push(outcome);
     note(

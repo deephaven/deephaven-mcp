@@ -1,10 +1,10 @@
-import { DhError } from "../../auth/errors.ts";
 import { noProfile, setDefault } from "../../auth/flows.ts";
 import { findByName, sortedProfiles } from "../../auth/profile.ts";
 import type { Config } from "../../auth/store.ts";
 import { defineCommand } from "../../cli/command.ts";
+import { DhError } from "../../errors.ts";
 import { BIN } from "../../version.ts";
-import { askNewDefault } from "./questions.ts";
+import { askDefaultProfile } from "./questions.ts";
 
 export const use = defineCommand({
   name: "use",
@@ -27,8 +27,8 @@ export const use = defineCommand({
       );
     }
     const id = name
-      ? profileId(config, name)
-      : await askNewDefault(ctx.ui, config);
+      ? profileIdFor(config, name)
+      : await askDefaultProfile(ctx.ui, config);
     // Another process may have removed it since the read above.
     const chosen = await setDefault(ctx.store, id);
     if (!chosen) throw noProfile(name ?? id);
@@ -40,7 +40,7 @@ export const use = defineCommand({
 });
 
 /** A profile name, or `:<user>`: that user's profile on the default profile's server. */
-function profileId(config: Config, name: string): string {
+function profileIdFor(config: Config, name: string): string {
   const found = findByName(config, name);
   if (found) return found[0];
   if (!name.startsWith(":")) throw noProfile(name);

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DhError, describe, reasonOf } from "../../src/auth/errors.ts";
+import { DhError, describe, reasonOf } from "../src/errors.ts";
 
 test("describe: one short line", () => {
   expect(describe(new Error("a\n  b"))).toBe("a b");

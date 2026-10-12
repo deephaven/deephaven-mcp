@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { generateBase64KeyPair } from "@deephaven-enterprise/auth-nodejs";
-import { DhError } from "../../src/auth/errors.ts";
 import { parseKeyFile } from "../../src/auth/keyfile.ts";
+import { DhError } from "../../src/errors.ts";
 
 const withEc = (key: string) =>
   Buffer.concat([Buffer.from("EC:"), Buffer.from(key, "base64")]).toString(

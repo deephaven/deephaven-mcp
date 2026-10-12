@@ -1,15 +1,16 @@
 /**
- * Migrating legacy dhcli / Deephaven MCP entries: each becomes a sign-in
- * recipe, then goes through the same connect → signIn → commitSignIn as login.
+ * Migrating legacy dhcli / Deephaven MCP entries: each becomes a sign-in request,
+ * then goes through the same connectServer → signIn → commitSignIn as login.
  */
+
+import { DhError, describe } from "../errors.ts";
 import { BIN } from "../version.ts";
 import { type CommunityLogin, communityUser } from "./community.ts";
-import { DhError, describe } from "./errors.ts";
 import {
-  type Committed,
   commitSignIn,
+  type ProfileToSave,
+  type SavedSignIn,
   saveProfile,
-  type ToSave,
 } from "./flows.ts";
 import { assertTrusted } from "./jsapi.ts";
 import { parseKeyFile, readKeyFile } from "./keyfile.ts";
@@ -21,7 +22,12 @@ import {
   type SecretRef,
 } from "./legacy.ts";
 import { loadedCa } from "./session.ts";
-import { connect, disconnect, type SignIn, signIn } from "./signin.ts";
+import {
+  connectServer,
+  disconnectServer,
+  type SignInRequest,
+  signIn,
+} from "./signin.ts";
 import type { Config, Credential, Store } from "./store.ts";
 
 export interface Migrated {
@@ -52,9 +58,9 @@ export function splitMigrated(
   return { done, pending: legacy.items.filter((i) => !done.includes(i)) };
 }
 
-interface Recipe {
-  how: SignIn;
-  save: ToSave;
+interface LegacySignIn {
+  request: SignInRequest;
+  toSave: ProfileToSave;
   /** False when the secret's variable isn't set: saved without signing in. */
   verify: boolean;
   /** What signing in waits on, for the progress line. */
@@ -69,7 +75,7 @@ function secretCredential(ref: SecretRef, value: string): Credential {
 }
 
 /** How to sign in as `item`, and what to save; reads secrets, not the network. */
-async function recipeFor(item: LegacyItem): Promise<Recipe> {
+async function legacySignIn(item: LegacyItem): Promise<LegacySignIn> {
   const host = new URL(item.origin).host;
   const plan = item.plan;
 
@@ -84,13 +90,13 @@ async function recipeFor(item: LegacyItem): Promise<Recipe> {
       );
     }
     return {
-      how: {
+      request: {
         method: "password",
         username: plan.username,
         password,
         operateAs: plan.operateAs,
       },
-      save: { method: "password", credential: "new-key" },
+      toSave: { method: "password", credential: "new-key" },
       verify: true,
       waiting: `signing in to ${host} as ${plan.username}, then authorizing this computer`,
       detail: "authorized this computer",
@@ -103,13 +109,13 @@ async function recipeFor(item: LegacyItem): Promise<Recipe> {
       : parseKeyFile(plan.keyText ?? "", item.source);
     if (!key.user) throw new DhError("usage", "key file has no user line");
     return {
-      how: {
+      request: {
         method: "private-key",
         username: key.user,
         keyPair: key.keyPair,
         operateAs: key.operateAs,
       },
-      save: {
+      toSave: {
         method: "private-key",
         credential: plan.keyPath
           ? { type: "keyFile", path: plan.keyPath }
@@ -169,8 +175,8 @@ async function recipeFor(item: LegacyItem): Promise<Recipe> {
   const handler = plan.method === "custom" ? plan.handler : undefined;
   const verify = secret !== undefined || plan.method === "anonymous";
   return {
-    how: { method: plan.method, handler, username, secret },
-    save: { method: plan.method, credential, handler },
+    request: { method: plan.method, handler, username, secret },
+    toSave: { method: plan.method, credential, handler },
     verify,
     waiting: `signing in to ${host} (${describePlan(item)})`,
     detail: verify
@@ -180,7 +186,7 @@ async function recipeFor(item: LegacyItem): Promise<Recipe> {
 }
 
 /** Signs in as `item` and saves it. Never throws: failures are outcomes. */
-export async function migrateItem(
+export async function migrateLegacyEntry(
   store: Store,
   legacyPath: string,
   item: LegacyItem,
@@ -193,26 +199,26 @@ export async function migrateItem(
         `uses a custom CA; run \`${BIN} auth login ${item.origin} --ca-cert ${item.caCert}\``,
       );
     }
-    const recipe = await recipeFor(item);
-    const save = {
-      ...recipe.save,
+    const entry = await legacySignIn(item);
+    const toSave = {
+      ...entry.toSave,
       caCert: item.caCert,
       importedFrom: importedFrom(legacyPath, item),
     };
-    let saved: Pick<Committed, "name" | "warnings">;
-    if (recipe.verify) {
-      waiting(recipe.waiting);
-      saved = await signInAndSave(store, item, recipe.how, save);
+    let saved: Pick<SavedSignIn, "name" | "warnings">;
+    if (entry.verify) {
+      waiting(entry.waiting);
+      saved = await signInAndSave(store, item, entry.request, toSave);
     } else {
       // Not signing in now, but later use would still refuse an untrusted origin.
       assertTrusted(new URL(item.origin));
-      const credential = save.credential as Credential;
+      const credential = toSave.credential as Credential;
       saved = {
         ...(await saveProfile(store, {
-          ...save,
+          ...toSave,
           origin: item.origin,
           kind: item.kind,
-          user: communityUser(recipe.how as CommunityLogin),
+          user: communityUser(entry.request as CommunityLogin),
           credential,
         })),
         warnings: [],
@@ -221,35 +227,35 @@ export async function migrateItem(
     return {
       item,
       profile: saved.name,
-      detail: recipe.detail,
+      detail: entry.detail,
       ok: true,
       warnings: saved.warnings,
     };
   } catch (e) {
-    return { item, detail: reason(item, e), ok: false, warnings: [] };
+    return { item, detail: migrationFailure(item, e), ok: false, warnings: [] };
   }
 }
 
 async function signInAndSave(
   store: Store,
   item: LegacyItem,
-  how: SignIn,
-  save: ToSave,
-): Promise<Committed> {
-  const server = await connect(item.origin, item.kind, store.cacheDir);
+  request: SignInRequest,
+  toSave: ProfileToSave,
+): Promise<SavedSignIn> {
+  const server = await connectServer(item.origin, item.kind, store.cacheDir);
   try {
-    const session = await signIn(server, how);
+    const session = await signIn(server, request);
     try {
-      return await commitSignIn(store, session, save);
+      return await commitSignIn(store, session, toSave);
     } finally {
-      disconnect(session);
+      disconnectServer(session);
     }
   } finally {
-    disconnect(server);
+    disconnectServer(server);
   }
 }
 
-function reason(item: LegacyItem, e: unknown): string {
+function migrationFailure(item: LegacyItem, e: unknown): string {
   if (e instanceof DhError && e.code === "server_unreachable") {
     return `can't reach ${new URL(item.origin).host} (${e.hint ?? e.message})`;
   }

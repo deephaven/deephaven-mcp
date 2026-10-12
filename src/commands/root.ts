@@ -5,7 +5,7 @@ import { agents } from "./agents.ts";
 import { auth } from "./auth/index.ts";
 
 /** `dh` alone: help and who's logged in. Every command is listed under `commands`. */
-export const dh = defineCommand({
+export const rootCommand = defineCommand({
   name: BIN,
   description: "Deephaven command line interface.",
   commands: [auth, agents],

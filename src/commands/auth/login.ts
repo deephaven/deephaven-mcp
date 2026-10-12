@@ -1,21 +1,30 @@
 import { resolve } from "node:path";
 import { InvalidArgumentError, Option } from "commander";
 import { commitSignIn } from "../../auth/flows.ts";
-import { findServer } from "../../auth/session.ts";
-import { connect, disconnect, offers, signIn } from "../../auth/signin.ts";
+import { trustAndResolveServer } from "../../auth/session.ts";
+import {
+  connectServer,
+  disconnectServer,
+  offeredMethods,
+  signIn,
+} from "../../auth/signin.ts";
 import type { Method } from "../../auth/store.ts";
 import { defineCommand } from "../../cli/command.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { logout } from "./logout.ts";
-import { isFirstRun, migratedOutput, migrateLegacy } from "./migrate.ts";
 import {
-  askCredentials,
-  askDefault,
-  askMethod,
-  askWhere,
-  confirmAccount,
-  knownIdentity,
+  migratedOutput,
+  migrateLegacy,
+  shouldOfferMigration,
+} from "./migrate.ts";
+import {
+  askLoginTarget,
+  askMakeDefault,
+  askSignInCredentials,
+  askSignInMethod,
+  confirmSsoAccount,
+  priorSignIn,
 } from "./questions.ts";
 
 export const METHODS: Method[] = [
@@ -89,7 +98,7 @@ export const login = defineCommand<LoginOptions>({
   async run(ctx, [serverArg], opts) {
     await ctx.store.ensureDir();
     let state = await ctx.store.read();
-    if (!serverArg && isFirstRun(state)) {
+    if (!serverArg && shouldOfferMigration(state)) {
       const migrated = await migrateLegacy(ctx, { yes: opts.yes }, true);
       if (migrated) return migratedOutput(migrated);
       state = await ctx.store.read();
@@ -97,31 +106,42 @@ export const login = defineCommand<LoginOptions>({
 
     // An explicit server outranks DH_PROFILE, but not --profile.
     const profile = ctx.profileFlag ?? (serverArg ? undefined : ctx.profile);
-    const where = await askWhere(ctx.ui, state, serverArg, profile, opts);
-    if (where === "remove") return await logout.run(ctx, [], {});
-    const known = knownIdentity(state, where.profile);
-    const { origin, kind } = await findServer(
-      where.server,
+    const target = await askLoginTarget(
+      ctx.ui,
+      state,
+      serverArg,
+      profile,
+      opts,
+    );
+    if (target === "remove") return await logout.run(ctx, [], {});
+    const prior = priorSignIn(state, target.profile);
+    const { origin, kind } = await trustAndResolveServer(
+      target.server,
       state.config.servers,
       opts.caCert,
-      where.rerun,
+      target.rerun,
     );
 
-    const server = await connect(origin, kind, ctx.store.cacheDir);
+    const server = await connectServer(origin, kind, ctx.store.cacheDir);
     try {
-      const offered = await offers(server);
-      const offer = await askMethod(ctx.ui, kind, offered, known, opts);
-      const { how, save } = await askCredentials(ctx.ui, offer, known, opts);
-      const session = await signIn(server, how);
+      const methods = await offeredMethods(server);
+      const method = await askSignInMethod(ctx.ui, kind, methods, prior, opts);
+      const { request, toSave } = await askSignInCredentials(
+        ctx.ui,
+        method,
+        prior,
+        opts,
+      );
+      const session = await signIn(server, request);
       try {
         note(
-          how.method === "anonymous"
+          request.method === "anonymous"
             ? "✔ Signed in anonymously"
             : `✔ Signed in as ${session.user}`,
         );
-        await confirmAccount(ctx.ui, session, offer, opts);
+        await confirmSsoAccount(ctx.ui, session, method, opts);
         const { config } = await ctx.store.read();
-        const makeDefault = await askDefault(
+        const makeDefault = await askMakeDefault(
           ctx.ui,
           config,
           session,
@@ -131,7 +151,7 @@ export const login = defineCommand<LoginOptions>({
         const saved = await commitSignIn(
           ctx.store,
           session,
-          { ...save, caCert },
+          { ...toSave, caCert },
           makeDefault,
         );
         if (saved.key) note(`✔ Authorized this computer (key "${saved.key}")`);
@@ -152,10 +172,10 @@ export const login = defineCommand<LoginOptions>({
           },
         };
       } finally {
-        disconnect(session);
+        disconnectServer(session);
       }
     } finally {
-      disconnect(server);
+      disconnectServer(server);
     }
   },
 });

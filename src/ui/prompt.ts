@@ -1,4 +1,4 @@
-import { DhError } from "../auth/errors.ts";
+import { DhError } from "../errors.ts";
 
 export interface Choice<T> {
   label: string;

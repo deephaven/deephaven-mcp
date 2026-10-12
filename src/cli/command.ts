@@ -12,7 +12,7 @@ export interface Context {
   json: boolean;
   /** `--profile`, then `DH_PROFILE`. */
   profile?: string;
-  /** `--profile` alone; login lets a typed server outrank `DH_PROFILE`. */
+  /** `--profile` alone, without the `DH_PROFILE` fallback. */
   profileFlag?: string;
   /** True with --no-prompt (or the hidden --no-input). */
   noPrompt: boolean;
@@ -26,20 +26,21 @@ export interface Output {
   json: unknown;
 }
 
-export interface Arg {
+export interface ArgSpec {
   /** Commander syntax: `<required>` or `[optional]`. */
   name: string;
   description?: string;
 }
 
 /**
- * One command. `run` reads as the command's script: questions (`ctx.ui`) and
- * actions (`src/auth`) alternating, returning what to print.
+ * One command. `run` reads as its script, alternating questions (prompts via
+ * `ctx.ui`, returning plain answers) and actions (network and disk, never
+ * prompting), and returns what to print.
  */
 export interface CommandSpec<Opts = Record<string, never>> {
   name: string;
   description: string;
-  args?: Arg[];
+  args?: ArgSpec[];
   options?: Option[];
   run(ctx: Context, args: (string | undefined)[], opts: Opts): Promise<Output>;
   /** Subcommands; they inherit the global flags. */
@@ -74,7 +75,7 @@ interface GlobalOptions {
   input?: boolean;
 }
 
-function contextFrom(cmd: Command): Context {
+function contextFromFlags(cmd: Command): Context {
   const g = cmd.optsWithGlobals() as GlobalOptions;
   const noPrompt = g.prompt === false || g.input === false;
   setFormat(g.output ?? "human");
@@ -92,14 +93,17 @@ function contextFrom(cmd: Command): Context {
 }
 
 /** Wires `spec` onto `cmd`: arguments, options, the shared handler, then subcommands. */
-export function attach(cmd: Command, spec: CommandSpec<never>): Command {
+export function registerCommand(
+  cmd: Command,
+  spec: CommandSpec<never>,
+): Command {
   cmd.description(spec.description);
   for (const a of spec.args ?? []) cmd.argument(a.name, a.description);
   for (const o of spec.options ?? []) cmd.addOption(o);
   cmd.action(async (...params: unknown[]) => {
     const self = params.at(-1) as Command;
     const out = await spec.run(
-      contextFrom(self),
+      contextFromFlags(self),
       self.processedArgs as (string | undefined)[],
       self.opts() as never,
     );
@@ -107,7 +111,7 @@ export function attach(cmd: Command, spec: CommandSpec<never>): Command {
   });
   // `command()` (not addCommand) so subcommands inherit the root's settings.
   for (const child of spec.commands ?? []) {
-    attach(cmd.command(child.name), child);
+    registerCommand(cmd.command(child.name), child);
   }
   return cmd;
 }

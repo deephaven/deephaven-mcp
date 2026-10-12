@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { signInFor } from "../../src/auth/session.ts";
+import { signInRequestFor } from "../../src/auth/session.ts";
 import type { Profile } from "../../src/auth/store.ts";
 
 test("signInFor: a saved key logs in with its key type, not the credential's tag", async () => {
@@ -10,7 +10,7 @@ test("signInFor: a saved key logs in with its key type, not the credential's tag
     method: "saml",
     createdAt: "",
   };
-  const spec = await signInFor(profile, "enterprise", {
+  const spec = await signInRequestFor(profile, "enterprise", {
     type: "keyPair",
     keyType: "ec",
     publicKey: "PUB",

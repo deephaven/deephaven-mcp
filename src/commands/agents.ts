@@ -1,6 +1,6 @@
 import type { Command, Option } from "commander";
-import { ERROR_CODES } from "../auth/errors.ts";
 import { defineCommand } from "../cli/command.ts";
+import { ERROR_CODES } from "../errors.ts";
 import { BIN, VERSION } from "../version.ts";
 
 interface Described {
