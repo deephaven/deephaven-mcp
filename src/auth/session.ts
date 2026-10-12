@@ -103,11 +103,13 @@ export function loadedCa(): string | undefined {
 
 /**
  * TLS trust is fixed at process start, so a custom CA means re-running this
- * process with `NODE_EXTRA_CA_CERTS` set. `extraArgs` carry choices already made.
+ * process with `NODE_EXTRA_CA_CERTS` set. `extraArgs` carry choices already
+ * made; `command` replaces this run's arguments.
  */
 export async function ensureCa(
   caCert: string | undefined,
   extraArgs: string[] = [],
+  command?: string[],
 ): Promise<void> {
   if (!caCert || loadedCa() === caCert) return;
   let pem: string;
@@ -132,13 +134,17 @@ export async function ensureCa(
     await writeFile(bundle, `${theirs}\n${pem}`);
   }
   // Compiled: argv[1] is a virtual path to skip, and runtime flags are built in.
-  const args = STANDALONE
-    ? process.argv.slice(2)
-    : [...process.execArgv, ...process.argv.slice(1)];
-  const proc = Bun.spawn([process.execPath, ...args, ...extraArgs], {
-    env: { ...process.env, NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
-    stdio: ["inherit", "inherit", "inherit"],
-  });
+  const runtime = STANDALONE
+    ? []
+    : [...process.execArgv, process.argv[1] ?? ""];
+  const args = command ?? process.argv.slice(2);
+  const proc = Bun.spawn(
+    [process.execPath, ...runtime, ...args, ...extraArgs],
+    {
+      env: { ...process.env, NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
+      stdio: ["inherit", "inherit", "inherit"],
+    },
+  );
   const code = await proc.exited;
   if (dir) await rm(dir, { recursive: true, force: true });
   process.exit(code);

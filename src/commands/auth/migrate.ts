@@ -151,7 +151,7 @@ async function migrateItem(
       "auth_failed",
     );
     try {
-      const { credential } = await authorizeComputer(session, cache);
+      const { credential } = await authorizeComputer(store, session, cache);
       let saved: Saved;
       try {
         saved = await save(plan.username, "password", credential, {

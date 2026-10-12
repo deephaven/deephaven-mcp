@@ -7,7 +7,7 @@ import {
 } from "../../auth/profile.ts";
 import { ensureCa, loadedCa } from "../../auth/session.ts";
 import { Store } from "../../auth/store.ts";
-import { note, result } from "../../output.ts";
+import { isJson, note, result } from "../../output.ts";
 import { getPrompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
 import {
@@ -37,7 +37,6 @@ export async function logout(
   }
 
   let ids: string[];
-  let extraArgs: string[] = [];
   const name = profileName ?? selectedProfile(g);
   if (options.all) {
     ids = profiles.map(([id]) => id);
@@ -64,8 +63,6 @@ export async function logout(
       "<profile> or --all",
     );
     ids = picked === ALL ? profiles.map(([id]) => id) : [picked];
-    // `--`: a profile name may start with `-`.
-    extraArgs = picked === ALL ? ["--all"] : ["--", nameOf(picked)];
   }
 
   // Revoking needs each server's CA, and a process can trust only one extra CA.
@@ -77,7 +74,23 @@ export async function logout(
       : undefined;
   };
   const cas = new Set(ids.map(caOf).filter((ca) => ca !== undefined));
-  if (cas.size === 1) await ensureCa([...cas][0], extraArgs);
+  if (cas.size === 1) {
+    // Explicit, since this may run from the `auth login` menu. `--`: names may start with `-`.
+    const [only] = ids;
+    const selection =
+      ids.length > 1 || !only ? ["--all"] : ["--", nameOf(only)];
+    await ensureCa(
+      [...cas][0],
+      [],
+      [
+        "auth",
+        "logout",
+        ...(isJson() ? ["-o", "json"] : []),
+        ...(promptsAllowed(g) ? [] : ["--no-prompt"]),
+        ...selection,
+      ],
+    );
+  }
   const trusted = loadedCa();
   const kept = ids.filter((id) => {
     const ca = caOf(id);

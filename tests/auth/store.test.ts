@@ -38,6 +38,17 @@ async function windowsAcl(path: string, kind: "dir" | "file") {
     .map((line) => line.trim());
 }
 
+/** Me, plus SYSTEM and Administrators, which can read everything anyway. */
+const OWNERS = ["me", "S-1-5-18", "S-1-5-32-544"];
+
+function expectOwnerOnly(acl: string[], inherited: boolean) {
+  expect(acl[0]).toBe(`protected=${inherited ? "False" : "True"}`);
+  expect(acl).toContain("me Allow FullControl");
+  for (const rule of acl.slice(1)) {
+    expect(OWNERS).toContain(rule.split(" ")[0] ?? "");
+  }
+}
+
 test("store: round-trips config and credentials", async () => {
   const store = await tempStore();
   await store.update(({ config, credentials }) => {
@@ -75,13 +86,9 @@ test.skipIf(!WINDOWS)(
   async () => {
     const store = await tempStore();
     await store.update(() => {});
-    const ownerOnly = ["protected=True", "me Allow FullControl"];
-    expect(await windowsAcl(store.dir, "dir")).toEqual(ownerOnly);
-    expect(await windowsAcl(store.credentialsPath, "file")).toEqual(ownerOnly);
-    expect(await windowsAcl(store.configPath, "file")).toEqual([
-      "protected=False",
-      "me Allow FullControl",
-    ]);
+    expectOwnerOnly(await windowsAcl(store.dir, "dir"), false);
+    expectOwnerOnly(await windowsAcl(store.credentialsPath, "file"), false);
+    expectOwnerOnly(await windowsAcl(store.configPath, "file"), true);
 
     const everyone = await run([
       "icacls",
@@ -92,7 +99,7 @@ test.skipIf(!WINDOWS)(
     ]);
     expect(everyone.code).toBe(0);
     await store.ensureDir();
-    expect(await windowsAcl(store.dir, "dir")).toEqual(ownerOnly);
+    expectOwnerOnly(await windowsAcl(store.dir, "dir"), false);
   },
 );
 
@@ -130,17 +137,36 @@ test("store: concurrent processes don't lose writes", async () => {
   expect(Object.keys((await store.read()).config.servers).length).toBe(30);
 });
 
-test("store: a lock left by an exited process is broken at once", async () => {
+test("store: a leftover lock file doesn't block; only a live holder does", async () => {
   const store = await tempStore();
-  const gone = Bun.spawn([process.execPath, "--version"], { stdout: "ignore" });
-  await gone.exited;
   await mkdir(store.dir, { recursive: true });
   const lock = join(store.dir, "config.lock");
-  await writeFile(lock, `${hostname()} ${gone.pid} old`);
+  await writeFile(lock, `${hostname()} 1 left by an older dh`);
   const started = Date.now();
   await store.update(() => {});
   expect(Date.now() - started).toBeLessThan(5_000);
-  expect(await stat(lock).catch(() => null)).toBeNull();
+
+  const module = pathToFileURL(
+    resolve(import.meta.dir, "../../src/auth/lock.ts"),
+  ).href;
+  const holder = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `import { withFileLock } from "${module}";
+       await withFileLock(${JSON.stringify(lock)}, 5000, async () => {
+         console.log("held");
+         await Bun.sleep(1500);
+       });`,
+    ],
+    { stdout: "pipe" },
+  );
+  const reader = holder.stdout.getReader();
+  await reader.read();
+  const waited = Date.now();
+  await store.update(() => {});
+  expect(Date.now() - waited).toBeGreaterThan(500);
+  await holder.exited;
 });
 
 test("saveProfile: keeps every legacy entry merged into one profile", async () => {

@@ -6,11 +6,10 @@ import {
   rename,
   rm,
   stat,
-  writeFile,
 } from "node:fs/promises";
-import { hostname } from "node:os";
 import { join } from "node:path";
 import { DhError, isErrno, reasonOf } from "./errors.ts";
+import { withFileLock } from "./lock.ts";
 
 export type Kind = "enterprise" | "community";
 export type Method =
@@ -85,7 +84,6 @@ export interface State {
 
 const WINDOWS = process.platform === "win32";
 const LOCK_WAIT_MS = 10_000;
-const LOCK_STALE_MS = 30_000;
 
 export function configDir(): string {
   const override = process.env.DH_CONFIG_DIR;
@@ -136,7 +134,8 @@ export class Store {
   /** Read-modify-write of both files under one lock. */
   async update<T>(fn: (state: State) => T | Promise<T>): Promise<T> {
     await this.makeDir(false);
-    return await withLock(join(this.dir, "config.lock"), async () => {
+    const lock = join(this.dir, "config.lock");
+    return await withFileLock(lock, LOCK_WAIT_MS, async () => {
       const state = await this.read();
       const value = await fn(state);
       await writeAtomic(this.configPath, state.config, 0o644);
@@ -240,68 +239,5 @@ async function restrictWindowsAcl(
     (await icacls(["/inheritance:r", "/grant:r", grant]));
   if (!ok) {
     throw new DhError("internal", `Could not restrict access to ${path}`);
-  }
-}
-
-/** The lock file names its holder, so only the holder removes it and a dead holder's lock can be broken. */
-async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
-  const token = `${hostname()} ${process.pid} ${crypto.randomUUID()}`;
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      await writeFile(path, token, { flag: "wx" });
-      break;
-    } catch (e) {
-      if (!isErrno(e, "EEXIST")) throw e;
-      const stale = await staleLock(path);
-      if (stale !== undefined) {
-        // Only if unchanged: another process may have broken it and locked since.
-        if ((await readFile(path, "utf8").catch(() => undefined)) === stale) {
-          await rm(path, { force: true }).catch(() => {});
-        }
-        continue;
-      }
-      if (Date.now() > deadline) {
-        throw new DhError(
-          "internal",
-          `Timed out waiting for ${path}`,
-          "Delete it if no other process is running.",
-        );
-      }
-      await new Promise((r) => setTimeout(r, 10 + Math.random() * 40));
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    // Only our own: another process may have broken ours and taken the lock.
-    if ((await readFile(path, "utf8").catch(() => "")) === token) {
-      await rm(path, { force: true }).catch(() => {});
-    }
-  }
-}
-
-/**
- * The lock's contents if its holder on this computer has exited, or if another
- * computer's lock is old; undefined if it's live or already gone.
- */
-async function staleLock(path: string): Promise<string | undefined> {
-  const info = await stat(path).catch(() => null);
-  const text = await readFile(path, "utf8").catch(() => undefined);
-  if (!info || text === undefined) return undefined;
-  const [host, pid] = text.split(" ");
-  if (host === hostname() && Number(pid) > 0) {
-    return isRunning(Number(pid)) ? undefined : text;
-  }
-  // Still being written, or from another computer sharing the folder.
-  return Date.now() - info.mtime.getTime() > LOCK_STALE_MS ? text : undefined;
-}
-
-function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return isErrno(e, "EPERM");
   }
 }

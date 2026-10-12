@@ -183,8 +183,9 @@ async function enterpriseLogin(
   prompt: Prompter,
   options: LoginOptions,
   target: Target,
-  cache: string,
+  store: Store,
 ): Promise<Result> {
+  const cache = store.cacheDir;
   const timeout = timeoutMs();
   const origin = target.origin;
   const conn = await connectEnterprise(origin, cache, timeout);
@@ -327,7 +328,11 @@ async function enterpriseLogin(
     operateAs,
     enterprise: signedIn,
   };
-  const { credential, comment } = await authorizeComputer(session, cache);
+  const { credential, comment } = await authorizeComputer(
+    store,
+    session,
+    cache,
+  );
   note(`✔ Authorized this computer (key "${comment}")`);
   return { session, method, credential };
 }
@@ -591,7 +596,7 @@ export async function login(
   const cache = store.cacheDir;
   const { session, method, credential, handler } =
     target.kind === "enterprise"
-      ? await enterpriseLogin(prompt, options, target, cache)
+      ? await enterpriseLogin(prompt, options, target, store)
       : await communityLogin(prompt, options, target, cache);
 
   let saved: Saved | undefined;

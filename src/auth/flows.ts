@@ -94,11 +94,19 @@ export async function saveProfile(
  * on a new connection before returning it.
  */
 export async function authorizeComputer(
+  store: Store,
   session: Session,
   cacheRoot: string,
 ): Promise<{ credential: Credential & { type: "keyPair" }; comment: string }> {
   const conn = session.enterprise!;
   const key = await createKey(conn, session.user);
+  const credential = {
+    type: "keyPair" as const,
+    keyType: key.type,
+    publicKey: key.publicKey,
+    privateKey: key.privateKey,
+    generated: true,
+  };
   const timeout = timeoutMs();
   let check: EnterpriseConnection | undefined;
   try {
@@ -112,7 +120,11 @@ export async function authorizeComputer(
       "auth_failed",
     );
   } catch (e) {
-    await deleteKey(conn, session.user, key).catch(() => {});
+    await deleteKey(conn, session.user, key).catch(() =>
+      store.update(({ credentials }) =>
+        addOrphan(credentials, session.origin, session.user, credential),
+      ),
+    );
     if (!check) throw e;
     throw new DhError(
       "key_upload_failed",
@@ -123,16 +135,7 @@ export async function authorizeComputer(
   } finally {
     if (check) disconnectEnterprise(check);
   }
-  return {
-    credential: {
-      type: "keyPair",
-      keyType: key.type,
-      publicKey: key.publicKey,
-      privateKey: key.privateKey,
-      generated: true,
-    },
-    comment: key.comment,
-  };
+  return { credential, comment: key.comment };
 }
 
 /** Deletes an old generated key with an already signed-in session. */

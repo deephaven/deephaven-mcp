@@ -14,7 +14,7 @@ is saved as a profile, and one profile is the default.
 | `dh auth logout [profile]`        | Revoke the key on the server if `dh` generated it, and remove the profile. Picker if no profile is given and there are 2+ profiles. |
 | `dh auth logout --all`            | Same, for every profile.                                                                                                            |
 | `dh auth status`                  | Check the profile against its server.                                                                                               |
-| `dh auth import [--from <path>]`  | Import legacy config.                                                                                                               |
+| `dh auth migrate [--from <path>]` | Migrate a legacy config.                                                                                                            |
 
 Global flags: `--profile <name>` (env `DH_PROFILE`), `-o json`, `--no-input`.
 Env: `DH_TIMEOUT` (connect + non-SSO login, default 30 s →
@@ -176,10 +176,10 @@ read or written.
 - More than one secret var set → usage error.
 - DHE password: logs in with the password on every command. No key is uploaded.
 
-## Legacy config import
+## Legacy config migration
 
 - Runs on the first `dh auth login` with no profiles (offered once), or on
-  `dh auth import`.
+  `dh auth migrate`.
 - Sources: `$DH_MCP_CONFIG_FILE` (v1); `$DH_AI_DATA_DIR/config` or
   `~/.deephaven/ai/config` (v2).
 - The prompt lists each item and the action for it. Items can be deselected.
