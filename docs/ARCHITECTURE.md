@@ -29,15 +29,29 @@ Why it matters:
 
 - **Readable:** the script is the summary. Details live one level down, in a
   function whose name says what it does.
+- **Extensible:** a new command is one file and one line in its parent's
+  `commands`. A new sign-in method is one case in `askSignInCredentials` and one
+  in `signIn`; every caller (login, saved profiles, env vars, migrate) gets it.
+  Behavior added to the shared handler, like a global flag or output format,
+  reaches every command at once.
 - **Reusable:** actions don't care where answers came from. `migrate` feeds
   login's actions from an old config file instead of prompts; saved profiles and
-  `DH_*` environment variables use the same `signIn`.
+  `DH_*` environment variables use the same `signIn`. Something other than the
+  CLI, such as an MCP tool, could call the same actions with its own inputs.
+- **Testable:** actions take and return plain data, so they're tested without a
+  terminal. Questions only need a `Prompter`, which is an interface and easy to
+  fake.
+- **Consistent:** help, `-o json`, `--no-prompt`, error codes and `dh agents`
+  come from the shared handler, so every command behaves the same and agents can
+  rely on it.
 - **Safe to cancel:** ask every question before the first irreversible action.
   Login asks "Make this the default?" before uploading a key, so Ctrl-C never
   leaves one behind.
 - **Scriptable:** every prompt names the flag that answers it. Without a
   terminal or with `--no-prompt`, the question fails with that flag in the
   error.
+- **Reviewable:** a change in what a command does shows up as a changed line in
+  its `run`, not buried in a helper.
 
 ## Layout
 
