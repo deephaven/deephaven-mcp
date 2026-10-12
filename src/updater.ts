@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { gt } from "semver";
 import { REPOSITORY, STANDALONE, VERSION } from "./version.ts";
 
 export const releasesUrl = (repository: string): string =>
@@ -109,7 +110,8 @@ export async function autoUpdate(): Promise<void> {
   const manifest = (await (
     await fetchOk(manifestUrl, 5_000)
   ).json()) as Manifest;
-  if (Bun.semver.order(manifest.version, VERSION) !== 1) return;
+  // Strict: throws on an invalid version (unlike Bun.semver, which accepts "3.0").
+  if (!gt(manifest.version, VERSION)) return;
 
   const asset = manifest.binaries[PLATFORM];
   if (!asset) return;

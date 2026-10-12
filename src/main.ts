@@ -27,6 +27,9 @@ await new Command()
   })
   // outputHelp, not help: help() exits, which would skip the update check below.
   .action((_options, command: Command) => command.outputHelp())
+  .showHelpAfterError()
+  // Usage errors exit 2 (the CLI convention, and what the Cliffy version did); help/version exit 0.
+  .exitOverride((err) => process.exit(err.exitCode === 1 ? 2 : err.exitCode))
   .parseAsync();
 
 try {

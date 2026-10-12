@@ -40,11 +40,16 @@ interface Result {
 async function run(
   cmd: string,
   args: string[],
-  env: Record<string, string>,
+  env: Record<string, string | undefined>,
+  cwd?: string,
 ): Promise<Result> {
-  // Bun.spawn replaces the environment rather than extending it.
+  // Bun.spawn replaces the environment rather than extending it; undefined unsets.
+  const merged = Object.entries({ ...process.env, ...env }).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  );
   const proc = Bun.spawn([cmd, ...args], {
-    env: { ...process.env, ...env },
+    env: Object.fromEntries(merged),
+    cwd,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -271,6 +276,29 @@ test("dh installed with the install script updates itself from GitHub releases",
     });
     expect(redirect.stderr).toContain("insecure URL");
     expect(await version()).toContain(NEXT);
+
+    // A repo dh runs inside must not configure it (Bun binaries autoload these by default).
+    const hostile = join(tmp, "hostile-cwd");
+    await mkdir(hostile);
+    await writeFile(join(hostile, ".env"), "DH_DEBUG=1\n");
+    await writeFile(join(hostile, "preload.ts"), 'console.error("PRELOADED");');
+    await writeFile(
+      join(hostile, "bunfig.toml"),
+      'preload = ["./preload.ts"]\n',
+    );
+    // The update fails (insecure redirect); only a loaded .env would print that.
+    const inRepo = await run(
+      exe,
+      [],
+      {
+        ...now,
+        DH_UPDATE_URL: `${repo}/releases/download/${INSECURE_TAG}/manifest.json`,
+        DH_DEBUG: undefined,
+      },
+      hostile,
+    );
+    expect(inRepo.stderr).not.toContain("PRELOADED");
+    expect(inRepo.stderr).not.toContain("auto-update failed");
   } finally {
     await server.stop(true);
     await rm(tmp, { recursive: true, force: true });

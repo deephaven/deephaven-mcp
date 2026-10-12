@@ -63,6 +63,10 @@ export async function build(
       process.execPath,
       "build",
       "--compile",
+      // Otherwise the binary loads .env/bunfig.toml from the CWD: a repo dh runs in
+      // could set DH_UPDATE_URL or preload its own code.
+      "--no-compile-autoload-dotenv",
+      "--no-compile-autoload-bunfig",
       `--target=bun-${target}`,
       "--define",
       `DH_BUILD_VERSION=${JSON.stringify(version)}`,
