@@ -104,8 +104,11 @@ export async function use(options: unknown, name?: string): Promise<void> {
       })();
   if (!id) throw noProfile(name!);
   const chosen = await store.update((state) => {
+    // Another process may have removed it since the read above.
+    const profile = state.config.profiles[id];
+    if (!profile) throw noProfile(name ?? id);
     state.config.defaultProfile = id;
-    return state.config.profiles[id]?.name;
+    return profile.name;
   });
   result(() => `✔ Default profile is now ${chosen}`, { default: chosen });
 }

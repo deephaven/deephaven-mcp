@@ -2,10 +2,10 @@ import { writeSync } from "node:fs";
 import { styleText } from "node:util";
 import { Command, CommanderError, Help, Option } from "commander";
 import { DhError } from "./auth/errors.ts";
-import { Store } from "./auth/store.ts";
+import { type Profile, Store } from "./auth/store.ts";
 import { agents } from "./commands/agents.ts";
 import { addAuthCommand } from "./commands/auth/index.ts";
-import { err, out, reportError, setFormat } from "./output.ts";
+import { err, reportError, result, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
 import { BIN, VERSION } from "./version.ts";
 
@@ -28,20 +28,33 @@ function formatFromArgs(args: string[]): "human" | "json" {
   return "human";
 }
 
-async function statusLine(): Promise<void> {
+async function rootStatus(command: Command): Promise<void> {
+  let p: Profile | undefined;
+  let readable = true;
   try {
     const { config } = await new Store().read();
-    const p = config.defaultProfile && config.profiles[config.defaultProfile];
-    out(
-      p
-        ? `Logged in as ${p.user} @ ${new URL(p.server).host} (default)`
-        : `Not logged in. Run \`${BIN} auth login\` to get started.`,
-    );
+    p = config.defaultProfile
+      ? config.profiles[config.defaultProfile]
+      : undefined;
   } catch {
-    out(`Run \`${BIN} auth\` to check your profiles.`);
+    readable = false;
   }
-  out(
-    `For agents: \`${BIN} agents\` summarizes commands and error codes (\`-o json\` for everything).`,
+  result(
+    () => {
+      command.outputHelp();
+      return [
+        !readable
+          ? `Run \`${BIN} auth\` to check your profiles.`
+          : p
+            ? `Logged in as ${p.user} @ ${new URL(p.server).host} (default)`
+            : `Not logged in. Run \`${BIN} auth login\` to get started.`,
+        `For agents: \`${BIN} agents\` summarizes commands and error codes (\`-o json\` for everything).`,
+      ];
+    },
+    {
+      version: VERSION,
+      default: p ? { profile: p.name, server: p.server, user: p.user } : null,
+    },
   );
 }
 
@@ -82,10 +95,7 @@ const root = new Command()
   .option("--no-prompt", "Never prompt; fail with the flag to pass instead.")
   // The older name; agents trained on other CLIs may still reach for it.
   .addOption(new Option("--no-input").hideHelp())
-  .action(async (_options, command: Command) => {
-    command.outputHelp();
-    await statusLine();
-  });
+  .action((_options, command: Command) => rootStatus(command));
 // Added after the settings above, so subcommands inherit them.
 addAuthCommand(root);
 root

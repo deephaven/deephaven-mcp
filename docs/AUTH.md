@@ -168,8 +168,10 @@ running as you can, including AI agents and other tools.
 On Windows the directory is `%APPDATA%\Deephaven\cli`. Set `DH_CONFIG_DIR` to
 use another directory.
 
-`dh` refuses to read `credentials.json` if other users can read it. Fix the
-permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
+On macOS and Linux, `dh` refuses to read `credentials.json` if other users can
+read it. Fix the permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
+On Windows, `dh` makes the folder and `credentials.json` owner-only when it
+creates them and at each `login`, but doesn't check them on read.
 
 ## Logging out
 
@@ -225,6 +227,7 @@ errors go to stderr.
 
 | Command           | stdout                                                               |
 | ----------------- | -------------------------------------------------------------------- |
+| `dh`              | `{"version", "default": {"profile", "server", "user"} \| null}`      |
 | `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`          |
 | `dh auth login`   | `{"profile", "server", "user", "default"}`                           |
 | `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                 |

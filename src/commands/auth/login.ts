@@ -463,7 +463,10 @@ async function pickTarget(
     .map((u) => u.origin)
     .find((o) => o in state.config.servers);
   const server = knownOrigin ? state.config.servers[knownOrigin] : undefined;
-  await ensureCa(options.caCert ?? server?.caCert, serverArg ? [] : [input]);
+  await ensureCa(
+    options.caCert ?? server?.caCert,
+    serverArg ? [] : ["--", input],
+  );
   if (knownOrigin && server && !options.caCert) {
     return { origin: knownOrigin, kind: server.kind };
   }

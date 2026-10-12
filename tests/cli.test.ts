@@ -112,6 +112,63 @@ test("cli: usage errors exit 2, with JSON on stderr", async () => {
   expect(unknown.code).toBe(2);
 });
 
+test("cli: bare dh -o json prints one JSON value", async () => {
+  const { run, configDir } = await setup();
+  const none = await run(["-o", "json"]);
+  expect(none.code).toBe(0);
+  expect(JSON.parse(none.stdout).default).toBeNull();
+
+  await seed(configDir);
+  const some = JSON.parse((await run(["-o", "json"])).stdout);
+  expect(some.default).toEqual({
+    profile: "a",
+    server: "http://localhost:10000",
+    user: "psk",
+  });
+});
+
+test("cli: a profile named like a flag, after --", async () => {
+  const { run, configDir } = await setup();
+  await seed(configDir);
+  expect((await run(["auth", "rename", "--", "b", "--all"])).code).toBe(0);
+  const out = await run(["auth", "logout", "-o", "json", "--", "--all"]);
+  expect(out.code, out.stderr).toBe(0);
+  expect(JSON.parse(out.stdout).removed).toEqual([
+    { profile: "--all", server: "http://localhost:10001", revoked: false },
+  ]);
+});
+
+test("cli: migrate refuses a remote plain-HTTP server even when it can't sign in yet", async () => {
+  const { run, tmp } = await setup();
+  const legacy = join(tmp, "v1.json");
+  await writeFile(
+    legacy,
+    JSON.stringify({
+      community: {
+        sessions: {
+          remote: {
+            host: "dhc.example.com",
+            port: 10000,
+            auth_type: "PSK",
+            auth_token_env_var: "UNSET_TEST_PSK",
+          },
+        },
+      },
+    }),
+  );
+  const res = await run([
+    "auth",
+    "migrate",
+    "--from",
+    legacy,
+    "--yes",
+    "-o",
+    "json",
+  ]);
+  expect(JSON.parse(res.stdout).migrated).toBe(0);
+  expect(res.stderr).toContain("Refusing to load client code over plain HTTP");
+});
+
 test("cli: agents summarizes, and lists every command and error code as JSON", async () => {
   const { run } = await setup();
   const summary = await run(["agents"]);

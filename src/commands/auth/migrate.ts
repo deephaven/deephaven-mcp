@@ -19,6 +19,7 @@ import {
   type Saved,
   saveProfile,
 } from "../../auth/flows.ts";
+import { assertTrusted } from "../../auth/jsapi.ts";
 import { parseKeyFile, readKeyFile } from "../../auth/keyfile.ts";
 import {
   describePlan,
@@ -261,6 +262,8 @@ async function migrateItem(
     await loginCommunity(conn, login, timeout, "auth_failed");
     disconnect(conn.client);
   } else {
+    // Not signing in now, but later use would still refuse an untrusted origin.
+    assertTrusted(new URL(item.origin));
     detail += " (not verified; variable not set)";
   }
   const user =

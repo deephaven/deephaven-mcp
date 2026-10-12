@@ -64,7 +64,8 @@ export async function logout(
       "<profile> or --all",
     );
     ids = picked === ALL ? profiles.map(([id]) => id) : [picked];
-    extraArgs = picked === ALL ? ["--all"] : [nameOf(picked)];
+    // `--`: a profile name may start with `-`.
+    extraArgs = picked === ALL ? ["--all"] : ["--", nameOf(picked)];
   }
 
   // Revoking needs each server's CA, and a process can trust only one extra CA.

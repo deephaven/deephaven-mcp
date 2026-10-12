@@ -37,7 +37,8 @@ function quietLibraries(libraryDir: string): void {
   });
 }
 
-function assertTrusted(url: URL): void {
+/** The jsapi is code from the server, so only https or a local server may supply it. */
+export function assertTrusted(url: URL): void {
   if (url.protocol === "https:" || isLocal(url)) return;
   throw new DhError(
     "server_unsupported",
