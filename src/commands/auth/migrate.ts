@@ -10,8 +10,10 @@ import {
 } from "../../auth/enterprise.ts";
 import { DhError, describe, timeoutMs } from "../../auth/errors.ts";
 import {
+  addOrphan,
   authorizeComputer,
   closeSession,
+  revokeOrphans,
   revokeWith,
   type Saved,
   saveProfile,
@@ -30,15 +32,15 @@ import { Store } from "../../auth/store.ts";
 import { note, result } from "../../output.ts";
 import { getPrompter, type Prompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
-import { globals } from "../common.ts";
+import { globals, promptsAllowed } from "../common.ts";
 
-export interface ImportOptions {
+export interface MigrateOptions {
   from?: string;
   yes?: boolean;
 }
 
-interface Imported {
-  item: string;
+interface Migrated {
+  item: LegacyItem;
   profile?: string;
   detail: string;
   ok: boolean;
@@ -64,8 +66,26 @@ function reason(item: LegacyItem, e: unknown): string {
     : describe(e);
 }
 
-/** `waiting` is told what the import is about to wait on, before each server call. */
-async function importItem(
+/** Deletes earlier undeletable keys, then the key this profile replaced (remembered if that fails). */
+async function cleanUp(
+  store: Store,
+  session: Session,
+  previous: Credential | undefined,
+  name: string,
+): Promise<void> {
+  await revokeOrphans(store, session).catch(() => {});
+  try {
+    await revokeWith(session, previous);
+  } catch (e) {
+    await store.update(({ credentials }) =>
+      addOrphan(credentials, session.origin, session.user, previous),
+    );
+    note(`  ! ${name}: could not delete the previous key: ${describe(e)}`);
+  }
+}
+
+/** `waiting` is told what migrating is about to wait on, before each server call. */
+async function migrateItem(
   store: Store,
   legacyPath: string,
   item: LegacyItem,
@@ -133,11 +153,7 @@ async function importItem(
         await revokeWith(session, credential).catch(() => {});
         throw e;
       }
-      await revokeWith(session, saved.previous).catch((e) =>
-        note(
-          `  ! ${item.name}: could not delete the previous key: ${describe(e)}`,
-        ),
-      );
+      await cleanUp(store, session, saved.previous, item.name);
       return { profile: saved.name, detail: "authorized this computer" };
     } finally {
       closeSession(session);
@@ -180,11 +196,7 @@ async function importItem(
         operateAs: key.operateAs,
         enterprise: conn,
       };
-      await revokeWith(session, saved.previous).catch((e) =>
-        note(
-          `  ! ${item.name}: could not delete the previous key: ${describe(e)}`,
-        ),
-      );
+      await cleanUp(store, session, saved.previous, item.name);
     } finally {
       disconnectEnterprise(conn);
     }
@@ -254,11 +266,11 @@ async function importItem(
   return { profile, detail };
 }
 
-/** Returns the number of profiles imported, or `undefined` if nothing was found. */
-export async function runImport(
+/** Returns the number of profiles migrated, or `undefined` if nothing was found. */
+export async function runMigrate(
   store: Store,
   prompt: Prompter,
-  options: ImportOptions,
+  options: MigrateOptions,
   offered: boolean,
 ): Promise<number | undefined> {
   const legacy = await findLegacy(options.from);
@@ -273,15 +285,15 @@ export async function runImport(
         p.importedFrom === importedFrom(legacy.path, i),
     ),
   );
-  for (const i of done) note(`  – ${i.name}: already imported`);
+  for (const i of done) note(`  – ${i.name}: already migrated`);
   let items = legacy.items.filter((i) => !done.includes(i));
   if (items.length === 0) return 0;
   note(
-    "Importing signs in to each server to check its credentials, so the servers must be reachable now (for example, on VPN).",
+    "Migrating signs in to each server to check its credentials, so the servers must be reachable now (for example, on VPN).",
   );
   if (!options.yes) {
     items = await prompt.multiSelect(
-      "Which servers do you want to import?",
+      "Which servers do you want to migrate?",
       items.map((i) => ({
         label: `${i.name.padEnd(12)} ${new URL(i.origin).host}`,
         hint: describePlan(i),
@@ -290,13 +302,13 @@ export async function runImport(
       "--yes",
     );
   }
-  for (const n of legacy.notImported) note(`  – ${n}: not used, not imported`);
+  for (const n of legacy.notImported) note(`  – ${n}: not used, not migrated`);
 
-  const outcomes: Imported[] = [];
+  const outcomes: Migrated[] = [];
   const seconds = timeoutMs() / 1000;
   for (const item of items) {
     try {
-      const { profile, detail } = await importItem(
+      const { profile, detail } = await migrateItem(
         store,
         legacy.path,
         item,
@@ -305,18 +317,18 @@ export async function runImport(
             `  … ${item.name}: ${what} (gives up after ${seconds}s if unreachable)`,
           ),
       );
-      outcomes.push({ item: item.name, profile, detail, ok: true });
+      outcomes.push({ item, profile, detail, ok: true });
       note(`  ✔ ${item.name} → ${profile}  ${detail}`);
     } catch (e) {
       const detail = reason(item, e);
-      outcomes.push({ item: item.name, detail, ok: false });
+      outcomes.push({ item, detail, ok: false });
       note(`  ! ${item.name}: ${detail}`);
     }
   }
   const failed = outcomes.filter((o) => !o.ok).length;
   if (failed) {
     note(
-      `${failed} not imported. Fix the problems above (for example, connect to the servers' network), then run \`${BIN} auth import\` to retry. Imported servers are skipped.`,
+      `${failed} not migrated. Fix the problems above (for example, connect to the servers' network), then run \`${BIN} auth migrate\` to retry. Migrated servers are skipped.`,
     );
   }
 
@@ -326,7 +338,10 @@ export async function runImport(
     if (items.length === 0) config.legacyImport = "declined";
     else if (anyOk) config.legacyImport = "done";
     const legacyDefault = outcomes.find(
-      (o) => o.ok && o.item === legacy.defaultName,
+      (o) =>
+        o.ok &&
+        o.item.name === legacy.defaultItem?.name &&
+        o.item.kind === legacy.defaultItem.kind,
     );
     if (legacyDefault) {
       const id = Object.entries(config.profiles).find(
@@ -338,17 +353,17 @@ export async function runImport(
   return outcomes.filter((o) => o.ok).length;
 }
 
-export async function importCommand(options: ImportOptions): Promise<void> {
+export async function migrateCommand(options: MigrateOptions): Promise<void> {
   const g = globals(options);
   const store = new Store();
   await store.ensureDir();
-  const prompt = await getPrompter(g.input !== false);
-  const count = await runImport(store, prompt, options, false);
+  const prompt = await getPrompter(promptsAllowed(g));
+  const count = await runMigrate(store, prompt, options, false);
   if (count === undefined) {
-    result(() => "No legacy config found.", { imported: 0 });
+    result(() => "No legacy config found.", { migrated: 0 });
     return;
   }
-  result(() => `Imported ${count} profile${count === 1 ? "" : "s"}.`, {
-    imported: count,
+  result(() => `Migrated ${count} profile${count === 1 ? "" : "s"}.`, {
+    migrated: count,
   });
 }

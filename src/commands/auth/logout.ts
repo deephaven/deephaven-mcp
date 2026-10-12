@@ -1,5 +1,5 @@
 import { DhError, describe } from "../../auth/errors.ts";
-import { revokeOwnKey } from "../../auth/flows.ts";
+import { addOrphan, revokeOwnKey } from "../../auth/flows.ts";
 import {
   findByName,
   removeProfile,
@@ -10,7 +10,11 @@ import { Store } from "../../auth/store.ts";
 import { note, result } from "../../output.ts";
 import { getPrompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
-import { globals, profileName as selectedProfile } from "../common.ts";
+import {
+  globals,
+  promptsAllowed,
+  profileName as selectedProfile,
+} from "../common.ts";
 
 export interface LogoutOptions {
   all?: boolean;
@@ -50,7 +54,7 @@ export async function logout(
   } else if (profiles.length === 1 && profiles[0]) {
     ids = [profiles[0][0]];
   } else {
-    const prompt = await getPrompter(g.input !== false);
+    const prompt = await getPrompter(promptsAllowed(g));
     const picked = await prompt.select(
       "Which profile do you want to remove?",
       [
@@ -87,6 +91,7 @@ export async function logout(
   ids = ids.filter((id) => !kept.includes(id));
 
   const removed: { profile: string; server: string; revoked: boolean }[] = [];
+  const unrevoked: string[] = [];
   for (const id of ids) {
     const p = config.profiles[id];
     if (!p) continue;
@@ -102,10 +107,11 @@ export async function logout(
           store.cacheDir,
         );
       } catch (e) {
+        unrevoked.push(id);
         note(
-          `! Could not revoke the key on ${p.server}: ${describe(
+          `! Could not delete the key on ${p.server}: ${describe(
             e,
-          )}. Removing the profile anyway.`,
+          )}. Removing the profile anyway; the key is deleted the next time you sign in there as ${p.user}.`,
         );
       }
     }
@@ -124,6 +130,10 @@ export async function logout(
       }
       next = removeProfile(state.config, id);
       delete state.credentials.credentials[id];
+      const p = config.profiles[id];
+      if (p && unrevoked.includes(id)) {
+        addOrphan(state.credentials, p.server, p.user, now);
+      }
     }
     return next ? state.config.profiles[next]?.name : undefined;
   });

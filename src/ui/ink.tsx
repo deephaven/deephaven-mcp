@@ -211,15 +211,14 @@ function TextInput({
   useInput(
     (input, key) => {
       if (key.ctrl && input === "c") cancel();
-      else if (key.return) done(current.current);
       else if (key.backspace || key.delete)
         update(current.current.slice(0, -1));
-      else if (!key.ctrl && !key.meta && input) {
-        // Pasted text can arrive together with the Enter that ends it.
+      // Before Return: pasted text can arrive together with the Enter that ends it.
+      else if (!key.ctrl && !key.meta && input && !/^[\r\n]+$/.test(input)) {
         const end = input.search(/[\r\n]/);
         if (end < 0) update(current.current + input);
         else done(current.current + input.slice(0, end));
-      }
+      } else if (key.return) done(current.current);
     },
     { isActive: answer === undefined },
   );

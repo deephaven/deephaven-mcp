@@ -40,7 +40,9 @@ async function statusLine(): Promise<void> {
   } catch {
     out(`Run \`${BIN} auth\` to check your profiles.`);
   }
-  out(`For agents: \`${BIN} agents\` prints commands and error codes as JSON.`);
+  out(
+    `For agents: \`${BIN} agents\` summarizes commands and error codes (\`-o json\` for everything).`,
+  );
 }
 
 const root = new Command()
@@ -77,7 +79,9 @@ const root = new Command()
       .choices(["human", "json"])
       .default("human"),
   )
-  .option("--no-input", "Never prompt.")
+  .option("--no-prompt", "Never prompt; fail with the flag to pass instead.")
+  // The older name; agents trained on other CLIs may still reach for it.
+  .addOption(new Option("--no-input").hideHelp())
   .action(async (_options, command: Command) => {
     command.outputHelp();
     await statusLine();
@@ -86,7 +90,7 @@ const root = new Command()
 addAuthCommand(root);
 root
   .command("agents")
-  .description("Print the command tree, flags and error codes as JSON.")
+  .description("Summarize commands and error codes; -o json for every flag.")
   .action(() => agents(root));
 
 setFormat(formatFromArgs(process.argv.slice(2)));

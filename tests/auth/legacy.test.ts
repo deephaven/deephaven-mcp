@@ -48,7 +48,7 @@ test("parseV1: maps every session and system", async () => {
 test("parseV2: maps the tree and reads the default system", async () => {
   const legacy = await parseV2(fixture("ai/config"));
   const byName = Object.fromEntries(legacy.items.map((i) => [i.name, i]));
-  expect(legacy.defaultName).toBe("prod");
+  expect(legacy.defaultItem).toEqual({ name: "prod", kind: "enterprise" });
   expect(byName.local_dev?.plan).toEqual({
     method: "psk",
     secret: { env: "DH_LOCAL_DEV_PSK" },
@@ -73,7 +73,7 @@ test("findLegacy: DH_MCP_CONFIG_FILE, then the v2 tree under DH_AI_DATA_DIR", as
   try {
     delete process.env.DH_MCP_CONFIG_FILE;
     process.env.DH_AI_DATA_DIR = fixture("ai");
-    expect((await findLegacy())?.defaultName).toBe("prod");
+    expect((await findLegacy())?.defaultItem?.name).toBe("prod");
     process.env.DH_MCP_CONFIG_FILE = fixture("v1_config.json");
     expect((await findLegacy())?.items.length).toBe(7);
     process.env.DH_AI_DATA_DIR = fixture("missing");

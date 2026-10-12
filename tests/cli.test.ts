@@ -25,8 +25,14 @@ async function setup() {
   };
 }
 
-/** Writes a config with two Community profiles that need no network. */
-async function seed(configDir: string) {
+interface Extra {
+  servers?: Record<string, unknown>;
+  profiles?: Record<string, unknown>;
+  credentials?: Record<string, unknown>;
+}
+
+/** Writes a config with two Community profiles that need no network, plus `extra`. */
+async function seed(configDir: string, extra: Extra = {}) {
   await mkdir(configDir, { recursive: true });
   await writeFile(
     join(configDir, "config.json"),
@@ -36,6 +42,7 @@ async function seed(configDir: string) {
       servers: {
         "http://localhost:10000": { kind: "community" },
         "http://localhost:10001": { kind: "community" },
+        ...extra.servers,
       },
       profiles: {
         p_a: {
@@ -52,6 +59,7 @@ async function seed(configDir: string) {
           method: "anonymous",
           createdAt: "",
         },
+        ...extra.profiles,
       },
     }),
   );
@@ -59,7 +67,10 @@ async function seed(configDir: string) {
     join(configDir, "credentials.json"),
     JSON.stringify({
       version: 1,
-      credentials: { p_a: { type: "envRef", env: "UNSET_TEST_PSK" } },
+      credentials: {
+        p_a: { type: "envRef", env: "UNSET_TEST_PSK" },
+        ...extra.credentials,
+      },
     }),
     { mode: 0o600 },
   );
@@ -83,7 +94,7 @@ test("cli: no profiles", async () => {
 
 test("cli: usage errors exit 2, with JSON on stderr", async () => {
   const { run } = await setup();
-  const login = await run(["auth", "login", "--no-input", "-o", "json"]);
+  const login = await run(["auth", "login", "--no-prompt", "-o", "json"]);
   expect(login.code).toBe(2);
   const error = JSON.parse(login.stderr);
   expect(error.code).toBe("usage");
@@ -94,9 +105,14 @@ test("cli: usage errors exit 2, with JSON on stderr", async () => {
   expect(unknown.code).toBe(2);
 });
 
-test("cli: agents lists commands and every error code", async () => {
+test("cli: agents summarizes, and lists every command and error code as JSON", async () => {
   const { run } = await setup();
-  const res = await run(["agents"]);
+  const summary = await run(["agents"]);
+  expect(summary.code).toBe(0);
+  expect(summary.stdout).toContain(`${BIN} auth login [server]`);
+  expect(summary.stdout).toContain("auth_required");
+
+  const res = await run(["agents", "-o", "json"]);
   expect(res.code).toBe(0);
   const manifest = JSON.parse(res.stdout);
   const auth = manifest.commands.find(
@@ -138,9 +154,75 @@ test("cli: use, rename, and logout without a server", async () => {
   );
   expect(Object.keys(creds.credentials)).toEqual(["p_a"]);
 
-  // One profile left: no picker needed.
+  // One profile left: no picker needed. --no-input is the hidden older name.
   const many = await run(["auth", "logout", "--no-input"]);
   expect(many.code).toBe(0);
+});
+
+test("cli: use :<user> picks that user on the default's server", async () => {
+  const { run, configDir } = await setup();
+  await seed(configDir, {
+    profiles: {
+      p_c: {
+        name: "c",
+        server: "http://localhost:10000",
+        user: "alice",
+        method: "basic",
+        createdAt: "",
+      },
+    },
+  });
+  const use = await run(["auth", "use", ":alice", "-o", "json"]);
+  expect(use.code, use.stderr).toBe(0);
+  expect(JSON.parse(use.stdout).default).toBe("c");
+  // b is anonymous, but on another server.
+  const other = await run(["auth", "use", ":anonymous", "-o", "json"]);
+  expect(other.code).toBe(2);
+  expect(JSON.parse(other.stderr).error).toContain("No profile for anonymous");
+});
+
+test("cli: a key logout can't delete is remembered for the next sign-in", async () => {
+  const { run, configDir } = await setup();
+  const closed = Bun.listen({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: { data() {} },
+  });
+  const server = `http://127.0.0.1:${closed.port}`;
+  closed.stop(true);
+  await seed(configDir, {
+    servers: { [server]: { kind: "enterprise" } },
+    profiles: {
+      p_e: {
+        name: "e",
+        server,
+        user: "alice",
+        method: "saml",
+        createdAt: "",
+      },
+    },
+    credentials: {
+      p_e: {
+        type: "keyPair",
+        keyType: "ec",
+        publicKey: "PUB",
+        privateKey: "PRIV",
+        generated: true,
+      },
+    },
+  });
+  const out = await run(["auth", "logout", "e", "-o", "json"], {
+    DH_TIMEOUT: "2",
+  });
+  expect(out.code, out.stderr).toBe(0);
+  expect(out.stderr).toContain("deleted the next time you sign in");
+  const creds = JSON.parse(
+    await readFile(join(configDir, "credentials.json"), "utf8"),
+  );
+  expect(creds.credentials.p_e).toBeUndefined();
+  expect(creds.orphans).toEqual([
+    { server, user: "alice", keyType: "ec", publicKey: "PUB" },
+  ]);
 });
 
 test("cli: a profile whose env var is unset", async () => {

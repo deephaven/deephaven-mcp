@@ -17,7 +17,7 @@ async function run(
   env: Record<string, string> = {},
 ) {
   const out = await spawn(
-    [process.execPath, MAIN, ...args, "-o", "json", "--no-input"],
+    [process.execPath, MAIN, ...args, "-o", "json", "--no-prompt"],
     {
       DH_CONFIG_DIR: dir,
       DH_AI_DATA_DIR: join(dir, "none"),

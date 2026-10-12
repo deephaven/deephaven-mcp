@@ -2,11 +2,11 @@ import { DhError } from "../../auth/errors.ts";
 import { closeSession } from "../../auth/flows.ts";
 import { findByName, sortedProfiles } from "../../auth/profile.ts";
 import { requireAuth } from "../../auth/session.ts";
-import { Store } from "../../auth/store.ts";
+import { type Config, Store } from "../../auth/store.ts";
 import { result } from "../../output.ts";
 import { getPrompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
-import { globals } from "../common.ts";
+import { globals, promptsAllowed } from "../common.ts";
 
 const KIND_LABEL = { enterprise: "Enterprise", community: "Community" };
 
@@ -42,6 +42,39 @@ function noProfile(name: string): DhError {
   );
 }
 
+/** `:<user>`: that user's profile on the default profile's server. */
+function findByUser(config: Config, user: string): string {
+  const current = config.defaultProfile
+    ? config.profiles[config.defaultProfile]
+    : undefined;
+  if (!current) {
+    throw new DhError(
+      "usage",
+      `No default profile to take the server from`,
+      `Name the profile instead, e.g. \`${BIN} auth use <host>:${user}\`.`,
+    );
+  }
+  const matches = sortedProfiles(config).filter(
+    ([, p]) => p.server === current.server && p.user === user,
+  );
+  // Operate-as profiles share the user; the plain one wins.
+  const plain = matches.find(([, p]) => !p.operateAs || p.operateAs === user);
+  const found = plain ?? (matches.length === 1 ? matches[0] : undefined);
+  if (found) return found[0];
+  if (matches.length > 0) {
+    throw new DhError(
+      "usage",
+      `Several profiles for ${user} on ${current.server}`,
+      `Pick one by name: ${matches.map(([, p]) => p.name).join(", ")}`,
+    );
+  }
+  throw new DhError(
+    "usage",
+    `No profile for ${user} on ${current.server}`,
+    `Run \`${BIN} auth login ${current.server}\` and sign in as ${user}.`,
+  );
+}
+
 export async function use(options: unknown, name?: string): Promise<void> {
   const g = globals(options);
   const store = new Store();
@@ -55,9 +88,10 @@ export async function use(options: unknown, name?: string): Promise<void> {
     );
   }
   const id = name
-    ? findByName(config, name)?.[0]
+    ? (findByName(config, name)?.[0] ??
+      (name.startsWith(":") ? findByUser(config, name.slice(1)) : undefined))
     : await (async () => {
-        const prompt = await getPrompter(g.input !== false);
+        const prompt = await getPrompter(promptsAllowed(g));
         return await prompt.select(
           "Which profile should be the default?",
           profiles.map(([id, p]) => ({

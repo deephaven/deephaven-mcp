@@ -1,14 +1,22 @@
 import type { Command, Option } from "commander";
 import { ERROR_CODES } from "../auth/errors.ts";
-import { out } from "../output.ts";
+import { result } from "../output.ts";
 import { BIN, VERSION } from "../version.ts";
+
+interface Described {
+  command: string;
+  description: string;
+  arguments: { name: string; optional: boolean }[];
+  options: { flags: string; description: string }[];
+  commands: Described[];
+}
 
 const describeOption = (o: Option) => ({
   flags: o.flags,
   description: o.description,
 });
 
-function describeCommand(cmd: Command, path: string[]): unknown {
+function describeCommand(cmd: Command, path: string[]): Described {
   return {
     command: [...path, cmd.name()].join(" "),
     description: cmd.description(),
@@ -23,24 +31,54 @@ function describeCommand(cmd: Command, path: string[]): unknown {
   };
 }
 
-/** Machine-readable command tree, flags, and error codes. */
+/** One line per command, e.g. `dh auth login [server]`, depth-first. */
+function usageLines(commands: Described[]): [string, string][] {
+  return commands.flatMap((c) => [
+    [
+      [
+        c.command,
+        ...c.arguments.map((a) => (a.optional ? `[${a.name}]` : `<${a.name}>`)),
+      ].join(" "),
+      c.description,
+    ],
+    ...usageLines(c.commands),
+  ]);
+}
+
+/** Command tree and error codes: a summary, or everything with `-o json`. */
 export function agents(root: Command): void {
-  out(
-    JSON.stringify({
-      name: BIN,
-      version: VERSION,
-      globalOptions: root.options.filter((o) => !o.hidden).map(describeOption),
-      commands: root.commands.map((c) => describeCommand(c, [BIN])),
-      errors: Object.entries(ERROR_CODES).map(([code, e]) => ({
-        code,
-        exit: e.exit,
-        description: e.description,
-      })),
-      errorFormat: {
-        stream: "stderr",
-        when: "-o json",
-        fields: ["error", "code", "exit", "hint"],
-      },
-    }),
-  );
+  const manifest = {
+    name: BIN,
+    version: VERSION,
+    globalOptions: root.options.filter((o) => !o.hidden).map(describeOption),
+    commands: root.commands.map((c) => describeCommand(c, [BIN])),
+    errors: Object.entries(ERROR_CODES).map(([code, e]) => ({
+      code,
+      exit: e.exit,
+      description: e.description,
+    })),
+    errorFormat: {
+      stream: "stderr",
+      when: "-o json",
+      fields: ["error", "code", "exit", "hint"],
+    },
+  };
+  result(() => {
+    const commands = usageLines(manifest.commands);
+    const width = Math.max(...commands.map(([usage]) => usage.length));
+    const codeWidth = Math.max(...manifest.errors.map((e) => e.code.length));
+    return [
+      `${BIN} ${VERSION}. Every command takes \`-o json\` for JSON output and \`--no-prompt\` to fail instead of prompting.`,
+      "",
+      "Commands:",
+      ...commands.map(([usage, text]) => `  ${usage.padEnd(width)}  ${text}`),
+      "",
+      "Errors (exit code; with -o json, stderr is {error, code, exit, hint}):",
+      ...manifest.errors.map(
+        (e) => `  ${e.code.padEnd(codeWidth)}  ${e.exit}  ${e.description}`,
+      ),
+      "",
+      `Flags: \`${BIN} <command> --help\`. Everything above, with flags, as JSON: \`${BIN} agents -o json\`.`,
+    ];
+  }, manifest);
 }

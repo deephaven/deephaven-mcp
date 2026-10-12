@@ -17,11 +17,11 @@ dh auth                            # list profiles; ● marks the default
 | `dh auth`                         | List profiles                                                                     |
 | `dh auth login [server]`          | Sign in and save a profile                                                        |
 | `dh auth status`                  | Sign in with the selected profile and report who you are                          |
-| `dh auth use [profile]`           | Set the default profile                                                           |
+| `dh auth use [profile]`           | Set the default profile. `:<user>` picks that user on the default's server        |
 | `dh auth rename <profile> <name>` | Rename a profile                                                                  |
 | `dh auth logout [profile]`        | Delete this computer's key on the server, if `dh` made it, and remove the profile |
 | `dh auth logout --all`            | The same for every profile                                                        |
-| `dh auth import [--from <path>]`  | Import servers from an old dhcli / Deephaven MCP config                           |
+| `dh auth migrate [--from <path>]` | Migrate profiles from an old dhcli / Deephaven MCP config                         |
 
 Global flags, accepted by every command:
 
@@ -29,22 +29,30 @@ Global flags, accepted by every command:
 | ------------------ | ---------------------------------------------------------- |
 | `--profile <name>` | Use this profile instead of the default (env `DH_PROFILE`) |
 | `-o json`          | Print results as JSON ([JSON output](#json-output))        |
-| `--no-input`       | Never prompt; fail with the flag to pass instead           |
+| `--no-prompt`      | Never prompt; fail with the flag to pass instead           |
+
+In a terminal, `dh` asks for anything the flags leave out: the server, the
+method when the server offers more than one, the username, and the password.
+[Scripts, CI and agents](#scripts-ci-and-agents) lists the flag for each
+question.
 
 ## Server addresses
 
 `dh auth login` accepts a host name, `host:port`, or a URL copied from the
 browser. It ignores the path.
 
-| You type                            | `dh` tries                          |
-| ----------------------------------- | ----------------------------------- |
-| `dhe.example.com`, `https://…`      | https on ports 443, 8000, 8123      |
-| `localhost`, `http://…`             | http on ports 10000, 8000, 8123, 80 |
-| a port, e.g. `dhe.example.com:8123` | that port only                      |
+| You type                                   | `dh` tries                          |
+| ------------------------------------------ | ----------------------------------- |
+| `dhe.example.com`                          | https on ports 443, 8000, 8123      |
+| `dhe.example.com:8123`                     | https on port 8123 only             |
+| `localhost` (or `127.0.0.1`, `[::1]`)      | http on ports 10000, 8000, 8123, 80 |
+| `localhost:10123`                          | http on port 10123 only             |
+| `https://` or `http://` before any of them | that scheme instead                 |
 
-It uses the first address in the list that answers as a Deephaven server, and
-reports whether that is Enterprise or Community. An `https` address never falls
-back to `http`.
+Without a scheme, `dh` uses https for every host except these local ones. It
+uses the first address in the list that answers as a Deephaven server, and
+reports whether that is Enterprise or Community. It never falls back from https
+to http.
 
 If nothing answers, the error lists every address tried. Check the address, your
 VPN, and whether the server is up.
@@ -118,7 +126,7 @@ an environment variable, or type them at the prompt.
 - `--*-env <VAR>` saves only the variable's name. `dh` reads the variable each
   time the profile is used, so it must be set then too.
 - A secret typed at the prompt or read from stdin is saved in
-  `credentials.json`, which only you can read.
+  `credentials.json` ([Where profiles are stored](#where-profiles-are-stored)).
 
 ```sh
 dh auth login localhost:10000 --method psk --psk-env DH_PSK
@@ -140,7 +148,8 @@ again as the same combination updates that profile instead of adding a new one.
   default.
 - **Several accounts on one server:** sign in once per account. Each gets its
   own profile, e.g. `dhe.example.com:alice` and `dhe.example.com:bob`. Switch
-  with `dh auth use` or `--profile`.
+  with `dh auth use dhe.example.com:bob`, `dh auth use :bob` (that user on the
+  default profile's server), or `--profile`.
 
 In a terminal, `dh auth login` with no server and existing profiles offers a
 menu: log in to another server, log in as a different user, sign in again with a
@@ -148,10 +157,13 @@ profile, or remove one.
 
 ### Where profiles are stored
 
-| Path                                | Contents                               |
-| ----------------------------------- | -------------------------------------- |
-| `~/.deephaven/cli/config.json`      | Servers and profiles. No secrets       |
-| `~/.deephaven/cli/credentials.json` | Keys and secrets. Readable only by you |
+| Path                                | Contents                                        |
+| ----------------------------------- | ----------------------------------------------- |
+| `~/.deephaven/cli/config.json`      | Servers and profiles. No secrets                |
+| `~/.deephaven/cli/credentials.json` | Keys and secrets. Readable only by your account |
+
+Other accounts on the computer can't read `credentials.json`, but any program
+running as you can, including AI agents and other tools.
 
 On Windows the directory is `%APPDATA%\Deephaven\cli`. Set `DH_CONFIG_DIR` to
 use another directory.
@@ -163,10 +175,13 @@ permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
 
 `dh auth logout <profile>` removes the profile from this computer. If `dh`
 generated the profile's Enterprise key, it first deletes that key on the server.
-It never deletes a key you supplied with `--private-key-file`.
+It deletes only that exact key, matched by the key itself, so the same user's
+keys from other computers stay, even ones with the same host name. It never
+deletes a key you supplied with `--private-key-file`.
 
-If the server can't be reached, `dh` warns, removes the profile anyway, and the
-key stays on the server. An administrator can list and delete keys with
+If the server can't be reached, `dh` warns, removes the profile anyway, and
+remembers the key. The next time you sign in to that server as that user, `dh`
+deletes it. Until then an administrator can list and delete keys with
 `dhconfig acl publickey` (run as the Deephaven admin user, e.g.
 `sudo -u irisadmin`). Keys made by `dh` have comments starting with `dh CLI -`.
 
@@ -175,17 +190,18 @@ certificate from the others, and names it. Log out of it on its own. A profile
 that is signed in again while logout runs is also kept, with its new key.
 
 Signing in again to an existing Enterprise profile replaces its key and deletes
-the old one.
+the old one. If that deletion fails, the old key is remembered the same way.
 
 ## Scripts, CI and agents
 
-Without a terminal, or with `--no-input`, `dh` never prompts. When it needs an
-answer, it fails with exit code 2 and names the flag to pass:
+Without a terminal, or with `--no-prompt`, `dh` never prompts. When it needs an
+answer, it fails with exit code 2 and names the flag to pass. (`--no-input` is
+accepted too.)
 
 ```text
-$ dh auth login --no-input
+$ dh auth login --no-prompt
 ✖ Input needed: pass <server>
-  Prompts are off without a TTY or with --no-input.
+  Prompts are off without a TTY or with --no-prompt.
 ```
 
 | Prompt                          | Flag that answers it                                       |
@@ -196,25 +212,26 @@ $ dh auth login --no-input
 | Password, key, token            | `--password-*`, `--psk-*`, `--token-*`                     |
 | `Use alice@example.com?` (SSO)  | `--expect-user alice@example.com`                          |
 | `Make this the default?`        | `--default` / `--no-default` (without either: not default) |
-| Import an old config?           | `--yes` (without it: skipped)                              |
+| Migrate an old config?          | `--yes` (without it: skipped)                              |
 | Which profile (`use`, `logout`) | the `profile` argument, or `logout --all`                  |
 
-`dh agents` prints every command, flag and error code as JSON.
+`dh agents` summarizes every command and error code. `dh agents -o json` prints
+the full manifest, with every flag, as JSON.
 
 ### JSON output
 
 With `-o json`, stdout holds exactly one JSON value. Progress messages and
 errors go to stderr.
 
-| Command          | stdout                                                               |
-| ---------------- | -------------------------------------------------------------------- |
-| `dh auth`        | `[{"name", "server", "kind", "user", "method", "default"}]`          |
-| `dh auth login`  | `{"profile", "server", "user", "default"}`                           |
-| `dh auth status` | `{"profile", "server", "kind", "user", "operateAs"}`                 |
-| `dh auth use`    | `{"default"}`                                                        |
-| `dh auth rename` | `{"from", "to"}`                                                     |
-| `dh auth logout` | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}` |
-| `dh auth import` | `{"imported"}`                                                       |
+| Command           | stdout                                                               |
+| ----------------- | -------------------------------------------------------------------- |
+| `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`          |
+| `dh auth login`   | `{"profile", "server", "user", "default"}`                           |
+| `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                 |
+| `dh auth use`     | `{"default"}`                                                        |
+| `dh auth rename`  | `{"from", "to"}`                                                     |
+| `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}` |
+| `dh auth migrate` | `{"migrated"}`                                                       |
 
 `profile` is `null` in `status` when signed in from environment variables.
 
@@ -271,16 +288,16 @@ DH_SERVER=localhost:10000 DH_PSK=… dh auth status -o json
 - An Enterprise password is used to sign in on every command.
 - `--profile` or `DH_PROFILE` takes priority over `DH_SERVER`.
 
-## Importing an old config
+## Migrating an old config
 
-If you used the earlier dhcli / Deephaven MCP tools, `dh` can import their
-servers. Your first `dh auth login` offers it, or run `dh auth import`.
+If you used the earlier dhcli / Deephaven MCP tools, `dh` can migrate their
+servers. Your first `dh auth login` offers it, or run `dh auth migrate`.
 
 `dh` looks for `$DH_MCP_CONFIG_FILE`, then `$DH_AI_DATA_DIR/config` or
 `~/.deephaven/ai/config`. `--from <path>` points it at another file or
 directory. The old files are not changed.
 
-Importing signs in to each server to check its credentials, so **each server
+Migrating signs in to each server to check its credentials, so **each server
 must be reachable at the time** (for example, connect to the VPN first). `dh`
 prints what it's waiting on for each server:
 
@@ -288,7 +305,7 @@ prints what it's waiting on for each server:
   … prod: signing in to dhe.example.com:8123 as alice, then authorizing this computer (gives up after 30s if unreachable)
   ✔ prod → dhe.example.com:alice  authorized this computer
   ! staging: can't reach dhe-staging.example.com:8123 (fetch failed)
-1 not imported. Fix the problems above (for example, connect to the servers' network), then run `dh auth import` to retry. Imported servers are skipped.
+1 not migrated. Fix the problems above (for example, connect to the servers' network), then run `dh auth migrate` to retry. Migrated servers are skipped.
 ```
 
 - An Enterprise password is used once to upload a key, then discarded.
@@ -300,7 +317,7 @@ prints what it's waiting on for each server:
 - Servers with a custom CA certificate are skipped. Sign in to them with
   `dh auth login <server> --ca-cert <file>`.
 - Session creation, Docker and timeout settings aren't used by `dh`; they are
-  listed as not imported.
+  listed as not migrated.
 
 ## Certificates and proxies
 
@@ -318,7 +335,7 @@ prints what it's waiting on for each server:
 | `DH_TIMEOUT`                           | Seconds to wait for connecting and non-SSO sign-in (default 30) |
 | `DH_DEBUG`                             | Show client library logs and internal error details             |
 | `DH_SERVER`, …                         | Environment-only sign-in ([above](#environment-only-sign-in))   |
-| `DH_MCP_CONFIG_FILE`, `DH_AI_DATA_DIR` | Where to look for an old config to import                       |
+| `DH_MCP_CONFIG_FILE`, `DH_AI_DATA_DIR` | Where to look for an old config to migrate                      |
 
 ## Troubleshooting
 

@@ -65,6 +65,15 @@ export interface Config {
 export interface Credentials {
   version: 1;
   credentials: Record<string, Credential>;
+  /** Generated keys whose deletion failed; retried at the next sign-in as `user`. */
+  orphans?: OrphanKey[];
+}
+
+export interface OrphanKey {
+  server: string;
+  user: string;
+  keyType: string;
+  publicKey: string;
 }
 
 export interface State {

@@ -1,8 +1,8 @@
 import { type Command, InvalidArgumentError, Option } from "commander";
-import { importCommand } from "./import.ts";
 import { login, METHODS } from "./login.ts";
 import { logout } from "./logout.ts";
 import { list, rename, status, use } from "./manage.ts";
+import { migrateCommand } from "./migrate.ts";
 
 function seconds(value: string): number {
   const n = Number(value);
@@ -51,7 +51,7 @@ export function addAuthCommand(root: Command): void {
     .option("--expect-user <user>", "Fail unless SSO signs in as this user.")
     .option("--default", "Make this the default profile.")
     .option("--no-default", "Don't make this the default profile.")
-    .option("-y, --yes", "Accept confirmation prompts.")
+    .option("-y, --yes", "Migrate a legacy config without asking.")
     .action((server, _options, cmd: Command) =>
       login(cmd.optsWithGlobals(), server),
     );
@@ -59,7 +59,10 @@ export function addAuthCommand(root: Command): void {
   auth
     .command("use")
     .description("Set the default profile.")
-    .argument("[profile]")
+    .argument(
+      "[profile]",
+      "Profile name, or :<user> for that user on the default's server.",
+    )
     .action((profile, _options, cmd: Command) =>
       use(cmd.optsWithGlobals(), profile),
     );
@@ -86,9 +89,9 @@ export function addAuthCommand(root: Command): void {
     .action((_options, cmd: Command) => status(cmd.optsWithGlobals()));
 
   auth
-    .command("import")
-    .description("Import a legacy dhcli / Deephaven MCP config.")
+    .command("migrate")
+    .description("Migrate profiles from a legacy dhcli / Deephaven MCP config.")
     .option("--from <path>", "Legacy config file or directory.")
-    .option("-y, --yes", "Import everything without asking.")
-    .action((_options, cmd: Command) => importCommand(cmd.optsWithGlobals()));
+    .option("-y, --yes", "Migrate everything without asking.")
+    .action((_options, cmd: Command) => migrateCommand(cmd.optsWithGlobals()));
 }

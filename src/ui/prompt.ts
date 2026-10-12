@@ -25,7 +25,7 @@ function missing(flag: string): Promise<never> {
     new DhError(
       "usage",
       `Input needed: pass ${flag}`,
-      "Prompts are off without a TTY or with --no-input.",
+      "Prompts are off without a TTY or with --no-prompt.",
     ),
   );
 }

@@ -3,7 +3,14 @@ import { DhError } from "../auth/errors.ts";
 export interface GlobalOptions {
   profile?: string;
   output?: "human" | "json";
+  /** False with `--no-prompt`. */
+  prompt?: boolean;
+  /** False with `--no-input`, the hidden older name of `--no-prompt`. */
   input?: boolean;
+}
+
+export function promptsAllowed(g: GlobalOptions): boolean {
+  return g.prompt !== false && g.input !== false;
 }
 
 /** Commands receive `optsWithGlobals()`, which includes the root's options. */

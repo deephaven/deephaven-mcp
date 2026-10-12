@@ -11,7 +11,7 @@ import { DhError, timeoutMs } from "./errors.ts";
 import type { KeyPair } from "./keyfile.ts";
 import { defaultName, findByIdentity, newProfileId } from "./profile.ts";
 import type { Session } from "./session.ts";
-import type { Credential, Kind, Method, Store } from "./store.ts";
+import type { Credential, Credentials, Kind, Method, Store } from "./store.ts";
 
 export interface NewProfile {
   origin: string;
@@ -155,6 +155,57 @@ export async function revokeOwnKey(
   } finally {
     disconnectEnterprise(conn);
   }
+}
+
+/** Remembers a generated key that couldn't be deleted, for {@link revokeOrphans}. */
+export function addOrphan(
+  credentials: Credentials,
+  server: string,
+  user: string,
+  cred: Credential | undefined,
+): void {
+  if (cred?.type !== "keyPair" || !cred.generated) return;
+  credentials.orphans ??= [];
+  const orphans = credentials.orphans;
+  if (orphans.some((o) => o.publicKey === cred.publicKey)) return;
+  orphans.push({
+    server,
+    user,
+    keyType: cred.keyType,
+    publicKey: cred.publicKey,
+  });
+}
+
+/** Deletes remembered keys of the signed-in Enterprise user; returns how many. */
+export async function revokeOrphans(
+  store: Store,
+  session: Session,
+): Promise<number> {
+  const conn = session.enterprise;
+  if (!conn) return 0;
+  const { credentials } = await store.read();
+  const mine = (credentials.orphans ?? []).filter(
+    (o) => o.server === session.origin && o.user === session.user,
+  );
+  const deleted = new Set<string>();
+  for (const o of mine) {
+    const key = { type: o.keyType, publicKey: o.publicKey, privateKey: "" };
+    try {
+      await deleteKey(conn, session.user, key);
+      deleted.add(o.publicKey);
+    } catch {
+      // Kept for the next sign-in.
+    }
+  }
+  if (deleted.size === 0) return 0;
+  await store.update(({ credentials }) => {
+    const left = (credentials.orphans ?? []).filter(
+      (o) => !deleted.has(o.publicKey),
+    );
+    if (left.length) credentials.orphans = left;
+    else delete credentials.orphans;
+  });
+  return deleted.size;
 }
 
 export function keyPairOf(cred: Credential & { type: "keyPair" }): KeyPair {

@@ -20,14 +20,17 @@ import {
 } from "../../auth/enterprise.ts";
 import { DhError, describe, timeoutMs } from "../../auth/errors.ts";
 import {
+  addOrphan,
   authorizeComputer,
   closeSession,
+  keyPairOf,
   type NewProfile,
+  revokeOrphans,
   revokeWith,
   type Saved,
   saveProfile,
 } from "../../auth/flows.ts";
-import { readKeyFile } from "../../auth/keyfile.ts";
+import { type KeyFile, type KeyPair, readKeyFile } from "../../auth/keyfile.ts";
 import {
   findByIdentity,
   findByName,
@@ -46,9 +49,9 @@ import {
 import { note, result } from "../../output.ts";
 import { type Choice, getPrompter, type Prompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
-import { globals, profileName, secretFrom } from "../common.ts";
-import { runImport } from "./import.ts";
+import { globals, profileName, promptsAllowed, secretFrom } from "../common.ts";
 import { type LogoutOptions, logout } from "./logout.ts";
+import { runMigrate } from "./migrate.ts";
 
 export const METHODS: Method[] = [
   "saml",
@@ -97,6 +100,8 @@ interface Target {
   handler?: string;
   /** Key file of a profile being re-authenticated. */
   keyFile?: string;
+  /** Key saved with `--copy-key` by a profile being re-authenticated. */
+  copiedKey?: KeyPair;
 }
 
 interface Result {
@@ -217,12 +222,18 @@ async function enterpriseLogin(
   const operateAs = options.operateAs ?? target.operateAs;
 
   if (method === "private-key") {
-    const path = resolve(
-      options.privateKeyFile ??
-        target.keyFile ??
-        (await prompt.text("Key file", "--private-key-file")),
-    );
-    const key = await readKeyFile(path);
+    let path: string | undefined;
+    let key: KeyFile;
+    if (!options.privateKeyFile && target.copiedKey) {
+      key = { keyPair: target.copiedKey };
+    } else {
+      path = resolve(
+        options.privateKeyFile ??
+          target.keyFile ??
+          (await prompt.text("Key file", "--private-key-file")),
+      );
+      key = await readKeyFile(path);
+    }
     const username =
       options.username ??
       key.user ??
@@ -240,15 +251,16 @@ async function enterpriseLogin(
         enterprise: conn,
       },
       method,
-      credential: options.copyKey
-        ? {
-            type: "keyPair",
-            keyType: key.keyPair.type,
-            publicKey: key.keyPair.publicKey,
-            privateKey: key.keyPair.privateKey,
-            generated: false,
-          }
-        : { type: "keyFile", path },
+      credential:
+        path && !options.copyKey
+          ? { type: "keyFile", path }
+          : {
+              type: "keyPair",
+              keyType: key.keyPair.type,
+              publicKey: key.keyPair.publicKey,
+              privateKey: key.keyPair.privateKey,
+              generated: false,
+            },
     };
   }
 
@@ -392,7 +404,7 @@ async function communityLogin(
   note(`✔ Signed in${method === "anonymous" ? " anonymously" : ` as ${user}`}`);
   if (method === "basic" && credential.type === "secret") {
     note(
-      "! The password is saved in credentials.json, readable only by you. Use --password-env to save a variable name instead.",
+      "! The password is saved in credentials.json, readable only by your account. Use --password-env to save a variable name instead.",
     );
   }
   return {
@@ -416,7 +428,9 @@ async function pickTarget(
   reauth: Target | undefined,
 ): Promise<Target> {
   if (reauth) {
-    await ensureCa(state.config.servers[reauth.origin]?.caCert);
+    await ensureCa(
+      options.caCert ?? state.config.servers[reauth.origin]?.caCert,
+    );
     return reauth;
   }
   let input = serverArg;
@@ -516,6 +530,8 @@ function targetOf(state: State, id: string): Target {
     operateAs: p.operateAs,
     handler: p.handler,
     keyFile: cred?.type === "keyFile" ? cred.path : undefined,
+    copiedKey:
+      cred?.type === "keyPair" && !cred.generated ? keyPairOf(cred) : undefined,
   };
 }
 
@@ -526,15 +542,15 @@ export async function login(
   const g = globals(options);
   const store = new Store();
   await store.ensureDir();
-  const prompt = await getPrompter(g.input !== false);
+  const prompt = await getPrompter(promptsAllowed(g));
   let state = await store.read();
 
   const hasProfiles = Object.keys(state.config.profiles).length > 0;
   if (!hasProfiles && !state.config.legacyImport && !serverArg) {
-    const count = await runImport(store, prompt, { yes: options.yes }, true);
+    const count = await runMigrate(store, prompt, { yes: options.yes }, true);
     if (count) {
-      result(() => `Imported ${count} profile${count === 1 ? "" : "s"}.`, {
-        imported: count,
+      result(() => `Migrated ${count} profile${count === 1 ? "" : "s"}.`, {
+        migrated: count,
       });
       return;
     }
@@ -603,10 +619,21 @@ export async function login(
       credential,
     };
     saved = await saveProfile(store, profile, makeDefault);
+    const cleaned = await revokeOrphans(store, session).catch(() => 0);
+    if (cleaned) {
+      note(
+        `✔ Deleted ${cleaned} old key${cleaned === 1 ? "" : "s"} that an earlier logout couldn't`,
+      );
+    }
     try {
       await revokeWith(session, saved.previous);
     } catch (e) {
-      note(`! Could not delete the previous key: ${describe(e)}`);
+      await store.update(({ credentials }) =>
+        addOrphan(credentials, session.origin, session.user, saved?.previous),
+      );
+      note(
+        `! Could not delete the previous key: ${describe(e)}. It's retried at your next sign-in.`,
+      );
     }
     const { name, isDefault } = saved;
     result(

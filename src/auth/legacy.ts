@@ -37,8 +37,8 @@ export interface LegacyConfig {
   items: LegacyItem[];
   /** Entries that need no import (session creation, Docker, timeouts). */
   notImported: string[];
-  /** Legacy name of the default system or session. */
-  defaultName?: string;
+  /** The default system or session; names can repeat across the two. */
+  defaultItem?: { name: string; kind: Kind };
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: untyped legacy config files.
@@ -294,7 +294,11 @@ export async function parseV2(configDir: string): Promise<LegacyConfig> {
     path: configDir,
     items,
     notImported,
-    defaultName: context.system ?? context.session,
+    defaultItem: context.system
+      ? { name: context.system, kind: "enterprise" }
+      : context.session
+        ? { name: context.session, kind: "community" }
+        : undefined,
   };
 }
 
