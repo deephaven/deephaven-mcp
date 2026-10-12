@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "bun@1.4.2",
   "scripts": {
-    "dev": "bun run src/main.ts",
+    "dev": "bun --experimental-http2-fetch src/main.ts",
     "build": "bun run scripts/build.ts",
     "release": "bun run scripts/release.ts",
     "check": "biome check . && tsc --noEmit"

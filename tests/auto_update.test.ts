@@ -12,6 +12,7 @@ import { join, resolve, sep } from "node:path";
 import { binaryName, build } from "../scripts/build.ts";
 import { PLATFORM } from "../src/updater.ts";
 import { BIN, VERSION } from "../src/version.ts";
+import { http2OnlyEnterprise, TEST_CA } from "./helpers.ts";
 
 const NEXT = "9.9.9";
 // Every asset of this release redirects to plain HTTP (never resolves: .invalid).
@@ -248,6 +249,19 @@ test("dh installed with the install script updates itself from GitHub releases",
     const version = async () => (await run(exe, ["--version"], env)).stdout;
 
     expect(await version()).toContain(VERSION);
+
+    // The compiled binary must offer HTTP/2: Enterprise's key service needs it.
+    const h2 = await http2OnlyEnterprise();
+    try {
+      const found = await run(
+        exe,
+        ["auth", "login", `https://localhost:${h2.port}`, "--no-prompt"],
+        { ...env, DH_AUTO_UPDATE: "off", NODE_EXTRA_CA_CERTS: TEST_CA },
+      );
+      expect(found.stdout).toContain("(Deephaven Enterprise)");
+    } finally {
+      await h2.stop(true);
+    }
 
     // Tag exists but its assets aren't uploaded: the check fails, but still starts the interval.
     latest.tag = `v${NEXT}`;

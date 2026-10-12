@@ -6,6 +6,12 @@ import { type Manifest, PLATFORM } from "../src/updater.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 
+/**
+ * Bun flags dh always runs with. Enterprise's key service (ACL write server) is
+ * HTTP/2-only, and Bun's fetch offers HTTP/2 only with this.
+ */
+export const RUNTIME_FLAGS = ["--experimental-http2-fetch"];
+
 /** Release keys, matching the updater's PLATFORM. */
 export const TARGETS = [
   "linux-x64",
@@ -67,6 +73,7 @@ export async function build(
       // could set DH_UPDATE_URL or preload its own code.
       "--no-compile-autoload-dotenv",
       "--no-compile-autoload-bunfig",
+      `--compile-exec-argv=${RUNTIME_FLAGS.join(" ")}`,
       // Ink's react-devtools-core is a devDependency only so this can resolve it;
       // it loads only when DEV=true (marking it external breaks startup).
       `--target=bun-${target}`,

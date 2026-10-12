@@ -123,8 +123,10 @@ export async function ensureCa(
     const theirs = await readFile(existing, "utf8").catch(() => "");
     await writeFile(bundle, `${theirs}\n${pem}`);
   }
-  // From source, argv[1] is the script; compiled, it's a virtual path to skip.
-  const args = process.argv.slice(STANDALONE ? 2 : 1);
+  // Compiled: argv[1] is a virtual path to skip, and runtime flags are built in.
+  const args = STANDALONE
+    ? process.argv.slice(2)
+    : [...process.execArgv, ...process.argv.slice(1)];
   const proc = Bun.spawn([process.execPath, ...args, ...extraArgs], {
     env: { ...process.env, NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
     stdio: ["inherit", "inherit", "inherit"],

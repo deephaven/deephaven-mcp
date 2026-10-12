@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MAIN, run as spawn, tempDir } from "./helpers.ts";
+import { CLI, run as spawn, tempDir } from "./helpers.ts";
 
 // Against real Community servers, e.g.
 //   deephaven server --port 10123 --jvm-args "-Dauthentication.psk=<psk>"
@@ -16,17 +16,14 @@ async function run(
   args: string[],
   env: Record<string, string> = {},
 ) {
-  const out = await spawn(
-    [process.execPath, MAIN, ...args, "-o", "json", "--no-prompt"],
-    {
-      DH_CONFIG_DIR: dir,
-      DH_AI_DATA_DIR: join(dir, "none"),
-      DH_AUTO_UPDATE: "off",
-      DH_PROFILE: undefined,
-      DH_SERVER: undefined,
-      ...env,
-    },
-  );
+  const out = await spawn([...CLI, ...args, "-o", "json", "--no-prompt"], {
+    DH_CONFIG_DIR: dir,
+    DH_AI_DATA_DIR: join(dir, "none"),
+    DH_AUTO_UPDATE: "off",
+    DH_PROFILE: undefined,
+    DH_SERVER: undefined,
+    ...env,
+  });
   return {
     code: out.code,
     json: out.stdout ? JSON.parse(out.stdout) : null,

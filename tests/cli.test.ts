@@ -2,7 +2,14 @@ import { expect, test } from "bun:test";
 import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BIN } from "../src/version.ts";
-import { MAIN, run, tempDir, WINDOWS } from "./helpers.ts";
+import {
+  CLI,
+  http2OnlyEnterprise,
+  run,
+  TEST_CA,
+  tempDir,
+  WINDOWS,
+} from "./helpers.ts";
 
 async function setup() {
   const tmp = await tempDir("dh-cli-test-");
@@ -11,7 +18,7 @@ async function setup() {
     configDir: join(tmp, "cli"),
     run: (args: string[], env: Record<string, string> = {}, stdin?: string) =>
       run(
-        [process.execPath, MAIN, ...args],
+        [...CLI, ...args],
         {
           DH_CONFIG_DIR: join(tmp, "cli"),
           DH_AI_DATA_DIR: join(tmp, "legacy"),
@@ -258,4 +265,27 @@ test("cli: environment-only auth", async () => {
   expect(JSON.parse(unreachable.stderr).code).toBe("server_unreachable");
   // Environment-only auth must not touch the config directory.
   expect(await stat(configDir).catch(() => null)).toBeNull();
+});
+
+test("cli: reaches an HTTP/2-only server, also after the --ca-cert re-run", async () => {
+  const { run } = await setup();
+  const server = await http2OnlyEnterprise();
+  try {
+    const res = await run([
+      "auth",
+      "login",
+      `https://localhost:${server.port}`,
+      "--ca-cert",
+      TEST_CA,
+      "--no-prompt",
+      "-o",
+      "json",
+    ]);
+    expect(res.stderr).toContain("(Deephaven Enterprise)");
+    // The fake has no client library to load, so login stops there.
+    const error = JSON.parse(res.stderr.trim().split("\n").pop() ?? "");
+    expect(error.code).toBe("server_unsupported");
+  } finally {
+    await server.stop(true);
+  }
 });
