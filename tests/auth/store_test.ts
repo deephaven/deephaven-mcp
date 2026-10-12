@@ -11,6 +11,30 @@ async function tempStore(): Promise<Store> {
   );
 }
 
+/** Whether `path`'s ACL drops inheritance, then each rule, with "me" for the current user. */
+async function windowsAcl(path: string, kind: "dir" | "file") {
+  const info = kind === "dir" ? "DirectoryInfo" : "FileInfo";
+  // .NET only: cmdlet modules can fail to load when launched from pwsh 7.
+  const out = await new Deno.Command("powershell", {
+    args: [
+      "-NoProfile",
+      "-Command",
+      `
+      $acl = [IO.${info}]::new($env:DH_TEST_ACL_PATH).GetAccessControl('Access')
+      $me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+      "protected=$($acl.AreAccessRulesProtected)"
+      foreach ($r in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+        $who = if ($r.IdentityReference -eq $me) { 'me' } else { $r.IdentityReference.Value }
+        "$who $($r.AccessControlType) $($r.FileSystemRights)"
+      }`,
+    ],
+    env: { DH_TEST_ACL_PATH: path },
+  }).output();
+  const text = new TextDecoder().decode(out.stdout);
+  assert(out.success, new TextDecoder().decode(out.stderr));
+  return text.trim().split("\n").map((line) => line.trim());
+}
+
 Deno.test("store: round-trips config and credentials", async () => {
   const store = await tempStore();
   await store.update(({ config, credentials }) => {
@@ -41,6 +65,29 @@ Deno.test({
     await Deno.chmod(store.credentialsPath, 0o644);
     const e = await assertRejects(() => store.read(), DhError);
     assertEquals(e.code, "credential_unavailable");
+  },
+});
+
+Deno.test({
+  name: "store: owner-only ACLs on Windows, re-securing an existing folder",
+  ignore: !WINDOWS,
+  async fn() {
+    const store = await tempStore();
+    await store.update(() => {});
+    const ownerOnly = ["protected=True", "me Allow FullControl"];
+    assertEquals(await windowsAcl(store.dir, "dir"), ownerOnly);
+    assertEquals(await windowsAcl(store.credentialsPath, "file"), ownerOnly);
+    assertEquals(await windowsAcl(store.configPath, "file"), [
+      "protected=False",
+      "me Allow FullControl",
+    ]);
+
+    const everyone = await new Deno.Command("icacls", {
+      args: [store.dir, "/grant", "*S-1-1-0:(OI)(CI)R", "/Q"],
+    }).output();
+    assert(everyone.success);
+    await store.ensureDir();
+    assertEquals(await windowsAcl(store.dir, "dir"), ownerOnly);
   },
 });
 
