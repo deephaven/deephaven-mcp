@@ -16,6 +16,7 @@ import {
   loginPassword,
 } from "./enterprise.ts";
 import { DhError, timeoutMs } from "./errors.ts";
+import { keyPairOf } from "./flows.ts";
 import { type KeyPair, readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
 import { resolveServer } from "./resolve.ts";
@@ -177,7 +178,7 @@ export async function specForProfile(
   }
   const keyPair =
     cred.type === "keyPair"
-      ? cred
+      ? keyPairOf(cred)
       : cred.type === "keyFile"
         ? (await readKeyFile(cred.path)).keyPair
         : undefined;
