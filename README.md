@@ -61,4 +61,5 @@ HTTPS.
 ## Development
 
 Building, testing and releasing are covered in the
-[Developer Guide](docs/DEVELOPER_GUIDE.md).
+[Developer Guide](docs/DEVELOPER_GUIDE.md). Read
+[Architecture](docs/ARCHITECTURE.md) before adding or changing a command.

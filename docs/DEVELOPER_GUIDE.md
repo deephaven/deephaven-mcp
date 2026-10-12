@@ -1,6 +1,8 @@
 # dh — Developer Guide
 
-For installing and using `dh`, see the [README](../README.md).
+For installing and using `dh`, see the [README](../README.md). For how the code
+is organized and the rules for adding commands, see
+[Architecture](ARCHITECTURE.md).
 
 ## Prerequisites
 
