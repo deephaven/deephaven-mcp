@@ -1,46 +1,46 @@
-import type { Command } from "@cliffy/command";
+import type { Command, Option } from "commander";
 import { ERROR_CODES } from "../auth/errors.ts";
 import { out } from "../output.ts";
 import { BIN, VERSION } from "../version.ts";
 
-// deno-lint-ignore no-explicit-any
-type AnyCommand = Command<any, any, any, any, any, any, any, any>;
+const describeOption = (o: Option) => ({
+  flags: o.flags,
+  description: o.description,
+});
 
-function describeCommand(cmd: AnyCommand, path: string[]): unknown {
+function describeCommand(cmd: Command, path: string[]): unknown {
   return {
-    command: [...path, cmd.getName()].join(" "),
-    description: cmd.getDescription(),
-    arguments: cmd.getArguments().map((a) => ({
-      name: a.name,
-      optional: a.optional,
+    command: [...path, cmd.name()].join(" "),
+    description: cmd.description(),
+    arguments: cmd.registeredArguments.map((a) => ({
+      name: a.name(),
+      optional: !a.required,
     })),
-    options: cmd.getBaseOptions(false)
-      .filter((o) => !o.global)
-      .map((o) => ({ flags: o.flags, description: o.description })),
-    commands: cmd.getCommands(false)
-      .map((c) => describeCommand(c, [...path, cmd.getName()])),
+    options: cmd.options.filter((o) => !o.hidden).map(describeOption),
+    commands: cmd.commands.map((c) =>
+      describeCommand(c, [...path, cmd.name()]),
+    ),
   };
 }
 
 /** Machine-readable command tree, flags, and error codes. */
-export function agents(root: AnyCommand): void {
-  out(JSON.stringify({
-    name: BIN,
-    version: VERSION,
-    globalOptions: root.getBaseOptions(false)
-      .filter((o) => o.global)
-      .map((o) => ({ flags: o.flags, description: o.description })),
-    commands: root.getCommands(false)
-      .map((c) => describeCommand(c, [BIN])),
-    errors: Object.entries(ERROR_CODES).map(([code, e]) => ({
-      code,
-      exit: e.exit,
-      description: e.description,
-    })),
-    errorFormat: {
-      stream: "stderr",
-      when: "-o json",
-      fields: ["error", "code", "exit", "hint"],
-    },
-  }));
+export function agents(root: Command): void {
+  out(
+    JSON.stringify({
+      name: BIN,
+      version: VERSION,
+      globalOptions: root.options.filter((o) => !o.hidden).map(describeOption),
+      commands: root.commands.map((c) => describeCommand(c, [BIN])),
+      errors: Object.entries(ERROR_CODES).map(([code, e]) => ({
+        code,
+        exit: e.exit,
+        description: e.description,
+      })),
+      errorFormat: {
+        stream: "stderr",
+        when: "-o json",
+        fields: ["error", "code", "exit", "hint"],
+      },
+    }),
+  );
 }

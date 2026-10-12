@@ -1,0 +1,129 @@
+import { expect, test } from "bun:test";
+import { chmod, readFile, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { Store } from "../../src/auth/store.ts";
+import { run, tempDir, WINDOWS } from "../helpers.ts";
+
+async function tempStore(): Promise<Store> {
+  return new Store(join(await tempDir("dh-store-"), "cli"));
+}
+
+/** Whether `path`'s ACL drops inheritance, then each rule, with "me" for the current user. */
+async function windowsAcl(path: string, kind: "dir" | "file") {
+  const info = kind === "dir" ? "DirectoryInfo" : "FileInfo";
+  // .NET only: cmdlet modules can fail to load when launched from pwsh 7.
+  const out = await run(
+    [
+      "powershell",
+      "-NoProfile",
+      "-Command",
+      `
+      $acl = [IO.${info}]::new($env:DH_TEST_ACL_PATH).GetAccessControl('Access')
+      $me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+      "protected=$($acl.AreAccessRulesProtected)"
+      foreach ($r in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+        $who = if ($r.IdentityReference -eq $me) { 'me' } else { $r.IdentityReference.Value }
+        "$who $($r.AccessControlType) $($r.FileSystemRights)"
+      }`,
+    ],
+    { DH_TEST_ACL_PATH: path },
+  );
+  expect(out.code, out.stderr).toBe(0);
+  return out.stdout
+    .trim()
+    .split("\n")
+    .map((line) => line.trim());
+}
+
+test("store: round-trips config and credentials", async () => {
+  const store = await tempStore();
+  await store.update(({ config, credentials }) => {
+    config.servers["https://dhe.example.com"] = { kind: "enterprise" };
+    credentials.credentials.p_1 = { type: "secret", value: "s3cret" };
+  });
+  const state = await store.read();
+  expect(state.config.servers["https://dhe.example.com"]?.kind).toBe(
+    "enterprise",
+  );
+  expect(state.credentials.credentials.p_1).toEqual({
+    type: "secret",
+    value: "s3cret",
+  });
+  const config = await readFile(store.configPath, "utf8");
+  expect(config).not.toContain("s3cret");
+});
+
+test.skipIf(WINDOWS)(
+  "store: owner-only files, and refuses a readable credentials file",
+  async () => {
+    const store = await tempStore();
+    await store.update(() => {});
+    expect((await stat(store.dir)).mode & 0o777).toBe(0o700);
+    expect((await stat(store.credentialsPath)).mode & 0o777).toBe(0o600);
+    await chmod(store.credentialsPath, 0o644);
+    await expect(store.read()).rejects.toMatchObject({
+      code: "credential_unavailable",
+    });
+  },
+);
+
+test.skipIf(!WINDOWS)(
+  "store: owner-only ACLs on Windows, re-securing an existing folder",
+  async () => {
+    const store = await tempStore();
+    await store.update(() => {});
+    const ownerOnly = ["protected=True", "me Allow FullControl"];
+    expect(await windowsAcl(store.dir, "dir")).toEqual(ownerOnly);
+    expect(await windowsAcl(store.credentialsPath, "file")).toEqual(ownerOnly);
+    expect(await windowsAcl(store.configPath, "file")).toEqual([
+      "protected=False",
+      "me Allow FullControl",
+    ]);
+
+    const everyone = await run([
+      "icacls",
+      store.dir,
+      "/grant",
+      "*S-1-1-0:(OI)(CI)R",
+      "/Q",
+    ]);
+    expect(everyone.code).toBe(0);
+    await store.ensureDir();
+    expect(await windowsAcl(store.dir, "dir")).toEqual(ownerOnly);
+  },
+);
+
+test("store: concurrent updates in one process don't lose writes", async () => {
+  const store = await tempStore();
+  await Promise.all(
+    Array.from({ length: 20 }, (_, i) =>
+      store.update(({ config }) => {
+        config.servers[`https://h${i}.example.com`] = { kind: "community" };
+      }),
+    ),
+  );
+  expect(Object.keys((await store.read()).config.servers).length).toBe(20);
+});
+
+test("store: concurrent processes don't lose writes", async () => {
+  const store = await tempStore();
+  const module = pathToFileURL(
+    resolve(import.meta.dir, "../../src/auth/store.ts"),
+  ).href;
+  const worker = (n: number) =>
+    run([
+      process.execPath,
+      "-e",
+      `import { Store } from "${module}";
+       const s = new Store(${JSON.stringify(store.dir)});
+       for (let i = 0; i < 10; i++) {
+         await s.update(({ config }) => {
+           config.servers["https://p${n}-" + i + ".example.com"] = { kind: "community" };
+         });
+       }`,
+    ]);
+  const results = await Promise.all([worker(1), worker(2), worker(3)]);
+  for (const r of results) expect(r.code, r.stderr).toBe(0);
+  expect(Object.keys((await store.read()).config.servers).length).toBe(30);
+});

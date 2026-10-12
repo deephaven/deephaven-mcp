@@ -1,5 +1,5 @@
-import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
-import { DhError } from "./errors.ts";
+import { readFile } from "node:fs/promises";
+import { DhError, isErrno } from "./errors.ts";
 
 export interface KeyPair {
   type: string;
@@ -16,8 +16,8 @@ export interface KeyFile {
 const EC_PREFIX = "EC:";
 
 function stripEc(value: string, where: string): string {
-  const bytes = decodeBase64(value);
-  const prefix = new TextDecoder().decode(bytes.subarray(0, EC_PREFIX.length));
+  const bytes = Buffer.from(value, "base64");
+  const prefix = bytes.subarray(0, EC_PREFIX.length).toString("latin1");
   if (prefix !== EC_PREFIX) {
     throw new DhError(
       "credential_unavailable",
@@ -25,15 +25,15 @@ function stripEc(value: string, where: string): string {
       "Run `dh auth login` to create a new key.",
     );
   }
-  return encodeBase64(bytes.subarray(EC_PREFIX.length));
+  return bytes.subarray(EC_PREFIX.length).toString("base64");
 }
 
 /** Parses a Deephaven Enterprise key file (`user`/`operateas`/`public`/`private` lines). */
 export function parseKeyFile(text: string, where = "key file"): KeyFile {
   const fields = new Map<string, string>();
   for (const line of text.split(/\r?\n/)) {
-    const match = line.trim().match(/^(\S+)\s+(.+)$/);
-    if (match) fields.set(match[1].toLowerCase(), match[2].trim());
+    const [, key, value] = line.trim().match(/^(\S+)\s+(.+)$/) ?? [];
+    if (key && value) fields.set(key.toLowerCase(), value.trim());
   }
   const pub = fields.get("public");
   const priv = fields.get("private");
@@ -57,9 +57,9 @@ export function parseKeyFile(text: string, where = "key file"): KeyFile {
 export async function readKeyFile(path: string): Promise<KeyFile> {
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await readFile(path, "utf8");
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
+    if (isErrno(e, "ENOENT")) {
       throw new DhError(
         "credential_unavailable",
         `Key file not found: ${path}`,

@@ -2,14 +2,15 @@
 # Wrapped in a script block so `iex` doesn't leak variables or exit the caller's shell.
 & {
   $ErrorActionPreference = 'Stop'
-  # Rewritten from deno.json "bin" by scripts/release.ts.
+  # Rewritten from package.json "name" by scripts/release.ts.
   $bin = 'dh'
   [Net.ServicePointManager]::SecurityProtocol =
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
   # HTTPS only; plain HTTP only for a loopback test server, matching the updater.
   function Assert-Trusted([Uri]$uri) {
-    if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) {
+    $loopback = 'localhost', '127.0.0.1', '[::1]'
+    if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $loopback -contains $uri.Host)) {
       throw "Refusing to install over insecure URL $uri"
     }
   }
@@ -45,7 +46,7 @@
   # Absolute against PowerShell's location (not .NET's cwd), since it's persisted in PATH.
   $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
   # x64 also runs on Windows on ARM under emulation.
-  $target = 'x86_64-pc-windows-msvc'
+  $target = 'windows-x64'
 
   $manifestUrl = if ($env:DH_INSTALL_VERSION) {
     "$repoUrl/releases/download/v$($env:DH_INSTALL_VERSION -replace '^v', '')/manifest.json"
@@ -87,15 +88,31 @@
   }
   Write-Host "Installed $bin v$($manifest.version) to $dir\$bin.exe"
 
-  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  if (($userPath -split ';') -notcontains $dir) {
-    if ($env:DH_INSTALL_NO_MODIFY_PATH) {
-      Write-Host "Add $dir to your PATH to run $bin."
-    } else {
-      $newPath = (@($userPath, $dir) | Where-Object { $_ }) -join ';'
-      [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-      $env:Path = "$env:Path;$dir"
-      Write-Host "Added $dir to your user PATH; other open terminals need a restart."
+  # Read and write the raw registry value, so %VAR% entries stay unexpanded.
+  $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+  try {
+    $userPath = [string]$envKey.GetValue('Path', '',
+      [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    # Keep an existing Path's kind (REG_SZ vs REG_EXPAND_SZ); only a new one is expandable.
+    $kind = if ($null -ne $envKey.GetValue('Path')) { $envKey.GetValueKind('Path') }
+      else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+    $expandable = $kind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString
+    $entries = $(if ($expandable) { [Environment]::ExpandEnvironmentVariables($userPath) } else { $userPath }) -split ';'
+    if ($entries -notcontains $dir) {
+      # ';' would split into bogus entries and '%' would expand in a REG_EXPAND_SZ value.
+      if ($env:DH_INSTALL_NO_MODIFY_PATH -or $dir -match '[;%]') {
+        Write-Host "Add $dir to your PATH to run $bin."
+      } else {
+        $newPath = (@($userPath, $dir) | Where-Object { $_ }) -join ';'
+        $envKey.SetValue('Path', $newPath, $kind)
+        # Changing any user variable this way broadcasts WM_SETTINGCHANGE, so new terminals see the PATH.
+        [Environment]::SetEnvironmentVariable('DH_INSTALL_PATH_CHANGED', '1', 'User')
+        [Environment]::SetEnvironmentVariable('DH_INSTALL_PATH_CHANGED', $null, 'User')
+        $env:Path = "$env:Path;$dir"
+        Write-Host "Added $dir to your user PATH; other open terminals need a restart."
+      }
     }
+  } finally {
+    $envKey.Close()
   }
 }

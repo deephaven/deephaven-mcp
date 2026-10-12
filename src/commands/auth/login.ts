@@ -1,4 +1,4 @@
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import {
   type CommunityLogin,
   communityMethods,
@@ -10,14 +10,15 @@ import {
 import {
   connectEnterprise,
   disconnect as disconnectEnterprise,
-  enterpriseAuthConfig,
+  type EnterpriseAuthConfig,
   type EnterpriseConnection,
+  enterpriseAuthConfig,
   loginKey,
   loginPassword,
   loginSaml,
   userName,
 } from "../../auth/enterprise.ts";
-import { describe, DhError, timeoutMs } from "../../auth/errors.ts";
+import { DhError, describe, timeoutMs } from "../../auth/errors.ts";
 import {
   authorizeComputer,
   closeSession,
@@ -47,7 +48,7 @@ import { type Choice, getPrompter, type Prompter } from "../../ui/prompt.ts";
 import { BIN } from "../../version.ts";
 import { globals, profileName, secretFrom } from "../common.ts";
 import { runImport } from "./import.ts";
-import { logout, type LogoutOptions } from "./logout.ts";
+import { type LogoutOptions, logout } from "./logout.ts";
 
 export const METHODS: Method[] = [
   "saml",
@@ -135,8 +136,8 @@ async function chooseMethod(
       "--private-key-file is only for Enterprise servers",
     );
   }
-  const wanted = options.method ??
-    (options.privateKeyFile ? "private-key" : undefined);
+  const wanted =
+    options.method ?? (options.privateKeyFile ? "private-key" : undefined);
   if (keyFile && wanted === "private-key") return { method: wanted };
   // Servers don't advertise key login; keep a re-authenticated key profile on it.
   if (keyFile && !wanted && target.method === "private-key") {
@@ -163,7 +164,8 @@ async function chooseMethod(
   }
   const previous = target.method && pick(target.method);
   if (previous) return previous;
-  if (offered.length === 1) return offered[0];
+  const [only] = offered;
+  if (only && offered.length === 1) return only;
   return await prompt.select(
     "How do you want to sign in?",
     choices,
@@ -180,7 +182,7 @@ async function enterpriseLogin(
   const timeout = timeoutMs();
   const origin = target.origin;
   const conn = await connectEnterprise(origin, cache, timeout);
-  let auth;
+  let auth: EnterpriseAuthConfig;
   try {
     auth = await enterpriseAuthConfig(conn, timeout);
   } catch (e) {
@@ -189,16 +191,20 @@ async function enterpriseLogin(
   }
   const choices: Choice<MethodChoice>[] = [
     ...(auth.saml
-      ? [{
-        label: `${auth.saml.providerName} (SSO)`,
-        value: { method: "saml" as const },
-      }]
+      ? [
+          {
+            label: `${auth.saml.providerName} (SSO)`,
+            value: { method: "saml" as const },
+          },
+        ]
       : []),
     ...(auth.passwordsEnabled
-      ? [{
-        label: "Username and password",
-        value: { method: "password" as const },
-      }]
+      ? [
+          {
+            label: "Username and password",
+            value: { method: "password" as const },
+          },
+        ]
       : []),
   ];
   let method: Method;
@@ -212,12 +218,16 @@ async function enterpriseLogin(
 
   if (method === "private-key") {
     const path = resolve(
-      options.privateKeyFile ?? target.keyFile ??
-        await prompt.text("Key file", "--private-key-file"),
+      options.privateKeyFile ??
+        target.keyFile ??
+        (await prompt.text("Key file", "--private-key-file")),
     );
     const key = await readKeyFile(path);
-    const username = options.username ?? key.user ?? target.username ??
-      await prompt.text("Username", "--username");
+    const username =
+      options.username ??
+      key.user ??
+      target.username ??
+      (await prompt.text("Username", "--username"));
     const as = operateAs ?? key.operateAs;
     await loginKey(conn, username, key.keyPair, as, timeout, "auth_failed");
     note(`✔ Signed in as ${username}`);
@@ -232,12 +242,12 @@ async function enterpriseLogin(
       method,
       credential: options.copyKey
         ? {
-          type: "keyPair",
-          keyType: key.keyPair.type,
-          publicKey: key.keyPair.publicKey,
-          privateKey: key.keyPair.privateKey,
-          generated: false,
-        }
+            type: "keyPair",
+            keyType: key.keyPair.type,
+            publicKey: key.keyPair.publicKey,
+            privateKey: key.keyPair.privateKey,
+            generated: false,
+          }
         : { type: "keyFile", path },
     };
   }
@@ -283,8 +293,10 @@ async function enterpriseLogin(
       }
     }
   } else {
-    user = options.username ?? target.username ??
-      await prompt.text("Username", "--username");
+    user =
+      options.username ??
+      target.username ??
+      (await prompt.text("Username", "--username"));
     const { value } = await secretFrom(
       "password",
       options.passwordStdin,
@@ -348,16 +360,15 @@ async function communityLogin(
   };
   if (method === "psk") {
     store(
-      await secretFrom(
-        "psk",
-        options.pskStdin,
-        options.pskEnv,
-        () => prompt.secret("Pre-shared key", "--psk-stdin"),
+      await secretFrom("psk", options.pskStdin, options.pskEnv, () =>
+        prompt.secret("Pre-shared key", "--psk-stdin"),
       ),
     );
   } else if (method === "basic") {
-    login.username = options.username ?? target.username ??
-      await prompt.text("Username", "--username");
+    login.username =
+      options.username ??
+      target.username ??
+      (await prompt.text("Username", "--username"));
     store(
       await secretFrom(
         "password",
@@ -371,11 +382,8 @@ async function communityLogin(
       throw new DhError("usage", "Input needed: pass --handler");
     }
     store(
-      await secretFrom(
-        "token",
-        options.tokenStdin,
-        options.tokenEnv,
-        () => prompt.secret("Token", "--token-stdin"),
+      await secretFrom("token", options.tokenStdin, options.tokenEnv, () =>
+        prompt.secret("Token", "--token-stdin"),
       ),
     );
   }
@@ -414,36 +422,35 @@ async function pickTarget(
   let input = serverArg;
   const known = Object.entries(state.config.servers);
   if (!input) {
-    const picked = known.length === 0 ? OTHER : await prompt.select(
-      "What server do you want to log in to?",
-      [
-        ...known.map(([origin, s]) => ({
-          label: origin,
-          value: origin,
-          hint: `(${s.kind === "enterprise" ? "Enterprise" : "Community"}${
-            s.importedFrom ? ` · ${s.importedFrom.split("#").pop()}` : ""
-          })`,
-        })),
-        { label: "Other…", value: OTHER },
-      ],
-      "<server>",
-    );
-    input = picked === OTHER
-      ? await prompt.text("What server do you want to log in to?", "<server>")
-      : picked;
+    const picked =
+      known.length === 0
+        ? OTHER
+        : await prompt.select(
+            "What server do you want to log in to?",
+            [
+              ...known.map(([origin, s]) => ({
+                label: origin,
+                value: origin,
+                hint: `(${s.kind === "enterprise" ? "Enterprise" : "Community"}${
+                  s.importedFrom ? ` · ${s.importedFrom.split("#").pop()}` : ""
+                })`,
+              })),
+              { label: "Other…", value: OTHER },
+            ],
+            "<server>",
+          );
+    input =
+      picked === OTHER
+        ? await prompt.text("What server do you want to log in to?", "<server>")
+        : picked;
   }
-  const knownOrigin = candidates(input).map((u) => u.origin).find((o) =>
-    o in state.config.servers
-  );
-  await ensureCa(
-    options.caCert ?? (knownOrigin && state.config.servers[knownOrigin].caCert),
-    serverArg ? [] : [input],
-  );
-  if (knownOrigin && !options.caCert) {
-    return {
-      origin: knownOrigin,
-      kind: state.config.servers[knownOrigin].kind,
-    };
+  const knownOrigin = candidates(input)
+    .map((u) => u.origin)
+    .find((o) => o in state.config.servers);
+  const server = knownOrigin ? state.config.servers[knownOrigin] : undefined;
+  await ensureCa(options.caCert ?? server?.caCert, serverArg ? [] : [input]);
+  if (knownOrigin && server && !options.caCert) {
+    return { origin: knownOrigin, kind: server.kind };
   }
   const resolved = await resolveServer(input);
   note(`✔ ${resolved.origin} (${KIND_LABEL[resolved.kind]})`);
@@ -464,12 +471,16 @@ async function menu(
       }`,
     );
   }
-  const action = await prompt.select("What would you like to do?", [
-    { label: "Log in to another server", value: "server" },
-    { label: "Log in as a different user", value: "user" },
-    { label: "Re-authenticate a profile", value: "reauth" },
-    { label: "Remove a profile", value: "remove" },
-  ], "<server>");
+  const action = await prompt.select(
+    "What would you like to do?",
+    [
+      { label: "Log in to another server", value: "server" },
+      { label: "Log in as a different user", value: "user" },
+      { label: "Re-authenticate a profile", value: "reauth" },
+      { label: "Remove a profile", value: "remove" },
+    ],
+    "<server>",
+  );
   if (action === "server") return {};
   if (action === "remove") return undefined;
   if (action === "user") {
@@ -490,15 +501,18 @@ async function menu(
 
 function targetOf(state: State, id: string): Target {
   const p = state.config.profiles[id];
+  if (!p) throw new DhError("internal", `No profile ${id}`);
   const cred = state.credentials.credentials[id];
   return {
     origin: p.server,
     kind: state.config.servers[p.server]?.kind ?? "community",
     method: p.method,
-    username: p.method === "basic" || p.method === "password" ||
-        p.method === "private-key"
-      ? p.user
-      : undefined,
+    username:
+      p.method === "basic" ||
+      p.method === "password" ||
+      p.method === "private-key"
+        ? p.user
+        : undefined,
     operateAs: p.operateAs,
     handler: p.handler,
     keyFile: cred?.type === "keyFile" ? cred.path : undefined,
@@ -519,10 +533,9 @@ export async function login(
   if (!hasProfiles && !state.config.legacyImport && !serverArg) {
     const count = await runImport(store, prompt, { yes: options.yes }, true);
     if (count) {
-      result(
-        () => `Imported ${count} profile${count === 1 ? "" : "s"}.`,
-        { imported: count },
-      );
+      result(() => `Imported ${count} profile${count === 1 ? "" : "s"}.`, {
+        imported: count,
+      });
       return;
     }
     state = await store.read();
@@ -542,7 +555,10 @@ export async function login(
     }
     reauth = targetOf(state, found[0]);
   } else if (
-    !serverArg && hasProfiles && prompt.interactive && !options.method &&
+    !serverArg &&
+    hasProfiles &&
+    prompt.interactive &&
+    !options.method &&
     !options.privateKeyFile
   ) {
     const choice = await menu(prompt, state);
@@ -553,9 +569,10 @@ export async function login(
 
   const target = await pickTarget(prompt, options, state, serverArg, reauth);
   const cache = store.cacheDir;
-  const { session, method, credential, handler } = target.kind === "enterprise"
-    ? await enterpriseLogin(prompt, options, target, cache)
-    : await communityLogin(prompt, options, target, cache);
+  const { session, method, credential, handler } =
+    target.kind === "enterprise"
+      ? await enterpriseLogin(prompt, options, target, cache)
+      : await communityLogin(prompt, options, target, cache);
 
   let saved: Saved | undefined;
   try {
@@ -567,8 +584,8 @@ export async function login(
       session.operateAs,
     );
     const defaultId = state.config.defaultProfile;
-    const hasDefault = defaultId !== undefined &&
-      defaultId in state.config.profiles;
+    const hasDefault =
+      defaultId !== undefined && defaultId in state.config.profiles;
     let makeDefault = options.default;
     if (makeDefault === undefined && hasDefault && same?.[0] !== defaultId) {
       makeDefault = prompt.interactive

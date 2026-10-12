@@ -51,7 +51,7 @@ export class DhError extends Error {
 export function describe(reason: unknown): string {
   if (reason instanceof Error) return reason.message;
   if (typeof reason === "string") return reason;
-  // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: GWT event objects are untyped.
   const detail = (reason as any)?.detail;
   if (typeof detail === "string") return detail;
   return String(reason);
@@ -77,6 +77,11 @@ export async function withTimeout<T>(
 }
 
 export function timeoutMs(): number {
-  const raw = Number(Deno.env.get("DH_TIMEOUT"));
+  const raw = Number(process.env.DH_TIMEOUT);
   return (Number.isFinite(raw) && raw > 0 ? raw : 30) * 1000;
+}
+
+/** A Node file-system error with this `code`, e.g. `ENOENT`. */
+export function isErrno(e: unknown, code: string): boolean {
+  return e instanceof Error && (e as NodeJS.ErrnoException).code === code;
 }

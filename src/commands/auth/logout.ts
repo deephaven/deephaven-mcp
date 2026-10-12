@@ -1,11 +1,11 @@
-import { describe, DhError } from "../../auth/errors.ts";
+import { DhError, describe } from "../../auth/errors.ts";
 import { revokeOwnKey } from "../../auth/flows.ts";
 import {
   findByName,
   removeProfile,
   sortedProfiles,
 } from "../../auth/profile.ts";
-import { ensureCa } from "../../auth/session.ts";
+import { ensureCa, loadedCa } from "../../auth/session.ts";
 import { Store } from "../../auth/store.ts";
 import { note, result } from "../../output.ts";
 import { getPrompter } from "../../ui/prompt.ts";
@@ -25,6 +25,7 @@ export async function logout(
   const g = globals(options);
   const store = new Store();
   const { config, credentials } = await store.read();
+  const nameOf = (id: string) => config.profiles[id]?.name ?? id;
   const profiles = sortedProfiles(config);
   if (profiles.length === 0) {
     result(() => "No profiles.", { removed: [], default: null });
@@ -46,7 +47,7 @@ export async function logout(
       );
     }
     ids = [found[0]];
-  } else if (profiles.length === 1) {
+  } else if (profiles.length === 1 && profiles[0]) {
     ids = [profiles[0][0]];
   } else {
     const prompt = await getPrompter(g.input !== false);
@@ -59,25 +60,26 @@ export async function logout(
       "<profile> or --all",
     );
     ids = picked === ALL ? profiles.map(([id]) => id) : [picked];
-    extraArgs = picked === ALL ? ["--all"] : [config.profiles[picked].name];
+    extraArgs = picked === ALL ? ["--all"] : [nameOf(picked)];
   }
 
   // Revoking needs each server's CA, and a process can trust only one extra CA.
   const caOf = (id: string) => {
     const cred = credentials.credentials[id];
+    const server = config.profiles[id]?.server ?? "";
     return cred?.type === "keyPair" && cred.generated
-      ? config.servers[config.profiles[id].server]?.caCert
+      ? config.servers[server]?.caCert
       : undefined;
   };
   const cas = new Set(ids.map(caOf).filter((ca) => ca !== undefined));
   if (cas.size === 1) await ensureCa([...cas][0], extraArgs);
-  const trusted = Deno.env.get("DENO_CERT");
+  const trusted = loadedCa();
   const kept = ids.filter((id) => {
     const ca = caOf(id);
     return ca !== undefined && ca !== trusted;
   });
   for (const id of kept) {
-    const keptName = config.profiles[id].name;
+    const keptName = nameOf(id);
     note(
       `! Kept ${keptName}: its server uses a different CA certificate. Run \`${BIN} auth logout ${keptName}\`.`,
     );
@@ -87,6 +89,7 @@ export async function logout(
   const removed: { profile: string; server: string; revoked: boolean }[] = [];
   for (const id of ids) {
     const p = config.profiles[id];
+    if (!p) continue;
     const cred = credentials.credentials[id];
     let revoked = false;
     if (cred) {
@@ -100,9 +103,9 @@ export async function logout(
         );
       } catch (e) {
         note(
-          `! Could not revoke the key on ${p.server}: ${
-            describe(e)
-          }. Removing the profile anyway.`,
+          `! Could not revoke the key on ${p.server}: ${describe(
+            e,
+          )}. Removing the profile anyway.`,
         );
       }
     }
@@ -125,13 +128,13 @@ export async function logout(
     return next ? state.config.profiles[next]?.name : undefined;
   });
   for (const id of resaved) {
-    const name = config.profiles[id].name;
+    const name = nameOf(id);
     note(
       `! Kept ${name}: it was signed in again during logout. Run \`${BIN} auth logout ${name}\` again.`,
     );
   }
-  const gone = removed.filter((r) =>
-    !resaved.some((id) => config.profiles[id].name === r.profile)
+  const gone = removed.filter(
+    (r) => !resaved.some((id) => nameOf(id) === r.profile),
   );
 
   result(
@@ -139,15 +142,15 @@ export async function logout(
       ...gone.map((r) =>
         r.revoked
           ? `✔ Revoked key on ${
-            new URL(r.server).host
-          } and removed ${r.profile}`
-          : `✔ Removed ${r.profile}`
+              new URL(r.server).host
+            } and removed ${r.profile}`
+          : `✔ Removed ${r.profile}`,
       ),
       nextDefault ? `Default profile: ${nextDefault}` : "No profiles left.",
     ],
     {
       removed: gone,
-      kept: [...kept, ...resaved].map((id) => config.profiles[id].name),
+      kept: [...kept, ...resaved].map(nameOf),
       default: nextDefault ?? null,
     },
   );

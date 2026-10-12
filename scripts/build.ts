@@ -1,21 +1,37 @@
-import { encodeHex } from "@std/encoding/hex";
-import { copy, ensureDir } from "@std/fs";
-import { fromFileUrl, join, resolve } from "@std/path";
-import config from "../deno.json" with { type: "json" };
-import type { Manifest } from "../src/updater.ts";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import pkg from "../package.json" with { type: "json" };
+import { type Manifest, PLATFORM } from "../src/updater.ts";
 
-const ROOT = fromFileUrl(new URL("..", import.meta.url));
+const ROOT = resolve(import.meta.dir, "..");
 
+/** Release keys, matching the updater's PLATFORM. */
 export const TARGETS = [
-  "x86_64-unknown-linux-gnu",
-  "aarch64-unknown-linux-gnu",
-  "x86_64-apple-darwin",
-  "aarch64-apple-darwin",
-  "x86_64-pc-windows-msvc",
+  "linux-x64",
+  "linux-arm64",
+  "darwin-x64",
+  "darwin-arm64",
+  "windows-x64",
 ];
 
 export function binaryName(target: string): string {
-  return `${config.bin}-${target}${target.includes("windows") ? ".exe" : ""}`;
+  return `${pkg.name}-${target}${target.startsWith("windows") ? ".exe" : ""}`;
+}
+
+async function exec(cmd: string[]): Promise<void> {
+  const proc = Bun.spawn(cmd, { stdout: "ignore", stderr: "inherit" });
+  if ((await proc.exited) !== 0) throw new Error(`${cmd[0]} failed: ${cmd}`);
+}
+
+// Bun appends the app to its own signed runtime, which invalidates that
+// signature for darwin-x64 (macOS may kill it at launch); codesign is macOS-only.
+async function adhocSign(file: string): Promise<void> {
+  if (process.platform !== "darwin") {
+    console.warn(`warning: ${file} not re-signed; codesign needs macOS`);
+    return;
+  }
+  await exec(["codesign", "--force", "--sign", "-", file]);
 }
 
 export interface BuildOptions {
@@ -30,77 +46,58 @@ export interface BuildOptions {
 /** Compiles the CLI into `outDir` with a `manifest.json` and `SHA256SUMS`. */
 export async function build(
   outDir: string,
-  { version, repository, targets = [Deno.build.target], baseUrl = "" }:
-    BuildOptions = {},
+  {
+    version = pkg.version,
+    repository = pkg.repository,
+    targets = [PLATFORM],
+    baseUrl = "",
+  }: BuildOptions = {},
 ): Promise<void> {
-  // deno.json is embedded at compile time, so overrides build from a copy.
-  let root = ROOT;
-  try {
-    if (version || repository) {
-      root = await Deno.makeTempDir({ prefix: "dh-build-" });
-      await copy(join(ROOT, "src"), join(root, "src"));
-      await copy(join(ROOT, "deno.lock"), join(root, "deno.lock"));
-      await Deno.writeTextFile(
-        join(root, "deno.json"),
-        JSON.stringify({
-          ...config,
-          version: version ?? config.version,
-          repository: repository ?? config.repository,
-        }),
-      );
-    }
+  await mkdir(outDir, { recursive: true });
+  const manifest: Manifest = { version, binaries: {} };
+  let sums = "";
+  for (const target of targets) {
+    const name = binaryName(target);
+    const output = join(outDir, name);
+    await exec([
+      process.execPath,
+      "build",
+      "--compile",
+      // Otherwise the binary loads .env/bunfig.toml from the CWD: a repo dh runs in
+      // could set DH_UPDATE_URL or preload its own code.
+      "--no-compile-autoload-dotenv",
+      "--no-compile-autoload-bunfig",
+      // Ink's react-devtools-core is a devDependency only so this can resolve it;
+      // it loads only when DEV=true (marking it external breaks startup).
+      `--target=bun-${target}`,
+      "--define",
+      `DH_BUILD_VERSION=${JSON.stringify(version)}`,
+      "--define",
+      `DH_BUILD_REPOSITORY=${JSON.stringify(repository)}`,
+      "--outfile",
+      output,
+      join(ROOT, "src/main.ts"),
+    ]);
+    if (target.startsWith("darwin")) await adhocSign(output);
 
-    await ensureDir(outDir);
-    const manifest: Manifest = {
-      version: version ?? config.version,
-      binaries: {},
-    };
-    let sums = "";
-    for (const target of targets) {
-      const name = binaryName(target);
-      const output = join(outDir, name);
-      const { success } = await new Deno.Command(Deno.execPath(), {
-        args: [
-          "compile",
-          "--quiet",
-          "--allow-env",
-          "--allow-net",
-          "--allow-read",
-          "--allow-write",
-          "--allow-run",
-          "--allow-sys=hostname",
-          "--target",
-          target,
-          "--output",
-          output,
-          join(root, "src/main.ts"),
-        ],
-        cwd: root,
-      }).spawn().status;
-      if (!success) throw new Error(`deno compile failed for ${target}`);
-
-      const sha256 = encodeHex(
-        await crypto.subtle.digest("SHA-256", await Deno.readFile(output)),
-      );
-      manifest.binaries[target] = { url: baseUrl + name, sha256 };
-      sums += `${sha256}  ${name}\n`;
-    }
-    await Deno.writeTextFile(
-      join(outDir, "manifest.json"),
-      JSON.stringify(manifest, null, 2) + "\n",
-    );
-    await Deno.writeTextFile(join(outDir, "SHA256SUMS"), sums);
-  } finally {
-    if (root !== ROOT) await Deno.remove(root, { recursive: true });
+    const sha256 = createHash("sha256")
+      .update(await readFile(output))
+      .digest("hex");
+    manifest.binaries[target] = { url: baseUrl + name, sha256 };
+    sums += `${sha256}  ${name}\n`;
   }
+  await writeFile(
+    join(outDir, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  await writeFile(join(outDir, "SHA256SUMS"), sums);
 }
 
 if (import.meta.main) {
-  const targets = Deno.args.includes("--all") ? TARGETS : [Deno.build.target];
-  const dir = Deno.args.find((arg) => arg !== "--all");
+  const args = process.argv.slice(2);
+  const targets = args.includes("--all") ? TARGETS : [PLATFORM];
+  const dir = args.find((arg) => arg !== "--all");
   const outDir = resolve(dir ?? join(ROOT, "dist"));
   await build(outDir, { targets });
-  console.log(
-    `built v${config.version} for ${targets.join(", ")} in ${outDir}`,
-  );
+  console.log(`built v${pkg.version} for ${targets.join(", ")} in ${outDir}`);
 }

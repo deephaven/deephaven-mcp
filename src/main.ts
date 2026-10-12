@@ -1,23 +1,28 @@
-import { Command, EnumType, ValidationError } from "@cliffy/command";
+import { writeSync } from "node:fs";
+import { styleText } from "node:util";
+import { Command, CommanderError, Help, Option } from "commander";
 import { DhError } from "./auth/errors.ts";
 import { Store } from "./auth/store.ts";
 import { agents } from "./commands/agents.ts";
-import { authCommand } from "./commands/auth/index.ts";
+import { addAuthCommand } from "./commands/auth/index.ts";
 import { err, out, reportError, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
 import { BIN, VERSION } from "./version.ts";
 
+const blue = (s: string) => styleText("blue", s);
+
 /** Known before parsing, so even argument errors honor `-o json`. */
 function formatFromArgs(args: string[]): "human" | "json" {
   for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    const value = a === "-o" || a === "--output"
-      ? args[i + 1]
-      : a.startsWith("--output=")
-      ? a.slice("--output=".length)
-      : a.startsWith("-o") && a.length > 2
-      ? a.slice(2)
-      : undefined;
+    const a = args[i] ?? "";
+    const value =
+      a === "-o" || a === "--output"
+        ? args[i + 1]
+        : a.startsWith("--output=")
+          ? a.slice("--output=".length)
+          : a.startsWith("-o") && a.length > 2
+            ? a.slice(2)
+            : undefined;
     if (value === "json") return "json";
   }
   return "human";
@@ -40,37 +45,64 @@ async function statusLine(): Promise<void> {
 
 const root = new Command()
   .name(BIN)
-  .version(VERSION)
+  .version(`${BIN} ${VERSION}`, "-V, --version", "Show the version number.")
+  .helpOption("-h, --help", "Show this help.")
   .description("Deephaven command line interface.")
-  .throwErrors()
-  .globalType("format", new EnumType(["human", "json"]))
-  .globalOption("--profile <name:string>", "Profile to use (env DH_PROFILE).")
-  .globalOption("-o, --output <format:format>", "Output format.", {
-    default: "human",
+  .configureHelp({
+    styleTitle: (s) => styleText("bold", s),
+    styleCommandText: (s) => styleText(["bold", "magenta"], s),
+    styleOptionTerm: blue,
+    styleSubcommandTerm: blue,
+    styleArgumentTerm: blue,
+    // Show the version under "Usage:"; it matters because the CLI updates itself.
+    formatHelp(cmd, helper) {
+      const [usage = "", ...rest] = Help.prototype.formatHelp
+        .call(helper, cmd, helper)
+        .split("\n");
+      const version = `${helper.styleTitle("Version:")} ${styleText("yellow", VERSION)}`;
+      return [usage, version, ...rest].join("\n");
+    },
   })
-  .globalOption("--no-input", "Never prompt.")
-  .action(async function () {
-    this.showHelp();
-    await statusLine();
+  // Synchronous, so nothing is lost when the process exits right after.
+  .configureOutput({
+    writeOut: (s) => writeSync(1, s),
+    writeErr: (s) => writeSync(2, s),
+    // Errors are printed by reportError, as text or JSON.
+    outputError: () => {},
   })
-  .command("auth", authCommand())
-  .command(
-    "agents",
-    "Print the command tree, flags and error codes as JSON.",
+  .exitOverride()
+  .option("--profile <name>", "Profile to use (env DH_PROFILE).")
+  .addOption(
+    new Option("-o, --output <format>", "Output format.")
+      .choices(["human", "json"])
+      .default("human"),
   )
-  .action(function () {
-    agents(this.getMainCommand());
-  })
-  .reset();
+  .option("--no-input", "Never prompt.")
+  .action(async (_options, command: Command) => {
+    command.outputHelp();
+    await statusLine();
+  });
+// Added after the settings above, so subcommands inherit them.
+addAuthCommand(root);
+root
+  .command("agents")
+  .description("Print the command tree, flags and error codes as JSON.")
+  .action(() => agents(root));
 
-setFormat(formatFromArgs(Deno.args));
+setFormat(formatFromArgs(process.argv.slice(2)));
 let code = 0;
 try {
-  await root.parse(Deno.args);
+  await root.parseAsync();
 } catch (e) {
+  // --help and --version: answered, with no update check.
+  if (e instanceof CommanderError && e.exitCode === 0) process.exit(0);
   code = reportError(
-    e instanceof ValidationError
-      ? new DhError("usage", e.message, `Run \`${BIN} --help\` for usage.`)
+    e instanceof CommanderError
+      ? new DhError(
+          "usage",
+          e.message.replace(/^error: /, ""),
+          `Run \`${BIN} --help\` for usage.`,
+        )
       : e,
   );
 }
@@ -78,7 +110,7 @@ try {
 try {
   await autoUpdate();
 } catch (e) {
-  if (Deno.env.get("DH_DEBUG")) err(`${BIN}: auto-update failed: ${e}`);
+  if (process.env.DH_DEBUG) err(`${BIN}: auto-update failed: ${e}`);
 }
 // The Deephaven client libraries keep sockets open.
-Deno.exit(code);
+process.exit(code);

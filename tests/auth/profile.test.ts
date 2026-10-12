@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { expect, test } from "bun:test";
 import {
   defaultName,
   findByIdentity,
@@ -14,7 +14,7 @@ function config(profiles: Record<string, Profile>, def?: string): Config {
   return { ...emptyState().config, profiles, defaultProfile: def };
 }
 
-Deno.test("defaultName: host:user, then host:port:user on collision", () => {
+test("defaultName: host:user, then host:port:user on collision", () => {
   const c = config({
     a: profile(
       "dhe.example.com:user-a",
@@ -22,28 +22,24 @@ Deno.test("defaultName: host:user, then host:port:user on collision", () => {
       "user-a",
     ),
   });
-  assertEquals(
-    defaultName(c, "https://dhe.example.com:9000", "user-a"),
+  expect(defaultName(c, "https://dhe.example.com:9000", "user-a")).toBe(
     "dhe.example.com:9000:user-a",
   );
-  assertEquals(
-    defaultName(c, "https://dhe.example.com:8123", "user-b"),
+  expect(defaultName(c, "https://dhe.example.com:8123", "user-b")).toBe(
     "dhe.example.com:user-b",
   );
 });
 
-Deno.test("defaultName: operate-as is part of the name", () => {
-  assertEquals(
+test("defaultName: operate-as is part of the name", () => {
+  expect(
     defaultName(config({}), "https://dhe.example.com", "user-a", "user-b"),
-    "dhe.example.com:user-a/user-b",
-  );
-  assertEquals(
+  ).toBe("dhe.example.com:user-a/user-b");
+  expect(
     defaultName(config({}), "https://dhe.example.com", "user-a", "user-a"),
-    "dhe.example.com:user-a",
-  );
+  ).toBe("dhe.example.com:user-a");
 });
 
-Deno.test("findByIdentity: server + user + operate-as", () => {
+test("findByIdentity: server + user + operate-as", () => {
   const c = config({
     a: profile("x", "https://dhe.example.com", "user-a"),
     b: {
@@ -51,23 +47,22 @@ Deno.test("findByIdentity: server + user + operate-as", () => {
       operateAs: "user-b",
     },
   });
-  assertEquals(
-    findByIdentity(c, "https://dhe.example.com", "user-a")?.[0],
-    "a",
-  );
-  assertEquals(
+  expect(findByIdentity(c, "https://dhe.example.com", "user-a")?.[0]).toBe("a");
+  expect(
     findByIdentity(c, "https://dhe.example.com", "user-a", "user-b")?.[0],
-    "b",
-  );
+  ).toBe("b");
 });
 
-Deno.test("removeProfile: promotes a profile on the same server first", () => {
-  const c = config({
-    a: profile("a", "https://one.example.com", "u1"),
-    b: profile("b", "https://two.example.com", "u2"),
-    c: profile("c", "https://one.example.com", "u3"),
-  }, "a");
-  assertEquals(removeProfile(c, "a"), "c");
-  assertEquals(removeProfile(c, "b"), "c");
-  assertEquals(removeProfile(c, "c"), undefined);
+test("removeProfile: promotes a profile on the same server first", () => {
+  const c = config(
+    {
+      a: profile("a", "https://one.example.com", "u1"),
+      b: profile("b", "https://two.example.com", "u2"),
+      c: profile("c", "https://one.example.com", "u3"),
+    },
+    "a",
+  );
+  expect(removeProfile(c, "a")).toBe("c");
+  expect(removeProfile(c, "b")).toBe("c");
+  expect(removeProfile(c, "c")).toBeUndefined();
 });

@@ -1,4 +1,4 @@
-import { describe, DhError } from "./errors.ts";
+import { DhError, describe } from "./errors.ts";
 import type { Kind } from "./store.ts";
 
 export interface ResolvedServer {
@@ -74,11 +74,13 @@ export async function resolveServer(
       detect(url, timeoutMs).catch((e) => {
         errors.push(`${url.origin}: ${describe(e)}`);
         return null;
-      })
+      }),
     ),
   );
   const i = kinds.findIndex((kind) => kind !== null);
-  if (i >= 0) return { origin: urls[i].origin, kind: kinds[i]! };
+  const url = urls[i];
+  const kind = kinds[i];
+  if (url && kind) return { origin: url.origin, kind };
   throw new DhError(
     "server_unreachable",
     `No Deephaven server found at ${input}`,

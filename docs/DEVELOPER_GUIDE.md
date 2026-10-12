@@ -4,16 +4,16 @@ For installing and using `dh`, see the [README](../README.md).
 
 ## Prerequisites
 
-[Deno](https://deno.com) 2.3 or later (for `Deno.build.standalone` and lockfile
-v5).
+[Bun](https://bun.sh); the version is pinned in `package.json`'s
+`packageManager` field, which CI also reads. Run `bun install` first.
 
 ## Common tasks
 
 ```sh
-deno task dev            # run from source (never auto-updates)
-deno task build          # compile for this platform -> dist/ (--all for every target)
-deno task test           # installs via install.sh/install.ps1 from a fake GitHub and proves dh updates itself
-deno task check          # fmt + lint + type-check
+bun run dev              # run from source (never auto-updates)
+bun run build            # compile for this platform -> dist/ (--all for every target)
+bun test                 # unit and CLI tests, plus an install from a fake GitHub that proves dh updates itself
+bun run check            # Biome format + lint, and tsc type-check
 ```
 
 CI (`.github/workflows/ci.yml`) runs `check` on Ubuntu and `test` on Ubuntu,
@@ -23,18 +23,19 @@ macOS and Windows for every pull request and push to `main`.
 
 After a run, `dh` fetches
 `https://github.com/deephaven/deephaven-mcp/releases/latest/download/manifest.json`
-(from `repository` in `deno.json`), at most once per `DH_UPDATE_INTERVAL`. If
+(from `repository` in `package.json`), at most once per `DH_UPDATE_INTERVAL`. If
 the manifest lists a newer version for this platform, `dh` downloads it, checks
 the SHA-256, and swaps the new binary in place of its own executable. The time
 of the last check is kept in `<executable>.last-update-check`. Only compiled
-binaries update themselves; `deno task dev` never does.
+binaries update themselves (the build bakes in the version with `--define`);
+`bun run dev` never does.
 
 ```json
 {
   "version": "3.0.1",
   "binaries": {
-    "aarch64-apple-darwin": {
-      "url": "https://github.com/deephaven/deephaven-mcp/releases/download/v3.0.1/dh-aarch64-apple-darwin",
+    "darwin-arm64": {
+      "url": "https://github.com/deephaven/deephaven-mcp/releases/download/v3.0.1/dh-darwin-arm64",
       "sha256": "..."
     }
   }
@@ -46,19 +47,21 @@ compatible.
 
 ## Releasing
 
-Bump `version` in `deno.json`, then either push a matching tag:
+Bump `version` in `package.json`, commit it, and push the commit to the branch
+first, so the tag points at a commit that's on the remote. Then either push a
+matching tag:
 
 ```sh
 git tag v3.0.1 && git push origin v3.0.1
 ```
 
 or, on GitHub, open **Actions → Release → Run workflow** and pick the branch.
-The run tags that branch's latest commit as `v<version from deno.json>`, and
+The run tags that branch's latest commit as `v<version from package.json>`, and
 fails if that tag already exists. GitHub only shows this button for workflows on
 the default branch.
 
 `.github/workflows/release.yml` runs CI, cross-compiles every target
-(`deno task release <tag>`), and publishes the binaries, `manifest.json`,
+(`bun run release <tag>`), and publishes the binaries, `manifest.json`,
 `SHA256SUMS`, `install.sh` and `install.ps1` as a GitHub release.
 
 Tags with a suffix (`v3.0.1-rc.1`) are published as prereleases, which

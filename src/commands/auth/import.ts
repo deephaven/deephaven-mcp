@@ -8,11 +8,12 @@ import {
   disconnect as disconnectEnterprise,
   loginKey,
 } from "../../auth/enterprise.ts";
-import { describe, DhError, timeoutMs } from "../../auth/errors.ts";
+import { DhError, describe, timeoutMs } from "../../auth/errors.ts";
 import {
   authorizeComputer,
   closeSession,
   revokeWith,
+  type Saved,
   saveProfile,
 } from "../../auth/flows.ts";
 import { parseKeyFile, readKeyFile } from "../../auth/keyfile.ts";
@@ -23,7 +24,7 @@ import {
   resolveSecret,
   type SecretRef,
 } from "../../auth/legacy.ts";
-import { connectAndLogin, type Session } from "../../auth/session.ts";
+import { connectAndLogin, loadedCa, type Session } from "../../auth/session.ts";
 import type { Credential, Method } from "../../auth/store.ts";
 import { Store } from "../../auth/store.ts";
 import { note, result } from "../../output.ts";
@@ -70,7 +71,7 @@ async function importItem(
   item: LegacyItem,
   waiting: (what: string) => void,
 ): Promise<{ profile: string; detail: string }> {
-  if (item.caCert && Deno.env.get("DENO_CERT") !== item.caCert) {
+  if (item.caCert && loadedCa() !== item.caCert) {
     throw new DhError(
       "usage",
       `uses a custom CA; run \`${BIN} auth login ${item.origin} --ca-cert ${item.caCert}\``,
@@ -85,16 +86,17 @@ async function importItem(
     method: Method,
     credential: Credential,
     extra: { operateAs?: string; handler?: string } = {},
-  ) => (await saveProfile(store, {
-    origin: item.origin,
-    kind: item.kind,
-    caCert: item.caCert,
-    importedFrom: importedFrom(legacyPath, item),
-    user,
-    method,
-    credential,
-    ...extra,
-  }));
+  ) =>
+    await saveProfile(store, {
+      origin: item.origin,
+      kind: item.kind,
+      caCert: item.caCert,
+      importedFrom: importedFrom(legacyPath, item),
+      user,
+      method,
+      credential,
+      ...extra,
+    });
 
   if (plan.method === "password") {
     const password = await resolveSecret(plan.password);
@@ -122,7 +124,7 @@ async function importItem(
     );
     try {
       const { credential } = await authorizeComputer(session, cache);
-      let saved;
+      let saved: Saved;
       try {
         saved = await save(plan.username, "password", credential, {
           operateAs: plan.operateAs,
@@ -134,7 +136,7 @@ async function importItem(
       await revokeWith(session, saved.previous).catch((e) =>
         note(
           `  ! ${item.name}: could not delete the previous key: ${describe(e)}`,
-        )
+        ),
       );
       return { profile: saved.name, detail: "authorized this computer" };
     } finally {
@@ -160,13 +162,13 @@ async function importItem(
     const credential: Credential = plan.keyPath
       ? { type: "keyFile", path: plan.keyPath }
       : {
-        type: "keyPair",
-        keyType: key.keyPair.type,
-        publicKey: key.keyPair.publicKey,
-        privateKey: key.keyPair.privateKey,
-        generated: false,
-      };
-    let saved;
+          type: "keyPair",
+          keyType: key.keyPair.type,
+          publicKey: key.keyPair.publicKey,
+          privateKey: key.keyPair.privateKey,
+          generated: false,
+        };
+    let saved: Saved | undefined;
     try {
       saved = await save(key.user, "private-key", credential, {
         operateAs: key.operateAs,
@@ -181,7 +183,7 @@ async function importItem(
       await revokeWith(session, saved.previous).catch((e) =>
         note(
           `  ! ${item.name}: could not delete the previous key: ${describe(e)}`,
-        )
+        ),
       );
     } finally {
       disconnectEnterprise(conn);
@@ -224,7 +226,9 @@ async function importItem(
     }
     credential = secretCredential(ref, secret ?? "");
     if (
-      credential.type === "envRef" && plan.method === "basic" && !plan.username
+      credential.type === "envRef" &&
+      plan.method === "basic" &&
+      !plan.username
     ) {
       credential.basicToken = true;
     }
@@ -240,11 +244,12 @@ async function importItem(
   } else {
     detail += " (not verified; variable not set)";
   }
-  const user = plan.method === "basic"
-    ? username!
-    : plan.method === "custom"
-    ? handler!.split(".").pop()!
-    : plan.method;
+  const user =
+    plan.method === "basic"
+      ? username!
+      : plan.method === "custom"
+        ? handler!.split(".").pop()!
+        : plan.method;
   const profile = (await save(user, plan.method, credential, { handler })).name;
   return { profile, detail };
 }
@@ -262,9 +267,11 @@ export async function runImport(
   note(`Found a dhcli config at ${legacy.path}.`);
   const { config: current } = await store.read();
   const done = legacy.items.filter((i) =>
-    Object.values(current.profiles).some((p) =>
-      p.server === i.origin && p.importedFrom === importedFrom(legacy.path, i)
-    )
+    Object.values(current.profiles).some(
+      (p) =>
+        p.server === i.origin &&
+        p.importedFrom === importedFrom(legacy.path, i),
+    ),
   );
   for (const i of done) note(`  – ${i.name}: already imported`);
   let items = legacy.items.filter((i) => !done.includes(i));
@@ -318,12 +325,12 @@ export async function runImport(
     // All failed → leave unset so the next login offers it again.
     if (items.length === 0) config.legacyImport = "declined";
     else if (anyOk) config.legacyImport = "done";
-    const legacyDefault = outcomes.find((o) =>
-      o.ok && o.item === legacy.defaultName
+    const legacyDefault = outcomes.find(
+      (o) => o.ok && o.item === legacy.defaultName,
     );
     if (legacyDefault) {
-      const id = Object.entries(config.profiles).find(([, p]) =>
-        p.name === legacyDefault.profile
+      const id = Object.entries(config.profiles).find(
+        ([, p]) => p.name === legacyDefault.profile,
       )?.[0];
       if (id) config.defaultProfile = id;
     }

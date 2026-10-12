@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { NodeHttp2gRPCTransport } from "@deephaven/jsapi-nodejs";
 import {
   createPasswordCredentials,
@@ -7,7 +8,7 @@ import {
   uploadPublicKey,
 } from "@deephaven-enterprise/auth-nodejs";
 import { BIN } from "../version.ts";
-import { describe, DhError, withTimeout } from "./errors.ts";
+import { DhError, describe, withTimeout } from "./errors.ts";
 import { type Api, loadEnterpriseApi } from "./jsapi.ts";
 import type { KeyPair } from "./keyfile.ts";
 
@@ -81,15 +82,16 @@ export async function enterpriseAuthConfig(
   const resolve = (url: string) => new URL(url, conn.origin).href;
   return {
     passwordsEnabled: c[PASSWORDS] !== "false",
-    saml: c[SAML_CLASS] && c[SAML_URL]
-      ? {
-        loginUrl: resolve(c[SAML_URL]),
-        providerName: c[SAML_NAME] || "SSO",
-        confirmUrl: c[SAML_CONFIRM_URL]
-          ? resolve(c[SAML_CONFIRM_URL])
-          : undefined,
-      }
-      : undefined,
+    saml:
+      c[SAML_CLASS] && c[SAML_URL]
+        ? {
+            loginUrl: resolve(c[SAML_URL]),
+            providerName: c[SAML_NAME] || "SSO",
+            confirmUrl: c[SAML_CONFIRM_URL]
+              ? resolve(c[SAML_CONFIRM_URL])
+              : undefined,
+          }
+        : undefined,
   };
 }
 
@@ -140,7 +142,7 @@ export function loginKey(
     () =>
       loginClientWithKeyPair(
         conn.client,
-        // deno-lint-ignore no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
         { type: "keyPair", username, keyPair, operateAs } as any,
       ),
     timeout,
@@ -199,8 +201,8 @@ export interface UploadedKey extends KeyPair {
 /** Where key uploads go; reported when they fail. */
 async function aclWriter(conn: EnterpriseConnection): Promise<string> {
   try {
-    const { dbAclWriterHost, dbAclWriterPort } = await conn.client
-      .getServerConfigValues();
+    const { dbAclWriterHost, dbAclWriterPort } =
+      await conn.client.getServerConfigValues();
     return `${dbAclWriterHost}:${dbAclWriterPort}`;
   } catch {
     return "its ACL write server";
@@ -225,13 +227,15 @@ export async function createKey(
   const keyPair = generateBase64KeyPair();
   const date = new Date().toISOString().slice(0, 10);
   // The server rejects comments that aren't printable ASCII.
-  const comment = `${BIN} CLI - ${Deno.hostname()} - ${date}`
-    .replace(/[^\x20-\x7e]/g, "?");
+  const comment = `${BIN} CLI - ${hostname()} - ${date}`.replace(
+    /[^\x20-\x7e]/g,
+    "?",
+  );
   let res: Response;
   try {
     res = await uploadPublicKey({
       dheClient: conn.client,
-      // deno-lint-ignore no-explicit-any
+      // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
       userName: username as any,
       publicKey: keyPair.publicKey,
       comment,
@@ -262,11 +266,11 @@ export async function deleteKey(
 ): Promise<void> {
   await deletePublicKeys({
     dheClient: conn.client,
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
     userName: username as any,
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
     publicKeys: [keyPair.publicKey as any],
-    // deno-lint-ignore no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
     type: keyPair.type as any,
   });
 }

@@ -1,5 +1,14 @@
-import { join } from "@std/path";
-import { DhError } from "./errors.ts";
+import {
+  chmod,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  stat,
+} from "node:fs/promises";
+import { join } from "node:path";
+import { DhError, isErrno } from "./errors.ts";
 
 export type Kind = "enterprise" | "community";
 export type Method =
@@ -33,13 +42,13 @@ export interface Profile {
 export type Credential =
   | { type: "none" }
   | {
-    type: "keyPair";
-    keyType: string;
-    publicKey: string;
-    privateKey: string;
-    /** Created and uploaded by this CLI, so it may revoke it. */
-    generated: boolean;
-  }
+      type: "keyPair";
+      keyType: string;
+      publicKey: string;
+      privateKey: string;
+      /** Created and uploaded by this CLI, so it may revoke it. */
+      generated: boolean;
+    }
   | { type: "keyFile"; path: string }
   | { type: "secret"; value: string }
   /** `basicToken`: the variable holds `user:password` (legacy v1 Basic). */
@@ -63,18 +72,18 @@ export interface State {
   credentials: Credentials;
 }
 
-const WINDOWS = Deno.build.os === "windows";
+const WINDOWS = process.platform === "win32";
 const LOCK_WAIT_MS = 10_000;
 const LOCK_STALE_MS = 30_000;
 
 export function configDir(): string {
-  const override = Deno.env.get("DH_CONFIG_DIR");
+  const override = process.env.DH_CONFIG_DIR;
   if (override) return override;
   if (WINDOWS) {
-    const appData = Deno.env.get("APPDATA");
+    const appData = process.env.APPDATA;
     if (appData) return join(appData, "Deephaven", "cli");
   }
-  const home = Deno.env.get(WINDOWS ? "USERPROFILE" : "HOME");
+  const home = WINDOWS ? process.env.USERPROFILE : process.env.HOME;
   if (!home) throw new DhError("internal", "Cannot find the home directory");
   return join(home, ".deephaven", "cli");
 }
@@ -131,9 +140,12 @@ export class Store {
   }
 
   private async makeDir(resecure: boolean): Promise<void> {
-    const existed = await Deno.stat(this.dir).then(() => true, () => false);
-    if (!existed) await Deno.mkdir(this.dir, { recursive: true });
-    if (!WINDOWS) await Deno.chmod(this.dir, 0o700);
+    const existed = await stat(this.dir).then(
+      () => true,
+      () => false,
+    );
+    if (!existed) await mkdir(this.dir, { recursive: true });
+    if (!WINDOWS) await chmod(this.dir, 0o700);
     // Editing ACLs races with other processes' writes, so not on every update.
     else if (!existed || resecure) {
       await restrictWindowsAcl(this.dir, existed ? "reset-dir" : "dir");
@@ -142,8 +154,8 @@ export class Store {
 
   private async assertPrivate(): Promise<void> {
     if (WINDOWS) return;
-    const { mode } = await Deno.stat(this.credentialsPath);
-    if (mode !== null && (mode & 0o077) !== 0) {
+    const { mode } = await stat(this.credentialsPath);
+    if ((mode & 0o077) !== 0) {
       throw new DhError(
         "credential_unavailable",
         `${this.credentialsPath} can be read by other users`,
@@ -156,9 +168,9 @@ export class Store {
 async function readJson<T>(path: string): Promise<T | undefined> {
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await readFile(path, "utf8");
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return undefined;
+    if (isErrno(e, "ENOENT")) return undefined;
     throw e;
   }
   try {
@@ -173,28 +185,21 @@ async function writeAtomic(
   value: unknown,
   mode: number,
 ): Promise<void> {
-  const tmp = `${path}.${Deno.pid}.${crypto.randomUUID()}.tmp`;
+  const tmp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    const file = await Deno.open(tmp, { createNew: true, write: true, mode });
+    const file = await open(tmp, "wx", mode);
     try {
-      const data = new TextEncoder().encode(
-        JSON.stringify(value, null, 2) + "\n",
-      );
-      for (let written = 0; written < data.length;) {
-        const n = await file.write(data.subarray(written));
-        if (n === 0) throw new Error(`Short write to ${tmp}`);
-        written += n;
-      }
+      await file.writeFile(`${JSON.stringify(value, null, 2)}\n`);
       await file.sync();
     } finally {
-      file.close();
+      await file.close();
     }
-    if (!WINDOWS) await Deno.chmod(tmp, mode);
+    if (!WINDOWS) await chmod(tmp, mode);
     // The temp file is this process's own, so its ACL can change without racing other writers.
     else if (mode === 0o600) await restrictWindowsAcl(tmp, "file");
-    await Deno.rename(tmp, path);
+    await rename(tmp, path);
   } catch (e) {
-    await Deno.remove(tmp).catch(() => {});
+    await rm(tmp, { force: true }).catch(() => {});
     throw e;
   }
 }
@@ -207,16 +212,16 @@ async function restrictWindowsAcl(
   path: string,
   kind: "dir" | "reset-dir" | "file",
 ): Promise<void> {
-  const user = Deno.env.get("USERNAME");
+  const user = process.env.USERNAME;
   const icacls = async (args: string[]) =>
-    (await new Deno.Command("icacls", {
-      args: [path, ...args, "/Q"],
-      stdout: "null",
-      stderr: "null",
-    }).output()).success;
+    (await Bun.spawn(["icacls", path, ...args, "/Q"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    }).exited) === 0;
   const grant = kind === "file" ? `${user}:F` : `${user}:(OI)(CI)F`;
-  const ok = (kind !== "reset-dir" || await icacls(["/reset"])) &&
-    await icacls(["/inheritance:r", "/grant:r", grant]);
+  const ok =
+    (kind !== "reset-dir" || (await icacls(["/reset"]))) &&
+    (await icacls(["/inheritance:r", "/grant:r", grant]));
   if (!ok) {
     throw new DhError("internal", `Could not restrict access to ${path}`);
   }
@@ -226,13 +231,13 @@ async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
-      (await Deno.open(path, { createNew: true, write: true })).close();
+      await (await open(path, "wx")).close();
       break;
     } catch (e) {
-      if (!(e instanceof Deno.errors.AlreadyExists)) throw e;
-      const mtime = (await Deno.stat(path).catch(() => null))?.mtime;
+      if (!isErrno(e, "EEXIST")) throw e;
+      const mtime = (await stat(path).catch(() => null))?.mtime;
       if (mtime && Date.now() - mtime.getTime() > LOCK_STALE_MS) {
-        await Deno.remove(path).catch(() => {});
+        await rm(path, { force: true }).catch(() => {});
         continue;
       }
       if (Date.now() > deadline) {
@@ -248,6 +253,6 @@ async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } finally {
-    await Deno.remove(path).catch(() => {});
+    await rm(path, { force: true }).catch(() => {});
   }
 }

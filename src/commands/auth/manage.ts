@@ -25,10 +25,11 @@ export async function list(): Promise<void> {
       return `No profiles. Run \`${BIN} auth login\` to get started.`;
     }
     const width = Math.max(...rows.map((r) => r.name.length));
-    return rows.map((r) =>
-      `${r.default ? "●" : " "} ${r.name.padEnd(width)}   ${
-        KIND_LABEL[r.kind].padEnd(10)
-      }${r.default ? "   (default)" : ""}`
+    return rows.map(
+      (r) =>
+        `${r.default ? "●" : " "} ${r.name.padEnd(width)}   ${KIND_LABEL[
+          r.kind
+        ].padEnd(10)}${r.default ? "   (default)" : ""}`,
     );
   }, rows);
 }
@@ -53,22 +54,24 @@ export async function use(options: unknown, name?: string): Promise<void> {
       `Run \`${BIN} auth login\` to get started.`,
     );
   }
-  const id = name ? findByName(config, name)?.[0] : await (async () => {
-    const prompt = await getPrompter(g.input !== false);
-    return await prompt.select(
-      "Which profile should be the default?",
-      profiles.map(([id, p]) => ({
-        label: p.name,
-        value: id,
-        hint: id === config.defaultProfile ? "(default)" : undefined,
-      })),
-      "<profile>",
-    );
-  })();
+  const id = name
+    ? findByName(config, name)?.[0]
+    : await (async () => {
+        const prompt = await getPrompter(g.input !== false);
+        return await prompt.select(
+          "Which profile should be the default?",
+          profiles.map(([id, p]) => ({
+            label: p.name,
+            value: id,
+            hint: id === config.defaultProfile ? "(default)" : undefined,
+          })),
+          "<profile>",
+        );
+      })();
   if (!id) throw noProfile(name!);
   const chosen = await store.update((state) => {
     state.config.defaultProfile = id;
-    return state.config.profiles[id].name;
+    return state.config.profiles[id]?.name;
   });
   result(() => `✔ Default profile is now ${chosen}`, { default: chosen });
 }
@@ -82,7 +85,7 @@ export async function rename(name: string, newName: string): Promise<void> {
     if (findByName(config, newName)) {
       throw new DhError("usage", `A profile named "${newName}" already exists`);
     }
-    config.profiles[found[0]].name = newName;
+    found[1].name = newName;
   });
   result(() => `✔ Renamed ${name} to ${newName}`, { from: name, to: newName });
 }

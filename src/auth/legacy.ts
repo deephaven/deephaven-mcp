@@ -1,19 +1,22 @@
-import { dirname, join } from "@std/path";
-import { parse as parseJsonc } from "@std/jsonc";
-import { DhError } from "./errors.ts";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { DhError, isErrno } from "./errors.ts";
 import type { Kind } from "./store.ts";
 
-export type SecretRef = { literal: string } | { env: string } | {
-  file: string;
-};
+export type SecretRef =
+  | { literal: string }
+  | { env: string }
+  | {
+      file: string;
+    };
 
 export type LegacyPlan =
   | {
-    method: "password";
-    username: string;
-    password: SecretRef;
-    operateAs?: string;
-  }
+      method: "password";
+      username: string;
+      password: SecretRef;
+      operateAs?: string;
+    }
   | { method: "private-key"; keyPath?: string; keyText?: string }
   | { method: "anonymous" }
   | { method: "psk"; secret: SecretRef }
@@ -38,18 +41,18 @@ export interface LegacyConfig {
   defaultName?: string;
 }
 
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: untyped legacy config files.
 type Json = any;
 
-const WINDOWS = Deno.build.os === "windows";
+const WINDOWS = process.platform === "win32";
 
 export function legacyDataRoot(): string {
-  const override = Deno.env.get("DH_AI_DATA_DIR");
+  const override = process.env.DH_AI_DATA_DIR;
   if (override) return override;
-  const appData = Deno.env.get("APPDATA");
+  const appData = process.env.APPDATA;
   if (WINDOWS && appData) return join(appData, "Deephaven", "ai");
   return join(
-    Deno.env.get(WINDOWS ? "USERPROFILE" : "HOME") ?? "",
+    (WINDOWS ? process.env.USERPROFILE : process.env.HOME) ?? "",
     ".deephaven",
     "ai",
   );
@@ -58,10 +61,10 @@ export function legacyDataRoot(): string {
 /** `${env:VAR}` / `${file:/path}` templates, or a literal. */
 export function secretRef(value: unknown): SecretRef | undefined {
   if (typeof value !== "string" || value === "") return undefined;
-  const env = value.match(/^\$\{env:([^}]+)\}$/);
-  if (env) return { env: env[1] };
-  const file = value.match(/^\$\{file:([^}]+)\}$/);
-  if (file) return { file: file[1] };
+  const env = value.match(/^\$\{env:([^}]+)\}$/)?.[1];
+  if (env) return { env };
+  const file = value.match(/^\$\{file:([^}]+)\}$/)?.[1];
+  if (file) return { file };
   return { literal: value };
 }
 
@@ -146,7 +149,7 @@ function v1Enterprise(name: string, cfg: Json): LegacyItem {
       username: cfg.username,
       password: cfg.password_env_var
         ? { env: cfg.password_env_var }
-        : secretRef(cfg.password) ?? { literal: "" },
+        : (secretRef(cfg.password) ?? { literal: "" }),
       operateAs: cfg.effective_user,
     },
   };
@@ -155,16 +158,16 @@ function v1Enterprise(name: string, cfg: Json): LegacyItem {
 export function parseV1(text: string, path: string): LegacyConfig {
   let cfg: Json;
   try {
-    cfg = parseJsonc(text);
+    cfg = Bun.JSONC.parse(text);
   } catch {
     throw new DhError("usage", `${path} is not valid JSON5`);
   }
   const items = [
     ...Object.entries(cfg?.community?.sessions ?? {}).map(([n, c]) =>
-      v1Community(n, c)
+      v1Community(n, c),
     ),
     ...Object.entries(cfg?.enterprise?.systems ?? {}).map(([n, c]) =>
-      v1Enterprise(n, c)
+      v1Enterprise(n, c),
     ),
   ];
   const notImported = [
@@ -181,13 +184,13 @@ export function parseV1(text: string, path: string): LegacyConfig {
 async function readJsonFiles(dir: string): Promise<[string, Json][]> {
   const out: [string, Json][] = [];
   try {
-    for await (const entry of Deno.readDir(dir)) {
-      if (!entry.isFile || !entry.name.endsWith(".json")) continue;
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
       const file = join(dir, entry.name);
-      out.push([file, JSON.parse(await Deno.readTextFile(file))]);
+      out.push([file, JSON.parse(await readFile(file, "utf8"))]);
     }
   } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
+    if (!isErrno(e, "ENOENT")) throw e;
   }
   return out.sort(([a], [b]) => a.localeCompare(b));
 }
@@ -244,12 +247,13 @@ function v2Enterprise(file: string, cfg: Json): LegacyItem {
     const ref = secretRef(cred.key_text);
     return {
       ...base,
-      plan: ref && "file" in ref
-        ? { method: "private-key", keyPath: ref.file }
-        : {
-          method: "private-key",
-          keyText: ref && "literal" in ref ? ref.literal : undefined,
-        },
+      plan:
+        ref && "file" in ref
+          ? { method: "private-key", keyPath: ref.file }
+          : {
+              method: "private-key",
+              keyText: ref && "literal" in ref ? ref.literal : undefined,
+            },
     };
   }
   return {
@@ -272,8 +276,9 @@ export async function parseV2(configDir: string): Promise<LegacyConfig> {
     ...sessions.map(([f, c]) => v2Community(f, c)),
     ...systems.map(([f, c]) => v2Enterprise(f, c)),
   ];
-  const settings = await Deno.readTextFile(
+  const settings = await readFile(
     join(configDir, "community", "settings.json"),
+    "utf8",
   ).then(JSON.parse, () => ({}));
   const notImported = [
     ...(settings.session_creation ? ["community session creation"] : []),
@@ -281,8 +286,9 @@ export async function parseV2(configDir: string): Promise<LegacyConfig> {
       .filter(([, c]) => c.session_creation)
       .map(([, c]) => `enterprise/systems/${c.system_name} session creation`),
   ];
-  const context = await Deno.readTextFile(
+  const context = await readFile(
     join(dirname(configDir), "runtime", "context.json"),
+    "utf8",
   ).then(JSON.parse, () => ({}));
   return {
     path: configDir,
@@ -293,8 +299,8 @@ export async function parseV2(configDir: string): Promise<LegacyConfig> {
 }
 
 async function kindOf(path: string): Promise<"file" | "dir" | undefined> {
-  const stat = await Deno.stat(path).catch(() => undefined);
-  return stat?.isDirectory ? "dir" : stat?.isFile ? "file" : undefined;
+  const info = await stat(path).catch(() => undefined);
+  return info?.isDirectory() ? "dir" : info?.isFile() ? "file" : undefined;
 }
 
 /** `from`, else `$DH_MCP_CONFIG_FILE` (v1), else the v2 tree. */
@@ -303,11 +309,12 @@ export async function findLegacy(
 ): Promise<LegacyConfig | undefined> {
   const candidates = from
     ? [from]
-    : [Deno.env.get("DH_MCP_CONFIG_FILE"), join(legacyDataRoot(), "config")]
-      .filter((p): p is string => Boolean(p));
+    : [process.env.DH_MCP_CONFIG_FILE, join(legacyDataRoot(), "config")].filter(
+        (p): p is string => Boolean(p),
+      );
   for (const path of candidates) {
     const kind = await kindOf(path);
-    if (kind === "file") return parseV1(await Deno.readTextFile(path), path);
+    if (kind === "file") return parseV1(await readFile(path, "utf8"), path);
     if (kind === "dir") return await parseV2(path);
   }
   if (from) throw new DhError("usage", `Not found: ${from}`);
@@ -318,8 +325,8 @@ export async function resolveSecret(
   ref: SecretRef,
 ): Promise<string | undefined> {
   if ("literal" in ref) return ref.literal || undefined;
-  if ("env" in ref) return Deno.env.get(ref.env) || undefined;
-  return (await Deno.readTextFile(ref.file)).trim();
+  if ("env" in ref) return process.env[ref.env] || undefined;
+  return (await readFile(ref.file, "utf8")).trim();
 }
 
 export function describePlan(item: LegacyItem): string {

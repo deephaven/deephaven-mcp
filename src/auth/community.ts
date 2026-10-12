@@ -1,4 +1,4 @@
-import { describe, DhError, withTimeout } from "./errors.ts";
+import { DhError, describe, withTimeout } from "./errors.ts";
 import { type Api, loadCommunityApi } from "./jsapi.ts";
 import type { Method } from "./store.ts";
 
@@ -36,12 +36,10 @@ export async function connectCommunity(
 ): Promise<CommunityConnection> {
   const dh = await loadCommunityApi(new URL(origin), cacheRoot, timeout);
   const client = new dh.CoreClient(origin);
-  let values: string[][];
+  let values: [string, string][];
   try {
-    values = await withTimeout(
-      client.getAuthConfigValues(),
-      timeout,
-      () => unreachable(origin),
+    values = await withTimeout(client.getAuthConfigValues(), timeout, () =>
+      unreachable(origin),
     );
   } catch (e) {
     disconnect(client);
@@ -69,8 +67,9 @@ export function communityMethods(
 ): { method: Method; handler: string }[] {
   return handlers
     .map((handler) => ({ method: methodFor(handler), handler }))
-    .sort((a, b) =>
-      Number(a.method === "anonymous") - Number(b.method === "anonymous")
+    .sort(
+      (a, b) =>
+        Number(a.method === "anonymous") - Number(b.method === "anonymous"),
     );
 }
 
@@ -92,22 +91,21 @@ export async function loginCommunity(
   rejected: "auth_failed" | "auth_expired",
 ): Promise<void> {
   const { dh, client, origin } = conn;
-  const credentials = login.method === "anonymous"
-    ? { type: dh.CoreClient.LOGIN_TYPE_ANONYMOUS }
-    : login.method === "psk"
-    ? { type: PSK_HANDLER, token: login.secret }
-    : login.method === "basic"
-    ? {
-      type: dh.CoreClient.LOGIN_TYPE_PASSWORD,
-      username: login.username,
-      token: login.secret,
-    }
-    : { type: login.handler, token: login.secret };
+  const credentials =
+    login.method === "anonymous"
+      ? { type: dh.CoreClient.LOGIN_TYPE_ANONYMOUS }
+      : login.method === "psk"
+        ? { type: PSK_HANDLER, token: login.secret }
+        : login.method === "basic"
+          ? {
+              type: dh.CoreClient.LOGIN_TYPE_PASSWORD,
+              username: login.username,
+              token: login.secret,
+            }
+          : { type: login.handler, token: login.secret };
   try {
-    await withTimeout(
-      client.login(credentials),
-      timeout,
-      () => unreachable(origin),
+    await withTimeout(client.login(credentials), timeout, () =>
+      unreachable(origin),
     );
   } catch (e) {
     disconnect(client);

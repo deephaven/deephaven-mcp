@@ -41,7 +41,7 @@ const noInput: Prompter = {
 
 /** Prompts render on stderr, so stdout stays clean for `-o json`. */
 export function canPrompt(inputEnabled: boolean): boolean {
-  return inputEnabled && Deno.stdin.isTerminal() && Deno.stderr.isTerminal();
+  return inputEnabled && Boolean(process.stdin.isTTY && process.stderr.isTTY);
 }
 
 export async function getPrompter(inputEnabled: boolean): Promise<Prompter> {

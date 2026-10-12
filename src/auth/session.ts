@@ -1,6 +1,7 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { fromFileUrl } from "@std/path";
-import { BIN } from "../version.ts";
+import { join } from "node:path";
+import { BIN, STANDALONE } from "../version.ts";
 import {
   type CommunityConnection,
   type CommunityLogin,
@@ -29,12 +30,12 @@ import {
 export type LoginSpec =
   | { kind: "community"; login: CommunityLogin }
   | {
-    kind: "enterprise";
-    username: string;
-    operateAs?: string;
-    password?: string;
-    keyPair?: KeyPair;
-  };
+      kind: "enterprise";
+      username: string;
+      operateAs?: string;
+      password?: string;
+      keyPair?: KeyPair;
+    };
 
 export interface Session {
   origin: string;
@@ -92,46 +93,51 @@ export async function connectAndLogin(
   };
 }
 
+/** Set in a re-run process to the `--ca-cert` file it trusts. */
+const LOADED_CA = "DH_LOADED_CA_CERT";
+
+export function loadedCa(): string | undefined {
+  return process.env[LOADED_CA];
+}
+
 /**
  * TLS trust is fixed at process start, so a custom CA means re-running this
- * process with `DENO_CERT` set. `extraArgs` carry choices already made.
+ * process with `NODE_EXTRA_CA_CERTS` set. `extraArgs` carry choices already made.
  */
 export async function ensureCa(
   caCert: string | undefined,
   extraArgs: string[] = [],
 ): Promise<void> {
-  if (!caCert || Deno.env.get("DENO_CERT") === caCert) return;
+  if (!caCert || loadedCa() === caCert) return;
+  let pem: string;
   try {
-    await Deno.stat(caCert);
+    pem = await readFile(caCert, "utf8");
   } catch {
     throw new DhError("usage", `CA certificate not found: ${caCert}`);
   }
-  const args = Deno.build.standalone ? [...Deno.args, ...extraArgs] : [
-    "run",
-    "--allow-env",
-    "--allow-net",
-    "--allow-read",
-    "--allow-write",
-    "--allow-run",
-    "--allow-sys=hostname",
-    fromFileUrl(Deno.mainModule),
-    ...Deno.args,
-    ...extraArgs,
-  ];
-  const { code } = await new Deno.Command(Deno.execPath(), {
-    args,
-    env: { DENO_CERT: caCert },
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  }).spawn().status;
-  Deno.exit(code);
+  // Keep CAs the user already trusts (e.g. a corporate proxy's), for updates too.
+  const existing = process.env.NODE_EXTRA_CA_CERTS;
+  const dir = existing ? await mkdtemp(join(tmpdir(), `${BIN}-ca-`)) : "";
+  const bundle = existing ? join(dir, "ca.pem") : caCert;
+  if (existing) {
+    const theirs = await readFile(existing, "utf8").catch(() => "");
+    await writeFile(bundle, `${theirs}\n${pem}`);
+  }
+  // From source, argv[1] is the script; compiled, it's a virtual path to skip.
+  const args = process.argv.slice(STANDALONE ? 2 : 1);
+  const proc = Bun.spawn([process.execPath, ...args, ...extraArgs], {
+    env: { ...process.env, NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
+    stdio: ["inherit", "inherit", "inherit"],
+  });
+  const code = await proc.exited;
+  if (dir) await rm(dir, { recursive: true, force: true });
+  process.exit(code);
 }
 
 function readSecret(cred: Credential, profile: Profile): string | undefined {
   if (cred.type === "secret") return cred.value;
   if (cred.type !== "envRef") return undefined;
-  const value = Deno.env.get(cred.env);
+  const value = process.env[cred.env];
   if (value === undefined) {
     throw new DhError(
       "credential_unavailable",
@@ -167,11 +173,12 @@ export async function specForProfile(
       },
     };
   }
-  const keyPair = cred.type === "keyPair"
-    ? cred
-    : cred.type === "keyFile"
-    ? (await readKeyFile(cred.path)).keyPair
-    : undefined;
+  const keyPair =
+    cred.type === "keyPair"
+      ? cred
+      : cred.type === "keyFile"
+        ? (await readKeyFile(cred.path)).keyPair
+        : undefined;
   return {
     kind,
     username: profile.user,
@@ -183,7 +190,7 @@ export async function specForProfile(
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
 async function envSession(): Promise<Session> {
-  const env = (name: string) => Deno.env.get(name) || undefined;
+  const env = (name: string) => process.env[name] || undefined;
   const secrets = [
     "DH_PASSWORD",
     "DH_PSK",
@@ -191,10 +198,7 @@ async function envSession(): Promise<Session> {
     "DH_AUTH_TOKEN",
   ].filter(env);
   if (secrets.length > 1) {
-    throw new DhError(
-      "usage",
-      `Set only one of ${secrets.join(", ")}`,
-    );
+    throw new DhError("usage", `Set only one of ${secrets.join(", ")}`);
   }
   await ensureCa(env("DH_CA_CERT"));
   const { origin, kind } = await resolveServer(env("DH_SERVER")!);
@@ -228,14 +232,14 @@ async function envSession(): Promise<Session> {
     const login: CommunityLogin = env("DH_PSK")
       ? { method: "psk", secret: env("DH_PSK") }
       : env("DH_PASSWORD")
-      ? { method: "basic", username, secret: env("DH_PASSWORD") }
-      : env("DH_AUTH_TOKEN")
-      ? {
-        method: "custom",
-        handler: env("DH_AUTH_HANDLER"),
-        secret: env("DH_AUTH_TOKEN"),
-      }
-      : { method: "anonymous" };
+        ? { method: "basic", username, secret: env("DH_PASSWORD") }
+        : env("DH_AUTH_TOKEN")
+          ? {
+              method: "custom",
+              handler: env("DH_AUTH_HANDLER"),
+              secret: env("DH_AUTH_TOKEN"),
+            }
+          : { method: "anonymous" };
     if (login.method === "basic" && !username) {
       throw new DhError("usage", "DH_PASSWORD needs DH_USERNAME");
     }
@@ -254,6 +258,7 @@ async function profileSession(
   id: string,
 ): Promise<Session> {
   const profile = state.config.profiles[id];
+  if (!profile) throw new DhError("internal", `No profile ${id}`);
   const server = state.config.servers[profile.server];
   const cred = state.credentials.credentials[id] ?? { type: "none" };
   await ensureCa(server?.caCert);
@@ -283,8 +288,8 @@ export async function requireAuth(
   profileFlag?: string,
   store = new Store(),
 ): Promise<Session> {
-  const name = profileFlag ?? Deno.env.get("DH_PROFILE");
-  if (!name && Deno.env.get("DH_SERVER")) return await envSession();
+  const name = profileFlag ?? process.env.DH_PROFILE;
+  if (!name && process.env.DH_SERVER) return await envSession();
   const state = await store.read();
   const id = name
     ? findByName(state.config, name)?.[0]

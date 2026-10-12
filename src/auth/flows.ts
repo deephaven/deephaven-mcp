@@ -1,3 +1,4 @@
+import { disconnect as disconnectCommunity } from "./community.ts";
 import {
   connectEnterprise,
   createKey,
@@ -6,7 +7,6 @@ import {
   type EnterpriseConnection,
   loginKey,
 } from "./enterprise.ts";
-import { disconnect as disconnectCommunity } from "./community.ts";
 import { DhError, timeoutMs } from "./errors.ts";
 import type { KeyPair } from "./keyfile.ts";
 import { defaultName, findByIdentity, newProfileId } from "./profile.ts";
@@ -42,8 +42,8 @@ export async function saveProfile(
   return await store.update(({ config, credentials }) => {
     const existing = findByIdentity(config, p.origin, p.user, p.operateAs);
     const id = existing?.[0] ?? newProfileId();
-    const name = existing?.[1].name ??
-      defaultName(config, p.origin, p.user, p.operateAs);
+    const name =
+      existing?.[1].name ?? defaultName(config, p.origin, p.user, p.operateAs);
     const importedFrom = p.importedFrom ?? existing?.[1].importedFrom;
     const previous = credentials.credentials[id];
     const server = config.servers[p.origin];
@@ -64,7 +64,8 @@ export async function saveProfile(
       createdAt: existing?.[1].createdAt ?? new Date().toISOString(),
     };
     credentials.credentials[id] = p.credential;
-    const hasDefault = config.defaultProfile !== undefined &&
+    const hasDefault =
+      config.defaultProfile !== undefined &&
       config.defaultProfile in config.profiles &&
       config.defaultProfile !== id;
     if (makeDefault === true || (makeDefault === undefined && !hasDefault)) {

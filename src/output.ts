@@ -1,8 +1,8 @@
+import { writeSync } from "node:fs";
 import { DhError, ERROR_CODES } from "./auth/errors.ts";
 
 export type Format = "human" | "json";
 
-const encoder = new TextEncoder();
 let format: Format = "human";
 
 export function setFormat(value: Format): void {
@@ -14,12 +14,13 @@ export function isJson(): boolean {
 }
 
 // Not console: it is silenced while the Deephaven client libraries run.
+// Synchronous, so nothing is lost when the process exits right after.
 export function out(text = ""): void {
-  Deno.stdout.writeSync(encoder.encode(text + "\n"));
+  writeSync(1, `${text}\n`);
 }
 
 export function err(text: string): void {
-  Deno.stderr.writeSync(encoder.encode(text + "\n"));
+  writeSync(2, `${text}\n`);
 }
 
 /** Progress and notices; never mixed into JSON stdout. */
@@ -39,21 +40,22 @@ export function result(human: () => string | string[], json: unknown): void {
 
 /** Prints `e` and returns the process exit code. */
 export function reportError(e: unknown): number {
-  const error = e instanceof DhError
-    ? e
-    : new DhError("internal", e instanceof Error ? e.message : String(e));
-  if (
-    error.code === "internal" && Deno.env.get("DH_DEBUG") && e instanceof Error
-  ) {
+  const error =
+    e instanceof DhError
+      ? e
+      : new DhError("internal", e instanceof Error ? e.message : String(e));
+  if (error.code === "internal" && process.env.DH_DEBUG && e instanceof Error) {
     err(e.stack ?? e.message);
   }
   if (isJson()) {
-    err(JSON.stringify({
-      error: error.message,
-      code: error.code,
-      exit: error.exit,
-      ...(error.hint ? { hint: error.hint } : {}),
-    }));
+    err(
+      JSON.stringify({
+        error: error.message,
+        code: error.code,
+        exit: error.exit,
+        ...(error.hint ? { hint: error.hint } : {}),
+      }),
+    );
   } else {
     err(`✖ ${error.message}`);
     if (error.hint) err(`  ${error.hint}`);

@@ -1,20 +1,27 @@
-import { encodeHex } from "@std/encoding/hex";
-import { greaterThan, parse } from "@std/semver";
-import { BIN, REPOSITORY, VERSION } from "./version.ts";
+import { createHash } from "node:crypto";
+import { writeSync } from "node:fs";
+import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { gt } from "semver";
+import { BIN, REPOSITORY, STANDALONE, VERSION } from "./version.ts";
 
 export const releasesUrl = (repository: string): string =>
   `https://github.com/${repository}/releases`;
 // Baked into every shipped binary; keep this URL and the manifest format stable.
-const DEFAULT_UPDATE_URL = `${
-  releasesUrl(REPOSITORY)
-}/latest/download/manifest.json`;
+const DEFAULT_UPDATE_URL = `${releasesUrl(
+  REPOSITORY,
+)}/latest/download/manifest.json`;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const DEFAULT_INTERVAL_HOURS = 24;
 const MAX_REDIRECTS = 5;
 
+/** This machine's release key, e.g. `darwin-arm64` or `windows-x64`. */
+export const PLATFORM = `${
+  process.platform === "win32" ? "windows" : process.platform
+}-${process.arch}`;
+
 export interface Manifest {
   version: string;
-  /** Keyed by `Deno.build.target`; `url` may be relative to the manifest. */
+  /** Keyed by {@link PLATFORM}; `url` may be relative to the manifest. */
   binaries: Record<string, { url: string; sha256: string }>;
 }
 
@@ -46,34 +53,34 @@ async function fetchOk(url: URL, timeoutMs: number): Promise<Response> {
 }
 
 async function replaceExecutable(binary: Uint8Array): Promise<void> {
-  const exe = Deno.execPath();
+  const exe = process.execPath;
   // Per-process name, so concurrent updates never rename each other's half-written file.
-  const staged = `${exe}.${Deno.pid}.new`;
+  const staged = `${exe}.${process.pid}.new`;
   try {
-    await Deno.writeFile(staged, binary, { mode: 0o755 });
-    if (Deno.build.os !== "windows") {
-      await Deno.chmod(staged, 0o755);
-      await Deno.rename(staged, exe);
+    await writeFile(staged, binary, { mode: 0o755 });
+    if (process.platform !== "win32") {
+      await chmod(staged, 0o755);
+      await rename(staged, exe);
       return;
     }
     // A running .exe can't be overwritten, but it can be renamed.
     const old = `${exe}.old`;
-    await Deno.remove(old).catch(() => {});
-    await Deno.rename(exe, old);
+    await rm(old).catch(() => {});
+    await rename(exe, old);
     try {
-      await Deno.rename(staged, exe);
+      await rename(staged, exe);
     } catch (e) {
-      await Deno.rename(old, exe);
+      await rename(old, exe);
       throw e;
     }
   } catch (e) {
-    await Deno.remove(staged).catch(() => {});
+    await rm(staged).catch(() => {});
     throw e;
   }
 }
 
 function intervalMs(): number {
-  const raw = Deno.env.get("DH_UPDATE_INTERVAL");
+  const raw = process.env.DH_UPDATE_INTERVAL;
   const hours = raw ? Number(raw) : NaN;
   const valid = Number.isFinite(hours) && hours >= 0;
   return (valid ? hours : DEFAULT_INTERVAL_HOURS) * 3_600_000;
@@ -81,48 +88,45 @@ function intervalMs(): number {
 
 /** Records a check attempt; returns false if the last one was too recent. */
 async function claimCheck(): Promise<boolean> {
-  const stamp = `${Deno.execPath()}.last-update-check`;
-  const last = Number(await Deno.readTextFile(stamp).catch(() => "0"));
+  const stamp = `${process.execPath}.last-update-check`;
+  const last = Number(await readFile(stamp, "utf8").catch(() => "0"));
   const elapsed = Date.now() - last;
   if (elapsed >= 0 && elapsed < intervalMs()) return false;
   // Written before fetching so failed or slow checks are throttled too.
-  await Deno.writeTextFile(stamp, String(Date.now()));
+  await writeFile(stamp, String(Date.now()));
   return true;
 }
 
 export async function autoUpdate(): Promise<void> {
-  // Only compiled binaries update; from source, execPath is the deno runtime.
-  if (!Deno.build.standalone) return;
-  if (Deno.build.os === "windows") {
+  // From source, execPath is the bun runtime, which must never be replaced.
+  if (!STANDALONE) return;
+  if (process.platform === "win32") {
     // Left by the previous update; deletable once that process has exited.
-    await Deno.remove(`${Deno.execPath()}.old`).catch(() => {});
+    await rm(`${process.execPath}.old`).catch(() => {});
   }
-  if (Deno.env.get("DH_AUTO_UPDATE") === "off") return;
-  if (!await claimCheck()) return;
+  if (process.env.DH_AUTO_UPDATE === "off") return;
+  if (!(await claimCheck())) return;
 
-  const manifestUrl = new URL(
-    Deno.env.get("DH_UPDATE_URL") ?? DEFAULT_UPDATE_URL,
-  );
-  const manifest: Manifest = await (await fetchOk(manifestUrl, 5_000)).json();
-  if (!greaterThan(parse(manifest.version), parse(VERSION))) return;
+  const manifestUrl = new URL(process.env.DH_UPDATE_URL ?? DEFAULT_UPDATE_URL);
+  const manifest = (await (
+    await fetchOk(manifestUrl, 5_000)
+  ).json()) as Manifest;
+  // Strict: throws on an invalid version (unlike Bun.semver, which accepts "3.0").
+  if (!gt(manifest.version, VERSION)) return;
 
-  const asset = manifest.binaries[Deno.build.target];
+  const asset = manifest.binaries[PLATFORM];
   if (!asset) return;
 
   const url = new URL(asset.url, manifestUrl);
   const binary = new Uint8Array(
     await (await fetchOk(url, 5 * 60_000)).arrayBuffer(),
   );
-  const digest = encodeHex(await crypto.subtle.digest("SHA-256", binary));
+  const digest = createHash("sha256").update(binary).digest("hex");
   if (digest !== asset.sha256.toLowerCase()) {
     throw new Error(`Checksum mismatch for ${url}`);
   }
 
   await replaceExecutable(binary);
   // Not console: it is silenced while the Deephaven client libraries run.
-  Deno.stderr.writeSync(
-    new TextEncoder().encode(
-      `Updated ${BIN} ${VERSION} -> ${manifest.version}\n`,
-    ),
-  );
+  writeSync(2, `Updated ${BIN} ${VERSION} -> ${manifest.version}\n`);
 }

@@ -1,8 +1,11 @@
-import { join, toFileUrl } from "@std/path";
-import { describe, DhError } from "./errors.ts";
+import { rmSync, writeSync } from "node:fs";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { DhError, describe } from "./errors.ts";
 import { isLocal } from "./resolve.ts";
 
-// deno-lint-ignore no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: the jsapi is untyped.
 export type Api = any;
 
 const MAX_REDIRECTS = 5;
@@ -10,28 +13,27 @@ const MAX_REDIRECTS = 5;
 let quieted = false;
 
 /** The client libraries log to console and leave stray rejections; keep both out of our output. */
-function quietLibraries(cacheRoot: string): void {
+function quietLibraries(libraryDir: string): void {
   if (quieted) return;
   quieted = true;
-  const debug = Deno.env.get("DH_DEBUG");
+  const debug = process.env.DH_DEBUG;
   if (!debug) {
-    for (
-      const m of ["log", "info", "warn", "error", "debug", "trace"] as const
-    ) {
+    for (const m of [
+      "log",
+      "info",
+      "warn",
+      "error",
+      "debug",
+      "trace",
+    ] as const) {
       console[m] = () => {};
     }
   }
-  globalThis.addEventListener("unhandledrejection", (e) => {
-    const reason = e.reason;
-    const fromLibrary = !(reason instanceof Error) ||
-      String(reason.stack).includes(cacheRoot);
-    if (!fromLibrary) return;
-    e.preventDefault();
-    if (debug) {
-      Deno.stderr.writeSync(
-        new TextEncoder().encode(`jsapi rejection: ${describe(reason)}\n`),
-      );
-    }
+  process.on("unhandledRejection", (reason) => {
+    const fromLibrary =
+      !(reason instanceof Error) || String(reason.stack).includes(libraryDir);
+    if (!fromLibrary) throw reason;
+    if (debug) writeSync(2, `jsapi rejection: ${describe(reason)}\n`);
   });
 }
 
@@ -53,7 +55,7 @@ async function download(
   const signal = AbortSignal.timeout(timeout);
   let res: Response;
   // Redirects are followed by hand so every hop must pass `assertTrusted`.
-  for (let hop = 0;; hop++) {
+  for (let hop = 0; ; hop++) {
     assertTrusted(url);
     try {
       res = await fetch(url, { signal, redirect: "manual" });
@@ -74,7 +76,7 @@ async function download(
   }
   if (optional && res.status === 404) {
     await res.body?.cancel();
-    await Deno.writeTextFile(dest, "");
+    await writeFile(dest, "");
     return;
   }
   if (!res.ok) {
@@ -84,7 +86,7 @@ async function download(
       `HTTP ${res.status} fetching ${url}`,
     );
   }
-  await Deno.writeTextFile(dest, await res.text());
+  await writeFile(dest, await res.text());
 }
 
 const runDirs = new Map<string, Promise<string>>();
@@ -94,19 +96,17 @@ function runDir(cacheRoot: string): Promise<string> {
   let dir = runDirs.get(cacheRoot);
   if (!dir) {
     dir = (async () => {
-      await Deno.mkdir(cacheRoot, { recursive: true });
-      const created = await Deno.makeTempDir({
-        dir: cacheRoot,
-        prefix: "run-",
-      });
-      globalThis.addEventListener("unload", () => {
+      await mkdir(cacheRoot, { recursive: true });
+      const created = await mkdtemp(join(cacheRoot, "run-"));
+      process.on("exit", () => {
         try {
-          Deno.removeSync(created, { recursive: true });
+          rmSync(created, { recursive: true, force: true });
         } catch {
           // Best effort.
         }
       });
-      return created;
+      // Compiled Bun binaries can't import through a symlink (macOS's /var is one).
+      return await realpath(created);
     })();
     runDirs.set(cacheRoot, dir);
   }
@@ -116,12 +116,12 @@ function runDir(cacheRoot: string): Promise<string> {
 async function originDir(cacheRoot: string, origin: URL): Promise<string> {
   // Reversible, so two origins can never share a directory (or a cached module).
   const dir = join(await runDir(cacheRoot), encodeURIComponent(origin.origin));
-  await Deno.mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true });
   return dir;
 }
 
 function polyfillBrowserGlobals(origin: URL): void {
-  // deno-lint-ignore no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: browser globals the jsapi expects.
   const g = globalThis as any;
   g.self = globalThis;
   g.window = globalThis;
@@ -151,8 +151,8 @@ export async function loadCommunityApi(
     true,
   );
   polyfillBrowserGlobals(origin);
-  quietLibraries(cacheRoot);
-  const mod = await import(toFileUrl(join(dir, "dh-core.js")).href);
+  quietLibraries(await runDir(cacheRoot));
+  const mod = await import(pathToFileURL(join(dir, "dh-core.js")).href);
   return mod.default ?? mod;
 }
 
@@ -167,8 +167,8 @@ export async function loadEnterpriseApi(
   const file = join(dir, "irisapi.nocache.js");
   await download(new URL("/irisapi/irisapi.nocache.js", origin), file, timeout);
   polyfillBrowserGlobals(origin);
-  quietLibraries(cacheRoot);
-  await import(toFileUrl(file).href);
-  // deno-lint-ignore no-explicit-any
+  quietLibraries(await runDir(cacheRoot));
+  await import(pathToFileURL(file).href);
+  // biome-ignore lint/suspicious/noExplicitAny: set by the loaded script.
   return (globalThis as any).iris;
 }
