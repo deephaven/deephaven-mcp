@@ -1,58 +1,22 @@
 import { resolve } from "node:path";
-import {
-  type CommunityLogin,
-  communityMethods,
-  communityUser,
-  connectCommunity,
-  disconnect as disconnectCommunity,
-  loginCommunity,
-} from "../../auth/community.ts";
-import {
-  connectEnterprise,
-  disconnect as disconnectEnterprise,
-  type EnterpriseAuthConfig,
-  type EnterpriseConnection,
-  enterpriseAuthConfig,
-  loginKey,
-  loginPassword,
-  loginSaml,
-  userName,
-} from "../../auth/enterprise.ts";
-import { DhError, describe, reasonOf, timeoutMs } from "../../auth/errors.ts";
-import {
-  addOrphan,
-  authorizeComputer,
-  closeSession,
-  keyPairOf,
-  type NewProfile,
-  orphansNote,
-  revokeOrphans,
-  revokeWith,
-  type Saved,
-  saveProfile,
-} from "../../auth/flows.ts";
-import { type KeyFile, type KeyPair, readKeyFile } from "../../auth/keyfile.ts";
-import {
-  findByIdentity,
-  findByName,
-  sortedProfiles,
-} from "../../auth/profile.ts";
-import { candidates, resolveServer } from "../../auth/resolve.ts";
-import { openBrowser, samlNonce, signInUrl } from "../../auth/saml.ts";
-import { ensureCa, type Session } from "../../auth/session.ts";
-import {
-  type Credential,
-  type Kind,
-  type Method,
-  type State,
-  Store,
-} from "../../auth/store.ts";
-import { note, result } from "../../output.ts";
-import { type Choice, getPrompter, type Prompter } from "../../ui/prompt.ts";
+import { InvalidArgumentError, Option } from "commander";
+import { commitSignIn } from "../../auth/flows.ts";
+import { findServer } from "../../auth/session.ts";
+import { connect, disconnect, offers, signIn } from "../../auth/signin.ts";
+import type { Method } from "../../auth/store.ts";
+import { defineCommand } from "../../cli/command.ts";
+import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
-import { globals, profileName, promptsAllowed, secretFrom } from "../common.ts";
-import { type LogoutOptions, logout } from "./logout.ts";
-import { runMigrate } from "./migrate.ts";
+import { logout } from "./logout.ts";
+import { isFirstRun, migratedOutput, migrateLegacy } from "./migrate.ts";
+import {
+  askCredentials,
+  askDefault,
+  askMethod,
+  askWhere,
+  confirmAccount,
+  knownIdentity,
+} from "./questions.ts";
 
 export const METHODS: Method[] = [
   "saml",
@@ -85,586 +49,121 @@ export interface LoginOptions {
   yes?: boolean;
 }
 
-const KIND_LABEL: Record<Kind, string> = {
-  enterprise: "Deephaven Enterprise",
-  community: "Deephaven Community",
-};
-const OTHER = "__other__";
+export const login = defineCommand<LoginOptions>({
+  name: "login",
+  description: "Sign in and save a profile.",
+  args: [{ name: "[server]" }],
+  options: [
+    new Option("--method <method>", "Sign-in method.").choices(METHODS),
+    new Option("--username <user>", "Username."),
+    new Option("--password-stdin", "Read the password from stdin."),
+    new Option("--password-env <var>", "Read the password from this env var."),
+    new Option("--psk-stdin", "Read the pre-shared key from stdin."),
+    new Option("--psk-env <var>", "Read the pre-shared key from this env var."),
+    new Option("--handler <class>", "Community custom auth handler class."),
+    new Option("--token-stdin", "Read the custom auth token from stdin."),
+    new Option(
+      "--token-env <var>",
+      "Read the custom auth token from this env var.",
+    ),
+    new Option(
+      "--private-key-file <path>",
+      "Use an existing Enterprise key file.",
+    ),
+    new Option("--copy-key", "Save the key itself instead of its path."),
+    new Option("--ca-cert <file>", "Trust this CA certificate for the server."),
+    new Option("--timeout <seconds>", "How long to wait for SSO sign-in.")
+      .argParser(seconds)
+      .default(300),
+    new Option("--operate-as <user>", "Enterprise user to operate as."),
+    new Option("--no-browser", "Print the SSO URL without opening a browser."),
+    new Option(
+      "--expect-user <user>",
+      "Fail unless SSO signs in as this user.",
+    ),
+    new Option("--default", "Make this the default profile."),
+    new Option("--no-default", "Don't make this the default profile."),
+    new Option("-y, --yes", "Migrate a legacy config without asking."),
+  ],
 
-/** Where to log in, and anything already known about the identity. */
-interface Target {
-  origin: string;
-  kind: Kind;
-  method?: Method;
-  username?: string;
-  operateAs?: string;
-  handler?: string;
-  /** Key file of a profile being re-authenticated. */
-  keyFile?: string;
-  /** Key saved with `--copy-key` by a profile being re-authenticated. */
-  copiedKey?: KeyPair;
-}
-
-interface Result {
-  session: Session;
-  method: Method;
-  credential: Credential;
-  handler?: string;
-}
-
-interface MethodChoice {
-  method: Method;
-  /** Community custom handler class. */
-  handler?: string;
-}
-
-function methodFlagError(method: Method, available: Method[]): DhError {
-  return new DhError(
-    "usage",
-    `This server doesn't offer --method ${method}`,
-    `Available: ${available.join(", ")}`,
-  );
-}
-
-/** `keyFile`: Enterprise, where an existing key file always works. */
-async function chooseMethod(
-  prompt: Prompter,
-  options: LoginOptions,
-  target: Target,
-  choices: Choice<MethodChoice>[],
-  keyFile: boolean,
-): Promise<MethodChoice> {
-  const offered = choices.map((c) => c.value);
-  const available = offered.map((o) => o.method);
-  if (!keyFile && options.privateKeyFile) {
-    throw new DhError(
-      "usage",
-      "--private-key-file is only for Enterprise servers",
-    );
-  }
-  const wanted =
-    options.method ?? (options.privateKeyFile ? "private-key" : undefined);
-  if (keyFile && wanted === "private-key") return { method: wanted };
-  // Servers don't advertise key login; keep a re-authenticated key profile on it.
-  if (keyFile && !wanted && target.method === "private-key") {
-    return { method: "private-key" };
-  }
-  const handler = options.handler ?? target.handler;
-  const pick = (method: Method) => {
-    const matches = offered.filter((o) => o.method === method);
-    return matches.find((o) => o.handler === handler) ?? matches[0];
-  };
-  if (wanted) {
-    const found = pick(wanted);
-    if (!found) throw methodFlagError(wanted, available);
-    return wanted === "custom" && options.handler
-      ? { method: wanted, handler: options.handler }
-      : found;
-  }
-  if (offered.length === 0) {
-    throw new DhError(
-      "server_unsupported",
-      "This server offers no sign-in method dh supports",
-      keyFile ? "Sign in with an existing key: --private-key-file" : undefined,
-    );
-  }
-  const previous = target.method && pick(target.method);
-  if (previous) return previous;
-  const [only] = offered;
-  if (only && offered.length === 1) return only;
-  return await prompt.select(
-    "How do you want to sign in?",
-    choices,
-    "--method",
-  );
-}
-
-async function enterpriseLogin(
-  prompt: Prompter,
-  options: LoginOptions,
-  target: Target,
-  store: Store,
-): Promise<Result> {
-  const cache = store.cacheDir;
-  const timeout = timeoutMs();
-  const origin = target.origin;
-  const conn = await connectEnterprise(origin, cache, timeout);
-  let auth: EnterpriseAuthConfig;
-  try {
-    auth = await enterpriseAuthConfig(conn, timeout);
-  } catch (e) {
-    disconnectEnterprise(conn);
-    throw e;
-  }
-  const choices: Choice<MethodChoice>[] = [
-    ...(auth.saml
-      ? [
-          {
-            label: `${auth.saml.providerName} (SSO)`,
-            value: { method: "saml" as const },
-          },
-        ]
-      : []),
-    ...(auth.passwordsEnabled
-      ? [
-          {
-            label: "Username and password",
-            value: { method: "password" as const },
-          },
-        ]
-      : []),
-  ];
-  let method: Method;
-  try {
-    ({ method } = await chooseMethod(prompt, options, target, choices, true));
-  } catch (e) {
-    disconnectEnterprise(conn);
-    throw e;
-  }
-  const operateAs = options.operateAs ?? target.operateAs;
-
-  if (method === "private-key") {
-    let path: string | undefined;
-    let key: KeyFile;
-    if (!options.privateKeyFile && target.copiedKey) {
-      key = { keyPair: target.copiedKey };
-    } else {
-      path = resolve(
-        options.privateKeyFile ??
-          target.keyFile ??
-          (await prompt.text("Key file", "--private-key-file")),
-      );
-      key = await readKeyFile(path);
+  async run(ctx, [serverArg], opts) {
+    await ctx.store.ensureDir();
+    let state = await ctx.store.read();
+    if (!serverArg && isFirstRun(state)) {
+      const migrated = await migrateLegacy(ctx, { yes: opts.yes }, true);
+      if (migrated) return migratedOutput(migrated);
+      state = await ctx.store.read();
     }
-    const username =
-      options.username ??
-      key.user ??
-      target.username ??
-      (await prompt.text("Username", "--username"));
-    const as = operateAs ?? key.operateAs;
-    await loginKey(conn, username, key.keyPair, as, timeout, "auth_failed");
-    note(`✔ Signed in as ${username}`);
-    return {
-      session: {
-        origin,
-        kind: "enterprise",
-        user: username,
-        operateAs: as,
-        enterprise: conn,
-      },
-      method,
-      credential:
-        path && !options.copyKey
-          ? { type: "keyFile", path }
-          : {
-              type: "keyPair",
-              keyType: key.keyPair.type,
-              publicKey: key.keyPair.publicKey,
-              privateKey: key.keyPair.privateKey,
-              generated: false,
-            },
-    };
-  }
 
-  let signedIn: EnterpriseConnection;
-  let user: string;
-  if (method === "saml") {
-    const saml = auth.saml!;
-    const nonce = samlNonce();
-    const url = signInUrl(saml.confirmUrl ?? saml.loginUrl, nonce);
-    if (options.browser === false) {
-      note(`Sign in at:\n  ${url}`);
-    } else {
-      note(
-        `Opening your browser to sign in. If it doesn't open, go to:\n  ${url}`,
-      );
-      await openBrowser(url);
-    }
-    note("Waiting for sign-in… (Ctrl-C to cancel)");
-    signedIn = await loginSaml(
-      conn,
-      () => connectEnterprise(origin, cache, timeout),
-      nonce,
-      (options.timeout ?? 300) * 1000,
+    // An explicit server outranks DH_PROFILE, but not --profile.
+    const profile = ctx.profileFlag ?? (serverArg ? undefined : ctx.profile);
+    const where = await askWhere(ctx.ui, state, serverArg, profile, opts);
+    if (where === "remove") return await logout.run(ctx, [], {});
+    const known = knownIdentity(state, where.profile);
+    const { origin, kind } = await findServer(
+      where.server,
+      state.config.servers,
+      opts.caCert,
+      where.rerun,
     );
-    user = await userName(signedIn);
-    if (options.expectUser && options.expectUser !== user) {
-      disconnectEnterprise(signedIn);
-      throw new DhError(
-        "auth_failed",
-        `Signed in as ${user}, expected ${options.expectUser}`,
-      );
-    }
-    if (!saml.confirmUrl && !options.expectUser) {
-      const ok = await prompt.confirm(`Use ${user}?`, true, "--expect-user");
-      if (!ok) {
-        disconnectEnterprise(signedIn);
-        throw new DhError(
-          "cancelled",
-          "Not saved.",
-          `To use another account, pick or add it in ${saml.providerName}'s account chooser, or sign out of ${saml.providerName} in your browser, then run \`${BIN} auth login\` again.`,
-        );
-      }
-    }
-  } else {
-    user =
-      options.username ??
-      target.username ??
-      (await prompt.text("Username", "--username"));
-    const { value } = await secretFrom(
-      "password",
-      options.passwordStdin,
-      options.passwordEnv,
-      () => prompt.secret("Password", "--password-stdin"),
-    );
-    await loginPassword(conn, user, value, operateAs, timeout);
-    signedIn = conn;
-  }
-  note(`✔ Signed in as ${user}`);
-  const session: Session = {
-    origin,
-    kind: "enterprise",
-    user,
-    operateAs,
-    enterprise: signedIn,
-  };
-  const { credential, comment } = await authorizeComputer(
-    store,
-    session,
-    cache,
-  );
-  note(`✔ Authorized this computer (key "${comment}")`);
-  return { session, method, credential };
-}
 
-async function communityLogin(
-  prompt: Prompter,
-  options: LoginOptions,
-  target: Target,
-  cache: string,
-): Promise<Result> {
-  const timeout = timeoutMs();
-  const conn = await connectCommunity(target.origin, cache, timeout);
-  const offered = communityMethods(conn.handlers);
-  const labels: Record<Method, string> = {
-    anonymous: "Anonymous",
-    psk: "Pre-shared key",
-    basic: "Username and password",
-    custom: "Custom",
-    saml: "SSO",
-    password: "Password",
-    "private-key": "Key file",
-  };
-  const choices = offered.map((o) => ({
-    label: o.method === "custom" ? o.handler : labels[o.method],
-    value: o,
-  }));
-  let chosen: MethodChoice;
-  try {
-    chosen = await chooseMethod(prompt, options, target, choices, false);
-  } catch (e) {
-    disconnectCommunity(conn.client);
-    throw e;
-  }
-  const { method } = chosen;
-  const handler = method === "custom" ? chosen.handler : undefined;
-  const login: CommunityLogin = { method, handler };
-  let credential = { type: "none" } as Credential;
-  const store = (source: { value: string; env?: string }) => {
-    login.secret = source.value;
-    credential = source.env
-      ? { type: "envRef", env: source.env }
-      : { type: "secret", value: source.value };
-  };
-  if (method === "psk") {
-    store(
-      await secretFrom("psk", options.pskStdin, options.pskEnv, () =>
-        prompt.secret("Pre-shared key", "--psk-stdin"),
-      ),
-    );
-  } else if (method === "basic") {
-    login.username =
-      options.username ??
-      target.username ??
-      (await prompt.text("Username", "--username"));
-    store(
-      await secretFrom(
-        "password",
-        options.passwordStdin,
-        options.passwordEnv,
-        () => prompt.secret("Password", "--password-stdin"),
-      ),
-    );
-  } else if (method === "custom") {
-    if (!handler) {
-      throw new DhError("usage", "Input needed: pass --handler");
-    }
-    store(
-      await secretFrom("token", options.tokenStdin, options.tokenEnv, () =>
-        prompt.secret("Token", "--token-stdin"),
-      ),
-    );
-  }
-  await loginCommunity(conn, login, timeout, "auth_failed");
-  const user = communityUser(login);
-  note(`✔ Signed in${method === "anonymous" ? " anonymously" : ` as ${user}`}`);
-  if (method === "basic" && credential.type === "secret") {
-    note(
-      "! The password is saved in credentials.json, readable only by your account. Use --password-env to save a variable name instead.",
-    );
-  }
-  return {
-    session: {
-      origin: target.origin,
-      kind: "community",
-      user,
-      community: conn,
-    },
-    method,
-    credential,
-    handler,
-  };
-}
-
-async function pickTarget(
-  prompt: Prompter,
-  options: LoginOptions,
-  state: State,
-  serverArg: string | undefined,
-  reauth: Target | undefined,
-): Promise<Target> {
-  if (reauth) {
-    await ensureCa(
-      options.caCert ?? state.config.servers[reauth.origin]?.caCert,
-    );
-    return reauth;
-  }
-  let input = serverArg;
-  const known = Object.entries(state.config.servers);
-  if (!input) {
-    const picked =
-      known.length === 0
-        ? OTHER
-        : await prompt.select(
-            "What server do you want to log in to?",
-            [
-              ...known.map(([origin, s]) => ({
-                label: origin,
-                value: origin,
-                hint: `(${s.kind === "enterprise" ? "Enterprise" : "Community"}${
-                  s.importedFrom ? ` · ${s.importedFrom.split("#").pop()}` : ""
-                })`,
-              })),
-              { label: "Other…", value: OTHER },
-            ],
-            "<server>",
-          );
-    input =
-      picked === OTHER
-        ? await prompt.text("What server do you want to log in to?", "<server>")
-        : picked;
-  }
-  const knownOrigin = candidates(input)
-    .map((u) => u.origin)
-    .find((o) => o in state.config.servers);
-  const server = knownOrigin ? state.config.servers[knownOrigin] : undefined;
-  await ensureCa(
-    options.caCert ?? server?.caCert,
-    serverArg ? [] : ["--", input],
-  );
-  if (knownOrigin && server && !options.caCert) {
-    return { origin: knownOrigin, kind: server.kind };
-  }
-  const resolved = await resolveServer(input);
-  note(`✔ ${resolved.origin} (${KIND_LABEL[resolved.kind]})`);
-  return resolved;
-}
-
-/** The "already logged in" menu. Returns undefined when the user removed a profile. */
-async function menu(
-  prompt: Prompter,
-  state: State,
-): Promise<{ target?: Target; server?: string } | undefined> {
-  const profiles = sortedProfiles(state.config);
-  note("Authenticated profiles:");
-  for (const [id, p] of profiles) {
-    note(
-      `  ${id === state.config.defaultProfile ? "●" : " "} ${p.name}${
-        id === state.config.defaultProfile ? "   (default)" : ""
-      }`,
-    );
-  }
-  const action = await prompt.select(
-    "What would you like to do?",
-    [
-      { label: "Log in to another server", value: "server" },
-      { label: "Log in as a different user", value: "user" },
-      { label: "Re-authenticate a profile", value: "reauth" },
-      { label: "Remove a profile", value: "remove" },
-    ],
-    "<server>",
-  );
-  if (action === "server") return {};
-  if (action === "remove") return undefined;
-  if (action === "user") {
-    const server = await prompt.select(
-      "Which server?",
-      Object.keys(state.config.servers).map((o) => ({ label: o, value: o })),
-      "<server>",
-    );
-    return { server };
-  }
-  const id = await prompt.select(
-    "Which profile?",
-    profiles.map(([id, p]) => ({ label: p.name, value: id })),
-    "--profile",
-  );
-  return { target: targetOf(state, id) };
-}
-
-function targetOf(state: State, id: string): Target {
-  const p = state.config.profiles[id];
-  if (!p) throw new DhError("internal", `No profile ${id}`);
-  const cred = state.credentials.credentials[id];
-  return {
-    origin: p.server,
-    kind: state.config.servers[p.server]?.kind ?? "community",
-    method: p.method,
-    username:
-      p.method === "basic" ||
-      p.method === "password" ||
-      p.method === "private-key"
-        ? p.user
-        : undefined,
-    operateAs: p.operateAs,
-    handler: p.handler,
-    keyFile: cred?.type === "keyFile" ? cred.path : undefined,
-    copiedKey:
-      cred?.type === "keyPair" && !cred.generated ? keyPairOf(cred) : undefined,
-  };
-}
-
-export async function login(
-  options: LoginOptions,
-  serverArg?: string,
-): Promise<void> {
-  const g = globals(options);
-  const store = new Store();
-  await store.ensureDir();
-  const prompt = await getPrompter(promptsAllowed(g));
-  let state = await store.read();
-
-  const hasProfiles = Object.keys(state.config.profiles).length > 0;
-  if (!hasProfiles && !state.config.legacyImport && !serverArg) {
-    const count = await runMigrate(store, prompt, { yes: options.yes }, true);
-    if (count) {
-      result(() => `Migrated ${count} profile${count === 1 ? "" : "s"}.`, {
-        migrated: count,
-      });
-      return;
-    }
-    state = await store.read();
-  }
-
-  let reauth: Target | undefined;
-  // An explicit server outranks DH_PROFILE, but not --profile.
-  const name = g.profile ?? (serverArg ? undefined : profileName(g));
-  if (name) {
-    const found = findByName(state.config, name);
-    if (!found) {
-      throw new DhError(
-        "usage",
-        `No profile named "${name}"`,
-        `Run \`${BIN} auth\` to list profiles.`,
-      );
-    }
-    reauth = targetOf(state, found[0]);
-  } else if (
-    !serverArg &&
-    hasProfiles &&
-    prompt.interactive &&
-    !options.method &&
-    !options.privateKeyFile
-  ) {
-    const choice = await menu(prompt, state);
-    if (!choice) return await logout(options as LogoutOptions);
-    reauth = choice.target;
-    serverArg = choice.server;
-  }
-
-  const target = await pickTarget(prompt, options, state, serverArg, reauth);
-  const cache = store.cacheDir;
-  const { session, method, credential, handler } =
-    target.kind === "enterprise"
-      ? await enterpriseLogin(prompt, options, target, store)
-      : await communityLogin(prompt, options, target, cache);
-
-  let saved: Saved | undefined;
-  try {
-    state = await store.read();
-    const same = findByIdentity(
-      state.config,
-      session.origin,
-      session.user,
-      session.operateAs,
-    );
-    const defaultId = state.config.defaultProfile;
-    const hasDefault =
-      defaultId !== undefined && defaultId in state.config.profiles;
-    let makeDefault = options.default;
-    if (makeDefault === undefined && hasDefault && same?.[0] !== defaultId) {
-      makeDefault = prompt.interactive
-        ? await prompt.confirm("Make this the default?", false, "--default")
-        : false;
-    }
-    const profile: NewProfile = {
-      origin: session.origin,
-      kind: target.kind,
-      caCert: options.caCert ? resolve(options.caCert) : undefined,
-      user: session.user,
-      operateAs: session.operateAs,
-      method,
-      handler,
-      credential,
-    };
-    saved = await saveProfile(store, profile, makeDefault);
-    const orphans = await revokeOrphans(store, session).catch((e) => ({
-      deleted: 0,
-      kept: 1,
-      failed: reasonOf(e),
-    }));
-    const orphanLine = orphansNote(orphans);
-    if (orphanLine) note(orphanLine);
+    const server = await connect(origin, kind, ctx.store.cacheDir);
     try {
-      await revokeWith(session, saved.previous);
-    } catch (e) {
-      await store.update(({ credentials }) =>
-        addOrphan(credentials, session.origin, session.user, saved?.previous),
-      );
-      note(
-        `! Could not delete the previous key: ${describe(e)}. It's retried at your next sign-in.`,
-      );
+      const offered = await offers(server);
+      const offer = await askMethod(ctx.ui, kind, offered, known, opts);
+      const { how, save } = await askCredentials(ctx.ui, offer, known, opts);
+      const session = await signIn(server, how);
+      try {
+        note(
+          how.method === "anonymous"
+            ? "✔ Signed in anonymously"
+            : `✔ Signed in as ${session.user}`,
+        );
+        await confirmAccount(ctx.ui, session, offer, opts);
+        const { config } = await ctx.store.read();
+        const makeDefault = await askDefault(
+          ctx.ui,
+          config,
+          session,
+          opts.default,
+        );
+        const caCert = opts.caCert ? resolve(opts.caCert) : undefined;
+        const saved = await commitSignIn(
+          ctx.store,
+          session,
+          { ...save, caCert },
+          makeDefault,
+        );
+        if (saved.key) note(`✔ Authorized this computer (key "${saved.key}")`);
+        for (const warning of saved.warnings) note(warning);
+
+        return {
+          human: [
+            saved.isDefault
+              ? `Logged in. Default profile: ${saved.name}`
+              : `Logged in. Profile: ${saved.name}`,
+            `Run \`${BIN} --help\` to learn more.`,
+          ],
+          json: {
+            profile: saved.name,
+            server: session.origin,
+            user: session.user,
+            default: saved.isDefault,
+          },
+        };
+      } finally {
+        disconnect(session);
+      }
+    } finally {
+      disconnect(server);
     }
-    const { name, isDefault } = saved;
-    result(
-      () => [
-        isDefault
-          ? `Logged in. Default profile: ${name}`
-          : `Logged in. Profile: ${name}`,
-        `Run \`${BIN} --help\` to learn more.`,
-      ],
-      {
-        profile: name,
-        server: session.origin,
-        user: session.user,
-        default: isDefault,
-      },
-    );
-  } catch (e) {
-    // Nothing references a generated key until it's saved.
-    if (!saved) await revokeWith(session, credential).catch(() => {});
-    throw e;
-  } finally {
-    closeSession(session);
+  },
+});
+
+function seconds(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError("Not a positive number.");
   }
+  return n;
 }

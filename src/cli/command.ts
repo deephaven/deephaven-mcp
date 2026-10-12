@@ -1,0 +1,113 @@
+import { type Command, Option } from "commander";
+import { Store } from "../auth/store.ts";
+import { result, setFormat } from "../output.ts";
+import { lazyPrompter, type Prompter } from "../ui/prompt.ts";
+
+/** What every command gets, built once from the global flags. */
+export interface Context {
+  /** The config directory: profiles and credentials. */
+  store: Store;
+  /** Questions for the user; without a terminal or with --no-prompt, they fail naming the flag. */
+  ui: Prompter;
+  json: boolean;
+  /** `--profile`, then `DH_PROFILE`. */
+  profile?: string;
+  /** `--profile` alone; login lets a typed server outrank `DH_PROFILE`. */
+  profileFlag?: string;
+  /** True with --no-prompt (or the hidden --no-input). */
+  noPrompt: boolean;
+  /** The whole command tree, for help and `dh agents`. */
+  cli: Command;
+}
+
+/** A command's result: what to print for people, and the `-o json` value. */
+export interface Output {
+  human: string | string[];
+  json: unknown;
+}
+
+export interface Arg {
+  /** Commander syntax: `<required>` or `[optional]`. */
+  name: string;
+  description?: string;
+}
+
+/**
+ * One command. `run` reads as the command's script: questions (`ctx.ui`) and
+ * actions (`src/auth`) alternating, returning what to print.
+ */
+export interface CommandSpec<Opts = Record<string, never>> {
+  name: string;
+  description: string;
+  args?: Arg[];
+  options?: Option[];
+  run(ctx: Context, args: (string | undefined)[], opts: Opts): Promise<Output>;
+  /** Subcommands; they inherit the global flags. */
+  commands?: CommandSpec<never>[];
+}
+
+/** Only checks the shape; `opts` is typed as `Opts`. */
+export function defineCommand<Opts = Record<string, never>>(
+  spec: CommandSpec<Opts>,
+): CommandSpec<Opts> {
+  return spec;
+}
+
+/** The flags every command accepts. */
+export const GLOBAL_OPTIONS = [
+  new Option("--profile <name>", "Profile to use (env DH_PROFILE)."),
+  new Option("-o, --output <format>", "Output format.")
+    .choices(["human", "json"])
+    .default("human"),
+  new Option(
+    "--no-prompt",
+    "Never prompt; fail with the flag to pass instead.",
+  ),
+  // The older name; agents trained on other CLIs may still reach for it.
+  new Option("--no-input").hideHelp(),
+];
+
+interface GlobalOptions {
+  profile?: string;
+  output?: "human" | "json";
+  prompt?: boolean;
+  input?: boolean;
+}
+
+function contextFrom(cmd: Command): Context {
+  const g = cmd.optsWithGlobals() as GlobalOptions;
+  const noPrompt = g.prompt === false || g.input === false;
+  setFormat(g.output ?? "human");
+  let cli = cmd;
+  while (cli.parent) cli = cli.parent;
+  return {
+    store: new Store(),
+    ui: lazyPrompter(!noPrompt),
+    json: g.output === "json",
+    profile: g.profile ?? (process.env.DH_PROFILE || undefined),
+    profileFlag: g.profile,
+    noPrompt,
+    cli,
+  };
+}
+
+/** Wires `spec` onto `cmd`: arguments, options, the shared handler, then subcommands. */
+export function attach(cmd: Command, spec: CommandSpec<never>): Command {
+  cmd.description(spec.description);
+  for (const a of spec.args ?? []) cmd.argument(a.name, a.description);
+  for (const o of spec.options ?? []) cmd.addOption(o);
+  cmd.action(async (...params: unknown[]) => {
+    const self = params.at(-1) as Command;
+    const out = await spec.run(
+      contextFrom(self),
+      self.processedArgs as (string | undefined)[],
+      self.opts() as never,
+    );
+    result(() => out.human, out.json);
+  });
+  // `command()` (not addCommand) so subcommands inherit the root's settings.
+  for (const child of spec.commands ?? []) {
+    attach(cmd.command(child.name), child);
+  }
+  return cmd;
+}

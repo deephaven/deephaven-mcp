@@ -1,4 +1,4 @@
-import { disconnect as disconnectCommunity } from "./community.ts";
+import { BIN } from "../version.ts";
 import {
   connectEnterprise,
   createKey,
@@ -7,11 +7,25 @@ import {
   type EnterpriseConnection,
   loginKey,
 } from "./enterprise.ts";
-import { DhError, reasonOf, timeoutMs } from "./errors.ts";
+import { DhError, describe, reasonOf, timeoutMs } from "./errors.ts";
 import type { KeyPair } from "./keyfile.ts";
-import { defaultName, findByIdentity, newProfileId } from "./profile.ts";
-import type { Session } from "./session.ts";
-import type { Credential, Credentials, Kind, Method, Store } from "./store.ts";
+import {
+  defaultName,
+  findByIdentity,
+  findByName,
+  newProfileId,
+  removeProfile,
+} from "./profile.ts";
+import { ensureCa, loadedCa } from "./session.ts";
+import type { Session } from "./signin.ts";
+import type {
+  Credential,
+  Credentials,
+  Kind,
+  Method,
+  State,
+  Store,
+} from "./store.ts";
 
 export interface NewProfile {
   origin: string;
@@ -31,6 +45,229 @@ export interface Saved {
   isDefault: boolean;
   /** Credential this save replaced (re-login of the same identity). */
   previous?: Credential;
+}
+
+/** How to save a signed-in session; `"new-key"` authorizes this computer with a new Enterprise key. */
+export interface ToSave {
+  method: Method;
+  credential: Credential | "new-key";
+  handler?: string;
+  caCert?: string;
+  importedFrom?: string;
+}
+
+export interface Committed extends Saved {
+  /** The new key's comment, if one was made. */
+  key?: string;
+  /** Old keys that couldn't be deleted (they're retried later). */
+  warnings: string[];
+}
+
+/**
+ * Saves `session` as a profile: authorizes this computer if asked, saves,
+ * then deletes keys the save made obsolete. A failed save deletes the new key.
+ * `makeDefault` undefined → only if there's no default yet.
+ */
+export async function commitSignIn(
+  store: Store,
+  session: Session,
+  save: ToSave,
+  makeDefault?: boolean,
+): Promise<Committed> {
+  let credential: Credential;
+  let key: string | undefined;
+  if (save.credential === "new-key") {
+    const made = await authorizeComputer(store, session);
+    credential = made.credential;
+    key = made.comment;
+  } else {
+    credential = save.credential;
+  }
+
+  let saved: Saved;
+  try {
+    saved = await saveProfile(
+      store,
+      {
+        origin: session.origin,
+        kind: session.kind,
+        user: session.user,
+        operateAs: session.operateAs,
+        method: save.method,
+        handler: save.handler,
+        caCert: save.caCert,
+        importedFrom: save.importedFrom,
+        credential,
+      },
+      makeDefault,
+    );
+  } catch (e) {
+    // Nothing references a new key until it's saved.
+    if (key) await revokeWith(session, credential).catch(() => {});
+    throw e;
+  }
+
+  const warnings: string[] = [];
+  const orphans = await revokeOrphans(store, session).catch((e) => ({
+    deleted: 0,
+    kept: 1,
+    failed: reasonOf(e),
+  }));
+  const orphanLine = orphansNote(orphans);
+  if (orphanLine) warnings.push(orphanLine);
+  try {
+    await revokeWith(session, saved.previous);
+  } catch (e) {
+    await store.update(({ credentials }) =>
+      addOrphan(credentials, session.origin, session.user, saved.previous),
+    );
+    warnings.push(
+      `! Could not delete the previous key: ${describe(e)}. It's retried at your next sign-in.`,
+    );
+  }
+  return { ...saved, key, warnings };
+}
+
+/**
+ * Revoking a key needs its server's CA, and a process trusts only one extra
+ * CA, so this re-runs as `rerun` if the profiles share one. Returns the
+ * profiles this run can revoke, and those it can't.
+ */
+export async function trustCasToRevoke(
+  state: State,
+  ids: string[],
+  rerun: string[],
+): Promise<{ ids: string[]; skipped: string[] }> {
+  const { config, credentials } = state;
+  const caOf = (id: string) => {
+    const cred = credentials.credentials[id];
+    const server = config.profiles[id]?.server ?? "";
+    return cred?.type === "keyPair" && cred.generated
+      ? config.servers[server]?.caCert
+      : undefined;
+  };
+  const cas = new Set(ids.map(caOf).filter((ca) => ca !== undefined));
+  if (cas.size === 1) await ensureCa([...cas][0], [], rerun);
+  const trusted = loadedCa();
+  const skipped = ids.filter((id) => {
+    const ca = caOf(id);
+    return ca !== undefined && ca !== trusted;
+  });
+  return { ids: ids.filter((id) => !skipped.includes(id)), skipped };
+}
+
+export interface Removed {
+  removed: { profile: string; server: string; revoked: boolean }[];
+  /** Names of profiles signed in again while this ran, so kept. */
+  resaved: string[];
+  /** The default profile's name afterward. */
+  default?: string;
+  warnings: string[];
+}
+
+/**
+ * Deletes each profile's generated key on its server, then the profiles. A key
+ * that can't be deleted is remembered and retried at the next sign-in there.
+ */
+export async function removeProfiles(
+  store: Store,
+  state: State,
+  ids: string[],
+): Promise<Removed> {
+  const { config, credentials } = state;
+  const removed: Removed["removed"] = [];
+  const warnings: string[] = [];
+  const unrevoked: string[] = [];
+  for (const id of ids) {
+    const p = config.profiles[id];
+    if (!p) continue;
+    const cred = credentials.credentials[id];
+    let revoked = false;
+    if (cred) {
+      try {
+        revoked = await revokeOwnKey(
+          p.server,
+          p.user,
+          p.operateAs,
+          cred,
+          store.cacheDir,
+        );
+      } catch (e) {
+        unrevoked.push(id);
+        warnings.push(
+          `! Could not delete the key on ${p.server}: ${describe(
+            e,
+          )}. Removing the profile anyway; the key is deleted the next time you sign in there as ${p.user}.`,
+        );
+      }
+    }
+    removed.push({ profile: p.name, server: p.server, revoked });
+  }
+
+  // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
+  const resaved: string[] = [];
+  const next = await store.update((now) => {
+    let next = now.config.defaultProfile;
+    for (const id of ids) {
+      const cred = now.credentials.credentials[id];
+      if (
+        JSON.stringify(cred) !== JSON.stringify(credentials.credentials[id])
+      ) {
+        resaved.push(config.profiles[id]?.name ?? id);
+        continue;
+      }
+      next = removeProfile(now.config, id);
+      delete now.credentials.credentials[id];
+      const p = config.profiles[id];
+      if (p && unrevoked.includes(id)) {
+        addOrphan(now.credentials, p.server, p.user, cred);
+      }
+    }
+    return next ? now.config.profiles[next]?.name : undefined;
+  });
+  return {
+    removed: removed.filter((r) => !resaved.includes(r.profile)),
+    resaved,
+    default: next,
+    warnings,
+  };
+}
+
+/** Makes `id` the default. Undefined if another process removed it meanwhile. */
+export async function setDefault(
+  store: Store,
+  id: string,
+): Promise<string | undefined> {
+  return await store.update(({ config }) => {
+    const profile = config.profiles[id];
+    if (!profile) return undefined;
+    config.defaultProfile = id;
+    return profile.name;
+  });
+}
+
+export async function renameProfile(
+  store: Store,
+  name: string,
+  newName: string,
+): Promise<void> {
+  await store.update(({ config }) => {
+    const found = findByName(config, name);
+    if (!found) throw noProfile(name);
+    if (!newName.trim()) throw new DhError("usage", "The new name is empty");
+    if (findByName(config, newName)) {
+      throw new DhError("usage", `A profile named "${newName}" already exists`);
+    }
+    found[1].name = newName;
+  });
+}
+
+export function noProfile(name: string): DhError {
+  return new DhError(
+    "usage",
+    `No profile named "${name}"`,
+    `Run \`${BIN} auth\` to list profiles.`,
+  );
 }
 
 /** `makeDefault` undefined → only if there's no default yet. */
@@ -96,7 +333,6 @@ export async function saveProfile(
 export async function authorizeComputer(
   store: Store,
   session: Session,
-  cacheRoot: string,
 ): Promise<{ credential: Credential & { type: "keyPair" }; comment: string }> {
   const conn = session.enterprise!;
   const key = await createKey(conn, session.user);
@@ -110,7 +346,7 @@ export async function authorizeComputer(
   const timeout = timeoutMs();
   let check: EnterpriseConnection | undefined;
   try {
-    check = await connectEnterprise(session.origin, cacheRoot, timeout);
+    check = await connectEnterprise(session.origin, session.cacheRoot, timeout);
     await loginKey(
       check,
       session.user,
@@ -245,9 +481,4 @@ export function keyPairOf(cred: Credential & { type: "keyPair" }): KeyPair {
     publicKey: cred.publicKey,
     privateKey: cred.privateKey,
   };
-}
-
-export function closeSession(session: Session): void {
-  if (session.enterprise) disconnectEnterprise(session.enterprise);
-  if (session.community) disconnectCommunity(session.community.client);
 }

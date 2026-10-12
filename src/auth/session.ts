@@ -1,26 +1,22 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { note } from "../output.ts";
 import { BIN, STANDALONE } from "../version.ts";
-import {
-  type CommunityConnection,
-  type CommunityLogin,
-  communityUser,
-  connectCommunity,
-  loginCommunity,
-} from "./community.ts";
-import {
-  connectEnterprise,
-  type EnterpriseConnection,
-  loginKey,
-  loginPassword,
-} from "./enterprise.ts";
-import { DhError, isErrno, reasonOf, timeoutMs } from "./errors.ts";
+import { DhError, isErrno, reasonOf } from "./errors.ts";
 import { keyPairOf } from "./flows.ts";
-import { type KeyPair, readKeyFile } from "./keyfile.ts";
+import { readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
-import { resolveServer } from "./resolve.ts";
+import { candidates, type ResolvedServer, resolveServer } from "./resolve.ts";
 import {
+  connect,
+  disconnect,
+  type Session,
+  type SignIn,
+  signIn,
+} from "./signin.ts";
+import {
+  type Config,
   type Credential,
   type Kind,
   type Profile,
@@ -28,70 +24,21 @@ import {
   Store,
 } from "./store.ts";
 
-export type LoginSpec =
-  | { kind: "community"; login: CommunityLogin }
-  | {
-      kind: "enterprise";
-      username: string;
-      operateAs?: string;
-      password?: string;
-      keyPair?: KeyPair;
-    };
-
-export interface Session {
-  origin: string;
-  kind: Kind;
-  user: string;
-  operateAs?: string;
-  profileName?: string;
-  community?: CommunityConnection;
-  enterprise?: EnterpriseConnection;
-}
-
-/** Connects to `origin` and logs in with `spec`. */
-export async function connectAndLogin(
+/** Connects to `origin` and signs in; the connection is closed if sign-in fails. */
+async function open(
   origin: string,
-  spec: LoginSpec,
+  kind: Kind,
+  how: SignIn,
   cacheRoot: string,
   rejected: "auth_failed" | "auth_expired",
 ): Promise<Session> {
-  const timeout = timeoutMs();
-  if (spec.kind === "community") {
-    const conn = await connectCommunity(origin, cacheRoot, timeout);
-    await loginCommunity(conn, spec.login, timeout, rejected);
-    return {
-      origin,
-      kind: "community",
-      user: communityUser(spec.login),
-      community: conn,
-    };
+  const server = await connect(origin, kind, cacheRoot);
+  try {
+    return await signIn(server, how, rejected);
+  } catch (e) {
+    disconnect(server);
+    throw e;
   }
-  const conn = await connectEnterprise(origin, cacheRoot, timeout);
-  if (spec.keyPair) {
-    await loginKey(
-      conn,
-      spec.username,
-      spec.keyPair,
-      spec.operateAs,
-      timeout,
-      rejected,
-    );
-  } else {
-    await loginPassword(
-      conn,
-      spec.username,
-      spec.password ?? "",
-      spec.operateAs,
-      timeout,
-    );
-  }
-  return {
-    origin,
-    kind: "enterprise",
-    user: spec.username,
-    operateAs: spec.operateAs,
-    enterprise: conn,
-  };
 }
 
 /** Set in a re-run process to the `--ca-cert` file it trusts. */
@@ -150,6 +97,35 @@ export async function ensureCa(
   process.exit(code);
 }
 
+const KIND_LABEL: Record<Kind, string> = {
+  enterprise: "Deephaven Enterprise",
+  community: "Deephaven Community",
+};
+
+/**
+ * Trusts `caCert` (re-running with `rerun` appended if it must), then finds
+ * the server `input` names: a saved one, else by probing it.
+ */
+export async function findServer(
+  input: string,
+  servers: Config["servers"],
+  caCert: string | undefined,
+  rerun: string[],
+): Promise<ResolvedServer> {
+  const knownOrigin = candidates(input)
+    .map((u) => u.origin)
+    .find((o) => o in servers);
+  const known = knownOrigin ? servers[knownOrigin] : undefined;
+  await ensureCa(caCert ?? known?.caCert, rerun);
+  // A new CA is checked by probing.
+  if (knownOrigin && known && !caCert) {
+    return { origin: knownOrigin, kind: known.kind };
+  }
+  const found = await resolveServer(input);
+  note(`✔ ${found.origin} (${KIND_LABEL[found.kind]})`);
+  return found;
+}
+
 function readSecret(cred: Credential, profile: Profile): string | undefined {
   if (cred.type === "secret") return cred.value;
   if (cred.type !== "envRef") return undefined;
@@ -173,20 +149,18 @@ function readSecret(cred: Credential, profile: Profile): string | undefined {
   return value.slice(at + 1);
 }
 
-export async function specForProfile(
+/** How a saved profile signs in. */
+export async function signInFor(
   profile: Profile,
   kind: Kind,
   cred: Credential,
-): Promise<LoginSpec> {
+): Promise<SignIn> {
   if (kind === "community") {
     return {
-      kind,
-      login: {
-        method: profile.method,
-        handler: profile.handler,
-        username: profile.method === "basic" ? profile.user : undefined,
-        secret: readSecret(cred, profile),
-      },
+      method: profile.method as "psk" | "basic" | "custom" | "anonymous",
+      handler: profile.handler,
+      username: profile.method === "basic" ? profile.user : undefined,
+      secret: readSecret(cred, profile),
     };
   }
   const keyPair =
@@ -195,13 +169,10 @@ export async function specForProfile(
       : cred.type === "keyFile"
         ? (await readKeyFile(cred.path)).keyPair
         : undefined;
-  return {
-    kind,
-    username: profile.user,
-    operateAs: profile.operateAs,
-    keyPair,
-    password: keyPair ? undefined : readSecret(cred, profile),
-  };
+  const who = { username: profile.user, operateAs: profile.operateAs };
+  return keyPair
+    ? { method: "private-key", ...who, keyPair }
+    : { method: "password", ...who, password: readSecret(cred, profile) ?? "" };
 }
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
@@ -220,7 +191,7 @@ async function envSession(): Promise<Session> {
   const { origin, kind } = await resolveServer(env("DH_SERVER")!);
   const username = env("DH_USERNAME");
   const operateAs = env("DH_OPERATE_AS");
-  let spec: LoginSpec;
+  let how: SignIn;
   if (kind === "enterprise") {
     const keyFile = env("DH_PRIVATE_KEY_FILE");
     const key = keyFile ? await readKeyFile(keyFile) : undefined;
@@ -231,13 +202,10 @@ async function envSession(): Promise<Session> {
         "Enterprise needs DH_USERNAME with DH_PASSWORD, or DH_PRIVATE_KEY_FILE",
       );
     }
-    spec = {
-      kind,
-      username: user,
-      operateAs: operateAs ?? key?.operateAs,
-      keyPair: key?.keyPair,
-      password: env("DH_PASSWORD"),
-    };
+    const who = { username: user, operateAs: operateAs ?? key?.operateAs };
+    how = key
+      ? { method: "private-key", ...who, keyPair: key.keyPair }
+      : { method: "password", ...who, password: env("DH_PASSWORD") ?? "" };
   } else {
     if (env("DH_PRIVATE_KEY_FILE")) {
       throw new DhError(
@@ -245,7 +213,7 @@ async function envSession(): Promise<Session> {
         "DH_PRIVATE_KEY_FILE is only for Enterprise servers",
       );
     }
-    const login: CommunityLogin = env("DH_PSK")
+    const login: SignIn = env("DH_PSK")
       ? { method: "psk", secret: env("DH_PSK") }
       : env("DH_PASSWORD")
         ? { method: "basic", username, secret: env("DH_PASSWORD") }
@@ -262,10 +230,10 @@ async function envSession(): Promise<Session> {
     if (login.method === "custom" && !login.handler) {
       throw new DhError("usage", "DH_AUTH_TOKEN needs DH_AUTH_HANDLER");
     }
-    spec = { kind, login };
+    how = login;
   }
   // The jsapi loader makes this run's own owner-only folder inside it.
-  return await connectAndLogin(origin, spec, tmpdir(), "auth_failed");
+  return await open(origin, kind, how, tmpdir(), "auth_failed");
 }
 
 async function profileSession(
@@ -278,11 +246,13 @@ async function profileSession(
   const server = state.config.servers[profile.server];
   const cred = state.credentials.credentials[id] ?? { type: "none" };
   await ensureCa(server?.caCert);
-  const spec = await specForProfile(profile, server?.kind ?? "community", cred);
+  const kind = server?.kind ?? "community";
+  const how = await signInFor(profile, kind, cred);
   try {
-    const session = await connectAndLogin(
+    const session = await open(
       profile.server,
-      spec,
+      kind,
+      how,
       store.cacheDir,
       "auth_expired",
     );

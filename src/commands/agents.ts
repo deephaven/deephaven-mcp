@@ -1,6 +1,6 @@
 import type { Command, Option } from "commander";
 import { ERROR_CODES } from "../auth/errors.ts";
-import { result } from "../output.ts";
+import { defineCommand } from "../cli/command.ts";
 import { BIN, VERSION } from "../version.ts";
 
 interface Described {
@@ -46,39 +46,47 @@ function usageLines(commands: Described[]): [string, string][] {
 }
 
 /** Command tree and error codes: a summary, or everything with `-o json`. */
-export function agents(root: Command): void {
-  const manifest = {
-    name: BIN,
-    version: VERSION,
-    globalOptions: root.options.filter((o) => !o.hidden).map(describeOption),
-    commands: root.commands.map((c) => describeCommand(c, [BIN])),
-    errors: Object.entries(ERROR_CODES).map(([code, e]) => ({
-      code,
-      exit: e.exit,
-      description: e.description,
-    })),
-    errorFormat: {
-      stream: "stderr",
-      when: "-o json",
-      fields: ["error", "code", "exit", "hint"],
-    },
-  };
-  result(() => {
+export const agents = defineCommand({
+  name: "agents",
+  description: "Summarize commands and error codes; -o json for every flag.",
+
+  async run(ctx) {
+    const manifest = {
+      name: BIN,
+      version: VERSION,
+      globalOptions: ctx.cli.options
+        .filter((o) => !o.hidden)
+        .map(describeOption),
+      commands: ctx.cli.commands.map((c) => describeCommand(c, [BIN])),
+      errors: Object.entries(ERROR_CODES).map(([code, e]) => ({
+        code,
+        exit: e.exit,
+        description: e.description,
+      })),
+      errorFormat: {
+        stream: "stderr",
+        when: "-o json",
+        fields: ["error", "code", "exit", "hint"],
+      },
+    };
     const commands = usageLines(manifest.commands);
     const width = Math.max(...commands.map(([usage]) => usage.length));
     const codeWidth = Math.max(...manifest.errors.map((e) => e.code.length));
-    return [
-      `${BIN} ${VERSION}. Every command takes \`-o json\` for JSON output and \`--no-prompt\` to fail instead of prompting.`,
-      "",
-      "Commands:",
-      ...commands.map(([usage, text]) => `  ${usage.padEnd(width)}  ${text}`),
-      "",
-      "Errors (exit code; with -o json, stderr is {error, code, exit, hint}):",
-      ...manifest.errors.map(
-        (e) => `  ${e.code.padEnd(codeWidth)}  ${e.exit}  ${e.description}`,
-      ),
-      "",
-      `Flags: \`${BIN} <command> --help\`. Everything above, with flags, as JSON: \`${BIN} agents -o json\`.`,
-    ];
-  }, manifest);
-}
+    return {
+      human: [
+        `${BIN} ${VERSION}. Every command takes \`-o json\` for JSON output and \`--no-prompt\` to fail instead of prompting.`,
+        "",
+        "Commands:",
+        ...commands.map(([usage, text]) => `  ${usage.padEnd(width)}  ${text}`),
+        "",
+        "Errors (exit code; with -o json, stderr is {error, code, exit, hint}):",
+        ...manifest.errors.map(
+          (e) => `  ${e.code.padEnd(codeWidth)}  ${e.exit}  ${e.description}`,
+        ),
+        "",
+        `Flags: \`${BIN} <command> --help\`. Everything above, with flags, as JSON: \`${BIN} agents -o json\`.`,
+      ],
+      json: manifest,
+    };
+  },
+});

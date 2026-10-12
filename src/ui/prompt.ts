@@ -44,8 +44,16 @@ export function canPrompt(inputEnabled: boolean): boolean {
   return inputEnabled && Boolean(process.stdin.isTTY && process.stderr.isTTY);
 }
 
-export async function getPrompter(inputEnabled: boolean): Promise<Prompter> {
+/** Ink prompts when possible, loading Ink only when the first question is asked. */
+export function lazyPrompter(inputEnabled: boolean): Prompter {
   if (!canPrompt(inputEnabled)) return noInput;
-  const { inkPrompter } = await import("./ink.tsx");
-  return inkPrompter;
+  const ink = () => import("./ink.tsx").then((m) => m.inkPrompter);
+  return {
+    interactive: true,
+    select: async (m, c, f) => (await ink()).select(m, c, f),
+    multiSelect: async (m, c, f) => (await ink()).multiSelect(m, c, f),
+    confirm: async (m, i, f) => (await ink()).confirm(m, i, f),
+    text: async (m, f) => (await ink()).text(m, f),
+    secret: async (m, f) => (await ink()).secret(m, f),
+  };
 }
