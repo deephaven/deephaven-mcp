@@ -8,7 +8,7 @@ import {
   uploadPublicKey,
 } from "@deephaven-enterprise/auth-nodejs";
 import { BIN } from "../version.ts";
-import { DhError, describe, withTimeout } from "./errors.ts";
+import { DhError, describe, reasonOf, withTimeout } from "./errors.ts";
 import { type Api, loadEnterpriseApi } from "./jsapi.ts";
 import type { KeyPair } from "./keyfile.ts";
 
@@ -106,7 +106,12 @@ async function guardedLogin(
   } catch (e) {
     disconnect(conn);
     if (e instanceof DhError) throw e;
-    throw new DhError(rejected, `${conn.origin} rejected the credentials`);
+    throw new DhError(
+      rejected,
+      `${conn.origin} rejected the credentials`,
+      undefined,
+      reasonOf(e),
+    );
   }
 }
 
@@ -182,7 +187,12 @@ export async function loginSaml(
       if (e instanceof DhError || Date.now() >= deadline) {
         throw e instanceof DhError
           ? e
-          : new DhError("auth_failed", "Sign-in failed");
+          : new DhError(
+              "auth_failed",
+              "Sign-in failed",
+              undefined,
+              reasonOf(e),
+            );
       }
     }
     conn = await reconnect();

@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { DhError, isErrno } from "./errors.ts";
+import { DhError, isErrno, reasonOf } from "./errors.ts";
 import type { Kind } from "./store.ts";
 
 export type SecretRef =
@@ -159,8 +159,13 @@ export function parseV1(text: string, path: string): LegacyConfig {
   let cfg: Json;
   try {
     cfg = Bun.JSONC.parse(text);
-  } catch {
-    throw new DhError("usage", `${path} is not valid JSON5`);
+  } catch (e) {
+    throw new DhError(
+      "usage",
+      `${path} is not valid JSON5`,
+      undefined,
+      reasonOf(e),
+    );
   }
   const items = [
     ...Object.entries(cfg?.community?.sessions ?? {}).map(([n, c]) =>

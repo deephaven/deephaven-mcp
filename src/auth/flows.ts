@@ -7,7 +7,7 @@ import {
   type EnterpriseConnection,
   loginKey,
 } from "./enterprise.ts";
-import { DhError, timeoutMs } from "./errors.ts";
+import { DhError, reasonOf, timeoutMs } from "./errors.ts";
 import type { KeyPair } from "./keyfile.ts";
 import { defaultName, findByIdentity, newProfileId } from "./profile.ts";
 import type { Session } from "./session.ts";
@@ -108,7 +108,8 @@ export async function authorizeComputer(
     throw new DhError(
       "key_upload_failed",
       `${session.origin} accepted the key upload but not a login with it`,
-      e instanceof Error ? e.message : undefined,
+      undefined,
+      e instanceof DhError ? e.detail : reasonOf(e),
     );
   } finally {
     if (check) disconnectEnterprise(check);
@@ -176,28 +177,30 @@ export function addOrphan(
   });
 }
 
-/** Deletes remembered keys of the signed-in Enterprise user; returns how many. */
+/** Deletes remembered keys of the signed-in Enterprise user; `failed` keeps the first reason. */
 export async function revokeOrphans(
   store: Store,
   session: Session,
-): Promise<number> {
+): Promise<{ deleted: number; kept: number; failed?: string }> {
   const conn = session.enterprise;
-  if (!conn) return 0;
+  if (!conn) return { deleted: 0, kept: 0 };
   const { credentials } = await store.read();
   const mine = (credentials.orphans ?? []).filter(
     (o) => o.server === session.origin && o.user === session.user,
   );
   const deleted = new Set<string>();
+  let failed: string | undefined;
   for (const o of mine) {
     const key = { type: o.keyType, publicKey: o.publicKey, privateKey: "" };
     try {
       await deleteKey(conn, session.user, key);
       deleted.add(o.publicKey);
-    } catch {
-      // Kept for the next sign-in.
+    } catch (e) {
+      failed ??= reasonOf(e) ?? "no reason given";
     }
   }
-  if (deleted.size === 0) return 0;
+  const kept = mine.length - deleted.size;
+  if (deleted.size === 0) return { deleted: 0, kept, failed };
   await store.update(({ credentials }) => {
     const left = (credentials.orphans ?? []).filter(
       (o) => !deleted.has(o.publicKey),
@@ -205,7 +208,23 @@ export async function revokeOrphans(
     if (left.length) credentials.orphans = left;
     else delete credentials.orphans;
   });
-  return deleted.size;
+  return { deleted: deleted.size, kept, failed };
+}
+
+/** One line on what {@link revokeOrphans} did, or undefined if there was nothing to do. */
+export function orphansNote(result: {
+  deleted: number;
+  kept: number;
+  failed?: string;
+}): string | undefined {
+  const keys = (n: number) => `${n} old key${n === 1 ? "" : "s"}`;
+  if (result.kept) {
+    return `! Could not delete ${keys(result.kept)} an earlier logout left; retried next sign-in: ${result.failed}`;
+  }
+  if (result.deleted) {
+    return `✔ Deleted ${keys(result.deleted)} that an earlier logout couldn't`;
+  }
+  return undefined;
 }
 
 export function keyPairOf(cred: Credential & { type: "keyPair" }): KeyPair {

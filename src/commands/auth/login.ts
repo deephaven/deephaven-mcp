@@ -18,13 +18,14 @@ import {
   loginSaml,
   userName,
 } from "../../auth/enterprise.ts";
-import { DhError, describe, timeoutMs } from "../../auth/errors.ts";
+import { DhError, describe, reasonOf, timeoutMs } from "../../auth/errors.ts";
 import {
   addOrphan,
   authorizeComputer,
   closeSession,
   keyPairOf,
   type NewProfile,
+  orphansNote,
   revokeOrphans,
   revokeWith,
   type Saved,
@@ -619,12 +620,13 @@ export async function login(
       credential,
     };
     saved = await saveProfile(store, profile, makeDefault);
-    const cleaned = await revokeOrphans(store, session).catch(() => 0);
-    if (cleaned) {
-      note(
-        `✔ Deleted ${cleaned} old key${cleaned === 1 ? "" : "s"} that an earlier logout couldn't`,
-      );
-    }
+    const orphans = await revokeOrphans(store, session).catch((e) => ({
+      deleted: 0,
+      kept: 1,
+      failed: reasonOf(e),
+    }));
+    const orphanLine = orphansNote(orphans);
+    if (orphanLine) note(orphanLine);
     try {
       await revokeWith(session, saved.previous);
     } catch (e) {

@@ -8,7 +8,7 @@ import {
   stat,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { DhError, isErrno } from "./errors.ts";
+import { DhError, isErrno, reasonOf } from "./errors.ts";
 
 export type Kind = "enterprise" | "community";
 export type Method =
@@ -184,8 +184,13 @@ async function readJson<T>(path: string): Promise<T | undefined> {
   }
   try {
     return JSON.parse(text) as T;
-  } catch {
-    throw new DhError("internal", `${path} is not valid JSON`);
+  } catch (e) {
+    throw new DhError(
+      "internal",
+      `${path} is not valid JSON`,
+      undefined,
+      reasonOf(e),
+    );
   }
 }
 

@@ -8,11 +8,12 @@ import {
   disconnect as disconnectEnterprise,
   loginKey,
 } from "../../auth/enterprise.ts";
-import { DhError, describe, timeoutMs } from "../../auth/errors.ts";
+import { DhError, describe, reasonOf, timeoutMs } from "../../auth/errors.ts";
 import {
   addOrphan,
   authorizeComputer,
   closeSession,
+  orphansNote,
   revokeOrphans,
   revokeWith,
   type Saved,
@@ -73,7 +74,13 @@ async function cleanUp(
   previous: Credential | undefined,
   name: string,
 ): Promise<void> {
-  await revokeOrphans(store, session).catch(() => {});
+  const orphans = await revokeOrphans(store, session).catch((e) => ({
+    deleted: 0,
+    kept: 1,
+    failed: reasonOf(e),
+  }));
+  const orphanLine = orphansNote(orphans);
+  if (orphanLine) note(`  ${orphanLine}`);
   try {
     await revokeWith(session, previous);
   } catch (e) {

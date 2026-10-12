@@ -237,6 +237,10 @@ errors go to stderr.
 
 ### Errors and exit codes
 
+When the server or a library gives a reason, the message ends with it, e.g.
+`… rejected the credentials: Login failed, verify credentials.` It's one line of
+at most 200 characters, in both human and JSON output.
+
 With `-o json`, an error is one line of JSON on stderr:
 
 ```json

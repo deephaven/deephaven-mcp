@@ -15,7 +15,7 @@ import {
   loginKey,
   loginPassword,
 } from "./enterprise.ts";
-import { DhError, timeoutMs } from "./errors.ts";
+import { DhError, isErrno, reasonOf, timeoutMs } from "./errors.ts";
 import { keyPairOf } from "./flows.ts";
 import { type KeyPair, readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
@@ -113,8 +113,15 @@ export async function ensureCa(
   let pem: string;
   try {
     pem = await readFile(caCert, "utf8");
-  } catch {
-    throw new DhError("usage", `CA certificate not found: ${caCert}`);
+  } catch (e) {
+    throw isErrno(e, "ENOENT")
+      ? new DhError("usage", `CA certificate not found: ${caCert}`)
+      : new DhError(
+          "usage",
+          `Can't read CA certificate ${caCert}`,
+          undefined,
+          reasonOf(e),
+        );
   }
   // Keep CAs the user already trusts (e.g. a corporate proxy's), for updates too.
   const existing = process.env.NODE_EXTRA_CA_CERTS;
@@ -280,6 +287,7 @@ async function profileSession(
         "auth_expired",
         `${profile.server} rejected the saved credentials for "${profile.name}"`,
         `Run \`${BIN} auth login --profile ${profile.name}\`.`,
+        e.detail,
       );
     }
     throw e;

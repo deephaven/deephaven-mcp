@@ -1,4 +1,4 @@
-import { DhError, describe, withTimeout } from "./errors.ts";
+import { DhError, describe, reasonOf, withTimeout } from "./errors.ts";
 import { type Api, loadCommunityApi } from "./jsapi.ts";
 import type { Method } from "./store.ts";
 
@@ -110,7 +110,12 @@ export async function loginCommunity(
   } catch (e) {
     disconnect(client);
     if (e instanceof DhError) throw e;
-    throw new DhError(rejected, `${origin} rejected the credentials`);
+    throw new DhError(
+      rejected,
+      `${origin} rejected the credentials`,
+      undefined,
+      reasonOf(e),
+    );
   }
 }
 

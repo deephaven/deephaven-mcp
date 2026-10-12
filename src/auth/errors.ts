@@ -33,12 +33,14 @@ export const ERROR_CODES = {
 export type ErrorCode = keyof typeof ERROR_CODES;
 
 export class DhError extends Error {
+  /** `detail`: the underlying reason, from {@link reasonOf}; appended to the message. */
   constructor(
     readonly code: ErrorCode,
     message: string,
     readonly hint?: string,
+    readonly detail?: string,
   ) {
-    super(message);
+    super(detail ? `${message}: ${detail}` : message);
     this.name = "DhError";
   }
 
@@ -47,14 +49,30 @@ export class DhError extends Error {
   }
 }
 
-/** The jsapi rejects with non-Error values (e.g. GWT `Event` objects). */
+const MAX_REASON = 200;
+
+/** One short line for any thrown value; the jsapi rejects with non-Errors (e.g. GWT `Event`s). */
 export function describe(reason: unknown): string {
-  if (reason instanceof Error) return reason.message;
-  if (typeof reason === "string") return reason;
   // biome-ignore lint/suspicious/noExplicitAny: GWT event objects are untyped.
   const detail = (reason as any)?.detail;
-  if (typeof detail === "string") return detail;
-  return String(reason);
+  const text = (
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === "string"
+        ? reason
+        : typeof detail === "string"
+          ? detail
+          : String(reason)
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > MAX_REASON ? `${text.slice(0, MAX_REASON)}…` : text;
+}
+
+/** {@link describe}, or undefined if it says nothing useful. */
+export function reasonOf(reason: unknown): string | undefined {
+  const text = describe(reason);
+  return !text || text.startsWith("[object ") ? undefined : text;
 }
 
 /** Rejects with `onTimeout()` if `promise` hasn't settled within `ms`. */
