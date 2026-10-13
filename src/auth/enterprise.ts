@@ -315,6 +315,9 @@ export async function createKey(
   return { ...keyPair, comment };
 }
 
+/** Short: a key that isn't deleted now is remembered and deleted at the next sign-in. */
+const DELETE_KEY_TIMEOUT_MS = 5_000;
+
 /** Deletes exactly this public key for `username`; other keys are untouched. */
 export async function deleteKey(
   conn: EnterpriseConnection,
@@ -332,7 +335,7 @@ export async function deleteKey(
   });
   await withTimeout(
     deleted,
-    timeoutMs(),
+    DELETE_KEY_TIMEOUT_MS,
     () =>
       new DhError(
         "server_unreachable",
