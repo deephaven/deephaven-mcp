@@ -121,7 +121,12 @@ stdout carries only the result and everything else goes to stderr.
 
 Human lines and notes stay plain text. On a terminal,
 [output.ts](../src/output.ts) colors a leading `✔`, `✖` or `!`, dims `…`
-progress lines, and colors `` `commands` `` in backticks.
+progress lines, and colors `` `commands` `` in backticks and a URL alone on its
+line.
+
+Keep lines short, since names and URLs make them long fast. Put a reason, a hint
+or a detail on its own indented line under the main line. A `DhError`'s `hint`
+and `detail` print that way already.
 
 ## Keeping functions readable
 
