@@ -56,16 +56,18 @@ export async function connectEnterprise(
   const client = new dhe.Client(new URL(origin).href, {
     transportFactory: NodeHttp2gRPCTransport.factory,
   });
-  await withTimeout(
-    new Promise<void>((resolve) => {
-      const off = client.addEventListener(dhe.Client.EVENT_CONNECT, () => {
-        off();
-        resolve();
-      });
-    }),
-    timeout,
-    () => unreachable(origin),
+  const connected = Promise.withResolvers<void>();
+  const off = client.addEventListener(dhe.Client.EVENT_CONNECT, () =>
+    connected.resolve(),
   );
+  try {
+    await withTimeout(connected.promise, timeout, () => unreachable(origin));
+  } catch (e) {
+    disconnect({ origin, dhe, client });
+    throw e;
+  } finally {
+    off();
+  }
   return { origin, dhe, client };
 }
 

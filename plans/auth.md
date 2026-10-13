@@ -204,7 +204,7 @@ read or written.
 | Path                 | Contents                                              |
 | -------------------- | ----------------------------------------------------- |
 | `src/auth/`          | Address resolution, store, DHE/DHC login, SSO, import |
-| `src/commands/auth/` | Cliffy commands                                       |
+| `src/commands/auth/` | Commander commands                                    |
 | `src/ui/`            | Ink prompts (TTY only, lazy-loaded)                   |
 
 Dependencies: `@deephaven-enterprise/auth-nodejs`, `@deephaven/jsapi-nodejs`
@@ -223,7 +223,8 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`, `@deephaven/jsapi-nodejs`
 - Key label: `dh CLI - <hostname> - <date>`. Printable ASCII only (server
   rejects others with HTTP 400).
 - jsapi:
-  - Download it with `fetch` and load it as ESM. CJS doesn't load in Deno.
+  - Download it with `fetch` and load it as ESM. CJS doesn't load in a compiled
+    Bun binary.
   - Load it only from the resolved origin, over TLS or loopback.
   - Cache it per origin.
   - Runs with `dh`'s permissions. Logging in to a server trusts it to run code,
@@ -234,13 +235,14 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`, `@deephaven/jsapi-nodejs`
   owner-only ACL).
 - `config.json` and `credentials.json`: read-modify-write under one lock
   (`config.lock`).
-- CA cert: re-run `dh` with `DENO_CERT` set, which covers `fetch` and the
-  transport.
+- CA cert: re-run `dh` with `NODE_EXTRA_CA_CERTS` set (added to any the user
+  already set), which covers `fetch` and the transport.
 - Proxy: `fetch` honors `HTTPS_PROXY`; the transport doesn't yet.
 - Timeouts: race connect + non-SSO login against `DH_TIMEOUT`, and the SSO wait
   against `--timeout`. On timeout, discard the client.
-- Command name: `"bin"` in `deno.json`, the only place it is set.
-- Build: add `--allow-run` and `--allow-sys=hostname`.
+- Command name: `"name"` in `package.json`, the only place it is set.
+- Build: bake `--experimental-http2-fetch` into the binary; the ACL write server
+  is HTTP/2-only.
 
 ## Out of scope
 
