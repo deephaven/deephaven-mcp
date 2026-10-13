@@ -49,6 +49,5 @@ function loginLine(readable: boolean, p: Profile | undefined): string {
   if (!p) {
     return `${styleText(["yellow", "bold"], "Not logged in.")} Run ${command(`${BIN} auth login`)} to get started.`;
   }
-  const who = styleText("bold", `${p.user} @ ${new URL(p.server).host}`);
-  return `${styleText("green", "●")} Logged in as ${who} (default profile ${p.name})`;
+  return `${styleText("green", "●")} Logged in as ${styleText("bold", p.name)}`;
 }
