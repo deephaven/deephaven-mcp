@@ -224,7 +224,9 @@ async function waitForSaml(
   } else {
     note(`Sign in at:\n  ${url}`);
   }
-  note("Waiting for sign-in… (Ctrl-C to cancel)");
+  note(
+    `Waiting up to ${Math.round(request.waitMs / 1000)}s for you to sign in in the browser… (--timeout to change, Ctrl-C to cancel)`,
+  );
   return await loginSaml(
     conn,
     () => connectEnterprise(server.origin, server.cacheRoot, timeoutMs()),

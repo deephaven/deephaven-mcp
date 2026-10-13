@@ -6,6 +6,7 @@ import {
 } from "../../auth/flows.ts";
 import { sortedProfiles } from "../../auth/profile.ts";
 import { type Context, defineCommand, type Output } from "../../cli/command.ts";
+import { timeoutMs } from "../../errors.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { askProfilesToRemove } from "./questions.ts";
@@ -45,7 +46,12 @@ export const logout = defineCommand<LogoutOptions>({
       );
     }
 
-    const done = await removeProfiles(ctx.store, state, ids);
+    const seconds = timeoutMs() / 1000;
+    const done = await removeProfiles(ctx.store, state, ids, (profile, what) =>
+      note(
+        `… ${profile}: ${what} (each step gives up after ${seconds}s if unreachable)`,
+      ),
+    );
     for (const warning of done.warnings) note(warning);
     for (const resaved of done.resaved) {
       note(

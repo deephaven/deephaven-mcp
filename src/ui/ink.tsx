@@ -103,7 +103,7 @@ function Select<T>({
         // biome-ignore lint/suspicious/noArrayIndexKey: the list never changes.
         <Text key={i} color={i === index ? "cyan" : undefined}>
           {i === index ? "❯ " : "  "}
-          {c.label}
+          <Text bold={i === index}>{c.label}</Text>
           {c.hint ? <Text dimColor>{`   ${c.hint}`}</Text> : null}
         </Text>
       ))}
@@ -231,11 +231,25 @@ function TextInput({
     { isActive: answer === undefined },
   );
   const shown = mask ? "•".repeat(value.length) : value;
+  const cursorOn = useBlink();
   return (
     <Frame message={message} answer={answer}>
-      <Text>{`  ${shown}`}</Text>
+      <Text>
+        {`  ${shown}`}
+        <Text inverse={cursorOn}> </Text>
+      </Text>
     </Frame>
   );
+}
+
+/** Toggles every half second, for a blinking cursor; Ink hides the terminal's own. */
+function useBlink(): boolean {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    const timer = setInterval(() => setOn((v) => !v), 500);
+    return () => clearInterval(timer);
+  }, []);
+  return on;
 }
 
 export const inkPrompter: Prompter = {

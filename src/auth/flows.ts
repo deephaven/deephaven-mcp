@@ -193,14 +193,21 @@ export interface Removed {
  * Deletes each profile's generated key on its server, then the profiles. A key
  * that can't be deleted is remembered and retried at the next sign-in there.
  * `state` is what was read before; a profile signed in again since is kept.
+ * `waiting` is told, before each server call, which profile it's for and what it waits on.
  */
 export async function removeProfiles(
   store: Store,
   state: State,
   ids: string[],
+  waiting: (profile: string, what: string) => void,
 ): Promise<Removed> {
   const { config, credentials } = state;
-  const { removed, unrevoked, warnings } = await revokeKeys(store, state, ids);
+  const { removed, unrevoked, warnings } = await revokeKeys(
+    store,
+    state,
+    ids,
+    waiting,
+  );
 
   // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
   const resaved: string[] = [];
@@ -236,6 +243,7 @@ async function revokeKeys(
   store: Store,
   state: State,
   ids: string[],
+  waiting: (profile: string, what: string) => void,
 ): Promise<{
   removed: Removed["removed"];
   unrevoked: string[];
@@ -244,26 +252,39 @@ async function revokeKeys(
   const removed: Removed["removed"] = [];
   const unrevoked: string[] = [];
   const warnings: string[] = [];
+  // A server that couldn't be reached once isn't tried again for its other profiles.
+  const unreachable = new Map<string, string>();
   for (const id of ids) {
     const p = state.config.profiles[id];
     if (!p) continue;
     const cred = state.credentials.credentials[id];
     let revoked = false;
-    if (cred) {
-      try {
-        revoked = await revokeOwnKey(
-          p.server,
-          p.user,
-          p.operateAs,
-          cred,
-          store.cacheDir,
+    if (cred?.type === "keyPair" && cred.generated) {
+      let failure = unreachable.get(p.server);
+      if (failure === undefined) {
+        waiting(
+          p.name,
+          `signing in to ${new URL(p.server).host} to delete this computer's key`,
         );
-      } catch (e) {
+        try {
+          revoked = await revokeOwnKey(
+            p.server,
+            p.user,
+            p.operateAs,
+            cred,
+            store.cacheDir,
+          );
+        } catch (e) {
+          failure = describe(e);
+          if (e instanceof DhError && e.code === "server_unreachable") {
+            unreachable.set(p.server, failure);
+          }
+        }
+      }
+      if (failure !== undefined) {
         unrevoked.push(id);
         warnings.push(
-          `! Could not delete the key on ${p.server}: ${describe(
-            e,
-          )}. Removing the profile anyway; the key is deleted the next time you sign in there as ${p.user}.`,
+          `! Could not delete the key on ${p.server}: ${failure}. Removing the profile anyway; the key is deleted the next time you sign in there as ${p.user}.`,
         );
       }
     }

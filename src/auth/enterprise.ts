@@ -7,7 +7,14 @@ import {
   loginClientWithKeyPair,
   uploadPublicKey,
 } from "@deephaven-enterprise/auth-nodejs";
-import { DhError, describe, reasonOf, withTimeout } from "../errors.ts";
+import {
+  DhError,
+  describe,
+  reasonOf,
+  timeoutMs,
+  withTimeout,
+} from "../errors.ts";
+import { err } from "../output.ts";
 import { BIN } from "../version.ts";
 import { type Api, loadEnterpriseApi } from "./jsapi.ts";
 import type { KeyPair } from "./keyfile.ts";
@@ -207,6 +214,9 @@ export async function loginSaml(
       return conn;
     } catch (e) {
       disconnect(conn);
+      if (process.env.DH_DEBUG) {
+        err(`${BIN}: SSO login call ended (${describe(e)}); asking again`);
+      }
       if (e instanceof DhError || Date.now() >= deadline) {
         throw e instanceof DhError
           ? e
@@ -236,8 +246,14 @@ export interface UploadedKey extends KeyPair {
 /** Where key uploads go; reported when they fail. */
 async function aclWriter(conn: EnterpriseConnection): Promise<string> {
   try {
-    const { dbAclWriterHost, dbAclWriterPort } =
-      await conn.client.getServerConfigValues();
+    const { dbAclWriterHost, dbAclWriterPort } = await withTimeout<{
+      dbAclWriterHost: string;
+      dbAclWriterPort: number;
+    }>(
+      conn.client.getServerConfigValues(),
+      timeoutMs(),
+      () => new DhError("server_unreachable", "Timed out"),
+    );
     return `${dbAclWriterHost}:${dbAclWriterPort}`;
   } catch {
     return "its ACL write server";
@@ -269,14 +285,18 @@ export async function createKey(
   );
   let res: Response;
   try {
-    res = await uploadPublicKey({
-      dheClient: conn.client,
-      // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-      userName: username as any,
-      publicKey: keyPair.publicKey,
-      comment,
-      type: keyPair.type,
-    });
+    res = await withTimeout(
+      uploadPublicKey({
+        dheClient: conn.client,
+        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
+        userName: username as any,
+        publicKey: keyPair.publicKey,
+        comment,
+        type: keyPair.type,
+      }),
+      timeoutMs(),
+      () => new DhError("server_unreachable", "Timed out"),
+    );
   } catch (e) {
     throw new DhError(
       "key_upload_failed",
@@ -301,7 +321,7 @@ export async function deleteKey(
   username: string,
   keyPair: KeyPair,
 ): Promise<void> {
-  await deletePublicKeys({
+  const deleted = deletePublicKeys({
     dheClient: conn.client,
     // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
     userName: username as any,
@@ -310,4 +330,14 @@ export async function deleteKey(
     // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
     type: keyPair.type as any,
   });
+  await withTimeout(
+    deleted,
+    timeoutMs(),
+    () =>
+      new DhError(
+        "server_unreachable",
+        `Could not reach ${conn.origin}'s ACL write server to delete the key`,
+        "Timed out",
+      ),
+  );
 }

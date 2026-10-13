@@ -1,3 +1,4 @@
+import { styleText } from "node:util";
 import type { Profile } from "../auth/store.ts";
 import { defineCommand } from "../cli/command.ts";
 import { BIN, VERSION } from "../version.ts";
@@ -24,8 +25,12 @@ export const rootCommand = defineCommand({
     return {
       human: [
         ctx.cli.helpInformation().trimEnd(),
+        "",
         loginLine(readable, p),
-        `For agents: \`${BIN} agents\` summarizes commands and error codes (\`-o json\` for everything).`,
+        styleText(
+          "dim",
+          `For agents: \`${BIN} agents\` summarizes commands and error codes (\`-o json\` for everything).`,
+        ),
       ],
       json: {
         version: VERSION,
@@ -35,9 +40,15 @@ export const rootCommand = defineCommand({
   },
 });
 
-/** Who's logged in by default, or what to run next. `readable`: whether the config could be read. */
+/** Who's logged in by default, or what to run next. `readable`: whether the config could be read. Colored only on a terminal. */
 function loginLine(readable: boolean, p: Profile | undefined): string {
-  if (!readable) return `Run \`${BIN} auth\` to check your profiles.`;
-  if (!p) return `Not logged in. Run \`${BIN} auth login\` to get started.`;
-  return `Logged in as ${p.user} @ ${new URL(p.server).host} (default)`;
+  const command = (c: string) => styleText("cyan", `\`${c}\``);
+  if (!readable) {
+    return `${styleText("yellow", "!")} Run ${command(`${BIN} auth`)} to check your profiles.`;
+  }
+  if (!p) {
+    return `${styleText(["yellow", "bold"], "Not logged in.")} Run ${command(`${BIN} auth login`)} to get started.`;
+  }
+  const who = styleText("bold", `${p.user} @ ${new URL(p.server).host}`);
+  return `${styleText("green", "●")} Logged in as ${who} (default profile ${p.name})`;
 }
