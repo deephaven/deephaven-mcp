@@ -220,7 +220,12 @@ export async function askSignInMethod(
       throw new DhError(
         "usage",
         `This server doesn't offer --method ${wanted}`,
-        `Available: ${offered.map((o) => o.method).join(", ")}`,
+        `Available: ${[
+          ...new Set([
+            ...offered.map((o) => o.method),
+            ...(keyLogin ? ["private-key"] : []),
+          ]),
+        ].join(", ")}`,
       );
     }
     return found.method === "custom" && opts.handler

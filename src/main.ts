@@ -1,7 +1,7 @@
 import { writeSync } from "node:fs";
 import { styleText } from "node:util";
 import { Command, CommanderError, Help } from "commander";
-import { GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
+import { commandPath, GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
 import { rootCommand } from "./commands/root.ts";
 import { DhError } from "./errors.ts";
 import { err, reportError, setFormat } from "./output.ts";
@@ -33,11 +33,28 @@ function outputFlagValue(
   return undefined;
 }
 
+/** The deepest command `args` name, e.g. `auth status` in `dh auth status extra`. */
+function commandIn(args: string[]): Command {
+  let cmd = root;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? "";
+    if (a === "--") break;
+    // The global flags that take a value; the value isn't a command.
+    if (a === "--profile" || a === "-o" || a === "--output") i++;
+    if (a.startsWith("-")) continue;
+    const sub = cmd.commands.find((c) => c.name() === a);
+    if (!sub) break;
+    cmd = sub;
+  }
+  return cmd;
+}
+
 const root = new Command()
   .name(BIN)
   .version(`${BIN} ${VERSION}`, "-V, --version", "Show the version number.")
   .helpOption("-h, --help", "Show this help.")
   .configureHelp({
+    showGlobalOptions: true,
     styleTitle: (s) => styleText("bold", s),
     styleCommandText: (s) => styleText(["bold", "magenta"], s),
     styleOptionTerm: blue,
@@ -76,7 +93,7 @@ try {
       ? new DhError(
           "usage",
           e.message.replace(/^error: /, ""),
-          `Run \`${BIN} --help\` for usage.`,
+          `Run \`${commandPath(commandIn(process.argv.slice(2)))} --help\` for usage.`,
         )
       : e,
   );

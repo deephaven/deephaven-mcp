@@ -34,11 +34,10 @@ export const auth = defineCommand({
     }
     const width = Math.max(...rows.map((r) => r.name.length));
     return {
-      human: rows.map(
-        (r) =>
-          `${r.default ? "●" : " "} ${r.name.padEnd(width)}   ${KIND_LABEL[
-            r.kind
-          ].padEnd(10)}${r.default ? "   (default)" : ""}`,
+      human: rows.map((r) =>
+        `${r.default ? "●" : " "} ${r.name.padEnd(width)}   ${KIND_LABEL[
+          r.kind
+        ].padEnd(10)}${r.default ? "   (default)" : ""}`.trimEnd(),
       ),
       json: rows,
     };

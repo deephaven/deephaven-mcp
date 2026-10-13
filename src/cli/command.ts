@@ -1,5 +1,6 @@
 import { type Command, Option } from "commander";
 import { Store } from "../auth/store.ts";
+import { DhError } from "../errors.ts";
 import { result, setFormat } from "../output.ts";
 import { lazyPrompter, type Prompter } from "../ui/prompt.ts";
 
@@ -109,8 +110,21 @@ export function registerCommand(
   cmd.description(spec.description);
   for (const a of spec.args ?? []) cmd.argument(a.name, a.description);
   for (const o of spec.options ?? []) cmd.addOption(o);
+  // A group like `dh auth` runs too, so commander would call an unknown
+  // subcommand an extra argument; let it through and name it here.
+  const isGroup = Boolean(spec.commands?.length) && !spec.args?.length;
+  // Explicit both ways: subcommands inherit the setting.
+  cmd.allowExcessArguments(isGroup);
   cmd.action(async (...params: unknown[]) => {
     const self = params.at(-1) as Command;
+    const [unknown] = self.args;
+    if (isGroup && unknown !== undefined) {
+      throw new DhError(
+        "usage",
+        `Unknown command "${unknown}"`,
+        `Run \`${commandPath(self)} --help\` to see commands.`,
+      );
+    }
     const out = await spec.run(
       contextFromFlags(self),
       self.processedArgs as (string | undefined)[],
@@ -123,4 +137,11 @@ export function registerCommand(
     registerCommand(cmd.command(child.name), child);
   }
   return cmd;
+}
+
+/** `cmd` as typed, e.g. `dh auth status`. */
+export function commandPath(cmd: Command): string {
+  const names: string[] = [];
+  for (let c: Command | null = cmd; c; c = c.parent) names.unshift(c.name());
+  return names.join(" ");
 }
