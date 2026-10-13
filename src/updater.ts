@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { writeSync } from "node:fs";
 import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { gt } from "semver";
-import { REPOSITORY, STANDALONE, VERSION } from "./version.ts";
+import { BIN, REPOSITORY, STANDALONE, VERSION } from "./version.ts";
 
 export const releasesUrl = (repository: string): string =>
   `https://github.com/${repository}/releases`;
@@ -18,12 +19,15 @@ export const PLATFORM = `${
   process.platform === "win32" ? "windows" : process.platform
 }-${process.arch}`;
 
+/** `manifest.json` in each release; every shipped binary reads it, so keep it backward compatible. */
 export interface Manifest {
+  /** The release's version, without a `v`. */
   version: string;
   /** Keyed by {@link PLATFORM}; `url` may be relative to the manifest. */
   binaries: Record<string, { url: string; sha256: string }>;
 }
 
+/** Updates only over https, or http to this machine (for tests). */
 function assertTrusted(url: URL): void {
   if (url.protocol === "https:") return;
   if (url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname)) return;
@@ -51,6 +55,7 @@ async function fetchOk(url: URL, timeoutMs: number): Promise<Response> {
   throw new Error(`Too many redirects fetching ${url}`);
 }
 
+/** Swaps `binary` in for this executable; on Windows the old one is renamed aside first. */
 async function replaceExecutable(binary: Uint8Array): Promise<void> {
   const exe = process.execPath;
   // Per-process name, so concurrent updates never rename each other's half-written file.
@@ -78,6 +83,7 @@ async function replaceExecutable(binary: Uint8Array): Promise<void> {
   }
 }
 
+/** Minimum time between update checks: `$DH_UPDATE_INTERVAL` hours, else the default. */
 function intervalMs(): number {
   const raw = process.env.DH_UPDATE_INTERVAL;
   const hours = raw ? Number(raw) : NaN;
@@ -96,6 +102,10 @@ async function claimCheck(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Runs after every command in a compiled binary: if a check is due, fetches the
+ * manifest and installs a newer build. `DH_AUTO_UPDATE=off` disables it.
+ */
 export async function autoUpdate(): Promise<void> {
   // From source, execPath is the bun runtime, which must never be replaced.
   if (!STANDALONE) return;
@@ -126,5 +136,6 @@ export async function autoUpdate(): Promise<void> {
   }
 
   await replaceExecutable(binary);
-  console.error(`Updated dh ${VERSION} -> ${manifest.version}`);
+  // Not console: it is silenced while the Deephaven client libraries run.
+  writeSync(2, `Updated ${BIN} ${VERSION} -> ${manifest.version}\n`);
 }

@@ -25,17 +25,18 @@ serializing it.
 
 This proposal adds a consistent output-shaping API:
 
-| Capability | Purpose |
-| --- | --- |
-| `filter` | Keep collection rows that satisfy an AIP-160 filter expression. |
-| `order_by` | Sort collection rows by one or more fields, ascending or descending. |
-| `fields` | Return only selected fields, including nested detail fields. |
-| `prune_empty` | Remove null and empty values from an otherwise selected result. |
-| `limit` | Bound a collection response and report whether it was truncated. |
+| Capability    | Purpose                                                              |
+| ------------- | -------------------------------------------------------------------- |
+| `filter`      | Keep collection rows that satisfy an AIP-160 filter expression.      |
+| `order_by`    | Sort collection rows by one or more fields, ascending or descending. |
+| `fields`      | Return only selected fields, including nested detail fields.         |
+| `prune_empty` | Remove null and empty values from an otherwise selected result.      |
+| `limit`       | Bound a collection response and report whether it was truncated.     |
 
-The first pass covers every in-memory list the servers already return — `pq
-list`, `sessions list`, `list systems`, `pip list`, and the catalog listings —
-plus `pq details`. The API is designed for later adoption by the remaining
+The first pass covers every in-memory list the servers already return —
+`pq
+list`, `sessions list`, `list systems`, `pip list`, and the catalog listings
+— plus `pq details`. The API is designed for later adoption by the remaining
 detail and table-backed tools.
 
 ## Design goals
@@ -44,28 +45,28 @@ The API must be easy for an AI to generate and easy for a human to verify. Those
 are compatible goals: a small, regular grammar lowers generation errors, while
 readable inputs and explicit feedback make results inspectable.
 
-| Goal | Design response |
-| --- | --- |
-| No invented language | Nothing here is a new syntax. `filter` implements [AIP-160](https://google.aip.dev/160) and `order_by` implements [AIP-132](https://google.aip.dev/132) as written. `fields` follows [AIP-157](https://google.aip.dev/157) and borrows `google.protobuf.FieldMask`'s wire shape, but its path grammar is FieldMask-*shaped* rather than FieldMask; the differences are enumerated in [Field grammar](#differences-from-fieldmask--aip-157). |
-| One obvious spelling per intent | Applies to what this project chooses, not to a borrowed grammar: where AIP-160 defines two spellings (`NOT` and `-`), both are accepted, because a caller's prior knowledge is only worth borrowing if it transfers intact. |
-| Reliable structured calls | `filter`, `order_by`, and `fields` are each a single string — `filter` and `order_by` exactly as their specifications define, `fields` in FieldMask's canonical comma-separated JSON encoding — priming models that already know them; only the pre-existing `engine_filters` is an array, keeping its established nullable-array schema. |
-| Discoverability | Each tool documents its filterable, sortable, and selectable fields, operators, examples, and parse errors. |
-| Repairability | Invalid input returns the expected form and a concrete example. |
-| Verifiability | Ordering is explicit and stable; projection changes only which fields are present; response metadata reports truncation and unmatched field paths. |
-| Consistency | A tool uses one closed field vocabulary for `filter`, `order_by`, and `fields`. |
+| Goal                            | Design response                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No invented language            | Nothing here is a new syntax. `filter` implements [AIP-160](https://google.aip.dev/160) and `order_by` implements [AIP-132](https://google.aip.dev/132) as written. `fields` follows [AIP-157](https://google.aip.dev/157) and borrows `google.protobuf.FieldMask`'s wire shape, but its path grammar is FieldMask-_shaped_ rather than FieldMask; the differences are enumerated in [Field grammar](#differences-from-fieldmask--aip-157). |
+| One obvious spelling per intent | Applies to what this project chooses, not to a borrowed grammar: where AIP-160 defines two spellings (`NOT` and `-`), both are accepted, because a caller's prior knowledge is only worth borrowing if it transfers intact.                                                                                                                                                                                                                 |
+| Reliable structured calls       | `filter`, `order_by`, and `fields` are each a single string — `filter` and `order_by` exactly as their specifications define, `fields` in FieldMask's canonical comma-separated JSON encoding — priming models that already know them; only the pre-existing `engine_filters` is an array, keeping its established nullable-array schema.                                                                                                   |
+| Discoverability                 | Each tool documents its filterable, sortable, and selectable fields, operators, examples, and parse errors.                                                                                                                                                                                                                                                                                                                                 |
+| Repairability                   | Invalid input returns the expected form and a concrete example.                                                                                                                                                                                                                                                                                                                                                                             |
+| Verifiability                   | Ordering is explicit and stable; projection changes only which fields are present; response metadata reports truncation and unmatched field paths.                                                                                                                                                                                                                                                                                          |
+| Consistency                     | A tool uses one closed field vocabulary for `filter`, `order_by`, and `fields`.                                                                                                                                                                                                                                                                                                                                                             |
 
 ## API
 
 ### Collection tools
 
-| Argument | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `filter` | string | `""` | One [AIP-160](https://google.aip.dev/160) filter expression over the tool's documented fields. Available on every collection tool; compiled to engine-side filters and run on the server when the tool is table-backed, else evaluated in the output layer. |
-| `order_by` | string | `""` | One [AIP-132](https://google.aip.dev/132) ordering expression — comma-separated fields, a `desc` suffix for descending. Empty means the tool's natural order. Compiled to an engine-side sort when table-backed, else sorted in the output layer. |
-| `engine_filters` | array of strings or null | `null` | Deephaven Query Language where-clauses, evaluated by the engine over the *backing table columns*. Offered only by tools whose rows come from a persistent Deephaven table (e.g. `catalog_tables_list`); absent otherwise. Keeps the existing catalog signature (`list[str] \| None`, default `null`) unchanged apart from the rename. |
-| `fields` | string | `""` | Comma-separated [`google.protobuf.FieldMask`](https://google.aip.dev/157) paths naming the fields to retain from each returned row. Empty (the default) applies no projection: every field is preserved. |
-| `limit` | positive integer or null | per-tool default | Maximum returned rows; must be a positive integer (zero or negative is rejected). Each tool's default is a conservative positive integer (see [First-pass scope](#first-pass-scope)); uncapped output is an explicit opt-in via `null`. |
-| `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
+| Argument         | Type                     | Default          | Meaning                                                                                                                                                                                                                                                                                                                               |
+| ---------------- | ------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `filter`         | string                   | `""`             | One [AIP-160](https://google.aip.dev/160) filter expression over the tool's documented fields. Available on every collection tool; compiled to engine-side filters and run on the server when the tool is table-backed, else evaluated in the output layer.                                                                           |
+| `order_by`       | string                   | `""`             | One [AIP-132](https://google.aip.dev/132) ordering expression — comma-separated fields, a `desc` suffix for descending. Empty means the tool's natural order. Compiled to an engine-side sort when table-backed, else sorted in the output layer.                                                                                     |
+| `engine_filters` | array of strings or null | `null`           | Deephaven Query Language where-clauses, evaluated by the engine over the _backing table columns_. Offered only by tools whose rows come from a persistent Deephaven table (e.g. `catalog_tables_list`); absent otherwise. Keeps the existing catalog signature (`list[str] \| None`, default `null`) unchanged apart from the rename. |
+| `fields`         | string                   | `""`             | Comma-separated [`google.protobuf.FieldMask`](https://google.aip.dev/157) paths naming the fields to retain from each returned row. Empty (the default) applies no projection: every field is preserved.                                                                                                                              |
+| `limit`          | positive integer or null | per-tool default | Maximum returned rows; must be a positive integer (zero or negative is rejected). Each tool's default is a conservative positive integer (see [First-pass scope](#first-pass-scope)); uncapped output is an explicit opt-in via `null`.                                                                                               |
+| `prune_empty`    | boolean                  | `false`          | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept.                                                                                                                                                                                                                    |
 
 The five compose as a fixed pipeline, and the order is part of the contract:
 
@@ -79,27 +80,27 @@ a field may be filtered or sorted on without being selected. `filter` is
 universal; `engine_filters` is conditional on a Deephaven backing and so is not
 part of every collection tool's signature. Where both are present they compose
 without ambiguity: `filter` compiles to engine-side filters, so both run at the
-source before `limit` bounds the result — detailed under [Why both `filter` and
-`engine_filters`](#why-both-filter-and-engine_filters). A successful collection
-response that received a non-empty `fields` selection includes
-`unmatched_fields: []` when all requested paths matched at least one delivered
-row, and lists any requested path that matched none; an omitted or empty
-`fields` is the no-projection case and carries no `unmatched_fields`.
+source before `limit` bounds the result — detailed under
+[Why both `filter` and `engine_filters`](#why-both-filter-and-engine_filters). A
+successful collection response that received a non-empty `fields` selection
+includes `unmatched_fields: []` when all requested paths matched at least one
+delivered row, and lists any requested path that matched none; an omitted or
+empty `fields` is the no-projection case and carries no `unmatched_fields`.
 `is_complete: false` means `limit` truncated the filtered result.
 
 ### Detail tools
 
-| Argument | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `fields` | string | `""` | Comma-separated [`google.protobuf.FieldMask`](https://google.aip.dev/157) paths naming the fields to retain from the detail object. Empty (the default) applies no projection: the whole object is preserved. |
-| `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept. |
+| Argument      | Type    | Default | Meaning                                                                                                                                                                                                       |
+| ------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fields`      | string  | `""`    | Comma-separated [`google.protobuf.FieldMask`](https://google.aip.dev/157) paths naming the fields to retain from the detail object. Empty (the default) applies no projection: the whole object is preserved. |
+| `prune_empty` | boolean | `false` | Recursively remove empty values (see [Pruning](#pruning)) before projection; booleans and numbers are always kept.                                                                                            |
 
 A successful detail response always retains `success` and the tool's existing
 identity path (`pq_details` retains top-level `id`). When a non-empty `fields`
 selection was supplied it also includes `unmatched_fields`: an empty list
 confirms every requested path was found in the delivered result, a non-empty
-list identifies paths that produced no output. An omitted or empty
-`fields` is the no-projection case and carries no `unmatched_fields`.
+list identifies paths that produced no output. An omitted or empty `fields` is
+the no-projection case and carries no `unmatched_fields`.
 
 `dhcli` exposes `--filter`, `--order-by`, and `--fields` as single-valued flags,
 one per invocation, mirroring the single-string MCP arguments:
@@ -129,20 +130,20 @@ DQL filtering must not disappear from the CLI.
 
 The split is therefore explicit:
 
-| Flag | Value | Forwards to |
-| --- | --- | --- |
-| `--filter` | Single AIP-160 expression over response field names | `filter` |
-| `--where` | Repeatable Deephaven Query Language where-clause over backing table columns | `engine_filters` |
+| Flag       | Value                                                                       | Forwards to      |
+| ---------- | --------------------------------------------------------------------------- | ---------------- |
+| `--filter` | Single AIP-160 expression over response field names                         | `filter`         |
+| `--where`  | Repeatable Deephaven Query Language where-clause over backing table columns | `engine_filters` |
 
 `--where` is added wherever `engine_filters` exists, so every DQL expression
 usable today remains usable, and the flag name matches the Deephaven table
 operation the clauses feed (`where()`). For one release the old spelling is
 detected rather than silently reinterpreted: a `--filter` value that fails to
-parse as AIP-160 *and* contains a backtick or a known backing column name exits
-`2` with `arg_parse_error` and a message naming `--where` as the
-replacement. `catalog sample` does **not** gain AIP-160 `--filter` in this
-pass; it keeps partition filtering on `--where` only (with legacy
-`--filter` rejected as an `arg_parse_error` that names the replacement).
+parse as AIP-160 _and_ contains a backtick or a known backing column name exits
+`2` with `arg_parse_error` and a message naming `--where` as the replacement.
+`catalog sample` does **not** gain AIP-160 `--filter` in this pass; it keeps
+partition filtering on `--where` only (with legacy `--filter` rejected as an
+`arg_parse_error` that names the replacement).
 
 The rename is recorded in the changelog beside `engine_filters` and `limit`, and
 `docs/CLI.md` carries the before/after invocation.
@@ -151,19 +152,18 @@ The CLI writes an `unmatched_fields` warning to stderr when the list is
 non-empty. Structured tool output remains the source of truth; warnings do not
 change the normal stdout payload.
 
-`--limit` takes a positive integer to cap the result, or the literal `all`
-for the tool's uncapped mode — the CLI spelling of the MCP `limit: null`,
-mirroring `docker logs --tail all`. A shared parser preserves all three states
-and does not fall through to Click's integer parsing: omission causes the wrapper
-to omit `limit` (selecting the tool's default), `all` explicitly forwards
+`--limit` takes a positive integer to cap the result, or the literal `all` for
+the tool's uncapped mode — the CLI spelling of the MCP `limit: null`, mirroring
+`docker logs --tail all`. A shared parser preserves all three states and does
+not fall through to Click's integer parsing: omission causes the wrapper to omit
+`limit` (selecting the tool's default), `all` explicitly forwards
 `{"limit": null}`, and a positive integer forwards that integer. Zero,
 negatives, and any other value raise `CliError` with `arg_parse_error` (exit
 `2`) rather than Click's unstructured `UsageError`. The `arg_parse_error`
-registry text in `_errors.py` must be updated to cover invalid `--limit`
-values alongside its existing cases (malformed `key=value` tokens and
-`--history` JSON), so `dhcli agents errors` gives accurate guidance. Every
-wrapper that exposes `limit` carries the flag with matching help and a test
-for each path.
+registry text in `_errors.py` must be updated to cover invalid `--limit` values
+alongside its existing cases (malformed `key=value` tokens and `--history`
+JSON), so `dhcli agents errors` gives accurate guidance. Every wrapper that
+exposes `limit` carries the flag with matching help and a test for each path.
 
 ## Filter syntax
 
@@ -174,19 +174,19 @@ a conforming processor behaves; the only things not accepted are constructs with
 no referent in this data model, tabulated below. `engine_filters` remains
 reserved for Deephaven Query Language where-clauses evaluated by the engine.
 
-| Form | Meaning | Example |
-| --- | --- | --- |
-| `field = value` | Equals | `owner = "jsmith"` |
-| `field != value` | Not equals | `status != "STOPPED"` |
-| `field : value` | Has, string case: case-insensitive substring (string fields only) | `name : report` |
-| `field > value`, `field >= value` | Greater than (or equal); numeric fields only | `serial >= 1000` |
-| `field < value`, `field <= value` | Less than (or equal); numeric fields only | `serial < 50` |
-| `NOT expr`, `-expr` | Negation (AIP-160 defines both spellings) | `NOT name : archived`, `-name : archived` |
-| `expr AND expr` | Conjunction | `enabled = true AND serial > 10` |
-| `expr OR expr` | Disjunction | `owner = "a" OR owner = "b"` |
-| `( expr )` | Grouping | `(owner = "a" OR owner = "b") AND enabled = true` |
-| `NULL` | Null field (`null` is accepted equivalently) | `owner = NULL` |
-| `"..."` | Quoted string literal (required when the value has spaces or operators) | `name = "my daily query"` |
+| Form                              | Meaning                                                                 | Example                                           |
+| --------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------- |
+| `field = value`                   | Equals                                                                  | `owner = "jsmith"`                                |
+| `field != value`                  | Not equals                                                              | `status != "STOPPED"`                             |
+| `field : value`                   | Has, string case: case-insensitive substring (string fields only)       | `name : report`                                   |
+| `field > value`, `field >= value` | Greater than (or equal); numeric fields only                            | `serial >= 1000`                                  |
+| `field < value`, `field <= value` | Less than (or equal); numeric fields only                               | `serial < 50`                                     |
+| `NOT expr`, `-expr`               | Negation (AIP-160 defines both spellings)                               | `NOT name : archived`, `-name : archived`         |
+| `expr AND expr`                   | Conjunction                                                             | `enabled = true AND serial > 10`                  |
+| `expr OR expr`                    | Disjunction                                                             | `owner = "a" OR owner = "b"`                      |
+| `( expr )`                        | Grouping                                                                | `(owner = "a" OR owner = "b") AND enabled = true` |
+| `NULL`                            | Null field (`null` is accepted equivalently)                            | `owner = NULL`                                    |
+| `"..."`                           | Quoted string literal (required when the value has spaces or operators) | `name = "my daily query"`                         |
 
 ### Precedence
 
@@ -197,10 +197,11 @@ nests inside it. So negation binds tightest, then `OR`, then `AND`, and
 
 That is conjunctive normal form, and it is the shape filters naturally take: a
 query is a set of independent conditions that must all hold, where any single
-condition may accept several alternatives. `status = "RUNNING" AND owner = "a"
-OR owner = "b"` means running queries belonging to either owner, which is
-almost always what someone writing that line intends. Parentheses are available
-whenever a different grouping is wanted.
+condition may accept several alternatives.
+`status = "RUNNING" AND owner = "a"
+OR owner = "b"` means running queries
+belonging to either owner, which is almost always what someone writing that line
+intends. Parentheses are available whenever a different grouping is wanted.
 
 The precedence is implemented exactly as specified, with no project-specific
 reinterpretation and no requirement to parenthesize a mixed expression. Adopting
@@ -213,7 +214,7 @@ A closed numeric range is `serial > 10 AND serial < 50`; a union is
 
 ### Restrictions
 
-AIP-160 defines a grammar and leaves the *value vocabulary* — which literals a
+AIP-160 defines a grammar and leaves the _value vocabulary_ — which literals a
 field accepts — to the implementing API. The null sentinel is therefore
 documented here rather than inherited: both `NULL` and `null` are accepted, and
 both compile to `isNull(Field)`. Typed literals follow the field's declared type
@@ -226,26 +227,27 @@ rejected at parse time with an actionable message. None is reinterpreted, and
 none is a stylistic preference — each is an absence of anything to evaluate
 against.
 
-| AIP-160 construct | Behavior | Reason |
-| --- | --- | --- |
+| AIP-160 construct                                                                     | Behavior                                                       | Reason                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `:` beyond the string case — `field:*` presence, map-key, and repeated-contains forms | Rejected; error names the field's type and its valid operators | Rows are flat records of scalars, so there is no map, no repeated field, and no unset-vs-set distinction for `has` to test. The string case is implemented as case-insensitive substring. |
-| Bare terms with no field reference (`foo` alone as a restriction) | Rejected; error echoes the allowed field names | Every comparison must name a field from the tool's closed vocabulary, which is what makes a typo distinguishable from a valid empty result. |
-| Functions and other extensions a host API may layer on | Rejected as unknown syntax | Use `engine_filters` for anything needing regex, functions, or `in` lists. |
+| Bare terms with no field reference (`foo` alone as a restriction)                     | Rejected; error echoes the allowed field names                 | Every comparison must name a field from the tool's closed vocabulary, which is what makes a typo distinguishable from a valid empty result.                                               |
+| Functions and other extensions a host API may layer on                                | Rejected as unknown syntax                                     | Use `engine_filters` for anything needing regex, functions, or `in` lists.                                                                                                                |
 
 Implicit conjunction (`a = 1 b = 2`, meaning `a = 1 AND b = 2`) is accepted, as
 the specification defines it. It cannot silently mis-parse here: a bare word in
 that position must resolve to a documented field, so an unquoted multi-word
-value such as `name = my daily query` fails on `daily` with the vocabulary
-error rather than quietly becoming a conjunction.
+value such as `name = my daily query` fails on `daily` with the vocabulary error
+rather than quietly becoming a conjunction.
 
 Every tool documents a closed filter vocabulary — the field names it accepts on
 the left of a comparison. A predicate naming a field outside that vocabulary
-(`owenr = "x"`) is rejected with an error that echoes the allowed field names; it <!-- codespell:ignore owenr -->
-is never silently treated as a no-match. This keeps a typo distinguishable from
-a valid empty result and satisfies the repairability goal. For a tool that also
-supports `fields`, the filter vocabulary is the same set of names it exposes
-there; the two scalar lists (`catalog_namespaces_list`, `session_tables_list`)
-expose only the synthetic `name` to `filter` and offer no `fields`.
+(`owenr = "x"`) is rejected with an error that echoes the allowed field names;
+it <!-- codespell:ignore owenr --> is never silently treated as a no-match. This
+keeps a typo distinguishable from a valid empty result and satisfies the
+repairability goal. For a tool that also supports `fields`, the filter
+vocabulary is the same set of names it exposes there; the two scalar lists
+(`catalog_namespaces_list`, `session_tables_list`) expose only the synthetic
+`name` to `filter` and offer no `fields`.
 
 ### Typed fields and operator validity
 
@@ -265,9 +267,9 @@ predicate.
   matching DQL literal — a backtick string, a bare integer, `true` / `false`, or
   `isNull(Field)` for `NULL` — and the output-layer evaluator applies the
   identical typed comparison. Neither side stringifies.
-- **Operator validity is per type.** Equality (`=`, `!=`) and the `NULL` sentinel
-  apply to every type. Containment (`:`) applies only to string fields: a
-  substring test on an integer or boolean has no well-defined, compilable
+- **Operator validity is per type.** Equality (`=`, `!=`) and the `NULL`
+  sentinel apply to every type. Containment (`:`) applies only to string fields:
+  a substring test on an integer or boolean has no well-defined, compilable
   meaning, so `serial : 5` or `enabled : true` is rejected with an error naming
   the field's type and the operators it accepts. Ordering comparisons (`>`,
   `>=`, `<`, `<=`) apply only to numeric fields.
@@ -281,7 +283,7 @@ cold, with no documentation and no prior turn to learn from.
 methods take a singular `filter` string, and Google Cloud APIs follow it
 universally. Models therefore carry a strong prior: a string parameter named
 `filter` on a list operation reliably elicits `owner = "x" AND serial > 5`. The
-unqualified name *is* the signal — any qualifier (`match`, `field_filter`,
+unqualified name _is_ the signal — any qualifier (`match`, `field_filter`,
 `json_filter`) weakens the prior precisely by deviating from the convention, and
 a name like `json_filter` actively misdirects toward JSON-object or JMESPath
 syntax. The type shape reinforces it: a single string says AIP-160, where an
@@ -290,19 +292,19 @@ array would say "some other convention."
 **`engine_filters` names the layer and the language.** The qualifier tells a
 cold reader three things the bare word could not: the expressions are evaluated
 by the Deephaven **engine**, they are therefore written in Deephaven Query
-Language, and they reference *backing table columns* rather than response field
+Language, and they reference _backing table columns_ rather than response field
 names. The plural is accurate rather than sloppy — it is an array of
 where-clauses, where `filter` is one expression.
 
 **The asymmetry is deliberate and load-bearing.** An unqualified name marks the
 default; a qualified name marks a specialization. An agent scanning schemas sees
-`filter` on every collection tool and `engine_filters` on only specific ones, and
-reads the hierarchy without any prose telling it which to prefer. Parallel names
-(`field_filter` / `engine_filters`) would imply the two are peers, which is the
-opposite of the intended relationship. This also avoids the `filter` / `filters`
-trap: a bare singular/plural pair carrying "AIP-160 vs DQL" would be actively
-harmful, whereas here the qualifier carries the distinction and the plural only
-describes shape.
+`filter` on every collection tool and `engine_filters` on only specific ones,
+and reads the hierarchy without any prose telling it which to prefer. Parallel
+names (`field_filter` / `engine_filters`) would imply the two are peers, which
+is the opposite of the intended relationship. This also avoids the `filter` /
+`filters` trap: a bare singular/plural pair carrying "AIP-160 vs DQL" would be
+actively harmful, whereas here the qualifier carries the distinction and the
+plural only describes shape.
 
 **What agents get concretely.** One filter concept, identically spelled and
 identically behaved on every collection tool, expressible zero-shot from prior
@@ -357,22 +359,22 @@ so filtering runs on the worker before rows are read. Output-layer evaluation
 remains the fallback for tools with no table behind them, and both evaluators
 implement the same parsed semantics.
 
-| | `filter` | `engine_filters` |
-| --- | --- | --- |
-| Language | AIP-160 | Deephaven Query Language |
-| Vocabulary | Response field names | Backing table column names |
-| Evaluated by | Engine when table-backed (compiled), else the tool output layer | Deephaven engine |
-| Availability | Every collection tool | Only persistent-table-backed tools |
-| Cost to write | Low; comparisons over documented field names | Higher; full DQL over backing columns |
-| Applied | At the source when table-backed, else after the tool builds its rows | Before the rows are read from the source |
+|               | `filter`                                                             | `engine_filters`                         |
+| ------------- | -------------------------------------------------------------------- | ---------------------------------------- |
+| Language      | AIP-160                                                              | Deephaven Query Language                 |
+| Vocabulary    | Response field names                                                 | Backing table column names               |
+| Evaluated by  | Engine when table-backed (compiled), else the tool output layer      | Deephaven engine                         |
+| Availability  | Every collection tool                                                | Only persistent-table-backed tools       |
+| Cost to write | Low; comparisons over documented field names                         | Higher; full DQL over backing columns    |
+| Applied       | At the source when table-backed, else after the tool builds its rows | Before the rows are read from the source |
 
 Offering both on a table-backed tool is not ambiguous, and the order is fixed:
 `engine_filters` and the compiled `filter` are applied together at the source,
-*before* the engine-side `limit` bounds the result, so `limit` and
-`is_complete` describe the filtered result rather than a pre-filter slice. The
-output-side layer (`prune_empty`) then trims whatever came back.
-`catalog_tables_list` keeps its engine-side where-clauses unchanged apart from
-the rename, and gains the output-side capabilities on top.
+_before_ the engine-side `limit` bounds the result, so `limit` and `is_complete`
+describe the filtered result rather than a pre-filter slice. The output-side
+layer (`prune_empty`) then trims whatever came back. `catalog_tables_list` keeps
+its engine-side where-clauses unchanged apart from the rename, and gains the
+output-side capabilities on top.
 
 ## Sort order
 
@@ -381,12 +383,12 @@ AIP-132 defines the standard `List` method, and AIP-160 defines the `filter`
 field that method carries; `filter` and `order_by` are the two halves of one
 convention, so a caller who knows either already knows the other.
 
-| Form | Meaning | Example |
-| --- | --- | --- |
-| `field` | Sort ascending on that field | `name` |
-| `field desc` | Sort descending on that field | `serial desc` |
-| `a, b desc` | Multiple keys, applied left to right | `status, serial desc` |
-| `""` | Omitted — the tool's natural order | |
+| Form         | Meaning                              | Example               |
+| ------------ | ------------------------------------ | --------------------- |
+| `field`      | Sort ascending on that field         | `name`                |
+| `field desc` | Sort descending on that field        | `serial desc`         |
+| `a, b desc`  | Multiple keys, applied left to right | `status, serial desc` |
+| `""`         | Omitted — the tool's natural order   |                       |
 
 This is AIP-132 as specified: a comma-separated list of field names, ascending
 by default, with a `desc` suffix for descending, keys applied in written order.
@@ -400,17 +402,17 @@ fields are rejected with the same vocabulary-echoing error `filter` uses.
 
 ### Where AIP-132 is silent, follow Deephaven
 
-AIP-132 specifies the *syntax* but not the *collation*. Those gaps are filled by
+AIP-132 specifies the _syntax_ but not the _collation_. Those gaps are filled by
 matching the Deephaven engine exactly, because the same expression must produce
 the same ordering whether it was pushed into a `sort()` on a worker or evaluated
 over in-memory rows. A divergence there would be invisible until a caller
 compared two tools.
 
-| Question | Behavior | Why |
-| --- | --- | --- |
-| Null ordering | Nulls sort as the smallest value: first ascending, last descending. | Deephaven's convention. AIP-132 is silent, and Python's `sorted` raises on `None` vs `str`, so the output-layer evaluator must implement this explicitly rather than inherit it. |
-| Ties | Stable — rows that compare equal retain their prior relative order. | Both Deephaven's sort and Python's `sorted` are stable, so multi-key sorting can be implemented as successive stable single-key sorts and still agree with the engine. |
-| Case | Case-sensitive, Java/UTF-16 lexicographic order. | Deephaven sorts strings by Java's natural order. Python compares Unicode code points instead, so the output-layer evaluator must compare UTF-16 code units explicitly to reproduce engine ordering, including for non-BMP characters. This is deliberately *not* symmetric with `filter`, whose `=` and `:` are case-insensitive. |
+| Question      | Behavior                                                            | Why                                                                                                                                                                                                                                                                                                                               |
+| ------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Null ordering | Nulls sort as the smallest value: first ascending, last descending. | Deephaven's convention. AIP-132 is silent, and Python's `sorted` raises on `None` vs `str`, so the output-layer evaluator must implement this explicitly rather than inherit it.                                                                                                                                                  |
+| Ties          | Stable — rows that compare equal retain their prior relative order. | Both Deephaven's sort and Python's `sorted` are stable, so multi-key sorting can be implemented as successive stable single-key sorts and still agree with the engine.                                                                                                                                                            |
+| Case          | Case-sensitive, Java/UTF-16 lexicographic order.                    | Deephaven sorts strings by Java's natural order. Python compares Unicode code points instead, so the output-layer evaluator must compare UTF-16 code units explicitly to reproduce engine ordering, including for non-BMP characters. This is deliberately _not_ symmetric with `filter`, whose `=` and `:` are case-insensitive. |
 
 ## Scope and prior art
 
@@ -450,7 +452,7 @@ does not grow an expression language of its own.
 Where AIP-160 stops, `engine_filters` continues — that is the escape hatch for
 regex, function calls, `in` lists, and column-to-column comparisons, and it is
 why the DQL surface is retained rather than replaced. If callers ever need
-arbitrary *reshaping* (as opposed to filtering), the answer is a separate
+arbitrary _reshaping_ (as opposed to filtering), the answer is a separate
 argument such as JMESPath, never an extension to `filter`. Such an argument
 would be relevant only to the MCP tools — a CLI caller already has `jq`
 downstream — and it carries costs both current parameters avoid: it cannot
@@ -464,7 +466,7 @@ rely on. It stays out of scope unless and until that demand is real.
 pattern — a caller names the parts of the result it wants and the server omits
 the rest — and borrows `google.protobuf.FieldMask`'s wire shape. Unlike `filter`
 and `order_by`, which implement their specifications as written, **the path
-grammar is a project grammar**: it is FieldMask-*shaped*, not FieldMask, and the
+grammar is a project grammar**: it is FieldMask-_shaped_, not FieldMask, and the
 differences are enumerated below. Prior knowledge transfers for the common cases
 and stops at the table.
 
@@ -479,26 +481,26 @@ single strings.
 
 ### Differences from `FieldMask` / AIP-157
 
-| Behavior | Here | Specification |
-| --- | --- | --- |
-| Field naming | Response field names verbatim, which are `snake_case` (`table_name`, `state_details.status`) | FieldMask's JSON encoding converts proto names to `lowerCamelCase`. These tools are not proto-derived and their JSON is snake_case, so paths name what the response actually contains. |
-| Repeated field before the final segment | Allowed — `replicas.status` applies to every element | FieldMask forbids a repeated field anywhere but the final segment. |
-| Escaped dot in a key (`weird\.key`) | Supported | Not defined by FieldMask, which assumes proto field names and therefore never needs it. |
-| `*` | Accepted as "all fields," equivalent to omitting the argument | AIP-157 / the `fields` system parameter define `*`; supported here so a caller writing it gets what they expect. |
-| Array indices, wildcard path segments (`a.*.b`) | Rejected | Not defined by FieldMask either; listed so the boundary is explicit. |
+| Behavior                                        | Here                                                                                         | Specification                                                                                                                                                                          |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field naming                                    | Response field names verbatim, which are `snake_case` (`table_name`, `state_details.status`) | FieldMask's JSON encoding converts proto names to `lowerCamelCase`. These tools are not proto-derived and their JSON is snake_case, so paths name what the response actually contains. |
+| Repeated field before the final segment         | Allowed — `replicas.status` applies to every element                                         | FieldMask forbids a repeated field anywhere but the final segment.                                                                                                                     |
+| Escaped dot in a key (`weird\.key`)             | Supported                                                                                    | Not defined by FieldMask, which assumes proto field names and therefore never needs it.                                                                                                |
+| `*`                                             | Accepted as "all fields," equivalent to omitting the argument                                | AIP-157 / the `fields` system parameter define `*`; supported here so a caller writing it gets what they expect.                                                                       |
+| Array indices, wildcard path segments (`a.*.b`) | Rejected                                                                                     | Not defined by FieldMask either; listed so the boundary is explicit.                                                                                                                   |
 
 The first three exist because the data being masked is not a protobuf message.
 They are additions to what FieldMask can express, not reinterpretations of it: a
 path that is valid FieldMask means here what it means there.
 
-| Form | Result |
-| --- | --- |
-| `config` | Keep the entire `config` object. |
-| `config.owner` | Keep only `config.owner`. |
+| Form                  | Result                                             |
+| --------------------- | -------------------------------------------------- |
+| `config`              | Keep the entire `config` object.                   |
+| `config.owner`        | Keep only `config.owner`.                          |
 | `config,config.owner` | Same as `config`; a parent supersedes descendants. |
-| `replicas.status` | Keep `status` from every replica. |
-| `weird\.key` | Match a literal dot in a key. |
-| `*` | Keep everything; identical to omitting `fields`. |
+| `replicas.status`     | Keep `status` from every replica.                  |
+| `weird\.key`          | Match a literal dot in a key.                      |
+| `*`                   | Keep everything; identical to omitting `fields`.   |
 
 Paths through arrays apply to every element. Array indexing and wildcard paths
 are not supported. A bare field such as `name` is the flat projection case.
@@ -518,7 +520,7 @@ serialized — the projection saves transfer, not just response bytes. The
 collection tools in the first pass have flat rows (`{namespace, table_name}`,
 `{package, version}`), so their projections push down entirely.
 
-The pushdown is applied *after* filtering and sorting, which is what allows a
+The pushdown is applied _after_ filtering and sorting, which is what allows a
 caller to filter or sort on a field they did not select. A selection containing
 any nested path falls back to output-layer projection for the whole request: a
 Deephaven table is flat, so a nested path has no column to select, and splitting
@@ -562,17 +564,17 @@ cheaply, as can scalar-list tools whose first pass only adds a single synthetic
 `name` field for matching. Tools that need deeper synthetic shaping, a
 nested-projection design review, or an engine refactor wait.
 
-| Tool | Kind | Row / shape | First pass | Notes |
-| --- | --- | --- | --- | --- |
-| `pq_list` | collection | dict rows (`id`, `serial`, `name`, `status`, `status_category`, `owner`, `enabled`) | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | No `engine_filters` yet — see the refactor note below. |
-| `sessions_list` | collection | dict rows (session identity, `type`, `system`, `origin`) | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | Keeps its existing `type` / `system` / `origin` scoping arguments. |
-| `list_systems` | collection | `{name, type}` | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | In-memory; no Deephaven backing. |
-| `session_pip_list` | collection | `{package, version}` | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | Rows come from a small, transient Deephaven table (`_pip_packages_table`); treated as output-layer (no `engine_filters`), so the fetch is uncapped and `limit` is applied after `filter` and `order_by` in the output layer. |
-| `catalog_tables_list` | collection | `{namespace, table_name}` | add `filter`, `order_by`, `fields`, `prune_empty` | Retains its engine-side where-clauses (renamed to `engine_filters`) and its row cap (renamed to `limit`). |
-| `catalog_namespaces_list` | scalar collection | namespace strings | add `filter`, `order_by` via synthetic `name` | Same renames as above; its existing implicit ascending sort stays the default. |
-| `session_tables_list` | scalar collection | table-name strings | `filter`, `order_by`, `limit` via synthetic `name` | Scalar list; single documented `name` field. |
-| `enterprise_systems_status` | collection | per-system records with optional diagnostics | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | `prune_empty` drops absent diagnostic fields. |
-| `pq_details` | detail | envelope with nested `config`, `state_details`, `replicas`, `spares` | `fields`, `prune_empty` | `prune_empty` already exists. |
+| Tool                        | Kind              | Row / shape                                                                         | First pass                                             | Notes                                                                                                                                                                                                                        |
+| --------------------------- | ----------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pq_list`                   | collection        | dict rows (`id`, `serial`, `name`, `status`, `status_category`, `owner`, `enabled`) | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | No `engine_filters` yet — see the refactor note below.                                                                                                                                                                       |
+| `sessions_list`             | collection        | dict rows (session identity, `type`, `system`, `origin`)                            | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | Keeps its existing `type` / `system` / `origin` scoping arguments.                                                                                                                                                           |
+| `list_systems`              | collection        | `{name, type}`                                                                      | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | In-memory; no Deephaven backing.                                                                                                                                                                                             |
+| `session_pip_list`          | collection        | `{package, version}`                                                                | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | Rows come from a small, transient Deephaven table (`_pip_packages_table`); treated as output-layer (no `engine_filters`), so the fetch is uncapped and `limit` is applied after `filter` and `order_by` in the output layer. |
+| `catalog_tables_list`       | collection        | `{namespace, table_name}`                                                           | add `filter`, `order_by`, `fields`, `prune_empty`      | Retains its engine-side where-clauses (renamed to `engine_filters`) and its row cap (renamed to `limit`).                                                                                                                    |
+| `catalog_namespaces_list`   | scalar collection | namespace strings                                                                   | add `filter`, `order_by` via synthetic `name`          | Same renames as above; its existing implicit ascending sort stays the default.                                                                                                                                               |
+| `session_tables_list`       | scalar collection | table-name strings                                                                  | `filter`, `order_by`, `limit` via synthetic `name`     | Scalar list; single documented `name` field.                                                                                                                                                                                 |
+| `enterprise_systems_status` | collection        | per-system records with optional diagnostics                                        | `filter`, `order_by`, `fields`, `limit`, `prune_empty` | `prune_empty` drops absent diagnostic fields.                                                                                                                                                                                |
+| `pq_details`                | detail            | envelope with nested `config`, `state_details`, `replicas`, `spares`                | `fields`, `prune_empty`                                | `prune_empty` already exists.                                                                                                                                                                                                |
 
 Detail and table-data tools with a deeper output shape — `session_details`, the
 schema tools, `session_table_data`, `catalog_table_sample` — stay out of the
@@ -580,14 +582,14 @@ first pass; they are the [follow-on candidates](#follow-on-candidates).
 
 Every first-pass collection has a conservative numeric `limit` default and
 always reports `is_complete`, per the repository's bounded-output contract (e.g.
-`table.py`, `catalog.py`): a default discovery call must never build an unbounded
-payload that only fails at the size guard. `catalog_tables_list` keeps 10,000 and
-`catalog_namespaces_list` 1,000; the others (`pq_list`, `sessions_list`,
-`list_systems`, `session_pip_list`, `session_tables_list`,
+`table.py`, `catalog.py`): a default discovery call must never build an
+unbounded payload that only fails at the size guard. `catalog_tables_list` keeps
+10,000 and `catalog_namespaces_list` 1,000; the others (`pq_list`,
+`sessions_list`, `list_systems`, `session_pip_list`, `session_tables_list`,
 `enterprise_systems_status`) default to 1,000. Uncapped output is an explicit
-opt-in — MCP `limit: null`, CLI `--limit all` — never the default. For the
-tools that are unbounded today this changes their default: a caller that needs
-the complete list must now pass the opt-in, and `is_complete: false` flags any
+opt-in — MCP `limit: null`, CLI `--limit all` — never the default. For the tools
+that are unbounded today this changes their default: a caller that needs the
+complete list must now pass the opt-in, and `is_complete: false` flags any
 truncation. That is a deliberate breaking change, documented in the changelog
 with the opt-in as the migration path, and preferred over an uncapped default
 that conflicts with the bounded-output contract.
@@ -600,22 +602,22 @@ refactor note below), so the whole pipeline runs in the MCP server's output
 layer, in the documented order: filter, sort, bound, prune, project. Its closed
 vocabulary — shared by `filter`, `order_by`, and `fields` — is:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | string | Fully qualified PQ identifier. |
-| `serial` | integer | Controller serial number. |
-| `name` | string | PQ name. |
-| `status` | string | Current PQ state. |
-| `status_category` | string | Stable state category. |
-| `owner` | string | Owning user. |
-| `enabled` | boolean | Whether the PQ is enabled. |
+| Field             | Type    | Meaning                        |
+| ----------------- | ------- | ------------------------------ |
+| `id`              | string  | Fully qualified PQ identifier. |
+| `serial`          | integer | Controller serial number.      |
+| `name`            | string  | PQ name.                       |
+| `status`          | string  | Current PQ state.              |
+| `status_category` | string  | Stable state category.         |
+| `owner`           | string  | Owning user.                   |
+| `enabled`         | boolean | Whether the PQ is enabled.     |
 
 `pq list` gains no `engine_filters` in this pass. It reads the controller's PQ
-snapshot (`controller.map()`), an in-memory map with no engine behind it, so only
-the output-side layer applies. A later refactor can add engine-side filtering:
-routing the listing through `connect_to_persistent_query` and a `PluginClient`
-against the `WebClientData` query's `QueryInfo` table replaces the
-un-filterable snapshot with a live Deephaven table, letting Deephaven Query
+snapshot (`controller.map()`), an in-memory map with no engine behind it, so
+only the output-side layer applies. A later refactor can add engine-side
+filtering: routing the listing through `connect_to_persistent_query` and a
+`PluginClient` against the `WebClientData` query's `QueryInfo` table replaces
+the un-filterable snapshot with a live Deephaven table, letting Deephaven Query
 Language where-clauses run on the worker before any row is returned. The same
 route generalizes to other controller-snapshot listings. It is out of scope
 here; `filter` covers the common narrowing case in the meantime.
@@ -632,7 +634,7 @@ and `spares`; `success` and `id` are always retained.
 dictionaries, so they take the full output-shaping layer (`filter`, `order_by`,
 `fields`, `limit`, `prune_empty`) with the same helpers as `pq list`.
 `sessions list` keeps its existing `type` / `system` / `origin` scoping
-arguments; those select *which* sessions to enumerate, while `filter` narrows
+arguments; those select _which_ sessions to enumerate, while `filter` narrows
 the enumerated rows. `pip list` is the one that materializes a transient
 Deephaven table (`_pip_packages_table`): it stays output-layer (no
 `engine_filters`). Because `filter` and `order_by` run in the output layer, the
@@ -647,20 +649,20 @@ pipeline in the output layer.
 The persistent/queryable catalog listings already carry engine-side
 where-clauses and a row cap; this pass renames those to `engine_filters` and
 `limit` and adds the output-side capabilities on top — `filter`, `order_by`,
-`fields`, and `prune_empty` for `catalog_tables_list`, and `filter` /
-`order_by` for the scalar `catalog_namespaces_list`, whose existing implicit
-ascending sort remains its default when `order_by` is omitted. Because these
-tools apply `limit` at the engine
-before converting rows to Arrow, the compiled `filter` must be combined with any
-`engine_filters` *before* that row limit; otherwise the limit could discard rows
-that a later `filter` would have kept, and `is_complete` would no longer describe
-the filtered result. For `catalog_namespaces_list` the combined filters must
-additionally run before `select_distinct("Namespace")`, since distinct extraction
-drops the `TableName` column that documented `TableName` where-clauses reference.
-Transient table-backed tools (for example `pip list`) remain output-layer for
-`filter`. The two scalar lists (`catalog_namespaces_list` and
-`session_tables_list`) expose `filter` through one documented synthetic field,
-`name`, matched against each string element.
+`fields`, and `prune_empty` for `catalog_tables_list`, and `filter` / `order_by`
+for the scalar `catalog_namespaces_list`, whose existing implicit ascending sort
+remains its default when `order_by` is omitted. Because these tools apply
+`limit` at the engine before converting rows to Arrow, the compiled `filter`
+must be combined with any `engine_filters` _before_ that row limit; otherwise
+the limit could discard rows that a later `filter` would have kept, and
+`is_complete` would no longer describe the filtered result. For
+`catalog_namespaces_list` the combined filters must additionally run before
+`select_distinct("Namespace")`, since distinct extraction drops the `TableName`
+column that documented `TableName` where-clauses reference. Transient
+table-backed tools (for example `pip list`) remain output-layer for `filter`.
+The two scalar lists (`catalog_namespaces_list` and `session_tables_list`)
+expose `filter` through one documented synthetic field, `name`, matched against
+each string element.
 
 `enterprise_systems_status` returns one record per system with several optional
 diagnostic fields; it takes `filter` (e.g. narrow to unhealthy systems) and
@@ -672,14 +674,14 @@ With the in-memory lists handled in the first pass, the remaining candidates are
 the deeper-shaped tools whose projection design warrants its own review, plus
 pagination and default field sets:
 
-| Capability | Candidates |
-| --- | --- |
-| Nested `fields` | `session details`, the schema tools (`session_table_schema`, `catalog_table_schema`), and `session_table_data` / `catalog_table_sample`. |
-| `prune_empty` | `session details` and any detail result with optional diagnostics. |
-| `limit` + `is_complete` | `session_table_data` and any other row-data tool still returning an unbounded result. |
-| `engine_filters` | `pq_list`, once its listing is refactored onto a live `QueryInfo` table (see [`pq list`](#pq-list)). |
-| Pagination: `skip` counterpart to `limit`, `total_size` in the response ([AIP-158](https://google.aip.dev/158)) | Every first-pass collection; `is_complete` already reports truncation in the meantime. |
-| Per-tool default field set, with a hint that more fields exist | Detail tools whose full object is much larger than a typical caller needs. |
+| Capability                                                                                                      | Candidates                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Nested `fields`                                                                                                 | `session details`, the schema tools (`session_table_schema`, `catalog_table_schema`), and `session_table_data` / `catalog_table_sample`. |
+| `prune_empty`                                                                                                   | `session details` and any detail result with optional diagnostics.                                                                       |
+| `limit` + `is_complete`                                                                                         | `session_table_data` and any other row-data tool still returning an unbounded result.                                                    |
+| `engine_filters`                                                                                                | `pq_list`, once its listing is refactored onto a live `QueryInfo` table (see [`pq list`](#pq-list)).                                     |
+| Pagination: `skip` counterpart to `limit`, `total_size` in the response ([AIP-158](https://google.aip.dev/158)) | Every first-pass collection; `is_complete` already reports truncation in the meantime.                                                   |
+| Per-tool default field set, with a hint that more fields exist                                                  | Detail tools whose full object is much larger than a typical caller needs.                                                               |
 
 Catalog tools already use engine-side Deephaven Query Language; that behavior is
 unchanged apart from the rename to `engine_filters`, and the first pass only
@@ -692,10 +694,9 @@ adds the output-side layer beside it.
    rename `max_rows` to `limit`. On the CLI, `--filter` is redefined as the
    AIP-160 expression and a repeatable `--where` is added wherever
    `engine_filters` exists. `catalog sample` is excluded from the first-pass
-   AIP-160 surface and keeps only partition DQL on `--where`, with
-   one-release rejection of the legacy `--filter` spelling as described above.
-   All of these are breaking and are recorded in the changelog with before/after
-   invocations.
+   AIP-160 surface and keeps only partition DQL on `--where`, with one-release
+   rejection of the legacy `--filter` spelling as described above. All of these
+   are breaking and are recorded in the changelog with before/after invocations.
 2. Build the AIP-160 front end: a tokenizer and recursive-descent parser
    producing a validated AST. The grammar is AIP-160's as written — an `AND` of
    `OR`-clauses, so negation binds tightest, then `OR`, then `AND`, with both
@@ -704,60 +705,60 @@ adds the output-side layer beside it.
    generic syntax error. Two backends consume the AST — a DQL compiler and an
    in-memory evaluator — so both layers share one semantics.
 3. Build the AIP-132 `order_by` parser over the same vocabulary: comma-separated
-   keys, an optional `desc` suffix, no `asc` synonym. Two backends again — an engine
-   `sort()` and an in-memory stable multi-key sort — which must agree on null
-   ordering (nulls smallest), tie stability, and case-sensitive comparison, since
-   AIP-132 specifies none of the three and Deephaven's behavior is the reference.
+   keys, an optional `desc` suffix, no `asc` synonym. Two backends again — an
+   engine `sort()` and an in-memory stable multi-key sort — which must agree on
+   null ordering (nulls smallest), tie stability, and case-sensitive comparison,
+   since AIP-132 specifies none of the three and Deephaven's behavior is the
+   reference.
 4. Extract reusable helpers with one set of semantics: filter parsing, sort-key
    parsing, nested projection, recursive pruning, and row shaping. The parsers
    validate each field reference against the tool's documented vocabulary —
-   rejecting an unknown
-   field, a literal that will not coerce to the field's declared type, and an
-   operator not valid for that type — with an error that lists the allowed names
-   and operators. Coercion and comparison are driven by the one per-field type
-   table so the evaluator and the DQL compiler cannot disagree. The shared
-   shaping path also estimates the emitted payload and calls `check_response_size`
-   before returning — a row cap alone does not bound serialized size, since wide
-   string fields or diagnostics can make even a capped result oversized —
-   mirroring the existing catalog guard (`mcp_systems_server/_tools/catalog.py`).
-   Because `get_response_limits` requires a fully qualified session id
-   (`shared.py:566-598`), tools that span multiple sessions or have no single
-   session id use strictest configured limits across every section the request
-   can span (community and/or enterprise). If no relevant section is configured
-   and the tool's success path is necessarily empty, skip the size check for
-   that empty result.
-   `pq_details` has no variable-sized list to reduce, so its error message omits
-   the "reduce `limit`" advice and instead tells the caller to use a narrower
-   `fields` selection or `prune_empty`.
+   rejecting an unknown field, a literal that will not coerce to the field's
+   declared type, and an operator not valid for that type — with an error that
+   lists the allowed names and operators. Coercion and comparison are driven by
+   the one per-field type table so the evaluator and the DQL compiler cannot
+   disagree. The shared shaping path also estimates the emitted payload and
+   calls `check_response_size` before returning — a row cap alone does not bound
+   serialized size, since wide string fields or diagnostics can make even a
+   capped result oversized — mirroring the existing catalog guard
+   (`mcp_systems_server/_tools/catalog.py`). Because `get_response_limits`
+   requires a fully qualified session id (`shared.py:566-598`), tools that span
+   multiple sessions or have no single session id use strictest configured
+   limits across every section the request can span (community and/or
+   enterprise). If no relevant section is configured and the tool's success path
+   is necessarily empty, skip the size check for that empty result. `pq_details`
+   has no variable-sized list to reduce, so its error message omits the "reduce
+   `limit`" advice and instead tells the caller to use a narrower `fields`
+   selection or `prune_empty`.
 5. For table-backed tools, push the whole pipeline to the engine in order:
    combined filters, then sort, then the row limit, then a column-selecting view
    for a fully top-level `fields` selection. `get_catalog_table` already applies
    filters before `_apply_row_limit`; preserve that order and insert the sort
-   between them. For `distinct_namespaces=True`, move combined filtering
-   before `select_distinct("Namespace")` so existing `TableName` where-clauses
-   remain valid and filtering precedes both distinct extraction and the row limit.
-   A selection containing any nested path skips the view and projects in the
+   between them. For `distinct_namespaces=True`, move combined filtering before
+   `select_distinct("Namespace")` so existing `TableName` where-clauses remain
+   valid and filtering precedes both distinct extraction and the row limit. A
+   selection containing any nested path skips the view and projects in the
    output layer instead.
 6. Give every first-pass collection a conservative numeric `limit` default per
    the bounded-output contract — catalog tools keep 10,000 / 1,000, the others
    default to 1,000 — and reserve uncapped output for an explicit opt-in (MCP
-   `limit: null`, CLI `--limit all`). Validate `limit` as a positive
-   integer. For the currently-unbounded tools this changes the default; document
-   it as a breaking change with the opt-in as the migration path.
+   `limit: null`, CLI `--limit all`). Validate `limit` as a positive integer.
+   For the currently-unbounded tools this changes the default; document it as a
+   breaking change with the opt-in as the migration path.
 7. Apply the layer to the first-pass collections — `pq list`, `sessions list`,
    `list systems`, `pip list`, `session_tables_list`,
-   `enterprise_systems_status`, and the catalog listings (`filter` / `order_by` /
-   `fields` / `prune_empty` atop their renamed `engine_filters`) — and add
+   `enterprise_systems_status`, and the catalog listings (`filter` / `order_by`
+   / `fields` / `prune_empty` atop their renamed `engine_filters`) — and add
    nested `fields` to `pq details`.
 8. Add `unmatched_fields` to every successful response that received a
-   *non-empty* `fields` selection. An omitted or empty `fields` is the
+   _non-empty_ `fields` selection. An omitted or empty `fields` is the
    no-projection case and adds no `unmatched_fields`, keeping the two identical.
    Populate it after pruning and projection; preserve requested-path order.
-9. Update every affected MCP tool docstring (the tool-reference source of truth),
-   the CLI `HelpSpec` / agents manifest, and `docs/CLI.md` (CLI surface only)
-   with the AIP-160 / AIP-132 / AIP-157 citations, the operator and ordering
-   tables, the vocabulary contrast between `filter` and `engine_filters`, the
-   sort-cost note, and canonical examples.
+9. Update every affected MCP tool docstring (the tool-reference source of
+   truth), the CLI `HelpSpec` / agents manifest, and `docs/CLI.md` (CLI surface
+   only) with the AIP-160 / AIP-132 / AIP-157 citations, the operator and
+   ordering tables, the vocabulary contrast between `filter` and
+   `engine_filters`, the sort-cost note, and canonical examples.
 10. Apply the same layer to the follow-on candidates only after their field
     vocabularies and output contracts are reviewed.
 
@@ -772,16 +773,16 @@ Tests cover:
   `a = 1 AND (b = 2 OR c = 3)`, with parenthesized forms confirming the
   alternative grouping — asserted against the reading a conforming processor
   produces, on both the engine and in-memory paths.
-- Every row of the restrictions table, each asserting a *distinct* actionable
+- Every row of the restrictions table, each asserting a _distinct_ actionable
   error rather than a generic parse failure: the non-string `:` forms
   (`field:*`), a bare term with no field reference, and unknown function syntax.
 - That an unquoted multi-word value (`name = my daily query`) fails with the
   vocabulary error on `daily` rather than silently becoming a conjunction.
-- `order_by`: single and multi-key ordering, the `desc` suffix, keys applied left to right,
-  rejection of `asc` and of an unknown sort field; null ordering (nulls first
-  ascending, last descending), stable ties, and case-sensitive comparison — each
-  asserted to produce identical results from the engine sort and the in-memory
-  sort.
+- `order_by`: single and multi-key ordering, the `desc` suffix, keys applied
+  left to right, rejection of `asc` and of an unknown sort field; null ordering
+  (nulls first ascending, last descending), stable ties, and case-sensitive
+  comparison — each asserted to produce identical results from the engine sort
+  and the in-memory sort.
 - Pipeline order: `order_by` applied before `limit`, so a capped request returns
   a deterministic top-N rather than a sorted arbitrary slice.
 - Projection pushdown: a fully top-level `fields` selection compiles to a
@@ -790,30 +791,30 @@ Tests cover:
   filtering and sorting on an unselected field still work.
 - Typed-field coercion: an integer field parsing `serial = 12345`, a boolean
   field parsing `enabled = true` / `false`, and an unparseable literal
-  (`serial = "abc"`) rejected; the output evaluator and the compiled DQL agreeing
-  on the same typed comparison rather than a stringified one.
-- Operator-validity rejection per type: `:` on a non-string field
-  (`serial : 5`, `enabled : true`) and an ordering comparison on a non-numeric
-  field, each erroring with the field's type and its allowed operators.
+  (`serial = "abc"`) rejected; the output evaluator and the compiled DQL
+  agreeing on the same typed comparison rather than a stringified one.
+- Operator-validity rejection per type: `:` on a non-string field (`serial : 5`,
+  `enabled : true`) and an ordering comparison on a non-numeric field, each
+  erroring with the field's type and its allowed operators.
 - Rejection of an unknown filter field, asserting the error echoes the allowed
   vocabulary (the `owenr = "x"` typo case). <!-- codespell:ignore owenr -->
-- Flat and nested projection, parent/descendant precedence, arrays,
-  escaped-dot keys, `*` as an explicit all-fields selection, and empty
-  projection (an omitted and an empty-string
-  `fields` both preserve the full result and emit no `unmatched_fields`).
-- Rejection of array indices and wildcard path segments (`a.*.b`), the two
-  path forms outside the documented grammar.
-- The CLI flag split: `--filter` forwarding to `filter` and repeatable
-  `--where` forwarding to `engine_filters` on every command that has
-  both, plus the transitional detection that a DQL expression passed to
-  `--filter` exits `2` naming `--where` rather than failing as an
-  opaque parse error.
+- Flat and nested projection, parent/descendant precedence, arrays, escaped-dot
+  keys, `*` as an explicit all-fields selection, and empty projection (an
+  omitted and an empty-string `fields` both preserve the full result and emit no
+  `unmatched_fields`).
+- Rejection of array indices and wildcard path segments (`a.*.b`), the two path
+  forms outside the documented grammar.
+- The CLI flag split: `--filter` forwarding to `filter` and repeatable `--where`
+  forwarding to `engine_filters` on every command that has both, plus the
+  transitional detection that a DQL expression passed to `--filter` exits `2`
+  naming `--where` rather than failing as an opaque parse error.
 - `prune_empty` removing exactly `null` / `""` / `[]` / `{}` recursively while
   preserving `false` and numeric `0`.
-- `limit` defaults: catalog 10,000 / 1,000 and the other first-pass tools
-  1,000; the CLI parser's three states (omit → tool default, `all` → MCP `null`,
+- `limit` defaults: catalog 10,000 / 1,000 and the other first-pass tools 1,000;
+  the CLI parser's three states (omit → tool default, `all` → MCP `null`,
   positive integer → cap) with zero / negative / other raising `CliError`
-  (`arg_parse_error`, exit `2`) not Click's `UsageError`; and `is_complete:
+  (`arg_parse_error`, exit `2`) not Click's `UsageError`; and
+  `is_complete:
   false` when a default or explicit cap truncates.
 - The shared shaping path calling `check_response_size`, so a capped-but-wide
   result still errors when it would exceed the serialized-response limit.
@@ -824,12 +825,13 @@ Tests cover:
 - Catalog `filter` compiled to engine-side where-clauses and applied before the
   engine `limit`, with the sort between them and `is_complete` describing the
   filtered result.
-- The other first-pass collections (`sessions list`, `list systems`, `pip
-  list`, catalog listings, `enterprise_systems_status`): the same shaping layer,
-  the synthetic `name` field on the scalar lists, and `engine_filters` composing
-  with `filter` on the catalog tools.
-- `pq details` identity-key retention, nested paths, pruning, and unmatched
-  path reporting.
+- The other first-pass collections (`sessions list`, `list systems`,
+  `pip
+  list`, catalog listings, `enterprise_systems_status`): the same shaping
+  layer, the synthetic `name` field on the scalar lists, and `engine_filters`
+  composing with `filter` on the catalog tools.
+- `pq details` identity-key retention, nested paths, pruning, and unmatched path
+  reporting.
 - CLI forwarding of the three single-valued flags (`--filter`, `--order-by`,
   `--fields`), including that passing any of them twice is a usage error rather
   than a silent last-wins; stderr warnings, tool-wrapper contract checks, help
@@ -846,10 +848,10 @@ produces an `unmatched_fields` report.
 Filtering or sorting detail objects; field-path wildcards or array indexes;
 extending `filter` or `order_by` past their specifications — both implement
 AIP-160 and AIP-132 as written, and widening either beyond what its
-specification defines is not on the roadmap;
-sorting by an expression rather than a documented field; server-side output
-transformation or reshaping languages (a JMESPath-style capability, if ever
-needed, would be a separate argument, not a bigger `filter`); replacing
-`engine_filters` — the Deephaven Query Language surface is retained precisely
-because AIP-160 cannot express regex, function calls, `in` lists, or
-column-to-column comparisons; new configuration or environment variables.
+specification defines is not on the roadmap; sorting by an expression rather
+than a documented field; server-side output transformation or reshaping
+languages (a JMESPath-style capability, if ever needed, would be a separate
+argument, not a bigger `filter`); replacing `engine_filters` — the Deephaven
+Query Language surface is retained precisely because AIP-160 cannot express
+regex, function calls, `in` lists, or column-to-column comparisons; new
+configuration or environment variables.
