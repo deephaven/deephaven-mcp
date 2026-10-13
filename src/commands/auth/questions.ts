@@ -131,7 +131,11 @@ async function askLoginMenuChoice(
 /** Picks a saved server, or asks for an address if there are none or the user picks "Other". */
 async function askServerAddress(ui: Prompter, config: Config): Promise<string> {
   const ask = () =>
-    ui.text("What server do you want to log in to?", "<server>");
+    ui.text(
+      "What server do you want to log in to?",
+      "<server>",
+      "e.g. dhe.example.com, https://dhe.example.com:8123, localhost:10000",
+    );
   const known = Object.entries(config.servers);
   if (known.length === 0) return await ask();
   const picked = await ui.select(

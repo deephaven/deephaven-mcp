@@ -20,7 +20,8 @@ export interface Prompter {
     flag: string,
   ): Promise<T[]>;
   confirm(message: string, initial: boolean, flag: string): Promise<boolean>;
-  text(message: string, flag: string): Promise<string>;
+  /** `example`: shown dimmed until the user types. */
+  text(message: string, flag: string, example?: string): Promise<string>;
   secret(message: string, flag: string): Promise<string>;
 }
 
@@ -58,7 +59,7 @@ export function lazyPrompter(inputEnabled: boolean): Prompter {
     select: async (m, c, f) => (await ink()).select(m, c, f),
     multiSelect: async (m, c, f) => (await ink()).multiSelect(m, c, f),
     confirm: async (m, i, f) => (await ink()).confirm(m, i, f),
-    text: async (m, f) => (await ink()).text(m, f),
+    text: async (m, f, e) => (await ink()).text(m, f, e),
     secret: async (m, f) => (await ink()).secret(m, f),
   };
 }

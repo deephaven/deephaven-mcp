@@ -3,6 +3,7 @@ import { BIN } from "../version.ts";
 import {
   connectEnterprise,
   createKey,
+  DELETE_KEY_TIMEOUT_MS,
   deleteKey,
   disconnect as disconnectEnterprise,
   type EnterpriseConnection,
@@ -264,7 +265,7 @@ async function revokeKeys(
       if (failure === undefined) {
         waiting(
           p.name,
-          `signing in to ${new URL(p.server).host} to delete this computer's key`,
+          `deleting key on ${new URL(p.server).host} (${DELETE_KEY_TIMEOUT_MS / 1000}s timeout)`,
         );
         try {
           revoked = await revokeOwnKey(
@@ -470,7 +471,7 @@ export async function revokeOwnKey(
   cacheRoot: string,
 ): Promise<boolean> {
   if (cred.type !== "keyPair" || !cred.generated) return false;
-  const timeout = timeoutMs();
+  const timeout = DELETE_KEY_TIMEOUT_MS;
   const conn = await connectEnterprise(origin, cacheRoot, timeout);
   try {
     const keyPair = keyPairOf(cred);

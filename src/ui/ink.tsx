@@ -194,14 +194,16 @@ function Confirm({
   );
 }
 
-/** One line of text; `mask` shows dots instead of what's typed. */
+/** One line of text; `mask` shows dots instead of what's typed; `example` is shown dimmed until typing starts. */
 function TextInput({
   message,
   mask,
+  example,
   finish,
 }: {
   message: string;
   mask: boolean;
+  example?: string;
   finish: Finish<string>;
 }) {
   const { answer, submit, cancel } = useAnswer(finish);
@@ -237,6 +239,7 @@ function TextInput({
       <Text>
         {`  ${shown}`}
         <Text inverse={cursorOn}> </Text>
+        {!value && example ? <Text dimColor>{example}</Text> : null}
       </Text>
     </Frame>
   );
@@ -266,9 +269,14 @@ export const inkPrompter: Prompter = {
     ask((finish) => (
       <Confirm message={message} initial={initial} finish={finish} />
     )),
-  text: (message) =>
+  text: (message, _flag, example) =>
     ask((finish) => (
-      <TextInput message={message} mask={false} finish={finish} />
+      <TextInput
+        message={message}
+        mask={false}
+        example={example}
+        finish={finish}
+      />
     )),
   secret: (message) =>
     ask((finish) => <TextInput message={message} mask finish={finish} />),

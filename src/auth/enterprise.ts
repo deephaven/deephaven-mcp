@@ -316,7 +316,7 @@ export async function createKey(
 }
 
 /** Short: a key that isn't deleted now is remembered and deleted at the next sign-in. */
-const DELETE_KEY_TIMEOUT_MS = 5_000;
+export const DELETE_KEY_TIMEOUT_MS = 5_000;
 
 /** Deletes exactly this public key for `username`; other keys are untouched. */
 export async function deleteKey(
