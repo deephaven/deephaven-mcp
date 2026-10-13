@@ -1,7 +1,11 @@
 import { Option } from "commander";
-import { removeProfiles, trustCasToRevoke } from "../../auth/flows.ts";
+import {
+  type Removed,
+  removeProfiles,
+  trustCasToRevoke,
+} from "../../auth/flows.ts";
 import { sortedProfiles } from "../../auth/profile.ts";
-import { defineCommand } from "../../cli/command.ts";
+import { type Context, defineCommand, type Output } from "../../cli/command.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { askProfilesToRemove } from "./questions.ts";
@@ -30,16 +34,11 @@ export const logout = defineCommand<LogoutOptions>({
     );
     const nameOf = (id: string) => state.config.profiles[id]?.name ?? id;
 
-    // Explicit, since this may run from the `auth login` menu. `--`: names may start with `-`.
-    const [only] = chosen;
-    const rerun = [
-      "auth",
-      "logout",
-      ...(ctx.json ? ["-o", "json"] : []),
-      ...(ctx.noPrompt ? ["--no-prompt"] : []),
-      ...(chosen.length === 1 && only ? ["--", nameOf(only)] : ["--all"]),
-    ];
-    const { ids, skipped } = await trustCasToRevoke(state, chosen, rerun);
+    const { ids, skipped } = await trustCasToRevoke(
+      state,
+      chosen,
+      logoutCommand(ctx, chosen.length === 1 ? chosen.map(nameOf) : undefined),
+    );
     for (const id of skipped) {
       note(
         `! Kept ${nameOf(id)}: its server uses a different CA certificate. Run \`${BIN} auth logout ${nameOf(id)}\`.`,
@@ -53,21 +52,39 @@ export const logout = defineCommand<LogoutOptions>({
         `! Kept ${resaved}: it was signed in again during logout. Run \`${BIN} auth logout ${resaved}\` again.`,
       );
     }
-
-    return {
-      human: [
-        ...done.removed.map((r) =>
-          r.revoked
-            ? `✔ Revoked key on ${new URL(r.server).host} and removed ${r.profile}`
-            : `✔ Removed ${r.profile}`,
-        ),
-        done.default ? `Default profile: ${done.default}` : "No profiles left.",
-      ],
-      json: {
-        removed: done.removed,
-        kept: [...skipped.map(nameOf), ...done.resaved],
-        default: done.default ?? null,
-      },
-    };
+    return removedOutput(done, skipped.map(nameOf));
   },
 });
+
+/**
+ * This logout as explicit arguments, for a re-run with a CA. Explicit because
+ * it may have started from the login menu; `names` undefined means `--all`.
+ */
+function logoutCommand(ctx: Context, names: string[] | undefined): string[] {
+  return [
+    "auth",
+    "logout",
+    ...(ctx.json ? ["-o", "json"] : []),
+    ...(ctx.noPrompt ? ["--no-prompt"] : []),
+    // `--`: names may start with `-`.
+    ...(names ? ["--", ...names] : ["--all"]),
+  ];
+}
+
+function removedOutput(done: Removed, skipped: string[]): Output {
+  return {
+    human: [
+      ...done.removed.map((r) =>
+        r.revoked
+          ? `✔ Revoked key on ${new URL(r.server).host} and removed ${r.profile}`
+          : `✔ Removed ${r.profile}`,
+      ),
+      done.default ? `Default profile: ${done.default}` : "No profiles left.",
+    ],
+    json: {
+      removed: done.removed,
+      kept: [...skipped, ...done.resaved],
+      default: done.default ?? null,
+    },
+  };
+}

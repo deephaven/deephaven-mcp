@@ -72,12 +72,15 @@ export async function askLoginTarget(
     return { server: found[1].server, profile: found[0], rerun: [] };
   }
   if (serverArg) return { server: serverArg, rerun: [] };
+
+  // The menu is for people at a terminal who have profiles and gave no method flags.
   const menu =
     Object.keys(config.profiles).length > 0 &&
     ui.interactive &&
     !opts.method &&
     !opts.privateKeyFile;
   const action = menu ? await askLoginMenuChoice(ui, config) : "server";
+  // Each `rerun` repeats the answer as flags, so a re-run with a CA doesn't ask again.
   if (action === "remove") return "remove";
   if (action === "reauth") {
     const id = await ui.select(
@@ -198,6 +201,7 @@ export async function askSignInMethod(
     return KEY_FILE_METHOD;
   }
   const handler = opts.handler ?? prior.handler;
+  // Several custom handlers can be offered; prefer the one named.
   const pick = (method: Method) => {
     const matches = offered.filter((o) => o.method === method);
     return matches.find((o) => o.handler === handler) ?? matches[0];
@@ -222,6 +226,7 @@ export async function askSignInMethod(
       keyLogin ? "Sign in with an existing key: --private-key-file" : undefined,
     );
   }
+  // No flag: the profile's previous method, else the only one, else ask.
   const previous = prior.method && pick(prior.method);
   if (previous) return previous;
   const [only] = offered;
@@ -273,44 +278,8 @@ export async function askSignInCredentials(
         toSave: { method: "password", credential: "new-key" },
       };
 
-    case "private-key": {
-      let path: string | undefined;
-      let key: KeyFile;
-      if (!opts.privateKeyFile && prior.copiedKey) {
-        key = { keyPair: prior.copiedKey };
-      } else {
-        path = resolve(
-          opts.privateKeyFile ??
-            prior.keyFile ??
-            (await ui.text("Key file", "--private-key-file")),
-        );
-        key = await readKeyFile(path);
-      }
-      const user =
-        opts.username ??
-        key.user ??
-        prior.username ??
-        (await ui.text("Username", "--username"));
-      const credential: Credential =
-        path && !opts.copyKey
-          ? { type: "keyFile", path }
-          : {
-              type: "keyPair",
-              keyType: key.keyPair.type,
-              publicKey: key.keyPair.publicKey,
-              privateKey: key.keyPair.privateKey,
-              generated: false,
-            };
-      return {
-        request: {
-          method: "private-key",
-          username: user,
-          keyPair: key.keyPair,
-          operateAs: operateAs ?? key.operateAs,
-        },
-        toSave: { method: "private-key", credential },
-      };
-    }
+    case "private-key":
+      return await askKeyFileCredentials(ui, prior, opts);
 
     case "anonymous":
       return {
@@ -364,6 +333,55 @@ function credentialFor(secret: Secret): Credential {
   return secret.env
     ? { type: "envRef", env: secret.env }
     : { type: "secret", value: secret.value };
+}
+
+/**
+ * Enterprise key login. The key comes from `--private-key-file`, the profile's
+ * copied key, its key file, or a prompt; the user from the flag, the key
+ * file's `user` line, the profile, or a prompt. Saves the file's path, or the
+ * key itself with `--copy-key`.
+ */
+async function askKeyFileCredentials(
+  ui: Prompter,
+  prior: PriorSignIn,
+  opts: LoginOptions,
+): Promise<{ request: SignInRequest; toSave: ProfileToSave }> {
+  let path: string | undefined;
+  let key: KeyFile;
+  if (!opts.privateKeyFile && prior.copiedKey) {
+    key = { keyPair: prior.copiedKey };
+  } else {
+    path = resolve(
+      opts.privateKeyFile ??
+        prior.keyFile ??
+        (await ui.text("Key file", "--private-key-file")),
+    );
+    key = await readKeyFile(path);
+  }
+  const user =
+    opts.username ??
+    key.user ??
+    prior.username ??
+    (await ui.text("Username", "--username"));
+  const credential: Credential =
+    path && !opts.copyKey
+      ? { type: "keyFile", path }
+      : {
+          type: "keyPair",
+          keyType: key.keyPair.type,
+          publicKey: key.keyPair.publicKey,
+          privateKey: key.keyPair.privateKey,
+          generated: false,
+        };
+  return {
+    request: {
+      method: "private-key",
+      username: user,
+      keyPair: key.keyPair,
+      operateAs: opts.operateAs ?? prior.operateAs ?? key.operateAs,
+    },
+    toSave: { method: "private-key", credential },
+  };
 }
 
 /** SSO picks the account in the browser; check it's the intended one. */

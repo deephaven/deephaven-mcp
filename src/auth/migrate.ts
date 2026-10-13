@@ -18,6 +18,7 @@ import {
   describePlan,
   type LegacyConfig,
   type LegacyItem,
+  type LegacyPlan,
   resolveSecret,
   type SecretRef,
 } from "./legacy.ts";
@@ -83,112 +84,127 @@ function secretCredential(ref: SecretRef, value: string): Credential {
 
 /** How to sign in as `item`, and what to save; reads secrets, not the network. */
 async function legacySignIn(item: LegacyItem): Promise<LegacySignIn> {
-  const host = new URL(item.origin).host;
   const plan = item.plan;
+  if (plan.method === "password") return await passwordSignIn(item, plan);
+  if (plan.method === "private-key") return await keySignIn(item, plan);
+  return await communitySignIn(item, plan);
+}
 
-  if (plan.method === "password") {
-    const password = await resolveSecret(plan.password);
-    if (!password) {
+type PlanFor<M extends LegacyPlan["method"]> = Extract<
+  LegacyPlan,
+  { method: M }
+>;
+
+/** Enterprise password: signs in once, then authorizes this computer with a new key. */
+async function passwordSignIn(
+  item: LegacyItem,
+  plan: PlanFor<"password">,
+): Promise<LegacySignIn> {
+  const password = await resolveSecret(plan.password);
+  if (!password) {
+    throw new DhError(
+      "credential_unavailable",
+      "env" in plan.password
+        ? `needs $${plan.password.env} set`
+        : "no saved password",
+    );
+  }
+  return {
+    request: {
+      method: "password",
+      username: plan.username,
+      password,
+      operateAs: plan.operateAs,
+    },
+    toSave: { method: "password", credential: "new-key" },
+    verify: true,
+    waiting: `signing in to ${new URL(item.origin).host} as ${plan.username}, then authorizing this computer`,
+    detail: "authorized this computer",
+  };
+}
+
+/** Enterprise key: keeps pointing at the key file, or copies a key the config held inline. */
+async function keySignIn(
+  item: LegacyItem,
+  plan: PlanFor<"private-key">,
+): Promise<LegacySignIn> {
+  const key = plan.keyPath
+    ? await readKeyFile(plan.keyPath)
+    : parseKeyFile(plan.keyText ?? "", item.source);
+  if (!key.user) throw new DhError("usage", "key file has no user line");
+  return {
+    request: {
+      method: "private-key",
+      username: key.user,
+      keyPair: key.keyPair,
+      operateAs: key.operateAs,
+    },
+    toSave: {
+      method: "private-key",
+      credential: plan.keyPath
+        ? { type: "keyFile", path: plan.keyPath }
+        : {
+            type: "keyPair",
+            keyType: key.keyPair.type,
+            publicKey: key.keyPair.publicKey,
+            privateKey: key.keyPair.privateKey,
+            generated: false,
+          },
+    },
+    verify: true,
+    waiting: `signing in to ${new URL(item.origin).host} as ${key.user} with the key`,
+    detail: plan.keyPath ? `uses ${plan.keyPath}` : "key copied",
+  };
+}
+
+/**
+ * Community: anonymous, PSK, basic or a custom handler. A secret held in an
+ * env var that isn't set now is saved as the variable name, unverified.
+ */
+async function communitySignIn(
+  item: LegacyItem,
+  plan: PlanFor<"anonymous" | "psk" | "basic" | "custom">,
+): Promise<LegacySignIn> {
+  let ref = plan.method === "anonymous" ? undefined : plan.secret;
+  let secret = ref && (await resolveSecret(ref));
+  let username = plan.method === "basic" ? plan.username : undefined;
+
+  // v1 Basic stores "user:password" in one token.
+  const combined = plan.method === "basic" && !username;
+  if (combined) {
+    const at = secret?.indexOf(":") ?? -1;
+    if (!secret || at < 0) {
       throw new DhError(
         "credential_unavailable",
-        "env" in plan.password
-          ? `needs $${plan.password.env} set`
-          : "no saved password",
+        "needs a user:password token",
       );
     }
-    return {
-      request: {
-        method: "password",
-        username: plan.username,
-        password,
-        operateAs: plan.operateAs,
-      },
-      toSave: { method: "password", credential: "new-key" },
-      verify: true,
-      waiting: `signing in to ${host} as ${plan.username}, then authorizing this computer`,
-      detail: "authorized this computer",
-    };
+    username = secret.slice(0, at);
+    secret = secret.slice(at + 1);
+    // An env var keeps holding user:password; the password is split off at use.
+    if (ref && !("env" in ref)) ref = { literal: secret };
   }
 
-  if (plan.method === "private-key") {
-    const key = plan.keyPath
-      ? await readKeyFile(plan.keyPath)
-      : parseKeyFile(plan.keyText ?? "", item.source);
-    if (!key.user) throw new DhError("usage", "key file has no user line");
-    return {
-      request: {
-        method: "private-key",
-        username: key.user,
-        keyPair: key.keyPair,
-        operateAs: key.operateAs,
-      },
-      toSave: {
-        method: "private-key",
-        credential: plan.keyPath
-          ? { type: "keyFile", path: plan.keyPath }
-          : {
-              type: "keyPair",
-              keyType: key.keyPair.type,
-              publicKey: key.keyPair.publicKey,
-              privateKey: key.keyPair.privateKey,
-              generated: false,
-            },
-      },
-      verify: true,
-      waiting: `signing in to ${host} as ${key.user} with the key`,
-      detail: plan.keyPath ? `uses ${plan.keyPath}` : "key copied",
-    };
-  }
-
-  // Community.
-  let username: string | undefined;
-  let secret: string | undefined;
   let credential: Credential = { type: "none" };
-  let ref: SecretRef | undefined;
-  if (plan.method !== "anonymous") {
-    ref = plan.secret;
-    secret = await resolveSecret(ref);
-  }
-  if (plan.method === "basic") {
-    username = plan.username;
-    if (!username) {
-      // v1 Basic stores "user:password" in one token.
-      const at = secret?.indexOf(":") ?? -1;
-      if (!secret || at < 0) {
-        throw new DhError(
-          "credential_unavailable",
-          "needs a user:password token",
-        );
-      }
-      username = secret.slice(0, at);
-      secret = secret.slice(at + 1);
-      // An env var keeps holding user:password; the password is split off at use.
-      if (ref && !("env" in ref)) ref = { literal: secret };
-    }
-  }
   if (ref) {
     if (!secret && !("env" in ref)) {
       throw new DhError("credential_unavailable", "no saved secret");
     }
     credential = secretCredential(ref, secret ?? "");
-    if (
-      credential.type === "envRef" &&
-      plan.method === "basic" &&
-      !plan.username
-    ) {
-      credential.basicToken = true;
-    }
+    if (credential.type === "envRef" && combined) credential.basicToken = true;
   }
+
   const handler = plan.method === "custom" ? plan.handler : undefined;
   const verify = secret !== undefined || plan.method === "anonymous";
+  const described = describePlan(item);
   return {
     request: { method: plan.method, handler, username, secret },
     toSave: { method: plan.method, credential, handler },
     verify,
-    waiting: `signing in to ${host} (${describePlan(item)})`,
+    waiting: `signing in to ${new URL(item.origin).host} (${described})`,
     detail: verify
-      ? describePlan(item)
-      : `${describePlan(item)} (not verified; variable not set)`,
+      ? described
+      : `${described} (not verified; variable not set)`,
   };
 }
 
@@ -221,19 +237,7 @@ export async function migrateLegacyEntry(
       waiting(entry.waiting);
       saved = await signInAndSave(store, item, entry.request, toSave);
     } else {
-      // Not signing in now, but later use would still refuse an untrusted origin.
-      assertTrusted(new URL(item.origin));
-      const credential = toSave.credential as Credential;
-      saved = {
-        ...(await saveProfile(store, {
-          ...toSave,
-          origin: item.origin,
-          kind: item.kind,
-          user: communityUser(entry.request as CommunityLogin),
-          credential,
-        })),
-        warnings: [],
-      };
+      saved = await saveUnverified(store, item, entry.request, toSave);
     }
     return {
       item,
@@ -245,6 +249,25 @@ export async function migrateLegacyEntry(
   } catch (e) {
     return { item, detail: migrationFailure(item, e), ok: false, warnings: [] };
   }
+}
+
+/** Saves a Community entry whose secret's env var isn't set, so it can't sign in yet. */
+async function saveUnverified(
+  store: Store,
+  item: LegacyItem,
+  request: SignInRequest,
+  toSave: ProfileToSave,
+): Promise<Pick<SavedSignIn, "name" | "warnings">> {
+  // Later use would refuse an untrusted origin, so refuse it now.
+  assertTrusted(new URL(item.origin));
+  const saved = await saveProfile(store, {
+    ...toSave,
+    origin: item.origin,
+    kind: item.kind,
+    user: communityUser(request as CommunityLogin),
+    credential: toSave.credential as Credential,
+  });
+  return { name: saved.name, warnings: [] };
 }
 
 /** Login's actions for one entry: connect, sign in, save. */

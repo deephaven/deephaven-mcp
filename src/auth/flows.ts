@@ -81,6 +81,7 @@ export async function commitSignIn(
   save: ProfileToSave,
   makeDefault?: boolean,
 ): Promise<SavedSignIn> {
+  // Uploaded only now, so a cancelled question never leaves a key on the server.
   let credential: Credential;
   let key: string | undefined;
   if (save.credential === "new-key") {
@@ -114,6 +115,20 @@ export async function commitSignIn(
     throw e;
   }
 
+  const warnings = await deleteObsoleteKeys(store, session, saved.previous);
+  return { ...saved, key, warnings };
+}
+
+/**
+ * After a save: deletes keys an earlier logout couldn't, then `previous`, the
+ * key the save replaced. Returns a warning for each that failed; a failed
+ * `previous` is remembered for the next sign-in.
+ */
+async function deleteObsoleteKeys(
+  store: Store,
+  session: Session,
+  previous: Credential | undefined,
+): Promise<string[]> {
   const warnings: string[] = [];
   const orphans = await revokeOrphans(store, session).catch((e) => ({
     deleted: 0,
@@ -123,16 +138,16 @@ export async function commitSignIn(
   const orphanLine = orphansNote(orphans);
   if (orphanLine) warnings.push(orphanLine);
   try {
-    await revokeWith(session, saved.previous);
+    await revokeWith(session, previous);
   } catch (e) {
     await store.update(({ credentials }) =>
-      addOrphan(credentials, session.origin, session.user, saved.previous),
+      addOrphan(credentials, session.origin, session.user, previous),
     );
     warnings.push(
       `! Could not delete the previous key: ${describe(e)}. It's retried at your next sign-in.`,
     );
   }
-  return { ...saved, key, warnings };
+  return warnings;
 }
 
 /**
@@ -185,34 +200,7 @@ export async function removeProfiles(
   ids: string[],
 ): Promise<Removed> {
   const { config, credentials } = state;
-  const removed: Removed["removed"] = [];
-  const warnings: string[] = [];
-  const unrevoked: string[] = [];
-  for (const id of ids) {
-    const p = config.profiles[id];
-    if (!p) continue;
-    const cred = credentials.credentials[id];
-    let revoked = false;
-    if (cred) {
-      try {
-        revoked = await revokeOwnKey(
-          p.server,
-          p.user,
-          p.operateAs,
-          cred,
-          store.cacheDir,
-        );
-      } catch (e) {
-        unrevoked.push(id);
-        warnings.push(
-          `! Could not delete the key on ${p.server}: ${describe(
-            e,
-          )}. Removing the profile anyway; the key is deleted the next time you sign in there as ${p.user}.`,
-        );
-      }
-    }
-    removed.push({ profile: p.name, server: p.server, revoked });
-  }
+  const { removed, unrevoked, warnings } = await revokeKeys(store, state, ids);
 
   // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
   const resaved: string[] = [];
@@ -241,6 +229,47 @@ export async function removeProfiles(
     default: next,
     warnings,
   };
+}
+
+/** Deletes each profile's generated key on its server. `unrevoked`: the ids whose deletion failed. */
+async function revokeKeys(
+  store: Store,
+  state: State,
+  ids: string[],
+): Promise<{
+  removed: Removed["removed"];
+  unrevoked: string[];
+  warnings: string[];
+}> {
+  const removed: Removed["removed"] = [];
+  const unrevoked: string[] = [];
+  const warnings: string[] = [];
+  for (const id of ids) {
+    const p = state.config.profiles[id];
+    if (!p) continue;
+    const cred = state.credentials.credentials[id];
+    let revoked = false;
+    if (cred) {
+      try {
+        revoked = await revokeOwnKey(
+          p.server,
+          p.user,
+          p.operateAs,
+          cred,
+          store.cacheDir,
+        );
+      } catch (e) {
+        unrevoked.push(id);
+        warnings.push(
+          `! Could not delete the key on ${p.server}: ${describe(
+            e,
+          )}. Removing the profile anyway; the key is deleted the next time you sign in there as ${p.user}.`,
+        );
+      }
+    }
+    removed.push({ profile: p.name, server: p.server, revoked });
+  }
+  return { removed, unrevoked, warnings };
 }
 
 /** Makes `id` the default. Undefined if another process removed it meanwhile. */
@@ -292,6 +321,7 @@ export async function saveProfile(
   makeDefault?: boolean,
 ): Promise<Saved> {
   return await store.update(({ config, credentials }) => {
+    // Signing in again as the same identity keeps its id, name and history.
     const existing = findByIdentity(config, p.origin, p.user, p.operateAs);
     const id =
       existing?.[0] ??
@@ -307,6 +337,8 @@ export async function saveProfile(
       ),
     ];
     const previous = credentials.credentials[id];
+
+    // A new CA replaces the saved one; the first import marker is kept.
     const server = config.servers[p.origin];
     config.servers[p.origin] = {
       ...server,
@@ -325,6 +357,8 @@ export async function saveProfile(
       createdAt: existing?.[1].createdAt ?? new Date().toISOString(),
     };
     credentials.credentials[id] = p.credential;
+
+    // A default that points at a removed profile counts as none.
     const hasDefault =
       config.defaultProfile !== undefined &&
       config.defaultProfile in config.profiles &&
@@ -360,6 +394,8 @@ export async function authorizeComputer(
     privateKey: key.privateKey,
     generated: true,
   };
+
+  // An uploaded key can still be refused at login (e.g. a server ACL), so try it.
   const timeout = timeoutMs();
   let check: EnterpriseConnection | undefined;
   try {
@@ -373,11 +409,13 @@ export async function authorizeComputer(
       "auth_failed",
     );
   } catch (e) {
+    // Take the key back, or remember it for the next sign-in if that fails too.
     await deleteKey(conn, session.user, key).catch(() =>
       store.update(({ credentials }) =>
         addOrphan(credentials, session.origin, session.user, credential),
       ),
     );
+    // No check connection means the server was unreachable, not that it refused the key.
     if (!check) throw e;
     throw new DhError(
       "key_upload_failed",

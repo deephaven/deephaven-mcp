@@ -50,6 +50,7 @@ function windowsTryLock(): TryLock {
   const ERROR_SHARING_VIOLATION = 32;
   return (path) => {
     const wide = Buffer.from(`${path}\0`, "utf16le");
+    // Share mode 0: until this handle closes, every other open of the file fails.
     const handle = BigInt(
       kernel32.symbols.CreateFileW(
         wide,
@@ -63,6 +64,7 @@ function windowsTryLock(): TryLock {
     );
     if (handle === INVALID_HANDLE_VALUE) {
       const error = kernel32.symbols.GetLastError();
+      // Another process has the file open, so it holds the lock.
       if (error === ERROR_SHARING_VIOLATION) return undefined;
       throw new DhError(
         "internal",

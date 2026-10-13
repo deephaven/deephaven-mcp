@@ -206,11 +206,13 @@ function TextInput({
 }) {
   const { answer, submit, cancel } = useAnswer(finish);
   const [value, setValue] = useState("");
+  // Keys can arrive faster than React re-renders, so the latest text lives in a ref.
   const current = useRef("");
   const update = (next: string) => {
     current.current = next;
     setValue(next);
   };
+  // A masked answer always shows 8 dots, so its length isn't revealed.
   const done = (v: string) => {
     if (v) submit(v, mask ? "•".repeat(8) : v);
   };

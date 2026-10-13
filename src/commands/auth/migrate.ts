@@ -1,5 +1,5 @@
 import { Option } from "commander";
-import { findLegacy } from "../../auth/legacy.ts";
+import { findLegacy, type LegacyItem } from "../../auth/legacy.ts";
 import {
   type Migrated,
   migrateLegacyEntry,
@@ -70,24 +70,8 @@ export async function migrateLegacy(
   for (const n of legacy.notImported) note(`  – ${n}: not used, not migrated`);
 
   const outcomes: Migrated[] = [];
-  const seconds = timeoutMs() / 1000;
   for (const item of chosen) {
-    const outcome = await migrateLegacyEntry(
-      ctx.store,
-      legacy.path,
-      item,
-      (what) =>
-        note(
-          `  … ${item.name}: ${what} (gives up after ${seconds}s if unreachable)`,
-        ),
-    );
-    outcomes.push(outcome);
-    note(
-      outcome.ok
-        ? `  ✔ ${item.name} → ${outcome.profile}  ${outcome.detail}`
-        : `  ! ${item.name}: ${outcome.detail}`,
-    );
-    for (const warning of outcome.warnings) note(`    ${warning}`);
+    outcomes.push(await migrateAndReport(ctx, legacy.path, item));
   }
   const failed = outcomes.filter((o) => !o.ok).length;
   if (failed) {
@@ -98,6 +82,31 @@ export async function migrateLegacy(
 
   await recordMigration(ctx.store, legacy, chosen, outcomes);
   return outcomes.filter((o) => o.ok).length;
+}
+
+/** Migrates one entry, printing what it waits on and how it went. */
+async function migrateAndReport(
+  ctx: Context,
+  legacyPath: string,
+  item: LegacyItem,
+): Promise<Migrated> {
+  const seconds = timeoutMs() / 1000;
+  const outcome = await migrateLegacyEntry(
+    ctx.store,
+    legacyPath,
+    item,
+    (what) =>
+      note(
+        `  … ${item.name}: ${what} (gives up after ${seconds}s if unreachable)`,
+      ),
+  );
+  note(
+    outcome.ok
+      ? `  ✔ ${item.name} → ${outcome.profile}  ${outcome.detail}`
+      : `  ! ${item.name}: ${outcome.detail}`,
+  );
+  for (const warning of outcome.warnings) note(`    ${warning}`);
+  return outcome;
 }
 
 /** "Migrated N profiles.", shared with login's first-run offer. */

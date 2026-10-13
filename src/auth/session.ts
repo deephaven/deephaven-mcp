@@ -186,7 +186,6 @@ export async function signInRequestFor(
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
 async function envSession(server: string): Promise<Session> {
-  const env = (name: string) => process.env[name] || undefined;
   const secrets = [
     "DH_PASSWORD",
     "DH_PSK",
@@ -198,51 +197,61 @@ async function envSession(server: string): Promise<Session> {
   }
   await ensureCa(env("DH_CA_CERT"));
   const { origin, kind } = await resolveServer(server);
-  const username = env("DH_USERNAME");
-  const operateAs = env("DH_OPERATE_AS");
-  let request: SignInRequest;
-  if (kind === "enterprise") {
-    const keyFile = env("DH_PRIVATE_KEY_FILE");
-    const key = keyFile ? await readKeyFile(keyFile) : undefined;
-    const user = username ?? key?.user;
-    if (!user || (!key && !env("DH_PASSWORD"))) {
-      throw new DhError(
-        "usage",
-        "Enterprise needs DH_USERNAME with DH_PASSWORD, or DH_PRIVATE_KEY_FILE",
-      );
-    }
-    const who = { username: user, operateAs: operateAs ?? key?.operateAs };
-    request = key
-      ? { method: "private-key", ...who, keyPair: key.keyPair }
-      : { method: "password", ...who, password: env("DH_PASSWORD") ?? "" };
-  } else {
-    if (env("DH_PRIVATE_KEY_FILE")) {
-      throw new DhError(
-        "usage",
-        "DH_PRIVATE_KEY_FILE is only for Enterprise servers",
-      );
-    }
-    const login: SignInRequest = env("DH_PSK")
-      ? { method: "psk", secret: env("DH_PSK") }
-      : env("DH_PASSWORD")
-        ? { method: "basic", username, secret: env("DH_PASSWORD") }
-        : env("DH_AUTH_TOKEN")
-          ? {
-              method: "custom",
-              handler: env("DH_AUTH_HANDLER"),
-              secret: env("DH_AUTH_TOKEN"),
-            }
-          : { method: "anonymous" };
-    if (login.method === "basic" && !username) {
-      throw new DhError("usage", "DH_PASSWORD needs DH_USERNAME");
-    }
-    if (login.method === "custom" && !login.handler) {
-      throw new DhError("usage", "DH_AUTH_TOKEN needs DH_AUTH_HANDLER");
-    }
-    request = login;
-  }
+  const request =
+    kind === "enterprise"
+      ? await enterpriseRequestFromEnv()
+      : communityRequestFromEnv();
   // The jsapi loader makes this run's own owner-only folder inside it.
   return await connectAndSignIn(origin, kind, request, tmpdir(), "auth_failed");
+}
+
+/** An env var's value; empty counts as unset. */
+function env(name: string): string | undefined {
+  return process.env[name] || undefined;
+}
+
+/** A key from `DH_PRIVATE_KEY_FILE`, else `DH_USERNAME` + `DH_PASSWORD`. */
+async function enterpriseRequestFromEnv(): Promise<SignInRequest> {
+  const keyFile = env("DH_PRIVATE_KEY_FILE");
+  const key = keyFile ? await readKeyFile(keyFile) : undefined;
+  const user = env("DH_USERNAME") ?? key?.user;
+  if (!user || (!key && !env("DH_PASSWORD"))) {
+    throw new DhError(
+      "usage",
+      "Enterprise needs DH_USERNAME with DH_PASSWORD, or DH_PRIVATE_KEY_FILE",
+    );
+  }
+  const who = {
+    username: user,
+    operateAs: env("DH_OPERATE_AS") ?? key?.operateAs,
+  };
+  return key
+    ? { method: "private-key", ...who, keyPair: key.keyPair }
+    : { method: "password", ...who, password: env("DH_PASSWORD") ?? "" };
+}
+
+/** `DH_PSK`, `DH_USERNAME` + `DH_PASSWORD`, `DH_AUTH_HANDLER` + `DH_AUTH_TOKEN`, else anonymous. */
+function communityRequestFromEnv(): SignInRequest {
+  if (env("DH_PRIVATE_KEY_FILE")) {
+    throw new DhError(
+      "usage",
+      "DH_PRIVATE_KEY_FILE is only for Enterprise servers",
+    );
+  }
+  const username = env("DH_USERNAME");
+  const handler = env("DH_AUTH_HANDLER");
+  if (env("DH_PSK")) return { method: "psk", secret: env("DH_PSK") };
+  if (env("DH_PASSWORD")) {
+    if (!username) throw new DhError("usage", "DH_PASSWORD needs DH_USERNAME");
+    return { method: "basic", username, secret: env("DH_PASSWORD") };
+  }
+  if (env("DH_AUTH_TOKEN")) {
+    if (!handler) {
+      throw new DhError("usage", "DH_AUTH_TOKEN needs DH_AUTH_HANDLER");
+    }
+    return { method: "custom", handler, secret: env("DH_AUTH_TOKEN") };
+  }
+  return { method: "anonymous" };
 }
 
 /** Signs in as the saved profile `id`; a rejection becomes `auth_expired` with a re-login hint. */

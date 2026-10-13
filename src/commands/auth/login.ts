@@ -1,15 +1,16 @@
 import { resolve } from "node:path";
 import { InvalidArgumentError, Option } from "commander";
-import { commitSignIn } from "../../auth/flows.ts";
+import { commitSignIn, type SavedSignIn } from "../../auth/flows.ts";
 import { trustAndResolveServer } from "../../auth/session.ts";
 import {
   connectServer,
   disconnectServer,
   offeredMethods,
+  type Session,
   signIn,
 } from "../../auth/signin.ts";
 import type { Method } from "../../auth/store.ts";
-import { defineCommand } from "../../cli/command.ts";
+import { defineCommand, type Output } from "../../cli/command.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { logout } from "./logout.ts";
@@ -100,6 +101,7 @@ export const login = defineCommand<LoginOptions>({
   async run(ctx, [serverArg], opts) {
     await ctx.store.ensureDir();
     let state = await ctx.store.read();
+    // First run: migrating a legacy config replaces signing in.
     if (!serverArg && shouldOfferMigration(state)) {
       const migrated = await migrateLegacy(ctx, { yes: opts.yes }, true);
       if (migrated) return migratedOutput(migrated);
@@ -126,6 +128,7 @@ export const login = defineCommand<LoginOptions>({
 
     const server = await connectServer(origin, kind, ctx.store.cacheDir);
     try {
+      // Sign in, then confirm the account before anything is saved.
       const methods = await offeredMethods(server);
       const method = await askSignInMethod(ctx.ui, kind, methods, prior, opts);
       const { request, toSave } = await askSignInCredentials(
@@ -142,6 +145,8 @@ export const login = defineCommand<LoginOptions>({
             : `✔ Signed in as ${session.user}`,
         );
         await confirmSsoAccount(ctx.ui, session, method, opts);
+
+        // Save: the last question first, then the key upload and the write.
         const { config } = await ctx.store.read();
         const makeDefault = await askMakeDefault(
           ctx.ui,
@@ -158,21 +163,7 @@ export const login = defineCommand<LoginOptions>({
         );
         if (saved.key) note(`✔ Authorized this computer (key "${saved.key}")`);
         for (const warning of saved.warnings) note(warning);
-
-        return {
-          human: [
-            saved.isDefault
-              ? `Logged in. Default profile: ${saved.name}`
-              : `Logged in. Profile: ${saved.name}`,
-            `Run \`${BIN} --help\` to learn more.`,
-          ],
-          json: {
-            profile: saved.name,
-            server: session.origin,
-            user: session.user,
-            default: saved.isDefault,
-          },
-        };
+        return loggedInOutput(saved, session);
       } finally {
         disconnectServer(session);
       }
@@ -181,6 +172,23 @@ export const login = defineCommand<LoginOptions>({
     }
   },
 });
+
+function loggedInOutput(saved: SavedSignIn, session: Session): Output {
+  return {
+    human: [
+      saved.isDefault
+        ? `Logged in. Default profile: ${saved.name}`
+        : `Logged in. Profile: ${saved.name}`,
+      `Run \`${BIN} --help\` to learn more.`,
+    ],
+    json: {
+      profile: saved.name,
+      server: session.origin,
+      user: session.user,
+      default: saved.isDefault,
+    },
+  };
+}
 
 /** Parses `--timeout`: a positive number of seconds. */
 function seconds(value: string): number {
