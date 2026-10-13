@@ -24,7 +24,9 @@ export type LegacyPlan =
   | { method: "psk"; secret: SecretRef }
   /** Without `username`, v1 keeps `user:password` in `secret`. */
   | { method: "basic"; username?: string; secret: SecretRef }
-  | { method: "custom"; handler: string; secret: SecretRef };
+  | { method: "custom"; handler: string; secret: SecretRef }
+  /** An auth type dh doesn't know; migrating the entry fails with it named. */
+  | { method: "unsupported"; type: string };
 
 /** One Community session or Enterprise system from a legacy config. */
 export interface LegacyItem {
@@ -103,6 +105,11 @@ function fileRef(value: unknown): string | undefined {
 
 // --- v1: one JSON5 file -----------------------------------------------------
 
+/** A plan for an auth type `dh` can't migrate, so the entry fails instead of signing in some other way. */
+function unsupported(type: unknown): LegacyPlan {
+  return { method: "unsupported", type: String(type ?? "none") };
+}
+
 /** One v1 `community.sessions` entry, named `name`. */
 function v1Community(name: string, cfg: Json): LegacyItem {
   const where = `community.sessions.${name}`;
@@ -157,6 +164,9 @@ function v1Enterprise(name: string, cfg: Json): LegacyItem {
       ...base,
       plan: { method: "private-key", keyPath: cfg.private_key_path },
     };
+  }
+  if (cfg.auth_type !== "password") {
+    return { ...base, plan: unsupported(cfg.auth_type) };
   }
   return {
     ...base,
@@ -251,8 +261,10 @@ function v2Community(file: string, cfg: Json): LegacyItem {
           secret: ref(cred.auth_token),
         },
       };
-    default:
+    case "anonymous":
       return { ...base, plan: { method: "anonymous" } };
+    default:
+      return { ...base, plan: unsupported(cred.type) };
   }
 }
 
@@ -275,6 +287,9 @@ function v2Enterprise(file: string, cfg: Json): LegacyItem {
     }
     const keyText = ref && "literal" in ref ? ref.literal : undefined;
     return { ...base, plan: { method: "private-key", keyText } };
+  }
+  if (cred.type !== "password") {
+    return { ...base, plan: unsupported(cred.type) };
   }
   return {
     ...base,
@@ -358,7 +373,9 @@ export async function resolveSecret(
 ): Promise<string | undefined> {
   if ("literal" in ref) return ref.literal || undefined;
   if ("env" in ref) return process.env[ref.env] || undefined;
-  return (await readFile(ref.file, "utf8")).trim();
+  // Only the file's final line ending; spaces can be part of the secret.
+  const text = await readFile(ref.file, "utf8");
+  return text.replace(/\r?\n$/, "") || undefined;
 }
 
 /** Where a secret comes from, for {@link describePlan}: ` from $VAR`, ` from <file>`, or nothing. */
@@ -384,5 +401,7 @@ export function describePlan(item: LegacyItem): string {
       return `username/password${secretSource(plan.secret)}`;
     case "custom":
       return `${plan.handler}${secretSource(plan.secret)}`;
+    case "unsupported":
+      return `unsupported auth type "${plan.type}"`;
   }
 }

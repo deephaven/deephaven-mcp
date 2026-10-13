@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { findLegacy, parseV1, parseV2 } from "../../src/auth/legacy.ts";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import {
+  findLegacy,
+  parseV1,
+  parseV2,
+  resolveSecret,
+} from "../../src/auth/legacy.ts";
 
 const fixture = (path: string) =>
   resolve(import.meta.dir, "../fixtures/legacy", path);
@@ -85,4 +91,39 @@ test("findLegacy: DH_MCP_CONFIG_FILE, then the v2 tree under DH_AI_DATA_DIR", as
       else process.env[k] = v;
     }
   }
+});
+
+test("unknown auth types are unsupported, not anonymous or password", async () => {
+  const v1 = parseV1(
+    JSON.stringify({
+      enterprise: {
+        systems: {
+          sso: {
+            connection_json_url: "https://x.example.com",
+            auth_type: "saml",
+          },
+        },
+      },
+    }),
+    "v1.json",
+  );
+  expect(v1.items[0]?.plan).toEqual({ method: "unsupported", type: "saml" });
+
+  const dir = await mkdtemp(join(tmpdir(), "dh-legacy-"));
+  await mkdir(join(dir, "community", "sessions"), { recursive: true });
+  await writeFile(
+    join(dir, "community", "sessions", "x.json"),
+    JSON.stringify({ auth: { credentials: { type: "oauth" } } }),
+  );
+  const v2 = await parseV2(dir);
+  expect(v2.items[0]?.plan).toEqual({ method: "unsupported", type: "oauth" });
+});
+
+test("resolveSecret: a file keeps its spaces, loses one line ending, and empty is unset", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dh-legacy-"));
+  const file = join(dir, "secret");
+  await writeFile(file, " s e c \n");
+  expect(await resolveSecret({ file })).toBe(" s e c ");
+  await writeFile(file, "");
+  expect(await resolveSecret({ file })).toBeUndefined();
 });

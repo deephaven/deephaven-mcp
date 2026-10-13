@@ -89,6 +89,9 @@ function secretCredential(ref: SecretRef, value: string): Credential {
 /** How to sign in as `item`, and what to save; reads secrets, not the network. */
 async function legacySignIn(item: LegacyItem): Promise<LegacySignIn> {
   const plan = item.plan;
+  if (plan.method === "unsupported") {
+    throw new DhError("usage", `auth type "${plan.type}" can't be migrated`);
+  }
   if (plan.method === "password") return await passwordSignIn(item, plan);
   if (plan.method === "private-key") return await keySignIn(item, plan);
   return await communitySignIn(item, plan);

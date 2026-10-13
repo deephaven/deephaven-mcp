@@ -234,7 +234,7 @@ errors go to stderr.
 | `dh auth use`     | `{"default"}`                                                        |
 | `dh auth rename`  | `{"from", "to"}`                                                     |
 | `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}` |
-| `dh auth migrate` | `{"migrated"}`                                                       |
+| `dh auth migrate` | `{"migrated", "failed"}`                                             |
 
 `profile` is `null` in `status` when signed in from environment variables.
 
@@ -323,6 +323,8 @@ prints what it's waiting on for each server:
   `credential_unavailable`.
 - Servers with a custom CA certificate are skipped. Sign in to them with
   `dh auth login <server> --ca-cert <file>`.
+- An entry whose auth type `dh` doesn't support (for example SSO) isn't
+  migrated; the error names the type, and the other entries still migrate.
 - Session creation, Docker and timeout settings aren't used by `dh`; they are
   listed as not migrated.
 

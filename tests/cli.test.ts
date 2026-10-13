@@ -174,8 +174,16 @@ test("cli: migrate refuses a remote plain-HTTP server even when it can't sign in
     "-o",
     "json",
   ]);
-  expect(JSON.parse(res.stdout).migrated).toBe(0);
+  expect(JSON.parse(res.stdout)).toEqual({ migrated: 0, failed: 1 });
   expect(res.stderr).toContain("Refusing to load client code over plain HTTP");
+
+  // Login's first-run offer reports the failed migration instead of moving on.
+  const login = await run(
+    ["auth", "login", "--yes", "--no-prompt", "-o", "json"],
+    { DH_MCP_CONFIG_FILE: legacy },
+  );
+  expect(login.code, login.stderr).toBe(0);
+  expect(JSON.parse(login.stdout)).toEqual({ migrated: 0, failed: 1 });
 });
 
 test("cli: agents summarizes, and lists every command and error code as JSON", async () => {

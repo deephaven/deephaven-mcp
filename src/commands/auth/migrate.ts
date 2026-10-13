@@ -29,13 +29,22 @@ export const migrate = defineCommand<MigrateOptions>({
 
   async run(ctx, _args, opts) {
     await ctx.store.ensureDir();
-    const migrated = await migrateLegacy(ctx, opts, false);
-    if (migrated === undefined) {
-      return { human: "No legacy config found.", json: { migrated: 0 } };
+    const result = await migrateLegacy(ctx, opts, false);
+    if (result === undefined) {
+      return {
+        human: "No legacy config found.",
+        json: { migrated: 0, failed: 0 },
+      };
     }
-    return migratedOutput(migrated);
+    return migratedOutput(result);
   },
 });
+
+/** How many legacy entries were migrated, and how many were tried and failed. */
+export interface MigrationResult {
+  migrated: number;
+  failed: number;
+}
 
 /** Login offers to migrate until the user has profiles or has answered once. */
 export function shouldOfferMigration(state: State): boolean {
@@ -47,13 +56,13 @@ export function shouldOfferMigration(state: State): boolean {
 
 /**
  * The migration itself, shared with login's first-run offer (`offered`).
- * Returns how many profiles were migrated, or undefined if there was nothing to do.
+ * Undefined if there was no config, or the offer was skipped without a terminal.
  */
 export async function migrateLegacy(
   ctx: Context,
   opts: MigrateOptions,
   offered: boolean,
-): Promise<number | undefined> {
+): Promise<MigrationResult | undefined> {
   const legacy = await findLegacy(opts.from);
   if (!legacy || legacy.items.length === 0) return undefined;
   if (offered && !opts.yes && !ctx.ui.interactive) return undefined;
@@ -62,7 +71,7 @@ export async function migrateLegacy(
   const { config } = await ctx.store.read();
   const { done, pending } = splitMigrated(legacy, config);
   for (const item of done) note(`  – ${item.name}: already migrated`);
-  if (pending.length === 0) return 0;
+  if (pending.length === 0) return { migrated: 0, failed: 0 };
   note(
     "Migrating signs in to each server to check its credentials, so the servers must be reachable now (for example, on VPN).",
   );
@@ -81,7 +90,7 @@ export async function migrateLegacy(
   }
 
   await recordMigration(ctx.store, legacy, chosen, outcomes);
-  return outcomes.filter((o) => o.ok).length;
+  return { migrated: outcomes.length - failed, failed };
 }
 
 /** Migrates one entry, printing what it waits on and how it went. */
@@ -110,9 +119,10 @@ async function migrateAndReport(
 }
 
 /** "Migrated N profiles.", shared with login's first-run offer. */
-export function migratedOutput(count: number): Output {
+export function migratedOutput({ migrated, failed }: MigrationResult): Output {
+  const counted = `Migrated ${migrated} profile${migrated === 1 ? "" : "s"}`;
   return {
-    human: `Migrated ${count} profile${count === 1 ? "" : "s"}.`,
-    json: { migrated: count },
+    human: failed ? `${counted}; ${failed} failed.` : `${counted}.`,
+    json: { migrated, failed },
   };
 }

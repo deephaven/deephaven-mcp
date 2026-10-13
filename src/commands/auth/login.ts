@@ -101,10 +101,12 @@ export const login = defineCommand<LoginOptions>({
   async run(ctx, [serverArg], opts) {
     await ctx.store.ensureDir();
     let state = await ctx.store.read();
-    // First run: migrating a legacy config replaces signing in.
+    // First run: migrating a legacy config replaces signing in, unless nothing was tried.
     if (!serverArg && shouldOfferMigration(state)) {
-      const migrated = await migrateLegacy(ctx, { yes: opts.yes }, true);
-      if (migrated) return migratedOutput(migrated);
+      const result = await migrateLegacy(ctx, { yes: opts.yes }, true);
+      if (result && result.migrated + result.failed > 0) {
+        return migratedOutput(result);
+      }
       state = await ctx.store.read();
     }
 
