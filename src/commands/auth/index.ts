@@ -1,3 +1,4 @@
+import { styleText } from "node:util";
 import { sortedProfiles } from "../../auth/profile.ts";
 import { defineCommand } from "../../cli/command.ts";
 import { BIN } from "../../version.ts";
@@ -35,7 +36,7 @@ export const auth = defineCommand({
     const width = Math.max(...rows.map((r) => r.name.length));
     return {
       human: rows.map((r) =>
-        `${r.default ? "●" : " "} ${r.name.padEnd(width)}   ${KIND_LABEL[
+        `${r.default ? styleText("green", "●") : " "} ${r.name.padEnd(width)}   ${KIND_LABEL[
           r.kind
         ].padEnd(10)}${r.default ? "   (default)" : ""}`.trimEnd(),
       ),

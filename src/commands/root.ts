@@ -42,12 +42,9 @@ export const rootCommand = defineCommand({
 
 /** Who's logged in by default, or what to run next. `readable`: whether the config could be read. Colored only on a terminal. */
 function loginLine(readable: boolean, p: Profile | undefined): string {
-  const command = (c: string) => styleText("cyan", `\`${c}\``);
-  if (!readable) {
-    return `${styleText("yellow", "!")} Run ${command(`${BIN} auth`)} to check your profiles.`;
-  }
+  if (!readable) return `! Run \`${BIN} auth\` to check your profiles.`;
   if (!p) {
-    return `${styleText(["yellow", "bold"], "Not logged in.")} Run ${command(`${BIN} auth login`)} to get started.`;
+    return `${styleText(["yellow", "bold"], "Not logged in.")} Run \`${BIN} auth login\` to get started.`;
   }
   return `${styleText("green", "●")} Logged in as ${styleText("bold", p.name)}`;
 }

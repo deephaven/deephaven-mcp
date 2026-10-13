@@ -119,6 +119,10 @@ show up in `dh agents`.
 `Output.human` is for people and `Output.json` for `-o json`. In JSON mode,
 stdout carries only the result and everything else goes to stderr.
 
+Human lines and notes stay plain text. On a terminal,
+[output.ts](../src/output.ts) colors a leading `✔`, `✖` or `!`, dims `…`
+progress lines, and colors `` `commands` `` in backticks.
+
 ## Keeping functions readable
 
 A function's doc comment says what it does, and its body should show how without

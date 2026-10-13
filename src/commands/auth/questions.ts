@@ -4,6 +4,7 @@
  * network or the config directory.
  */
 import { resolve } from "node:path";
+import { styleText } from "node:util";
 import { keyPairOf, noProfile, type ProfileToSave } from "../../auth/flows.ts";
 import { type KeyFile, type KeyPair, readKeyFile } from "../../auth/keyfile.ts";
 import { describePlan, type LegacyItem } from "../../auth/legacy.ts";
@@ -113,7 +114,7 @@ async function askLoginMenuChoice(
   for (const [id, p] of sortedProfiles(config)) {
     const isDefault = id === config.defaultProfile;
     note(
-      `  ${isDefault ? "●" : " "} ${p.name}${isDefault ? "   (default)" : ""}`,
+      `  ${isDefault ? styleText("green", "●") : " "} ${p.name}${isDefault ? "   (default)" : ""}`,
     );
   }
   return await ui.select(
