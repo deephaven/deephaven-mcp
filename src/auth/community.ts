@@ -7,13 +7,18 @@ export const ANONYMOUS_HANDLER =
 export const PSK_HANDLER =
   "io.deephaven.authentication.psk.PskAuthenticationHandler";
 
+/** A connected, not yet signed-in Community client. */
 export interface CommunityConnection {
   origin: string;
+  /** The server's jsapi module. */
   dh: Api;
+  /** Its `CoreClient`. */
   client: Api;
+  /** Auth handler classes the server offers. */
   handlers: string[];
 }
 
+/** One Community sign-in: the method, plus the handler class, user and secret it needs. */
 export interface CommunityLogin {
   method: Method;
   handler?: string;

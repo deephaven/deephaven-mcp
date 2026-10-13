@@ -19,7 +19,9 @@ export const PLATFORM = `${
   process.platform === "win32" ? "windows" : process.platform
 }-${process.arch}`;
 
+/** `manifest.json` in each release; every shipped binary reads it, so keep it backward compatible. */
 export interface Manifest {
+  /** The release's version, without a `v`. */
   version: string;
   /** Keyed by {@link PLATFORM}; `url` may be relative to the manifest. */
   binaries: Record<string, { url: string; sha256: string }>;

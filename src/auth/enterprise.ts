@@ -18,17 +18,23 @@ const SAML_NAME = "authentication.client.samlauth.provider.name";
 const SAML_CONFIRM_URL = "authentication.client.samlauth.confirm.url";
 const PASSWORDS = "authentication.passwordsEnabled";
 
+/** A connected Enterprise client; signed in once a login call succeeds. */
 export interface EnterpriseConnection {
   origin: string;
+  /** The server's irisapi module. */
   dhe: Api;
+  /** Its `Client`. */
   client: Api;
 }
 
+/** The sign-in options an Enterprise server advertises. */
 export interface EnterpriseAuthConfig {
   passwordsEnabled: boolean;
+  /** `confirmUrl`: a server page where the user confirms the account, so dh needn't ask. */
   saml?: { loginUrl: string; providerName: string; confirmUrl?: string };
 }
 
+/** The error code for rejected credentials: `auth_failed` at login, `auth_expired` for a saved profile. */
 type Rejected = "auth_failed" | "auth_expired";
 
 /** `cause`: why it failed; without one, the error says it timed out. */
@@ -215,6 +221,7 @@ export async function userName(conn: EnterpriseConnection): Promise<string> {
   return info.username;
 }
 
+/** A key {@link createKey} uploaded; `comment` is how it's labeled on the server. */
 export interface UploadedKey extends KeyPair {
   comment: string;
 }

@@ -1,6 +1,7 @@
 import { DhError, describe } from "../errors.ts";
 import type { Kind } from "./store.ts";
 
+/** A server address normalized to its origin, and which product answered there. */
 export interface ResolvedServer {
   origin: string;
   kind: Kind;

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { DhError, isErrno, reasonOf } from "../errors.ts";
 import type { Kind } from "./store.ts";
 
+/** Where a legacy config kept a secret: inline, in an env var, or in a file. */
 export type SecretRef =
   | { literal: string }
   | { env: string }
@@ -10,6 +11,7 @@ export type SecretRef =
       file: string;
     };
 
+/** How a legacy entry signed in, as its config describes it. */
 export type LegacyPlan =
   | {
       method: "password";
@@ -20,19 +22,26 @@ export type LegacyPlan =
   | { method: "private-key"; keyPath?: string; keyText?: string }
   | { method: "anonymous" }
   | { method: "psk"; secret: SecretRef }
+  /** Without `username`, v1 keeps `user:password` in `secret`. */
   | { method: "basic"; username?: string; secret: SecretRef }
   | { method: "custom"; handler: string; secret: SecretRef };
 
+/** One Community session or Enterprise system from a legacy config. */
 export interface LegacyItem {
+  /** The session or system name in the old config. */
   name: string;
+  /** Where in the config it came from, e.g. `community.sessions.prod`; part of the migration marker. */
   source: string;
   kind: Kind;
   origin: string;
+  /** CA certificate path the old config trusted. */
   caCert?: string;
   plan: LegacyPlan;
 }
 
+/** A legacy config, found and parsed. */
 export interface LegacyConfig {
+  /** The file (v1) or directory (v2) it was read from. */
   path: string;
   items: LegacyItem[];
   /** Entries that need no import (session creation, Docker, timeouts). */

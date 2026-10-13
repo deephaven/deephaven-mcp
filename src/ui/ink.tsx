@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { DhError } from "../errors.ts";
 import type { Choice, Prompter } from "./prompt.ts";
 
+/** Called once with the prompt's answer. */
 type Finish<T> = (value: T) => void;
 
 /** Renders one prompt on stderr; resolves with its value, or rejects on Ctrl-C. */

@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { DhError, describe } from "../errors.ts";
 import { isLocal } from "./resolve.ts";
 
+/** A value from the server's untyped client code. */
 // biome-ignore lint/suspicious/noExplicitAny: the jsapi is untyped.
 export type Api = any;
 

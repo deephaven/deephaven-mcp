@@ -1,6 +1,7 @@
 import { writeSync } from "node:fs";
 import { DhError, ERROR_CODES } from "./errors.ts";
 
+/** `-o human` (default) or `-o json`. */
 export type Format = "human" | "json";
 
 let format: Format = "human";

@@ -14,6 +14,7 @@ async function readStdin(flag: string): Promise<string> {
   return value;
 }
 
+/** A secret read from a flag or prompt. */
 export interface Secret {
   value: string;
   /** Env var name, if the secret came from `--*-env`. */

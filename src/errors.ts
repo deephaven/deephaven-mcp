@@ -30,6 +30,7 @@ export const ERROR_CODES = {
   },
 } as const;
 
+/** A key of {@link ERROR_CODES}. */
 export type ErrorCode = keyof typeof ERROR_CODES;
 
 /** Thrown for every expected failure; `main.ts` turns `code` into an exit code and `hint` into advice. */

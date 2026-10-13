@@ -3,7 +3,9 @@ import { defineCommand } from "../cli/command.ts";
 import { ERROR_CODES } from "../errors.ts";
 import { BIN, VERSION } from "../version.ts";
 
+/** One command in the `dh agents -o json` listing. */
 interface Described {
+  /** The full command, e.g. `dh auth login`. */
   command: string;
   description: string;
   arguments: { name: string; optional: boolean }[];

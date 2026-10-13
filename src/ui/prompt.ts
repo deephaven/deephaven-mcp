@@ -1,12 +1,16 @@
 import { DhError } from "../errors.ts";
 
+/** One option in a select; `label` is shown, `value` returned, `hint` dimmed beside it. */
 export interface Choice<T> {
   label: string;
   value: T;
   hint?: string;
 }
 
-/** Every prompt names the flag that answers it without a TTY. */
+/**
+ * Asks the user things. Every method takes the flag that answers it instead;
+ * when `interactive` is false, each one fails with that flag in the error.
+ */
 export interface Prompter {
   readonly interactive: boolean;
   select<T>(message: string, choices: Choice<T>[], flag: string): Promise<T>;

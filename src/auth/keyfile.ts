@@ -1,12 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { DhError, isErrno } from "../errors.ts";
 
+/** An Enterprise key pair, base64; `type` is the algorithm, e.g. `EC`. */
 export interface KeyPair {
   type: string;
   publicKey: string;
   privateKey: string;
 }
 
+/** A parsed key file; `user` and `operateAs` are optional lines in it. */
 export interface KeyFile {
   user?: string;
   operateAs?: string;

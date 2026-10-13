@@ -9,6 +9,7 @@ export interface Context {
   store: Store;
   /** Questions for the user; without a terminal or with --no-prompt, they fail naming the flag. */
   ui: Prompter;
+  /** True with `-o json`. */
   json: boolean;
   /** `--profile`, then `DH_PROFILE`. */
   profile?: string;
@@ -22,10 +23,13 @@ export interface Context {
 
 /** A command's result: what to print for people, and the `-o json` value. */
 export interface Output {
+  /** Printed one line per entry, without `-o json`. */
   human: string | string[];
+  /** Printed as one JSON value with `-o json`. */
   json: unknown;
 }
 
+/** One positional argument. */
 export interface ArgSpec {
   /** Commander syntax: `<required>` or `[optional]`. */
   name: string;
@@ -39,9 +43,12 @@ export interface ArgSpec {
  */
 export interface CommandSpec<Opts = Record<string, never>> {
   name: string;
+  /** One line, shown in help and `dh agents`. */
   description: string;
   args?: ArgSpec[];
+  /** The command's own flags; global ones come from {@link GLOBAL_OPTIONS}. */
   options?: Option[];
+  /** `args` in declared order; `opts` are the parsed `options`. */
   run(ctx: Context, args: (string | undefined)[], opts: Opts): Promise<Output>;
   /** Subcommands; they inherit the global flags. */
   commands?: CommandSpec<never>[];
@@ -68,6 +75,7 @@ export const GLOBAL_OPTIONS = [
   new Option("--no-input").hideHelp(),
 ];
 
+/** {@link GLOBAL_OPTIONS} as commander parses them. `prompt`/`input` are false with `--no-prompt`/`--no-input`. */
 interface GlobalOptions {
   profile?: string;
   output?: "human" | "json";

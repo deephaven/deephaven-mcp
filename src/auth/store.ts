@@ -11,7 +11,9 @@ import { join } from "node:path";
 import { DhError, isErrno, reasonOf } from "../errors.ts";
 import { withFileLock } from "./lock.ts";
 
+/** Which Deephaven product a server is. */
 export type Kind = "enterprise" | "community";
+/** How a profile signs in. `saml`, `password` and `private-key` are Enterprise; the rest are Community. */
 export type Method =
   | "saml"
   | "password"
@@ -21,25 +23,34 @@ export type Method =
   | "anonymous"
   | "custom";
 
+/** What's known about a server, keyed by origin in {@link Config.servers}. */
 export interface ServerEntry {
   kind: Kind;
+  /** Absolute path of a CA certificate to trust for it (`--ca-cert`). */
   caCert?: string;
+  /** The legacy config entry it was first migrated from. */
   importedFrom?: string;
 }
 
+/** One saved identity on one server. Its credential is stored separately, under the same id. */
 export interface Profile {
+  /** Unique, user-facing; `<host>:<user>` unless renamed. */
   name: string;
+  /** The server's origin, a key of {@link Config.servers}. */
   server: string;
   user: string;
   method: Method;
+  /** Enterprise user to act as, if not `user`. */
   operateAs?: string;
   /** DHC custom auth handler class. */
   handler?: string;
   /** Legacy config entries this profile was migrated from (a string in older configs). */
   importedFrom?: string[];
+  /** ISO timestamp of the first save. */
   createdAt: string;
 }
 
+/** What a profile signs in with, kept in `credentials.json`. */
 export type Credential =
   | { type: "none" }
   | {
@@ -51,25 +62,34 @@ export type Credential =
       generated: boolean;
     }
   | { type: "keyFile"; path: string }
+  /** A pre-shared key, password or token, saved as is. */
   | { type: "secret"; value: string }
-  /** `basicToken`: the variable holds `user:password` (legacy v1 Basic). */
+  /** Read from the env var `env` at each use. `basicToken`: the variable holds `user:password` (legacy v1 Basic). */
   | { type: "envRef"; env: string; basicToken?: boolean };
 
+/** `config.json`: servers and profiles, nothing secret. */
 export interface Config {
   version: 1;
+  /** Profile id. */
   defaultProfile?: string;
+  /** Set once login has offered to migrate a legacy config; unset means offer again. */
   legacyImport?: "done" | "declined";
+  /** By origin. */
   servers: Record<string, ServerEntry>;
+  /** By profile id. */
   profiles: Record<string, Profile>;
 }
 
+/** `credentials.json`: owner-only. */
 export interface Credentials {
   version: 1;
+  /** By profile id. */
   credentials: Record<string, Credential>;
   /** Generated keys whose deletion failed; retried at the next sign-in as `user`. */
   orphans?: OrphanKey[];
 }
 
+/** A generated public key still on `server` for `user`; the private half is gone. */
 export interface OrphanKey {
   server: string;
   user: string;
@@ -77,6 +97,7 @@ export interface OrphanKey {
   publicKey: string;
 }
 
+/** Both files, as read or about to be written. */
 export interface State {
   config: Config;
   credentials: Credentials;

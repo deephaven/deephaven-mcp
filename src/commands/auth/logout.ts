@@ -6,6 +6,7 @@ import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { askProfilesToRemove } from "./questions.ts";
 
+/** `dh auth logout`'s flags. */
 export interface LogoutOptions {
   all?: boolean;
 }

@@ -27,6 +27,7 @@ import {
   priorSignIn,
 } from "./questions.ts";
 
+/** Every `--method` choice. */
 export const METHODS: Method[] = [
   "saml",
   "password",
@@ -37,6 +38,7 @@ export const METHODS: Method[] = [
   "custom",
 ];
 
+/** `dh auth login`'s flags, camel-cased by commander; see `options` below for each. `browser` is false with `--no-browser`. */
 export interface LoginOptions {
   method?: Method;
   username?: string;

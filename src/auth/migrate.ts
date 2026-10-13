@@ -30,11 +30,15 @@ import {
 } from "./signin.ts";
 import type { Config, Credential, Store } from "./store.ts";
 
+/** The outcome for one legacy entry. */
 export interface Migrated {
   item: LegacyItem;
+  /** The profile's name, if it was saved. */
   profile?: string;
+  /** What was done, or why it failed. */
   detail: string;
   ok: boolean;
+  /** Old keys that couldn't be deleted. */
   warnings: string[];
 }
 
@@ -58,6 +62,7 @@ export function splitMigrated(
   return { done, pending: legacy.items.filter((i) => !done.includes(i)) };
 }
 
+/** How to sign in as a legacy entry and save it, worked out without the network. */
 interface LegacySignIn {
   request: SignInRequest;
   toSave: ProfileToSave;
@@ -65,6 +70,7 @@ interface LegacySignIn {
   verify: boolean;
   /** What signing in waits on, for the progress line. */
   waiting: string;
+  /** What migrating it does, for the result line. */
   detail: string;
 }
 

@@ -29,9 +29,10 @@ import type { KeyPair } from "./keyfile.ts";
 import { openBrowser, samlNonce, signInUrl } from "./saml.ts";
 import type { Kind, Method } from "./store.ts";
 
+/** An Enterprise server's SSO settings. */
 export type Saml = NonNullable<EnterpriseAuthConfig["saml"]>;
 
-/** A connected server, not yet signed in. */
+/** A connected server, not yet signed in. Exactly one of `enterprise` and `community` is set, matching `kind`. */
 export interface Server {
   origin: string;
   kind: Kind;
@@ -44,7 +45,9 @@ export interface Server {
 /** A signed-in server. */
 export interface Session extends Server {
   user: string;
+  /** Enterprise user being acted as, if not `user`. */
   operateAs?: string;
+  /** The saved profile it came from, if any. */
   profileName?: string;
 }
 

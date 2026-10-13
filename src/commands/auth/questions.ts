@@ -33,7 +33,10 @@ import type { LoginOptions } from "./login.ts";
 
 // ── login ───────────────────────────────────────────────────────────────
 
-/** Where to sign in. `rerun`: the flags giving the same answers, for a re-run. */
+/**
+ * Where to sign in: a server address or origin, plus the profile `id` when
+ * signing in again. `rerun`: the flags giving the same answers, for a re-run.
+ */
 export type LoginTarget =
   | { server: string; profile?: string; rerun: string[] }
   | "remove";
@@ -41,9 +44,12 @@ export type LoginTarget =
 /** What a profile being signed in again already says about its identity. */
 export interface PriorSignIn {
   method?: Method;
+  /** Only for methods where the user is typed in (basic, password, key). */
   username?: string;
   operateAs?: string;
+  /** Community custom auth handler class. */
   handler?: string;
+  /** The key file a key profile uses. */
   keyFile?: string;
   /** Key saved with `--copy-key`. */
   copiedKey?: KeyPair;

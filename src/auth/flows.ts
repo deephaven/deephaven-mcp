@@ -27,21 +27,27 @@ import type {
   Store,
 } from "./store.ts";
 
+/** Everything {@link saveProfile} needs; the profile's id and name are chosen there. */
 export interface NewProfile {
   origin: string;
   kind: Kind;
+  /** CA certificate to remember for the server. */
   caCert?: string;
+  /** Legacy config entry, when migrating. */
   importedFrom?: string;
   user: string;
   operateAs?: string;
   method: Method;
+  /** Community custom auth handler class. */
   handler?: string;
   credential: Credential;
 }
 
+/** The profile a save wrote. */
 export interface Saved {
   id: string;
   name: string;
+  /** Whether it's the default after the save. */
   isDefault: boolean;
   /** Credential this save replaced (re-login of the same identity). */
   previous?: Credential;
@@ -56,6 +62,7 @@ export interface ProfileToSave {
   importedFrom?: string;
 }
 
+/** The profile {@link commitSignIn} saved, and what it couldn't clean up. */
 export interface SavedSignIn extends Saved {
   /** The new key's comment, if one was made. */
   key?: string;
@@ -156,7 +163,9 @@ export async function trustCasToRevoke(
   return { ids: ids.filter((id) => !skipped.includes(id)), skipped };
 }
 
+/** What {@link removeProfiles} did. */
 export interface Removed {
+  /** `revoked`: its key was deleted on the server. */
   removed: { profile: string; server: string; revoked: boolean }[];
   /** Names of profiles signed in again while this ran, so kept. */
   resaved: string[];

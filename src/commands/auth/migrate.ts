@@ -13,6 +13,7 @@ import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { askLegacyEntriesToMigrate } from "./questions.ts";
 
+/** `dh auth migrate`'s flags; login passes `yes` from its own `--yes`. */
 export interface MigrateOptions {
   from?: string;
   yes?: boolean;
