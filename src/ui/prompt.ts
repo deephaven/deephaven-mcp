@@ -20,6 +20,7 @@ export interface Prompter {
   secret(message: string, flag: string): Promise<string>;
 }
 
+/** The `usage` error a question raises when it can't prompt: names `flag` to pass instead. */
 function missing(flag: string): Promise<never> {
   return Promise.reject(
     new DhError(

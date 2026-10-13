@@ -25,6 +25,7 @@ export interface Manifest {
   binaries: Record<string, { url: string; sha256: string }>;
 }
 
+/** Updates only over https, or http to this machine (for tests). */
 function assertTrusted(url: URL): void {
   if (url.protocol === "https:") return;
   if (url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname)) return;
@@ -52,6 +53,7 @@ async function fetchOk(url: URL, timeoutMs: number): Promise<Response> {
   throw new Error(`Too many redirects fetching ${url}`);
 }
 
+/** Swaps `binary` in for this executable; on Windows the old one is renamed aside first. */
 async function replaceExecutable(binary: Uint8Array): Promise<void> {
   const exe = process.execPath;
   // Per-process name, so concurrent updates never rename each other's half-written file.
@@ -79,6 +81,7 @@ async function replaceExecutable(binary: Uint8Array): Promise<void> {
   }
 }
 
+/** Minimum time between update checks: `$DH_UPDATE_INTERVAL` hours, else the default. */
 function intervalMs(): number {
   const raw = process.env.DH_UPDATE_INTERVAL;
   const hours = raw ? Number(raw) : NaN;
@@ -97,6 +100,10 @@ async function claimCheck(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Runs after every command in a compiled binary: if a check is due, fetches the
+ * manifest and installs a newer build. `DH_AUTO_UPDATE=off` disables it.
+ */
 export async function autoUpdate(): Promise<void> {
   // From source, execPath is the bun runtime, which must never be replaced.
   if (!STANDALONE) return;

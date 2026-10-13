@@ -47,6 +47,7 @@ export function assertTrusted(url: URL): void {
   );
 }
 
+/** Downloads `url` to `dest`. `optional`: a 404 writes an empty file instead of failing. */
 async function download(
   url: URL,
   dest: string,
@@ -114,6 +115,7 @@ function runDir(cacheRoot: string): Promise<string> {
   return dir;
 }
 
+/** This run's cache folder for `origin`'s client code. */
 async function originDir(cacheRoot: string, origin: URL): Promise<string> {
   // Reversible, so two origins can never share a directory (or a cached module).
   const dir = join(await runDir(cacheRoot), encodeURIComponent(origin.origin));
@@ -121,6 +123,7 @@ async function originDir(cacheRoot: string, origin: URL): Promise<string> {
   return dir;
 }
 
+/** The jsapi expects to run in a browser tab; give it `self`, `window` and a `location`. */
 function polyfillBrowserGlobals(origin: URL): void {
   // biome-ignore lint/suspicious/noExplicitAny: browser globals the jsapi expects.
   const g = globalThis as any;

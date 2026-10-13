@@ -29,6 +29,7 @@ export function note(text: string): void {
   else out(text);
 }
 
+/** Prints a command's result: `json` with `-o json`, else the lines from `human`. */
 export function result(human: () => string | string[], json: unknown): void {
   if (isJson()) {
     out(JSON.stringify(json));

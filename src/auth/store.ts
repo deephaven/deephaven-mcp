@@ -85,6 +85,7 @@ export interface State {
 const WINDOWS = process.platform === "win32";
 const LOCK_WAIT_MS = 10_000;
 
+/** `$DH_CONFIG_DIR`, else `~/.deephaven/cli` (`%APPDATA%\Deephaven\cli` on Windows). */
 export function configDir(): string {
   const override = process.env.DH_CONFIG_DIR;
   if (override) return override;
@@ -104,6 +105,7 @@ export function emptyState(): State {
   };
 }
 
+/** `config.json` and `credentials.json` in `dir`, always read and written together. */
 export class Store {
   constructor(readonly dir: string = configDir()) {}
 
@@ -119,6 +121,7 @@ export class Store {
     return join(this.dir, "cache");
   }
 
+  /** Both files; missing files read as empty. Refuses a `credentials.json` other users can read. */
   async read(): Promise<State> {
     const state = emptyState();
     const config = await readJson<Config>(this.configPath);
@@ -175,6 +178,7 @@ export class Store {
   }
 }
 
+/** Parsed JSON at `path`, or undefined if the file doesn't exist. */
 async function readJson<T>(path: string): Promise<T | undefined> {
   let text: string;
   try {
@@ -195,6 +199,7 @@ async function readJson<T>(path: string): Promise<T | undefined> {
   }
 }
 
+/** Writes `value` as JSON via a temp file and rename, so readers never see half a file. */
 async function writeAtomic(
   path: string,
   value: unknown,

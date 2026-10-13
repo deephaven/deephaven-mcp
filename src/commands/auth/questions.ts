@@ -94,6 +94,7 @@ export async function askLoginTarget(
   return { server, rerun: ["--", server] };
 }
 
+/** Lists the saved profiles, then asks what the user wants to do. */
 async function askLoginMenuChoice(
   ui: Prompter,
   config: Config,
@@ -117,6 +118,7 @@ async function askLoginMenuChoice(
   );
 }
 
+/** Picks a saved server, or asks for an address if there are none or the user picks "Other". */
 async function askServerAddress(ui: Prompter, config: Config): Promise<string> {
   const known = Object.entries(config.servers);
   const picked =
@@ -141,6 +143,7 @@ async function askServerAddress(ui: Prompter, config: Config): Promise<string> {
     : picked;
 }
 
+/** What profile `id` (if given) already says about its sign-in, so login doesn't ask again. */
 export function priorSignIn(state: State, id: string | undefined): PriorSignIn {
   const p = id ? state.config.profiles[id] : undefined;
   if (!id || !p) return {};
@@ -163,7 +166,10 @@ const KEY_FILE_METHOD: OfferedMethod = {
   label: "Key file",
 };
 
-/** `--method`, then the profile's method, then the only one offered, else asks. */
+/**
+ * `--method`, then `prior`'s method, then the only one offered, else asks.
+ * Enterprise (`kind`) also allows key-file login, which servers don't advertise.
+ */
 export async function askSignInMethod(
   ui: Prompter,
   kind: Kind,
@@ -434,6 +440,7 @@ export async function askProfilesToRemove(
   return picked === ALL ? everyId : [picked];
 }
 
+/** Asks which profile should be the default; returns its id. */
 export async function askDefaultProfile(
   ui: Prompter,
   config: Config,
@@ -451,6 +458,7 @@ export async function askDefaultProfile(
 
 // ── migrate ─────────────────────────────────────────────────────────────
 
+/** All of `pending` with `--yes`, else the ones the user picks. */
 export async function askLegacyEntriesToMigrate(
   ui: Prompter,
   pending: LegacyItem[],

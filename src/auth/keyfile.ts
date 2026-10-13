@@ -15,6 +15,7 @@ export interface KeyFile {
 
 const EC_PREFIX = "EC:";
 
+/** Removes the `EC:` prefix Deephaven key files put inside the base64; `where` names the file in errors. */
 function stripEc(value: string, where: string): string {
   const bytes = Buffer.from(value, "base64");
   const prefix = bytes.subarray(0, EC_PREFIX.length).toString("latin1");
@@ -54,6 +55,7 @@ export function parseKeyFile(text: string, where = "key file"): KeyFile {
   };
 }
 
+/** {@link parseKeyFile} on the file at `path`; a missing file is `credential_unavailable`. */
 export async function readKeyFile(path: string): Promise<KeyFile> {
   let text: string;
   try {

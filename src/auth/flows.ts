@@ -130,7 +130,7 @@ export async function commitSignIn(
 
 /**
  * Revoking a key needs its server's CA, and a process trusts only one extra
- * CA, so this re-runs as `rerun` if the profiles share one. Returns the
+ * CA, so this re-runs as `rerun` if the profiles `ids` share one. Returns the
  * profiles this run can revoke, and those it can't.
  */
 export async function trustCasToRevoke(
@@ -168,6 +168,7 @@ export interface Removed {
 /**
  * Deletes each profile's generated key on its server, then the profiles. A key
  * that can't be deleted is remembered and retried at the next sign-in there.
+ * `state` is what was read before; a profile signed in again since is kept.
  */
 export async function removeProfiles(
   store: Store,
@@ -246,6 +247,7 @@ export async function setDefault(
   });
 }
 
+/** Renames the profile `name` to `newName`; fails if it's missing or the new name is empty or taken. */
 export async function renameProfile(
   store: Store,
   name: string,
@@ -262,6 +264,7 @@ export async function renameProfile(
   });
 }
 
+/** The `usage` error for a profile name that doesn't exist. */
 export function noProfile(name: string): DhError {
   return new DhError(
     "usage",
@@ -270,7 +273,10 @@ export function noProfile(name: string): DhError {
   );
 }
 
-/** `makeDefault` undefined → only if there's no default yet. */
+/**
+ * Saves `p`, replacing the profile with the same identity if there is one.
+ * `makeDefault` undefined → only if there's no default yet.
+ */
 export async function saveProfile(
   store: Store,
   p: NewProfile,
@@ -387,7 +393,7 @@ export async function revokeWith(
   return true;
 }
 
-/** Logs in with a generated key and deletes it on the server. */
+/** Signs in to `origin` with `cred` and deletes that key. False, doing nothing, unless dh generated it. */
 export async function revokeOwnKey(
   origin: string,
   user: string,
@@ -408,7 +414,7 @@ export async function revokeOwnKey(
   }
 }
 
-/** Remembers a generated key that couldn't be deleted, for {@link revokeOrphans}. */
+/** Remembers `cred`, a generated key of `user` on `server` that couldn't be deleted, for {@link revokeOrphans}. */
 export function addOrphan(
   credentials: Credentials,
   server: string,
@@ -477,6 +483,7 @@ export function orphansNote(result: {
   return undefined;
 }
 
+/** The key pair stored in a credential, in the shape the Enterprise client takes. */
 export function keyPairOf(cred: Credential & { type: "keyPair" }): KeyPair {
   return {
     type: cred.keyType,

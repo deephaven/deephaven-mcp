@@ -29,6 +29,7 @@ export function defaultName(
   }
 }
 
+/** `[id, profile]` for the profile named `name`. */
 export function findByName(
   config: Config,
   name: string,
@@ -36,6 +37,7 @@ export function findByName(
   return Object.entries(config.profiles).find(([, p]) => p.name === name);
 }
 
+/** `[id, profile]` for this server, user and operate-as user: the identity a profile stands for. */
 export function findByIdentity(
   config: Config,
   server: string,
@@ -61,6 +63,7 @@ export function removeProfile(config: Config, id: string): string | undefined {
   return config.defaultProfile;
 }
 
+/** `[id, profile]` pairs, by name. */
 export function sortedProfiles(config: Config): [string, Profile][] {
   return Object.entries(config.profiles).sort(([, a], [, b]) =>
     a.name.localeCompare(b.name),

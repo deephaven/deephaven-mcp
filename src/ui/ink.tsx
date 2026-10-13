@@ -40,6 +40,7 @@ function useAnswer<T>(finish: Finish<T>) {
   };
 }
 
+/** A prompt's layout: `? message hint` and the input below; once answered, `✔ message answer`. */
 function Frame({
   message,
   answer,
@@ -70,6 +71,7 @@ function Frame({
   );
 }
 
+/** Pick one of `choices` with the arrow keys and Enter. */
 function Select<T>({
   message,
   choices,
@@ -108,6 +110,7 @@ function Select<T>({
   );
 }
 
+/** Pick any of `choices` (all start picked); space toggles, Enter submits. */
 function MultiSelect<T>({
   message,
   choices,
@@ -157,6 +160,7 @@ function MultiSelect<T>({
   );
 }
 
+/** y or n; Enter takes `initial`. */
 function Confirm({
   message,
   initial,
@@ -189,6 +193,7 @@ function Confirm({
   );
 }
 
+/** One line of text; `mask` shows dots instead of what's typed. */
 function TextInput({
   message,
   mask,

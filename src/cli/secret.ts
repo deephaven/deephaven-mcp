@@ -2,6 +2,7 @@ import { DhError } from "../errors.ts";
 
 let stdinUsed = false;
 
+/** All of stdin, minus one trailing newline. Only one `--*-stdin` flag per run can use it. */
 async function readStdin(flag: string): Promise<string> {
   if (stdinUsed) {
     throw new DhError("usage", `Only one --*-stdin flag can be used (${flag})`);

@@ -99,6 +99,7 @@ export async function migrateLegacy(
   return outcomes.filter((o) => o.ok).length;
 }
 
+/** "Migrated N profiles.", shared with login's first-run offer. */
 export function migratedOutput(count: number): Output {
   return {
     human: `Migrated ${count} profile${count === 1 ? "" : "s"}.`,

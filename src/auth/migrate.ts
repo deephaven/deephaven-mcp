@@ -68,6 +68,7 @@ interface LegacySignIn {
   detail: string;
 }
 
+/** A secret from an env var is saved as the variable's name, otherwise as its value. */
 function secretCredential(ref: SecretRef, value: string): Credential {
   return "env" in ref
     ? { type: "envRef", env: ref.env }
@@ -185,7 +186,11 @@ async function legacySignIn(item: LegacyItem): Promise<LegacySignIn> {
   };
 }
 
-/** Signs in as `item` and saves it. Never throws: failures are outcomes. */
+/**
+ * Signs in as `item` (from the config at `legacyPath`) and saves it. `waiting`
+ * is told what each server call is about to wait on. Never throws: failures
+ * are outcomes.
+ */
 export async function migrateLegacyEntry(
   store: Store,
   legacyPath: string,
@@ -236,6 +241,7 @@ export async function migrateLegacyEntry(
   }
 }
 
+/** Login's actions for one entry: connect, sign in, save. */
 async function signInAndSave(
   store: Store,
   item: LegacyItem,
@@ -255,6 +261,7 @@ async function signInAndSave(
   }
 }
 
+/** One line on why `item` wasn't migrated. */
 function migrationFailure(item: LegacyItem, e: unknown): string {
   if (e instanceof DhError && e.code === "server_unreachable") {
     return `can't reach ${new URL(item.origin).host} (${e.hint ?? e.message})`;
@@ -265,8 +272,9 @@ function migrationFailure(item: LegacyItem, e: unknown): string {
 }
 
 /**
- * Remembers the migration so login stops offering it (unless every entry
- * failed), and makes the legacy default the default.
+ * Records the result so login stops offering to migrate: `declined` if none were
+ * `chosen`, `done` if any succeeded, unset if all failed. Makes the legacy
+ * default the default.
  */
 export async function recordMigration(
   store: Store,

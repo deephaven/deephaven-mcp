@@ -32,6 +32,7 @@ export const ERROR_CODES = {
 
 export type ErrorCode = keyof typeof ERROR_CODES;
 
+/** Thrown for every expected failure; `main.ts` turns `code` into an exit code and `hint` into advice. */
 export class DhError extends Error {
   /** `detail`: the underlying reason, from {@link reasonOf}; appended to the message. */
   constructor(
@@ -94,6 +95,7 @@ export async function withTimeout<T>(
   }
 }
 
+/** How long one server call may take: `$DH_TIMEOUT` seconds, default 30. */
 export function timeoutMs(): number {
   const raw = Number(process.env.DH_TIMEOUT);
   return (Number.isFinite(raw) && raw > 0 ? raw : 30) * 1000;

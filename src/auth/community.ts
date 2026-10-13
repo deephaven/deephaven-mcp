@@ -21,6 +21,7 @@ export interface CommunityLogin {
   secret?: string;
 }
 
+/** `cause`: why it failed; without one, the error says it timed out. */
 function unreachable(origin: string, cause?: unknown): DhError {
   return new DhError(
     "server_unreachable",
@@ -29,6 +30,10 @@ function unreachable(origin: string, cause?: unknown): DhError {
   );
 }
 
+/**
+ * Loads `origin`'s jsapi (cached under `cacheRoot`), connects, and reads which
+ * auth handlers the server offers. Not signed in yet.
+ */
 export async function connectCommunity(
   origin: string,
   cacheRoot: string,
@@ -73,6 +78,7 @@ export function communityMethods(
     );
 }
 
+/** The user name a profile records for `login`: the basic-auth user, the handler's class name, or the method. */
 export function communityUser(login: CommunityLogin): string {
   switch (login.method) {
     case "basic":
@@ -84,6 +90,11 @@ export function communityUser(login: CommunityLogin): string {
   }
 }
 
+/**
+ * Signs in on `conn`. A rejection throws `rejected` (`auth_failed` at login,
+ * `auth_expired` for a saved profile); a timeout throws `server_unreachable`.
+ * The connection is closed on failure.
+ */
 export async function loginCommunity(
   conn: CommunityConnection,
   login: CommunityLogin,

@@ -75,6 +75,7 @@ export type SignInRequest =
     }
   | (CommunityLogin & { method: "psk" | "basic" | "custom" | "anonymous" });
 
+/** Loads the server's client code (cached under `cacheRoot`) and connects. Not signed in yet. */
 export async function connectServer(
   origin: string,
   kind: Kind,
@@ -132,8 +133,10 @@ export async function offeredMethods(server: Server): Promise<OfferedMethod[]> {
 }
 
 /**
- * Signs in to `server`. SSO opens the browser and waits; it may replace the
- * connection, so use the returned session's.
+ * Signs in to `server` as `request` says. A rejection throws `rejected`
+ * (`auth_failed` at login, `auth_expired` for a saved profile). SSO opens the
+ * browser and waits; it may replace the connection, so use the returned
+ * session's.
  */
 export async function signIn(
   server: Server,
@@ -191,6 +194,7 @@ export async function signIn(
   }
 }
 
+/** Opens the SSO page and waits for the browser sign-in; returns the signed-in connection. */
 async function waitForSaml(
   server: Server,
   conn: EnterpriseConnection,
@@ -218,6 +222,7 @@ async function waitForSaml(
   );
 }
 
+/** `server`'s Enterprise connection; an `internal` error for a Community server. */
 function enterpriseConnection(server: Server): EnterpriseConnection {
   if (!server.enterprise) {
     throw new DhError("internal", `${server.origin} is not Enterprise`);

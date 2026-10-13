@@ -180,6 +180,7 @@ export const login = defineCommand<LoginOptions>({
   },
 });
 
+/** Parses `--timeout`: a positive number of seconds. */
 function seconds(value: string): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {

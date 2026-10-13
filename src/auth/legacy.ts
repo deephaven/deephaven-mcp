@@ -46,6 +46,7 @@ type Json = any;
 
 const WINDOWS = process.platform === "win32";
 
+/** The Deephaven MCP data folder: `$DH_AI_DATA_DIR`, else `~/.deephaven/ai` (`%APPDATA%\Deephaven\ai` on Windows). */
 export function legacyDataRoot(): string {
   const override = process.env.DH_AI_DATA_DIR;
   if (override) return override;
@@ -68,11 +69,13 @@ export function secretRef(value: unknown): SecretRef | undefined {
   return { literal: value };
 }
 
+/** A Community session's origin from its host, optional port and TLS setting. */
 function origin(host: string, port: unknown, tls: boolean): string {
   const scheme = tls ? "https" : "http";
   return new URL(`${scheme}://${host}${port ? `:${port}` : ""}`).origin;
 }
 
+/** An Enterprise system's origin from its `connection_json_url`; `where` names the entry in errors. */
 function enterpriseOrigin(url: string, where: string): string {
   try {
     return new URL(url).origin;
@@ -81,6 +84,7 @@ function enterpriseOrigin(url: string, where: string): string {
   }
 }
 
+/** A file path from a config value (a plain path or `${file:...}`); env refs aren't paths. */
 function fileRef(value: unknown): string | undefined {
   const ref = secretRef(value);
   if (!ref) return undefined;
@@ -89,6 +93,7 @@ function fileRef(value: unknown): string | undefined {
 
 // --- v1: one JSON5 file -----------------------------------------------------
 
+/** One v1 `community.sessions` entry, named `name`. */
 function v1Community(name: string, cfg: Json): LegacyItem {
   const where = `community.sessions.${name}`;
   const authType = String(cfg.auth_type ?? "Anonymous");
@@ -128,6 +133,7 @@ function v1Community(name: string, cfg: Json): LegacyItem {
   }
 }
 
+/** One v1 `enterprise.systems` entry, named `name`. */
 function v1Enterprise(name: string, cfg: Json): LegacyItem {
   const where = `enterprise.systems.${name}`;
   const base = {
@@ -155,6 +161,7 @@ function v1Enterprise(name: string, cfg: Json): LegacyItem {
   };
 }
 
+/** Parses a v1 config (one JSON5 file, read from `path`) into the entries to migrate. */
 export function parseV1(text: string, path: string): LegacyConfig {
   let cfg: Json;
   try {
@@ -186,6 +193,7 @@ export function parseV1(text: string, path: string): LegacyConfig {
 
 // --- v2: a directory tree ----------------------------------------------------
 
+/** Every `*.json` file in `dir`, parsed, with its path; a missing `dir` is empty. */
 async function readJsonFiles(dir: string): Promise<[string, Json][]> {
   const out: [string, Json][] = [];
   try {
@@ -200,6 +208,7 @@ async function readJsonFiles(dir: string): Promise<[string, Json][]> {
   return out.sort(([a], [b]) => a.localeCompare(b));
 }
 
+/** One v2 `community/sessions/*.json` file; the name defaults to the file's. */
 function v2Community(file: string, cfg: Json): LegacyItem {
   const name = cfg.session_name ?? file.replace(/^.*[\\/]|\.json$/g, "");
   const cred = cfg.auth?.credentials ?? { type: "anonymous" };
@@ -237,6 +246,7 @@ function v2Community(file: string, cfg: Json): LegacyItem {
   }
 }
 
+/** One v2 `enterprise/systems/*.json` file; the name defaults to the file's. */
 function v2Enterprise(file: string, cfg: Json): LegacyItem {
   const name = cfg.system_name ?? file.replace(/^.*[\\/]|\.json$/g, "");
   const source = `enterprise/systems/${name}.json`;
@@ -272,6 +282,7 @@ function v2Enterprise(file: string, cfg: Json): LegacyItem {
   };
 }
 
+/** Parses a v2 config tree (one file per session or system under `configDir`). */
 export async function parseV2(configDir: string): Promise<LegacyConfig> {
   const sessions = await readJsonFiles(
     join(configDir, "community", "sessions"),
@@ -307,6 +318,7 @@ export async function parseV2(configDir: string): Promise<LegacyConfig> {
   };
 }
 
+/** Whether `path` is a file, a directory, or missing. */
 async function kindOf(path: string): Promise<"file" | "dir" | undefined> {
   const info = await stat(path).catch(() => undefined);
   return info?.isDirectory() ? "dir" : info?.isFile() ? "file" : undefined;
@@ -330,6 +342,7 @@ export async function findLegacy(
   return undefined;
 }
 
+/** The secret's value now; undefined if it's empty or its env var isn't set. */
 export async function resolveSecret(
   ref: SecretRef,
 ): Promise<string | undefined> {
@@ -338,6 +351,7 @@ export async function resolveSecret(
   return (await readFile(ref.file, "utf8")).trim();
 }
 
+/** A short description of how `item` will sign in, for the migrate picker and progress lines. */
 export function describePlan(item: LegacyItem): string {
   const plan = item.plan;
   const ref = (r: SecretRef) =>

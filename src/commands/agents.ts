@@ -16,6 +16,7 @@ const describeOption = (o: Option) => ({
   description: o.description,
 });
 
+/** `cmd` and its subcommands as data; `path` is the parent command names. */
 function describeCommand(cmd: Command, path: string[]): Described {
   return {
     command: [...path, cmd.name()].join(" "),

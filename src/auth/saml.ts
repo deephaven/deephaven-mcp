@@ -5,6 +5,7 @@ export function samlNonce(): string {
   );
 }
 
+/** The SSO login (or confirm) page `base`, carrying `nonce` as `?key=`. */
 export function signInUrl(base: string, nonce: string): string {
   const url = new URL(base);
   url.searchParams.set("key", nonce);

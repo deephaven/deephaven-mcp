@@ -24,7 +24,7 @@ import {
   Store,
 } from "./store.ts";
 
-/** Connects to `origin` and signs in; the connection is closed if sign-in fails. */
+/** Connects to `origin` and signs in; closes the connection if sign-in fails. A rejection throws `rejected`. */
 async function connectAndSignIn(
   origin: string,
   kind: Kind,
@@ -44,6 +44,7 @@ async function connectAndSignIn(
 /** Set in a re-run process to the `--ca-cert` file it trusts. */
 const LOADED_CA = "DH_LOADED_CA_CERT";
 
+/** The DH_LOADED_CA_CERT this process was re-run with, if any. */
 export function loadedCa(): string | undefined {
   return process.env[LOADED_CA];
 }
@@ -126,6 +127,10 @@ export async function trustAndResolveServer(
   return found;
 }
 
+/**
+ * The secret a saved `cred` holds, reading its env var now if it names one.
+ * Undefined for credentials without a secret (keys, none).
+ */
 function savedSecret(cred: Credential, profile: Profile): string | undefined {
   if (cred.type === "secret") return cred.value;
   if (cred.type !== "envRef") return undefined;
@@ -240,6 +245,7 @@ async function envSession(server: string): Promise<Session> {
   return await connectAndSignIn(origin, kind, request, tmpdir(), "auth_failed");
 }
 
+/** Signs in as the saved profile `id`; a rejection becomes `auth_expired` with a re-login hint. */
 async function profileSession(
   store: Store,
   state: State,

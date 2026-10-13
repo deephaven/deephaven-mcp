@@ -44,12 +44,14 @@ export function candidates(input: string): URL[] {
   });
 }
 
+/** True if `url` answers 2xx (redirects don't count). */
 async function answers(url: URL, signal: AbortSignal): Promise<boolean> {
   const res = await fetch(url, { signal, redirect: "manual" });
   await res.body?.cancel();
   return res.ok;
 }
 
+/** Which kind of Deephaven server `origin` is, by the files it serves; null if neither. */
 async function detect(origin: URL, timeoutMs: number): Promise<Kind | null> {
   const signal = AbortSignal.timeout(timeoutMs);
   const probe = (path: string) => answers(new URL(path, origin), signal);

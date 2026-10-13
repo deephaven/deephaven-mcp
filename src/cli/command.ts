@@ -75,6 +75,7 @@ interface GlobalOptions {
   input?: boolean;
 }
 
+/** Builds the {@link Context} from `cmd`'s parsed global flags, and sets the output format. */
 function contextFromFlags(cmd: Command): Context {
   const g = cmd.optsWithGlobals() as GlobalOptions;
   const noPrompt = g.prompt === false || g.input === false;

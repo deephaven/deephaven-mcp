@@ -31,6 +31,7 @@ export interface EnterpriseAuthConfig {
 
 type Rejected = "auth_failed" | "auth_expired";
 
+/** `cause`: why it failed; without one, the error says it timed out. */
 function unreachable(origin: string, cause?: unknown): DhError {
   return new DhError(
     "server_unreachable",
@@ -39,6 +40,7 @@ function unreachable(origin: string, cause?: unknown): DhError {
   );
 }
 
+/** Loads `origin`'s irisapi (cached under `cacheRoot`) and waits for the gRPC connection. Not signed in yet. */
 export async function connectEnterprise(
   origin: string,
   cacheRoot: string,
@@ -61,6 +63,7 @@ export async function connectEnterprise(
   return { origin, dhe, client };
 }
 
+/** Safe to call more than once. */
 export function disconnect(conn: EnterpriseConnection): void {
   try {
     conn.client.disconnect();
@@ -69,6 +72,7 @@ export function disconnect(conn: EnterpriseConnection): void {
   }
 }
 
+/** Whether the server allows passwords, and its SSO settings if it has SSO. */
 export async function enterpriseAuthConfig(
   conn: EnterpriseConnection,
   timeout: number,
@@ -95,6 +99,10 @@ export async function enterpriseAuthConfig(
   };
 }
 
+/**
+ * Runs `login` with a timeout. A rejection throws `rejected`; a timeout throws
+ * `server_unreachable`. Closes `conn` on failure.
+ */
 async function guardedLogin(
   conn: EnterpriseConnection,
   login: () => Promise<unknown>,
@@ -115,6 +123,7 @@ async function guardedLogin(
   }
 }
 
+/** `operateAs` defaults to `username`. A rejection is `auth_failed`. */
 export function loginPassword(
   conn: EnterpriseConnection,
   username: string,
@@ -134,6 +143,7 @@ export function loginPassword(
   );
 }
 
+/** Signs in with a key pair. A rejection throws `rejected` (`auth_failed` or `auth_expired`). */
 export function loginKey(
   conn: EnterpriseConnection,
   username: string,
@@ -199,6 +209,7 @@ export async function loginSaml(
   }
 }
 
+/** Who `conn` is signed in as; how SSO learns the user name. */
 export async function userName(conn: EnterpriseConnection): Promise<string> {
   const info = await conn.client.getUserInfo();
   return info.username;
@@ -219,6 +230,7 @@ async function aclWriter(conn: EnterpriseConnection): Promise<string> {
   }
 }
 
+/** What to tell the user about a failed key upload, from its HTTP `status` and response `body`. */
 function uploadHint(status: number, body: string, user: string): string {
   if (status === 401) {
     return "The ACL write server didn't accept this session's token. This is a server configuration problem; tell an administrator.";
@@ -269,6 +281,7 @@ export async function createKey(
   return { ...keyPair, comment };
 }
 
+/** Deletes exactly this public key for `username`; other keys are untouched. */
 export async function deleteKey(
   conn: EnterpriseConnection,
   username: string,
