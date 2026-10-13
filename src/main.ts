@@ -16,17 +16,21 @@ function formatFromArgs(args: string[]): "human" | "json" {
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? "";
     if (a === "--") break;
-    const value =
-      a === "-o" || a === "--output"
-        ? args[i + 1]
-        : a.startsWith("--output=")
-          ? a.slice("--output=".length)
-          : a.startsWith("-o") && a.length > 2
-            ? a.slice(2)
-            : undefined;
+    const value = outputFlagValue(a, args[i + 1]);
     if (value === "json" || value === "human") format = value;
   }
   return format;
+}
+
+/** The value `arg` gives `-o`, in any spelling: `-o json`, `-ojson`, `--output json`, `--output=json`. */
+function outputFlagValue(
+  arg: string,
+  next: string | undefined,
+): string | undefined {
+  if (arg === "-o" || arg === "--output") return next;
+  if (arg.startsWith("--output=")) return arg.slice("--output=".length);
+  if (arg.startsWith("-o") && arg.length > 2) return arg.slice(2);
+  return undefined;
 }
 
 const root = new Command()

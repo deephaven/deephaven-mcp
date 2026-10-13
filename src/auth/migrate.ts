@@ -5,7 +5,11 @@
 
 import { DhError, describe } from "../errors.ts";
 import { BIN } from "../version.ts";
-import { type CommunityLogin, communityUser } from "./community.ts";
+import {
+  type CommunityLogin,
+  type CommunityMethod,
+  communityUser,
+} from "./community.ts";
 import {
   commitSignIn,
   type ProfileToSave,
@@ -163,7 +167,7 @@ async function keySignIn(
  */
 async function communitySignIn(
   item: LegacyItem,
-  plan: PlanFor<"anonymous" | "psk" | "basic" | "custom">,
+  plan: PlanFor<CommunityMethod>,
 ): Promise<LegacySignIn> {
   let ref = plan.method === "anonymous" ? undefined : plan.secret;
   let secret = ref && (await resolveSecret(ref));

@@ -76,7 +76,7 @@ export type SignInRequest =
       keyPair: KeyPair;
       operateAs?: string;
     }
-  | (CommunityLogin & { method: "psk" | "basic" | "custom" | "anonymous" });
+  | CommunityLogin;
 
 /** Loads the server's client code (cached under `cacheRoot`) and connects. Not signed in yet. */
 export async function connectServer(
@@ -110,7 +110,7 @@ const COMMUNITY_LABELS: Partial<Record<Method, string>> = {
 export async function offeredMethods(server: Server): Promise<OfferedMethod[]> {
   if (server.community) {
     return communityMethods(server.community.handlers).map((o) => ({
-      method: o.method as Exclude<Method, "saml">,
+      method: o.method,
       handler: o.handler,
       label: COMMUNITY_LABELS[o.method] ?? o.handler,
     }));

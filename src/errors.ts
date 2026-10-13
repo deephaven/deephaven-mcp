@@ -55,20 +55,18 @@ const MAX_REASON = 200;
 
 /** One short line for any thrown value; the jsapi rejects with non-Errors (e.g. GWT `Event`s). */
 export function describe(reason: unknown): string {
+  const text = messageOf(reason).replace(/\s+/g, " ").trim();
+  return text.length > MAX_REASON ? `${text.slice(0, MAX_REASON)}…` : text;
+}
+
+/** The best text a thrown value carries: an Error's message, a string, or a GWT event's `detail`. */
+function messageOf(reason: unknown): string {
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === "string") return reason;
   // biome-ignore lint/suspicious/noExplicitAny: GWT event objects are untyped.
   const detail = (reason as any)?.detail;
-  const text = (
-    reason instanceof Error
-      ? reason.message
-      : typeof reason === "string"
-        ? reason
-        : typeof detail === "string"
-          ? detail
-          : String(reason)
-  )
-    .replace(/\s+/g, " ")
-    .trim();
-  return text.length > MAX_REASON ? `${text.slice(0, MAX_REASON)}…` : text;
+  if (typeof detail === "string") return detail;
+  return String(reason);
 }
 
 /** {@link describe}, or undefined if it says nothing useful. */

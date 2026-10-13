@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DhError, isErrno, reasonOf } from "../errors.ts";
 import { note } from "../output.ts";
 import { BIN, STANDALONE } from "../version.ts";
+import type { CommunityMethod } from "./community.ts";
 import { keyPairOf } from "./flows.ts";
 import { readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
@@ -162,7 +163,7 @@ export async function signInRequestFor(
 ): Promise<SignInRequest> {
   if (kind === "community") {
     return {
-      method: profile.method as "psk" | "basic" | "custom" | "anonymous",
+      method: profile.method as CommunityMethod,
       handler: profile.handler,
       username: profile.method === "basic" ? profile.user : undefined,
       secret: savedSecret(cred, profile),

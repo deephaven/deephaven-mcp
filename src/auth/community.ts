@@ -18,9 +18,15 @@ export interface CommunityConnection {
   handlers: string[];
 }
 
+/** The {@link Method}s a Community server can offer. */
+export type CommunityMethod = Extract<
+  Method,
+  "anonymous" | "psk" | "basic" | "custom"
+>;
+
 /** One Community sign-in: the method, plus the handler class, user and secret it needs. */
 export interface CommunityLogin {
-  method: Method;
+  method: CommunityMethod;
   handler?: string;
   username?: string;
   secret?: string;
@@ -64,7 +70,7 @@ export async function connectCommunity(
 }
 
 /** Basic-auth handlers vary by server build; recognize them by name. */
-export function methodFor(handler: string): Method {
+export function methodFor(handler: string): CommunityMethod {
   if (handler === ANONYMOUS_HANDLER) return "anonymous";
   if (handler === PSK_HANDLER) return "psk";
   if (/basic/i.test(handler)) return "basic";
@@ -74,7 +80,7 @@ export function methodFor(handler: string): Method {
 /** Login options the server offers, with anonymous last. */
 export function communityMethods(
   handlers: string[],
-): { method: Method; handler: string }[] {
+): { method: CommunityMethod; handler: string }[] {
   return handlers
     .map((handler) => ({ method: methodFor(handler), handler }))
     .sort(
@@ -106,22 +112,12 @@ export async function loginCommunity(
   timeout: number,
   rejected: "auth_failed" | "auth_expired",
 ): Promise<void> {
-  const { dh, client, origin } = conn;
-  const credentials =
-    login.method === "anonymous"
-      ? { type: dh.CoreClient.LOGIN_TYPE_ANONYMOUS }
-      : login.method === "psk"
-        ? { type: PSK_HANDLER, token: login.secret }
-        : login.method === "basic"
-          ? {
-              type: dh.CoreClient.LOGIN_TYPE_PASSWORD,
-              username: login.username,
-              token: login.secret,
-            }
-          : { type: login.handler, token: login.secret };
+  const { client, origin } = conn;
   try {
-    await withTimeout(client.login(credentials), timeout, () =>
-      unreachable(origin),
+    await withTimeout(
+      client.login(loginCredentials(conn.dh, login)),
+      timeout,
+      () => unreachable(origin),
     );
   } catch (e) {
     disconnect(client);
@@ -132,6 +128,24 @@ export async function loginCommunity(
       undefined,
       reasonOf(e),
     );
+  }
+}
+
+/** `login` in the shape the jsapi's `CoreClient.login` takes; `dh` is the server's jsapi module. */
+function loginCredentials(dh: Api, login: CommunityLogin): object {
+  switch (login.method) {
+    case "anonymous":
+      return { type: dh.CoreClient.LOGIN_TYPE_ANONYMOUS };
+    case "psk":
+      return { type: PSK_HANDLER, token: login.secret };
+    case "basic":
+      return {
+        type: dh.CoreClient.LOGIN_TYPE_PASSWORD,
+        username: login.username,
+        token: login.secret,
+      };
+    case "custom":
+      return { type: login.handler, token: login.secret };
   }
 }
 
