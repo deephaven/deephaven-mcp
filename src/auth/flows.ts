@@ -334,7 +334,9 @@ export async function authorizeComputer(
   store: Store,
   session: Session,
 ): Promise<{ credential: Credential & { type: "keyPair" }; comment: string }> {
-  const conn = session.enterprise!;
+  const conn = session.enterprise;
+  if (!conn)
+    throw new DhError("internal", `${session.origin} is not Enterprise`);
   const key = await createKey(conn, session.user);
   const credential = {
     type: "keyPair" as const,

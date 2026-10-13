@@ -180,7 +180,7 @@ export async function signInRequestFor(
 }
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
-async function envSession(): Promise<Session> {
+async function envSession(server: string): Promise<Session> {
   const env = (name: string) => process.env[name] || undefined;
   const secrets = [
     "DH_PASSWORD",
@@ -192,7 +192,7 @@ async function envSession(): Promise<Session> {
     throw new DhError("usage", `Set only one of ${secrets.join(", ")}`);
   }
   await ensureCa(env("DH_CA_CERT"));
-  const { origin, kind } = await resolveServer(env("DH_SERVER")!);
+  const { origin, kind } = await resolveServer(server);
   const username = env("DH_USERNAME");
   const operateAs = env("DH_OPERATE_AS");
   let request: SignInRequest;
@@ -280,7 +280,8 @@ export async function requireAuth(
   store = new Store(),
 ): Promise<Session> {
   const name = profileFlag ?? process.env.DH_PROFILE;
-  if (!name && process.env.DH_SERVER) return await envSession();
+  const envServer = process.env.DH_SERVER;
+  if (!name && envServer) return await envSession(envServer);
   const state = await store.read();
   const id = name
     ? findByName(state.config, name)?.[0]

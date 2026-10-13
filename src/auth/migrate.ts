@@ -156,7 +156,7 @@ async function legacySignIn(item: LegacyItem): Promise<LegacySignIn> {
       username = secret.slice(0, at);
       secret = secret.slice(at + 1);
       // An env var keeps holding user:password; the password is split off at use.
-      if (!("env" in ref!)) ref = { literal: secret };
+      if (ref && !("env" in ref)) ref = { literal: secret };
     }
   }
   if (ref) {

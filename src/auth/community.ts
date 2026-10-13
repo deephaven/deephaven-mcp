@@ -76,9 +76,9 @@ export function communityMethods(
 export function communityUser(login: CommunityLogin): string {
   switch (login.method) {
     case "basic":
-      return login.username!;
+      return login.username ?? login.method;
     case "custom":
-      return login.handler!.split(".").pop()!;
+      return login.handler?.split(".").pop() ?? login.method;
     default:
       return login.method;
   }
