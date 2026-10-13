@@ -125,8 +125,8 @@ an environment variable, or type them at the prompt.
 
 - `--*-env <VAR>` saves only the variable's name. `dh` reads the variable each
   time the profile is used, so it must be set then too.
-- A secret typed at the prompt or read from stdin is saved in
-  `credentials.json` ([Where profiles are stored](#where-profiles-are-stored)).
+- A secret typed at the prompt or read from stdin is saved in `credentials.json`
+  ([Where profiles are stored](#where-profiles-are-stored)).
 
 ```sh
 dh auth login localhost:10000 --method psk --psk-env DH_PSK
@@ -200,9 +200,11 @@ Without a terminal, or with `--no-prompt`, `dh` never prompts. When it needs an
 answer, it fails with exit code 2 and names the flag to pass. (`--no-input` is
 accepted too.)
 
-`--no-prompt` also means yes: nothing asks for confirmation, so the command does
-what its flags say. `dh auth logout --all --no-prompt` revokes every key and
-removes every profile.
+> [!WARNING]
+>
+> `--no-prompt` also means yes: nothing asks for confirmation, so the command
+> does what its flags say. `dh auth logout --all --no-prompt` revokes every key
+> and removes every profile.
 
 ```text
 $ dh auth login --no-prompt
