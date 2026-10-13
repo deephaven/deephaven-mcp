@@ -24,11 +24,7 @@ export const rootCommand = defineCommand({
     return {
       human: [
         ctx.cli.helpInformation().trimEnd(),
-        !readable
-          ? `Run \`${BIN} auth\` to check your profiles.`
-          : p
-            ? `Logged in as ${p.user} @ ${new URL(p.server).host} (default)`
-            : `Not logged in. Run \`${BIN} auth login\` to get started.`,
+        loginLine(readable, p),
         `For agents: \`${BIN} agents\` summarizes commands and error codes (\`-o json\` for everything).`,
       ],
       json: {
@@ -38,3 +34,10 @@ export const rootCommand = defineCommand({
     };
   },
 });
+
+/** Who's logged in by default, or what to run next. `readable`: whether the config could be read. */
+function loginLine(readable: boolean, p: Profile | undefined): string {
+  if (!readable) return `Run \`${BIN} auth\` to check your profiles.`;
+  if (!p) return `Not logged in. Run \`${BIN} auth login\` to get started.`;
+  return `Logged in as ${p.user} @ ${new URL(p.server).host} (default)`;
+}

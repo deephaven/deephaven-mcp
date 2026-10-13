@@ -6,7 +6,7 @@ import { note } from "../output.ts";
 import { BIN, STANDALONE } from "../version.ts";
 import type { CommunityMethod } from "./community.ts";
 import { keyPairOf } from "./flows.ts";
-import { readKeyFile } from "./keyfile.ts";
+import { type KeyPair, readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
 import { candidates, type ResolvedServer, resolveServer } from "./resolve.ts";
 import {
@@ -155,6 +155,13 @@ function savedSecret(cred: Credential, profile: Profile): string | undefined {
   return value.slice(at + 1);
 }
 
+/** The key a saved credential signs in with: stored in it, or read from its key file. */
+async function savedKeyPair(cred: Credential): Promise<KeyPair | undefined> {
+  if (cred.type === "keyPair") return keyPairOf(cred);
+  if (cred.type === "keyFile") return (await readKeyFile(cred.path)).keyPair;
+  return undefined;
+}
+
 /** How a saved profile signs in. */
 export async function signInRequestFor(
   profile: Profile,
@@ -169,12 +176,7 @@ export async function signInRequestFor(
       secret: savedSecret(cred, profile),
     };
   }
-  const keyPair =
-    cred.type === "keyPair"
-      ? keyPairOf(cred)
-      : cred.type === "keyFile"
-        ? (await readKeyFile(cred.path)).keyPair
-        : undefined;
+  const keyPair = await savedKeyPair(cred);
   const who = { username: profile.user, operateAs: profile.operateAs };
   return keyPair
     ? { method: "private-key", ...who, keyPair }

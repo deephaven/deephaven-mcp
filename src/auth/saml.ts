@@ -14,13 +14,7 @@ export function signInUrl(base: string, nonce: string): string {
 
 /** Best effort; the URL is always printed too. */
 export async function openBrowser(url: string): Promise<boolean> {
-  const [cmd, ...args] =
-    process.platform === "darwin"
-      ? ["open", url]
-      : // Not `cmd /c start`: cmd would expand the %XX escapes in the URL.
-        process.platform === "win32"
-        ? ["rundll32", "url.dll,FileProtocolHandler", url]
-        : ["xdg-open", url];
+  const [cmd, ...args] = openCommand(url);
   try {
     const proc = Bun.spawn([cmd, ...args], {
       stdin: "ignore",
@@ -31,4 +25,14 @@ export async function openBrowser(url: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The command that opens `url` in the default browser on this platform. */
+function openCommand(url: string): [string, ...string[]] {
+  if (process.platform === "darwin") return ["open", url];
+  // Not `cmd /c start`: cmd would expand the %XX escapes in the URL.
+  if (process.platform === "win32") {
+    return ["rundll32", "url.dll,FileProtocolHandler", url];
+  }
+  return ["xdg-open", url];
 }

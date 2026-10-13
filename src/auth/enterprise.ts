@@ -89,19 +89,24 @@ export async function enterpriseAuthConfig(
     () => unreachable(conn.origin),
   );
   const c = Object.fromEntries(values);
-  const resolve = (url: string) => new URL(url, conn.origin).href;
   return {
     passwordsEnabled: c[PASSWORDS] !== "false",
-    saml:
-      c[SAML_CLASS] && c[SAML_URL]
-        ? {
-            loginUrl: resolve(c[SAML_URL]),
-            providerName: c[SAML_NAME] || "SSO",
-            confirmUrl: c[SAML_CONFIRM_URL]
-              ? resolve(c[SAML_CONFIRM_URL])
-              : undefined,
-          }
-        : undefined,
+    saml: samlConfig(c, conn.origin),
+  };
+}
+
+/** SSO settings from the server's auth config `c`, if SSO is set up; relative URLs resolve against `origin`. */
+function samlConfig(
+  c: Record<string, string>,
+  origin: string,
+): EnterpriseAuthConfig["saml"] {
+  if (!c[SAML_CLASS] || !c[SAML_URL]) return undefined;
+  const resolve = (url: string) => new URL(url, origin).href;
+  const confirmUrl = c[SAML_CONFIRM_URL];
+  return {
+    loginUrl: resolve(c[SAML_URL]),
+    providerName: c[SAML_NAME] || "SSO",
+    confirmUrl: confirmUrl ? resolve(confirmUrl) : undefined,
   };
 }
 

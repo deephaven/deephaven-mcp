@@ -96,8 +96,9 @@ function enterpriseOrigin(url: string, where: string): string {
 /** A file path from a config value (a plain path or `${file:...}`); env refs aren't paths. */
 function fileRef(value: unknown): string | undefined {
   const ref = secretRef(value);
-  if (!ref) return undefined;
-  return "file" in ref ? ref.file : "literal" in ref ? ref.literal : undefined;
+  if (ref && "file" in ref) return ref.file;
+  if (ref && "literal" in ref) return ref.literal;
+  return undefined;
 }
 
 // --- v1: one JSON5 file -----------------------------------------------------
@@ -269,16 +270,11 @@ function v2Enterprise(file: string, cfg: Json): LegacyItem {
   };
   if (cred.type === "private_key") {
     const ref = secretRef(cred.key_text);
-    return {
-      ...base,
-      plan:
-        ref && "file" in ref
-          ? { method: "private-key", keyPath: ref.file }
-          : {
-              method: "private-key",
-              keyText: ref && "literal" in ref ? ref.literal : undefined,
-            },
-    };
+    if (ref && "file" in ref) {
+      return { ...base, plan: { method: "private-key", keyPath: ref.file } };
+    }
+    const keyText = ref && "literal" in ref ? ref.literal : undefined;
+    return { ...base, plan: { method: "private-key", keyText } };
   }
   return {
     ...base,
@@ -319,18 +315,23 @@ export async function parseV2(configDir: string): Promise<LegacyConfig> {
     path: configDir,
     items,
     notImported,
-    defaultItem: context.system
-      ? { name: context.system, kind: "enterprise" }
-      : context.session
-        ? { name: context.session, kind: "community" }
-        : undefined,
+    defaultItem: defaultFromContext(context),
   };
+}
+
+/** The v2 runtime context's current system (preferred) or session, if any. */
+function defaultFromContext(context: Json): LegacyConfig["defaultItem"] {
+  if (context.system) return { name: context.system, kind: "enterprise" };
+  if (context.session) return { name: context.session, kind: "community" };
+  return undefined;
 }
 
 /** Whether `path` is a file, a directory, or missing. */
 async function kindOf(path: string): Promise<"file" | "dir" | undefined> {
   const info = await stat(path).catch(() => undefined);
-  return info?.isDirectory() ? "dir" : info?.isFile() ? "file" : undefined;
+  if (info?.isDirectory()) return "dir";
+  if (info?.isFile()) return "file";
+  return undefined;
 }
 
 /** `from`, else `$DH_MCP_CONFIG_FILE` (v1), else the v2 tree. */
@@ -360,11 +361,16 @@ export async function resolveSecret(
   return (await readFile(ref.file, "utf8")).trim();
 }
 
+/** Where a secret comes from, for {@link describePlan}: ` from $VAR`, ` from <file>`, or nothing. */
+function secretSource(ref: SecretRef): string {
+  if ("env" in ref) return ` from $${ref.env}`;
+  if ("file" in ref) return ` from ${ref.file}`;
+  return "";
+}
+
 /** A short description of how `item` will sign in, for the migrate picker and progress lines. */
 export function describePlan(item: LegacyItem): string {
   const plan = item.plan;
-  const ref = (r: SecretRef) =>
-    "env" in r ? ` from $${r.env}` : "file" in r ? ` from ${r.file}` : "";
   switch (plan.method) {
     case "password":
       return "sign in with the saved password, then authorize this computer";
@@ -373,10 +379,10 @@ export function describePlan(item: LegacyItem): string {
     case "anonymous":
       return "anonymous";
     case "psk":
-      return `PSK${ref(plan.secret)}`;
+      return `PSK${secretSource(plan.secret)}`;
     case "basic":
-      return `username/password${ref(plan.secret)}`;
+      return `username/password${secretSource(plan.secret)}`;
     case "custom":
-      return `${plan.handler}${ref(plan.secret)}`;
+      return `${plan.handler}${secretSource(plan.secret)}`;
   }
 }

@@ -22,6 +22,7 @@ import type {
   Credential,
   Kind,
   Method,
+  ServerEntry,
   State,
 } from "../../auth/store.ts";
 import { readSecret, type Secret } from "../../cli/secret.ts";
@@ -129,27 +130,30 @@ async function askLoginMenuChoice(
 
 /** Picks a saved server, or asks for an address if there are none or the user picks "Other". */
 async function askServerAddress(ui: Prompter, config: Config): Promise<string> {
+  const ask = () =>
+    ui.text("What server do you want to log in to?", "<server>");
   const known = Object.entries(config.servers);
-  const picked =
-    known.length === 0
-      ? OTHER
-      : await ui.select(
-          "What server do you want to log in to?",
-          [
-            ...known.map(([origin, s]) => ({
-              label: origin,
-              value: origin,
-              hint: `(${s.kind === "enterprise" ? "Enterprise" : "Community"}${
-                s.importedFrom ? ` · ${s.importedFrom.split("#").pop()}` : ""
-              })`,
-            })),
-            { label: "Other…", value: OTHER },
-          ],
-          "<server>",
-        );
-  return picked === OTHER
-    ? await ui.text("What server do you want to log in to?", "<server>")
-    : picked;
+  if (known.length === 0) return await ask();
+  const picked = await ui.select(
+    "What server do you want to log in to?",
+    [
+      ...known.map(([origin, s]) => ({
+        label: origin,
+        value: origin,
+        hint: serverHint(s),
+      })),
+      { label: "Other…", value: OTHER },
+    ],
+    "<server>",
+  );
+  return picked === OTHER ? await ask() : picked;
+}
+
+/** `(Enterprise)`, or `(Community · <legacy entry>)` for a migrated server. */
+function serverHint(s: ServerEntry): string {
+  const kind = s.kind === "enterprise" ? "Enterprise" : "Community";
+  const from = s.importedFrom?.split("#").pop();
+  return from ? `(${kind} · ${from})` : `(${kind})`;
 }
 
 /** What profile `id` (if given) already says about its sign-in, so login doesn't ask again. */

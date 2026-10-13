@@ -119,6 +119,17 @@ show up in `dh agents`.
 `Output.human` is for people and `Output.json` for `-o json`. In JSON mode,
 stdout carries only the result and everything else goes to stderr.
 
+## Keeping functions readable
+
+A function's doc comment says what it does, and its body should show how without
+reading the functions it calls. When a function gets long, split it into named
+steps; when a step can't be split usefully, give it a one-line comment saying
+why it's there.
+
+A ternary can't contain another ternary, even inside an object or template in
+one of its branches. Use early returns, a `switch`, or a small named function.
+Biome's `noNestedTernary` catches the direct cases; reviewers catch the rest.
+
 ## Naming
 
 Names should make sense where they're called, not just where they're defined.

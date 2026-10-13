@@ -42,10 +42,8 @@ export function result(human: () => string | string[], json: unknown): void {
 
 /** Prints `e` and returns the process exit code. */
 export function reportError(e: unknown): number {
-  const error =
-    e instanceof DhError
-      ? e
-      : new DhError("internal", e instanceof Error ? e.message : String(e));
+  const message = e instanceof Error ? e.message : String(e);
+  const error = e instanceof DhError ? e : new DhError("internal", message);
   if (error.code === "internal" && process.env.DH_DEBUG && e instanceof Error) {
     err(e.stack ?? e.message);
   }
