@@ -41,17 +41,24 @@ const MARKS: Record<string, Style> = {
 };
 
 /**
- * `line` colored for `stream`, plain unless it's a terminal: its leading mark,
- * and `commands` in cyan. A `…` progress line is dimmed whole.
+ * `text` colored for `stream`, plain unless it's a terminal: a leading mark,
+ * `commands` in cyan, and a URL alone on its line. A `…` progress line is
+ * dimmed whole.
  */
-function styled(line: string, stream: NodeJS.WriteStream): string {
+function styled(text: string, stream: NodeJS.WriteStream): string {
   const paint = (style: Style, s: string) => styleText(style, s, { stream });
-  const [, indent = "", mark = ""] = /^(\s*)([✔✖!…]) /.exec(line) ?? [];
-  if (mark === "…") return paint("dim", line);
-  const text = line.replace(/`[^`\n]+`/g, (c) => paint("cyan", c));
-  const style = MARKS[mark];
-  if (!style) return text;
-  return indent + paint(style, mark) + text.slice(indent.length + 1);
+  const styleLine = (line: string) => {
+    if (/^\s*https?:\/\/\S+$/.test(line)) {
+      return line.replace(/\S+/, (url) => paint(["cyan", "underline"], url));
+    }
+    const [, indent = "", mark = ""] = /^(\s*)([✔✖!…]) /.exec(line) ?? [];
+    if (mark === "…") return paint("dim", line);
+    const plain = line.replace(/`[^`]+`/g, (c) => paint("cyan", c));
+    const style = MARKS[mark];
+    if (!style) return plain;
+    return indent + paint(style, mark) + plain.slice(indent.length + 1);
+  };
+  return text.split("\n").map(styleLine).join("\n");
 }
 
 /** Prints a command's result: `json` with `-o json`, else the lines from `human`. */
@@ -83,8 +90,13 @@ export function reportError(e: unknown): number {
       }),
     );
   } else {
-    err(styled(`✖ ${error.message}`, process.stderr));
-    if (error.hint) err(styled(`  ${error.hint}`, process.stderr));
+    // The reason and the hint each go on their own indented lines.
+    const below = [error.detail, error.hint]
+      .flatMap((text) => text?.split("\n") ?? [])
+      .map((line) => `  ${line}`);
+    for (const line of [`✖ ${error.headline}`, ...below]) {
+      err(styled(line, process.stderr));
+    }
   }
   return ERROR_CODES[error.code].exit;
 }

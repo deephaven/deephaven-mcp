@@ -359,8 +359,8 @@ prints what it's waiting on for each server:
 | `No Deephaven server found at …`                              | Check the address and VPN. Add the port if the server uses a non-standard one              |
 | `Could not reach <host>:<port> to upload this computer's key` | Connect to the network the server's ACL write server is on (for example, the VPN)          |
 | `… rejected this computer's key (HTTP 400)`                   | The hint shows the server's reason                                                         |
-| `… rejected the saved credentials for "<profile>"`            | The key was deleted or the user disabled. Run `dh auth login --profile <profile>`          |
-| `Profile "<profile>" needs DH_PSK, which is not set`          | Set the variable the profile was saved with, or sign in again without `--psk-env`          |
+| `The server rejected the saved credentials for "<profile>"`   | The key was deleted or the user disabled. Run `dh auth login --profile <profile>`          |
+| `Profile "<profile>" needs DH_PSK set`                        | Set the variable the profile was saved with, or sign in again without `--psk-env`          |
 | `… can be read by other users`                                | `chmod 600 ~/.deephaven/cli/credentials.json`                                              |
 | `Input needed: pass <flag>`                                   | Running without a terminal; pass that flag                                                 |
 | SSO keeps signing in as the wrong account                     | Choose the account in your identity provider, or sign out of it first; use `--expect-user` |

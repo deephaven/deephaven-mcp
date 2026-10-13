@@ -139,7 +139,7 @@ function savedSecret(cred: Credential, profile: Profile): string | undefined {
   if (value === undefined) {
     throw new DhError(
       "credential_unavailable",
-      `Profile "${profile.name}" needs ${cred.env}, which is not set`,
+      `Profile "${profile.name}" needs ${cred.env} set`,
       `Set ${cred.env}, or run \`${BIN} auth login --profile ${profile.name}\`.`,
     );
   }
@@ -148,7 +148,7 @@ function savedSecret(cred: Credential, profile: Profile): string | undefined {
   if (at < 0 || value.slice(0, at) !== profile.user) {
     throw new DhError(
       "credential_unavailable",
-      `Profile "${profile.name}" needs ${cred.env} to be "${profile.user}:<password>"`,
+      `${cred.env} must be "${profile.user}:<password>"`,
       `Fix ${cred.env}, or run \`${BIN} auth login --profile ${profile.name}\`.`,
     );
   }
@@ -283,7 +283,7 @@ async function profileSession(
     if (e instanceof DhError && e.code === "auth_expired") {
       throw new DhError(
         "auth_expired",
-        `${profile.server} rejected the saved credentials for "${profile.name}"`,
+        `The server rejected the saved credentials for "${profile.name}"`,
         `Run \`${BIN} auth login --profile ${profile.name}\`.`,
         e.detail,
       );

@@ -263,7 +263,7 @@ async function aclWriter(conn: EnterpriseConnection): Promise<string> {
 /** What to tell the user about a failed key upload, from its HTTP `status` and response `body`. */
 function uploadHint(status: number, body: string, user: string): string {
   if (status === 401) {
-    return "The ACL write server didn't accept this session's token. This is a server configuration problem; tell an administrator.";
+    return "The ACL write server didn't accept this session's token.\nThis is a server configuration problem; tell an administrator.";
   }
   if (status === 403) {
     return `The ACL write server didn't allow adding a key for ${user}.`;
@@ -301,7 +301,8 @@ export async function createKey(
     throw new DhError(
       "key_upload_failed",
       `Could not reach ${await aclWriter(conn)} to upload this computer's key`,
-      `${describe(e)}. That address must be reachable from this computer.`,
+      "That address must be reachable from this computer.",
+      describe(e),
     );
   }
   const body = (await res.text().catch(() => "")).trim().slice(0, 300);

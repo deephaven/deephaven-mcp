@@ -73,7 +73,7 @@ export async function migrateLegacy(
   for (const item of done) note(`  – ${item.name}: already migrated`);
   if (pending.length === 0) return { migrated: 0, failed: 0 };
   note(
-    "Migrating signs in to each server to check its credentials, so the servers must be reachable now (for example, on VPN).",
+    "Migrating signs in to each server to check its credentials,\nso the servers must be reachable now (for example, on VPN).",
   );
   const chosen = await askLegacyEntriesToMigrate(ctx.ui, pending, opts.yes);
   for (const n of legacy.notImported) note(`  – ${n}: not used, not migrated`);
@@ -85,7 +85,7 @@ export async function migrateLegacy(
   const failed = outcomes.filter((o) => !o.ok).length;
   if (failed) {
     note(
-      `${failed} not migrated. Fix the problems above (for example, connect to the servers' network), then run \`${BIN} auth migrate\` to retry. Migrated servers are skipped.`,
+      `${failed} not migrated. Fix the problems above (for example, connect to the servers' network),\nthen run \`${BIN} auth migrate\` to retry. Migrated servers are skipped.`,
     );
   }
 
@@ -112,7 +112,7 @@ async function migrateAndReport(
   note(
     outcome.ok
       ? `  ✔ ${item.name} → ${outcome.profile}  ${outcome.detail}`
-      : `  ! ${item.name}: ${outcome.detail}`,
+      : `  ! ${item.name}: ${outcome.detail.replaceAll("\n", "\n    ")}`,
   );
   for (const warning of outcome.warnings) note(`    ${warning}`);
   return outcome;

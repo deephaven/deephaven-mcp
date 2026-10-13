@@ -41,17 +41,17 @@ export const logout = defineCommand<LogoutOptions>({
     );
     for (const id of skipped) {
       note(
-        `! Kept ${nameOf(id)}: its server uses a different CA certificate. Run \`${BIN} auth logout ${nameOf(id)}\`.`,
+        `! Kept ${nameOf(id)}: its server uses a different CA certificate.\n  Run \`${BIN} auth logout ${nameOf(id)}\`.`,
       );
     }
 
-    const done = await removeProfiles(ctx.store, state, ids, (profile, what) =>
-      note(`… ${profile}: ${what}`),
+    const done = await removeProfiles(ctx.store, state, ids, (what) =>
+      note(`… ${what}`),
     );
     for (const warning of done.warnings) note(warning);
     for (const resaved of done.resaved) {
       note(
-        `! Kept ${resaved}: it was signed in again during logout. Run \`${BIN} auth logout ${resaved}\` again.`,
+        `! Kept ${resaved}: it was signed in again during logout.\n  Run \`${BIN} auth logout ${resaved}\` again.`,
       );
     }
     return removedOutput(done, skipped.map(nameOf));
@@ -76,10 +76,13 @@ function logoutCommand(ctx: Context, names: string[] | undefined): string[] {
 function removedOutput(done: Removed, skipped: string[]): Output {
   return {
     human: [
-      ...done.removed.map((r) =>
+      ...done.removed.flatMap((r) =>
         r.revoked
-          ? `✔ Revoked key on ${new URL(r.server).host} and removed ${r.profile}`
-          : `✔ Removed ${r.profile}`,
+          ? [
+              `✔ Removed ${r.profile}`,
+              `  Revoked its key on ${new URL(r.server).host}`,
+            ]
+          : [`✔ Removed ${r.profile}`],
       ),
       done.default ? `Default profile: ${done.default}` : "No profiles left.",
     ],

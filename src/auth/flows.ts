@@ -145,7 +145,7 @@ async function deleteObsoleteKeys(
       addOrphan(credentials, session.origin, session.user, previous),
     );
     warnings.push(
-      `! Could not delete the previous key: ${describe(e)}. It's retried at your next sign-in.`,
+      `! Could not delete the previous key; it's retried at your next sign-in.\n  ${describe(e)}`,
     );
   }
   return warnings;
@@ -194,13 +194,13 @@ export interface Removed {
  * Deletes each profile's generated key on its server, then the profiles. A key
  * that can't be deleted is remembered and retried at the next sign-in there.
  * `state` is what was read before; a profile signed in again since is kept.
- * `waiting` is told, before each server call, which profile it's for and what it waits on.
+ * `waiting` is told what each server call waits on, before it starts.
  */
 export async function removeProfiles(
   store: Store,
   state: State,
   ids: string[],
-  waiting: (profile: string, what: string) => void,
+  waiting: (what: string) => void,
 ): Promise<Removed> {
   const { config, credentials } = state;
   const { removed, unrevoked, warnings } = await revokeKeys(
@@ -244,7 +244,7 @@ async function revokeKeys(
   store: Store,
   state: State,
   ids: string[],
-  waiting: (profile: string, what: string) => void,
+  waiting: (what: string) => void,
 ): Promise<{
   removed: Removed["removed"];
   unrevoked: string[];
@@ -264,7 +264,6 @@ async function revokeKeys(
       let failure = unreachable.get(p.server);
       if (failure === undefined) {
         waiting(
-          p.name,
           `deleting key on ${new URL(p.server).host} (${DELETE_KEY_TIMEOUT_MS / 1000}s timeout)`,
         );
         try {
@@ -285,7 +284,7 @@ async function revokeKeys(
       if (failure !== undefined) {
         unrevoked.push(id);
         warnings.push(
-          `! Could not delete the key on ${p.server}: ${failure}. Removing the profile anyway; the key is deleted the next time you sign in there as ${p.user}.`,
+          `! Could not delete the key on ${new URL(p.server).host}; it's deleted the next time you sign in there as ${p.user}.\n  ${failure}`,
         );
       }
     }
@@ -544,7 +543,7 @@ export function orphansNote(result: {
 }): string | undefined {
   const keys = (n: number) => `${n} old key${n === 1 ? "" : "s"}`;
   if (result.kept) {
-    return `! Could not delete ${keys(result.kept)} an earlier logout left; retried next sign-in: ${result.failed}`;
+    return `! Could not delete ${keys(result.kept)} an earlier logout left; retried next sign-in.\n  ${result.failed}`;
   }
   if (result.deleted) {
     return `✔ Deleted ${keys(result.deleted)} that an earlier logout couldn't`;

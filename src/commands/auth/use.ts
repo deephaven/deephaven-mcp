@@ -66,7 +66,7 @@ function profileIdFor(config: Config, name: string): string {
     throw new DhError(
       "usage",
       `Several profiles for ${user} on ${current.server}`,
-      `Pick one by name: ${matches.map(([, p]) => p.name).join(", ")}`,
+      `Pick one by name:\n${matches.map(([, p]) => `  ${p.name}`).join("\n")}`,
     );
   }
   throw new DhError(

@@ -35,6 +35,9 @@ export type ErrorCode = keyof typeof ERROR_CODES;
 
 /** Thrown for every expected failure; `main.ts` turns `code` into an exit code and `hint` into advice. */
 export class DhError extends Error {
+  /** The message without `detail`. */
+  readonly headline: string;
+
   /** `detail`: the underlying reason, from {@link reasonOf}; appended to the message. */
   constructor(
     readonly code: ErrorCode,
@@ -44,6 +47,7 @@ export class DhError extends Error {
   ) {
     super(detail ? `${message}: ${detail}` : message);
     this.name = "DhError";
+    this.headline = message;
   }
 
   get exit(): number {

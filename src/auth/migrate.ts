@@ -230,7 +230,8 @@ export async function migrateLegacyEntry(
     if (item.caCert && loadedCa() !== item.caCert) {
       throw new DhError(
         "usage",
-        `uses a custom CA; run \`${BIN} auth login ${item.origin} --ca-cert ${item.caCert}\``,
+        "uses a custom CA",
+        `Run \`${BIN} auth login ${item.origin} --ca-cert ${item.caCert}\`.`,
       );
     }
     const entry = await legacySignIn(item);
@@ -297,13 +298,13 @@ async function signInAndSave(
   }
 }
 
-/** One line on why `item` wasn't migrated. */
+/** Why `item` wasn't migrated: a line, then any reason or hint on the next. */
 function migrationFailure(item: LegacyItem, e: unknown): string {
   if (e instanceof DhError && e.code === "server_unreachable") {
-    return `can't reach ${new URL(item.origin).host} (${e.hint ?? e.message})`;
+    return `can't reach ${new URL(item.origin).host}\n${e.hint ?? e.message}`;
   }
   return e instanceof DhError && e.hint
-    ? `${e.message} (${e.hint})`
+    ? `${e.message}\n${e.hint}`
     : describe(e);
 }
 

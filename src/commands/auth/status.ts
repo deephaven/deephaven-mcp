@@ -11,13 +11,17 @@ export const status = defineCommand({
     disconnectServer(session);
     const operating =
       session.operateAs && session.operateAs !== session.user
-        ? ` (operating as ${session.operateAs})`
-        : "";
+        ? [`  Operating as: ${session.operateAs}`]
+        : [];
     const profile = session.profileName
-      ? ` · profile ${session.profileName}`
-      : "";
+      ? [`  Profile: ${session.profileName}`]
+      : [];
     return {
-      human: `✔ Logged in to ${session.origin} as ${session.user}${operating}${profile}`,
+      human: [
+        `✔ Logged in to ${session.origin} as ${session.user}`,
+        ...operating,
+        ...profile,
+      ],
       json: {
         profile: session.profileName ?? null,
         server: session.origin,

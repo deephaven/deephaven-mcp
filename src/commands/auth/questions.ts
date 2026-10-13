@@ -421,7 +421,7 @@ export async function confirmSsoAccount(
   throw new DhError(
     "cancelled",
     "Not saved.",
-    `To use another account, pick or add it in ${saml.providerName}'s account chooser, or sign out of ${saml.providerName} in your browser, then run \`${BIN} auth login\` again.`,
+    `To use another account, pick or add it in ${saml.providerName}'s account chooser,\nor sign out of ${saml.providerName} in your browser, then run \`${BIN} auth login\` again.`,
   );
 }
 

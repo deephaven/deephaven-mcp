@@ -89,6 +89,6 @@ export async function resolveServer(
     `No Deephaven server found at ${input}`,
     errors.length === urls.length && urls.length === 1
       ? errors[0]
-      : `Tried: ${urls.map((u) => u.origin).join(", ")}`,
+      : `Tried:${urls.map((u) => `\n  ${u.origin}`).join("")}`,
   );
 }
