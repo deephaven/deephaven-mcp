@@ -200,6 +200,10 @@ Without a terminal, or with `--no-prompt`, `dh` never prompts. When it needs an
 answer, it fails with exit code 2 and names the flag to pass. (`--no-input` is
 accepted too.)
 
+`--no-prompt` also means yes: nothing asks for confirmation, so the command does
+what its flags say. `dh auth logout --all --no-prompt` revokes every key and
+removes every profile.
+
 ```text
 $ dh auth login --no-prompt
 ✖ Input needed: pass <server>

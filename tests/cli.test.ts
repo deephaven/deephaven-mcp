@@ -110,11 +110,12 @@ test("cli: usage errors exit 2, with JSON on stderr", async () => {
 
   const unknown = await run(["auth", "bogus"]);
   expect(unknown.code).toBe(2);
-  expect(unknown.stderr).toContain('Unknown command "bogus"');
+  expect(unknown.stderr).toContain('Unknown command or extra argument "bogus"');
   expect(unknown.stderr).toContain("dh auth --help");
 
   const extra = await run(["auth", "status", "extra"]);
   expect(extra.code).toBe(2);
+  expect(extra.stderr).toContain('Unknown command or extra argument "extra"');
   expect(extra.stderr).toContain("dh auth status --help");
 });
 

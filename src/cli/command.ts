@@ -110,19 +110,16 @@ export function registerCommand(
   cmd.description(spec.description);
   for (const a of spec.args ?? []) cmd.argument(a.name, a.description);
   for (const o of spec.options ?? []) cmd.addOption(o);
-  // A group like `dh auth` runs too, so commander would call an unknown
-  // subcommand an extra argument; let it through and name it here.
-  const isGroup = Boolean(spec.commands?.length) && !spec.args?.length;
-  // Explicit both ways: subcommands inherit the setting.
-  cmd.allowExcessArguments(isGroup);
+  // Checked below, so a typo'd subcommand and an extra argument read the same.
+  cmd.allowExcessArguments();
   cmd.action(async (...params: unknown[]) => {
     const self = params.at(-1) as Command;
-    const [unknown] = self.args;
-    if (isGroup && unknown !== undefined) {
+    const extra = self.args[spec.args?.length ?? 0];
+    if (extra !== undefined) {
       throw new DhError(
         "usage",
-        `Unknown command "${unknown}"`,
-        `Run \`${commandPath(self)} --help\` to see commands.`,
+        `Unknown command or extra argument "${extra}"`,
+        `Run \`${commandPath(self)} --help\` for usage.`,
       );
     }
     const out = await spec.run(
