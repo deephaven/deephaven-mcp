@@ -267,6 +267,7 @@ export async function askSignInCredentials(
           saml: chosen.saml,
           waitMs: (opts.timeout ?? 300) * 1000,
           browser: opts.browser !== false,
+          operateAs,
         },
         toSave: { method: "saml", credential: "new-key" },
       };

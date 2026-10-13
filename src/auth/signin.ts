@@ -63,7 +63,13 @@ export type OfferedMethod =
 
 /** Everything one sign-in needs; `method` says which server kind it's for. */
 export type SignInRequest =
-  | { method: "saml"; saml: Saml; waitMs: number; browser: boolean }
+  | {
+      method: "saml";
+      saml: Saml;
+      waitMs: number;
+      browser: boolean;
+      operateAs?: string;
+    }
   | {
       method: "password";
       username: string;
@@ -183,10 +189,12 @@ export async function signIn(
       };
     case "saml": {
       const signedIn = await waitForSaml(server, conn, request);
+      // SSO signs in as the user; operate-as applies to the key made next, whose login checks it.
       return {
         ...server,
         enterprise: signedIn,
         user: await userName(signedIn),
+        operateAs: request.operateAs,
       };
     }
     default:
