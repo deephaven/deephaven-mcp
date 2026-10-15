@@ -80,8 +80,12 @@ _PRE_INIT_STATES = frozenset(
 )
 """States a start attempt passes through before its initialization begins."""
 
-_NEW_ATTEMPT_MARKERS = _PRE_INIT_STATES | {"STOPPING", "STOPPED"}
-"""States that, once updated after a request, show the previous run is gone."""
+_OLD_RUN_GONE_STATES = _PRE_INIT_STATES | {"STOPPED"}
+"""States that, once updated after a request, show the previous run has finished.
+
+STOPPING is excluded: the previous run can still end in COMPLETED or FAILED
+from it.
+"""
 
 _LIVE_STATES = _STARTED_STATES | _PRE_INIT_STATES | {"INITIALIZING", "STOPPING"}
 """States in which a query has a run that could still end on its own."""
@@ -105,10 +109,10 @@ class _StartWatcher:
 
     A serving state counts only once a new initialization has begun. An ended
     state counts once a new initialization has begun, or once the state has
-    changed after the previous run is known to be gone: it was not live when
-    the request was issued, or it has since been seen tearing down or starting
-    over. The run that was live when the request was issued is never taken for
-    its outcome, even if it ends first.
+    changed after the previous run is known to have finished: it was not live
+    when the request was issued, or it has since been seen STOPPED or in a new
+    attempt's pre-initialization state. The run that was live when the request
+    was issued is never taken for its outcome, even if it ends first.
     """
 
     def __init__(self, before: CorePlusQueryState | None) -> None:
@@ -118,8 +122,15 @@ class _StartWatcher:
             before (CorePlusQueryState | None): That state, or ``None`` if the
                 query had none.
         """
+        before_name = None if before is None else before.status.name
         self._before = before
-        self._old_run_gone = before is None or before.status.name not in _LIVE_STATES
+        self._old_run_gone = before_name not in _LIVE_STATES
+        # A run still starting up when the request was issued reports pre-init states itself.
+        self._gone_markers = (
+            frozenset({"STOPPED"})
+            if before_name in _PRE_INIT_STATES
+            else _OLD_RUN_GONE_STATES
+        )
 
     def __call__(self, info: CorePlusQueryInfo) -> bool:
         """Return whether ``info`` shows the outcome of the request.
@@ -141,7 +152,7 @@ class _StartWatcher:
             state.pb.initializationStartNanos != before.initializationStartNanos
         )
         updated = bool(state.pb.lastUpdateNanos != before.lastUpdateNanos)
-        if updated and name in _NEW_ATTEMPT_MARKERS:
+        if updated and name in self._gone_markers:
             self._old_run_gone = True
         if name in _STARTED_STATES:
             return new_init

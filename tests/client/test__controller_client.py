@@ -1541,11 +1541,25 @@ async def test_state_change_submit_uses_management_timeout(
         ),
         # The previous run ends before its replacement starts.
         (("RUNNING", 1, 1), [("FAILED", 1, 2), ("COMPLETED", 1, 3)], None),
+        (("RUNNING", 1, 1), [("STOPPING", 1, 2), ("COMPLETED", 1, 3)], None),
+        (("RUNNING", 1, 1), [("STOPPING", 1, 2), ("FAILED", 1, 3)], None),
+        (
+            ("RUNNING", 1, 1),
+            [("STOPPING", 1, 2), ("STOPPED", 1, 3), ("FAILED", 1, 4)],
+            2,
+        ),
         (
             ("RUNNING", 1, 1),
             [("FAILED", 1, 2), ("ACQUIRING_WORKER", 1, 3), ("FAILED", 1, 4)],
             2,
         ),
+        # A run still starting up reports its own pre-init states.
+        (
+            ("ACQUIRING_WORKER", 1, 1),
+            [("ACQUIRING_WORKER", 1, 2), ("FAILED", 1, 3)],
+            None,
+        ),
+        (("ACQUIRING_WORKER", 1, 1), [("STOPPED", 1, 2), ("FAILED", 1, 3)], 1),
         # A new initialization identifies the attempt whatever came before.
         (("RUNNING", 1, 1), [("FAILED", 2, 2)], 0),
         # Restarting a failed query: a failure before initialization still counts.
