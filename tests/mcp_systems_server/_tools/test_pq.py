@@ -675,7 +675,7 @@ async def test_pq_restart_multiple():
     mock_pq_info_2 = create_mock_pq_info(67890, "reporting", "RUNNING", 8.0)
 
     mock_controller.get = AsyncMock(side_effect=[mock_pq_info_1, mock_pq_info_2])
-    mock_controller.restart_query = AsyncMock(return_value=None)
+    mock_controller.restart_and_wait = AsyncMock(return_value=None)
 
     context = MockContext(
         {
@@ -723,12 +723,12 @@ async def test_pq_restart_partial_failure():
 
     mock_pq_info_1 = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
 
-    async def mock_restart_side_effect(serials, wait=True):
-        if serials == [67890]:
+    async def mock_restart_side_effect(serial):
+        if serial == 67890:
             raise Exception("PQ cannot be restarted")
 
     mock_controller.get = AsyncMock(return_value=mock_pq_info_1)
-    mock_controller.restart_query = AsyncMock(side_effect=mock_restart_side_effect)
+    mock_controller.restart_and_wait = AsyncMock(side_effect=mock_restart_side_effect)
 
     context = MockContext(
         {
@@ -832,14 +832,14 @@ async def test_pq_start_partial_failure():
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
-    async def mock_start_side_effect(serial, wait=True):
+    async def mock_start_side_effect(serial):
         if serial == 67890:
             raise Exception("Timeout waiting for PQ to start")
 
-    mock_controller.start_and_wait = AsyncMock(side_effect=mock_start_side_effect)
+    mock_controller.restart_and_wait = AsyncMock(side_effect=mock_start_side_effect)
 
     # get() pre-check returns STOPPED for both PQs; post-start returns RUNNING for 12345.
-    # 67890 raises in start_and_wait so its post-start get() is never called.
+    # 67890 raises in restart_and_wait so its post-start get() is never called.
     call_counts: dict[int, int] = {}
 
     async def mock_get_side_effect(serial):
@@ -896,11 +896,11 @@ async def test_pq_stop_partial_failure():
 
     mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
 
-    async def mock_stop_side_effect(serials, wait=True):
-        if serials == [67890]:
+    async def mock_stop_side_effect(serial):
+        if serial == 67890:
             raise Exception("PQ already stopped")
 
-    mock_controller.stop_query = AsyncMock(side_effect=mock_stop_side_effect)
+    mock_controller.stop_and_wait = AsyncMock(side_effect=mock_stop_side_effect)
     mock_controller.get = AsyncMock(return_value=mock_pq_info)
 
     context = MockContext(
@@ -3746,7 +3746,7 @@ async def test_pq_start_success():
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
-    mock_controller.start_and_wait = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     # get() is called twice: pre-start state check (STOPPED), then post-start state (RUNNING)
     mock_pq_info_stopped = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
     mock_pq_info_running = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
@@ -3778,8 +3778,8 @@ async def test_pq_start_success():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Started 1 PQ(s)"
-    # Verify controller.start_and_wait was called with default wait=True
-    mock_controller.start_and_wait.assert_called_once_with(12345, wait=True)
+    # Verify the default wait=True waits for the start to settle
+    mock_controller.restart_and_wait.assert_called_once_with(12345)
 
 
 @pytest.mark.asyncio
@@ -3796,7 +3796,7 @@ async def test_pq_start_already_running():
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
-    mock_controller.start_and_wait = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     mock_pq_running = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.get = AsyncMock(return_value=mock_pq_running)
 
@@ -3815,8 +3815,8 @@ async def test_pq_start_already_running():
     assert "already RUNNING" in result["results"][0]["error"]
     assert result["summary"]["succeeded"] == 0
     assert result["summary"]["failed"] == 1
-    # Verify start_and_wait was NOT called
-    mock_controller.start_and_wait.assert_not_called()
+    # Verify the start was NOT attempted
+    mock_controller.restart_and_wait.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -3908,7 +3908,7 @@ async def test_pq_start_multiple():
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
-    mock_controller.start_and_wait = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     # get() called twice per PQ: pre-start check (STOPPED) then post-start state (RUNNING)
     names = {12345: "analytics", 67890: "reporting"}
     heaps = {12345: 8.0, 67890: 16.0}
@@ -4014,8 +4014,8 @@ async def test_pq_stop_success():
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
-    # Mock controller methods - now uses stop_query
-    mock_controller.stop_query = AsyncMock()
+    # Mock controller methods
+    mock_controller.stop_and_wait = AsyncMock()
     mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
     mock_controller.get = AsyncMock(return_value=mock_pq_info)
 
@@ -4042,7 +4042,7 @@ async def test_pq_stop_success():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Stopped 1 PQ(s)"
-    mock_controller.stop_query.assert_called_once_with([12345], wait=True)
+    mock_controller.stop_and_wait.assert_called_once_with(12345)
 
 
 @pytest.mark.asyncio
@@ -4060,8 +4060,8 @@ async def test_pq_stop_success_custom_timeout():
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
-    # Mock controller methods - now uses stop_query
-    mock_controller.stop_query = AsyncMock()
+    # Mock controller methods
+    mock_controller.stop_and_wait = AsyncMock()
     mock_pq_info = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
     mock_controller.get = AsyncMock(return_value=mock_pq_info)
 
@@ -4088,7 +4088,7 @@ async def test_pq_stop_success_custom_timeout():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Stopped 1 PQ(s)"
-    mock_controller.stop_query.assert_called_once_with([12345], wait=True)
+    mock_controller.stop_and_wait.assert_called_once_with(12345)
 
 
 @pytest.mark.asyncio
@@ -4202,7 +4202,7 @@ async def test_pq_restart_success():
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods (no more get_serial_for_name)
-    mock_controller.restart_query = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     mock_pq_info = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_controller.get = AsyncMock(return_value=mock_pq_info)
 
@@ -4229,7 +4229,49 @@ async def test_pq_restart_success():
     assert result["summary"]["succeeded"] == 1
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Restarted 1 PQ(s)"
-    mock_controller.restart_query.assert_called_once_with([12345], wait=True)
+    mock_controller.restart_and_wait.assert_called_once_with(12345)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool, submit, waiter, state",
+    [
+        (pq_start, "restart_query", "restart_and_wait", "STOPPED"),
+        (pq_stop, "stop_query", "stop_and_wait", "RUNNING"),
+        (pq_restart, "restart_query", "restart_and_wait", "RUNNING"),
+    ],
+)
+async def test_pq_lifecycle_no_wait_only_submits(tool, submit, waiter, state):
+    """wait=False submits the request without waiting for the PQ to settle."""
+    mock_session_registry = MagicMock(spec=EnterpriseSessionRegistry)
+    mock_session_registry.system_name = _TEST_SYSTEM_NAME
+    mock_factory_manager = MagicMock()
+    mock_factory = MagicMock()
+    mock_controller = MagicMock()
+
+    mock_session_registry.factory_manager = mock_factory_manager
+    mock_factory_manager.get = AsyncMock(return_value=mock_factory)
+    mock_factory.controller_client = mock_controller
+    mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
+
+    setattr(mock_controller, submit, AsyncMock())
+    setattr(mock_controller, waiter, AsyncMock())
+    mock_controller.get = AsyncMock(
+        return_value=create_mock_pq_info(12345, "analytics", state, 8.0)
+    )
+
+    context = MockContext(
+        {
+            "config_manager": MagicMock(),
+            "registry": mock_session_registry,
+        }
+    )
+
+    result = await tool(context, id="enterprise:system:12345", wait=False)
+
+    assert result["results"][0]["success"] is True
+    getattr(mock_controller, submit).assert_awaited_once_with(12345)
+    getattr(mock_controller, waiter).assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -4343,7 +4385,7 @@ async def test_pq_stop_multiple():
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
-    mock_controller.stop_query = AsyncMock()
+    mock_controller.stop_and_wait = AsyncMock()
     mock_pq_info1 = create_mock_pq_info(12345, "analytics", "STOPPED", 8.0)
     mock_pq_info2 = create_mock_pq_info(67890, "reporting", "STOPPED", 16.0)
     mock_controller.get = AsyncMock(side_effect=[mock_pq_info1, mock_pq_info2])
@@ -4380,8 +4422,8 @@ async def test_pq_stop_multiple():
     assert result["summary"]["succeeded"] == 2
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Stopped 2 PQ(s)"
-    # Verify stop_query was called for each PQ individually
-    assert mock_controller.stop_query.call_count == 2
+    # Verify stop_and_wait was called for each PQ individually
+    assert mock_controller.stop_and_wait.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -4400,7 +4442,7 @@ async def test_pq_restart_multiple():
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock controller methods
-    mock_controller.restart_query = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     mock_pq_info1 = create_mock_pq_info(12345, "analytics", "RUNNING", 8.0)
     mock_pq_info2 = create_mock_pq_info(67890, "reporting", "RUNNING", 16.0)
     mock_controller.get = AsyncMock(side_effect=[mock_pq_info1, mock_pq_info2])
@@ -4437,8 +4479,8 @@ async def test_pq_restart_multiple():
     assert result["summary"]["succeeded"] == 2
     assert result["summary"]["failed"] == 0
     assert result["message"] == "Restarted 2 PQ(s)"
-    # Verify restart_query was called for each PQ individually
-    assert mock_controller.restart_query.call_count == 2
+    # Verify restart_and_wait was called for each PQ individually
+    assert mock_controller.restart_and_wait.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -4721,14 +4763,14 @@ async def test_pq_start_parallel_execution():
     active_operations = []
     max_concurrent_observed = 0
 
-    async def mock_start_and_wait(serial, wait=True):
+    async def mock_restart_and_wait(serial):
         active_operations.append(serial)
         nonlocal max_concurrent_observed
         max_concurrent_observed = max(max_concurrent_observed, len(active_operations))
         await asyncio.sleep(0.01)
         active_operations.remove(serial)
 
-    mock_controller.start_and_wait = AsyncMock(side_effect=mock_start_and_wait)
+    mock_controller.restart_and_wait = AsyncMock(side_effect=mock_restart_and_wait)
     # get() called twice per PQ: pre-start check (STOPPED) then post-start state (RUNNING)
     parallel_call_counts: dict[int, int] = {}
 
@@ -4778,9 +4820,7 @@ async def test_pq_stop_parallel_with_mixed_results():
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # First and third succeed, second fails
-    async def mock_stop_side_effect(serials, wait=True):
-        # serials is a list with one element
-        serial = serials[0]
+    async def mock_stop_side_effect(serial):
         if serial == 2:
             raise TimeoutError("PQ did not stop in time")
 
@@ -4788,7 +4828,7 @@ async def test_pq_stop_parallel_with_mixed_results():
         # This is only called after successful stops
         return create_mock_pq_info(serial, f"pq_{serial}", "STOPPED")
 
-    mock_controller.stop_query = AsyncMock(side_effect=mock_stop_side_effect)
+    mock_controller.stop_and_wait = AsyncMock(side_effect=mock_stop_side_effect)
     mock_controller.get = AsyncMock(side_effect=mock_get_side_effect)
 
     context = MockContext(
@@ -4838,7 +4878,7 @@ async def test_pq_restart_parallel_execution():
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
     # Mock successful restarts
-    mock_controller.restart_query = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     mock_controller.get = AsyncMock(
         side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING")
     )
@@ -4864,8 +4904,8 @@ async def test_pq_restart_parallel_execution():
     assert result["summary"]["succeeded"] == 4
     assert result["summary"]["failed"] == 0
 
-    # Verify all restart_query calls were made
-    assert mock_controller.restart_query.call_count == 4
+    # Verify all restart_and_wait calls were made
+    assert mock_controller.restart_and_wait.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -4989,7 +5029,7 @@ async def test_pq_start_exception_escapes_to_gather(monkeypatch):
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
-    mock_controller.start_and_wait = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     mock_controller.get = AsyncMock(
         side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING")
     )
@@ -5043,7 +5083,7 @@ async def test_pq_stop_exception_escapes_to_gather(monkeypatch):
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
-    mock_controller.stop_query = AsyncMock()
+    mock_controller.stop_and_wait = AsyncMock()
     mock_controller.get = AsyncMock(
         side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "STOPPED")
     )
@@ -5097,7 +5137,7 @@ async def test_pq_restart_exception_escapes_to_gather(monkeypatch):
     mock_factory.controller_client = mock_controller
     mock_factory_manager.get_controller_client = AsyncMock(return_value=mock_controller)
 
-    mock_controller.restart_query = AsyncMock()
+    mock_controller.restart_and_wait = AsyncMock()
     mock_controller.get = AsyncMock(
         side_effect=lambda s: create_mock_pq_info(s, f"pq_{s}", "RUNNING")
     )

@@ -696,25 +696,35 @@ exit `0` means the batch ran, not that every id succeeded — check the
 `summary` and per-item `results` in the payload for failures. All ids in
 one invocation must belong to the same Enterprise system.
 
-None of these verbs report a settled state:
+None of these verbs report readiness on their own:
 
 - `create` does not wait. Its `state` is always the placeholder
   `UNINITIALIZED` — the state at the instant the controller accepted the
   definition, not the live state. Poll `pq details` for what the PQ is
   actually doing.
-- `start` / `restart` succeed on *acceptance*, not readiness. Branch on
-  each `results[].state_category`: `TRANSITIONAL` (state `CONNECTING` or
-  `INITIALIZING`) is a normal outcome with `--no-wait` or a short wait,
-  and only `ACTIVE` means the id is usable with the `session`, `table`,
-  and `catalog` verbs.
+- `start` / `restart` / `stop` wait by default until each PQ settles:
+  `start` and `restart` until it is serving (`RUNNING` or `EXECUTING`) or
+  the attempt has ended (`FAILED`, `ERROR`, `DISCONNECTED`, or
+  `COMPLETED`); `stop` until it is no longer running. With `--no-wait` they
+  return as soon as the controller accepts the request.
+- A settled `start` / `restart` is still a per-item success when the PQ
+  failed to come up. Branch on each `results[].state_category`: only
+  `ACTIVE` means the id is usable with the `session`, `table`, and
+  `catalog` verbs; `TERMINAL` with state `FAILED` means it did not come up
+  (read `pq details` for why). With `--no-wait`, `TRANSITIONAL` (state
+  `CONNECTING` or `INITIALIZING`) is the normal outcome.
 - A `--wait` that runs out is reported as a per-item failure even though
   the controller keeps going in the background. Treat a timeout as
   *unknown* rather than failed: re-read `pq details` instead of retrying
   blindly. The wait duration is
   `timeouts.client.pq_state_change_timeout_seconds` in
-  `enterprise/settings.json` (120 seconds unless set), and
-  `--max-concurrent` defaults to `pq_tools.default_max_concurrent` there
-  (20 unless set).
+  `enterprise/settings.json` (120 seconds unless set), the controller
+  request itself is bounded by `pq_management_timeout_seconds` there (60
+  seconds unless set), and `--max-concurrent` defaults to
+  `pq_tools.default_max_concurrent` there (20 unless set). The CLI
+  extends its request timeout for these three verbs to cover those
+  durations, so `cli.request.timeouts.default_seconds` does not cut a
+  wait short.
 
 Modifying a running PQ without `--restart` stores the new definition
 while the live worker keeps serving the old one; the response then

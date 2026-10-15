@@ -378,8 +378,9 @@ Timeout durations for PQ lifecycle operations are operator-tuned via
 `enterprise/settings.json: timeouts.client.*` (next table). The PQ tools do
 not expose numeric `timeout_seconds` parameters to AI agents;
 `pq_start`, `pq_stop`, and `pq_restart` accept a `wait: bool`
-parameter (default `True`) so agents can choose
-wait-for-completion vs. fire-and-forget without picking a timeout.
+parameter (default `True`): `True` waits until each PQ settles (serving
+or failed after a start/restart, no longer running after a stop), and
+`False` returns as soon as the controller accepts the request.
 
 ### `response_limits`
 
@@ -415,8 +416,8 @@ Java API requires it. Every field must be greater than zero except
 | `subscribe_timeout_seconds`                       | float | `30.0`  | Initial snapshot of a controller state subscription                                                    |
 | `controller_resubscribe_backoff_initial_seconds`  | float | `30.0`  | First delay before the healer recreates a wedged controller subscription; doubles after each attempt   |
 | `controller_resubscribe_backoff_max_seconds`      | float | `300.0` | Ceiling for that backoff delay during a prolonged controller outage                                    |
-| `pq_management_timeout_seconds`                   | float | `60.0`  | Persistent-query management RPCs: add, delete, modify                                                  |
-| `pq_state_change_timeout_seconds`                 | int   | `120`   | Waiting for a persistent query to reach a target lifecycle state                                       |
+| `pq_management_timeout_seconds`                   | float | `60.0`  | Persistent-query management RPCs: add, delete, modify, and the start/stop/restart request             |
+| `pq_state_change_timeout_seconds`                 | int   | `120`   | Waiting for a persistent query to settle after a start, stop, or restart is accepted                  |
 | `web_client_data_timeout_seconds`                 | float | `30.0`  | One `WebClientData` widget round-trip (backs the catalog listing tools)                                |
 | `no_wait_seconds`                                 | float | `0.0`   | Wait window for controller subscription-map lookups                                                    |
 

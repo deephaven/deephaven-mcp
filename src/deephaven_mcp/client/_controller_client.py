@@ -39,11 +39,13 @@ See Also:
 
 import asyncio
 import logging
-from collections.abc import Iterable
-from typing import Any, cast
+from collections.abc import Callable, Iterable
+from functools import partial
+from typing import cast
 
 from deephaven_enterprise.client.controller import ControllerClient, SubState
 
+from deephaven_mcp._blocking import run_blocking
 from deephaven_mcp._exceptions import (
     DeephavenConnectionError,
     InternalError,
@@ -61,10 +63,72 @@ from ._protobuf import (
     CorePlusQueryConfig,
     CorePlusQueryInfo,
     CorePlusQuerySerial,
+    CorePlusQueryState,
 )
 from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
+
+_STARTED_STATES = frozenset({"RUNNING", "EXECUTING"})
+"""States in which a started query is serving."""
+
+_START_ENDED_STATES = frozenset({"COMPLETED", "FAILED", "ERROR", "DISCONNECTED"})
+"""States in which a start attempt ended without the query serving."""
+
+_STOPPED_STATES = frozenset(
+    {
+        "STOPPED",
+        "COMPLETED",
+        "FAILED",
+        "ERROR",
+        "DISCONNECTED",
+        "UNINITIALIZED",
+        "UNSPECIFIED",
+    }
+)
+"""States in which a query is no longer running."""
+
+
+def _start_settled(info: CorePlusQueryInfo, before: CorePlusQueryState | None) -> bool:
+    """Return whether ``info`` shows the outcome of a start issued from state ``before``.
+
+    A serving state counts only once a new initialization has begun, and an
+    ended state only once the state has been updated, so the run that was
+    current when the start was issued is never taken for its outcome.
+
+    Args:
+        info (CorePlusQueryInfo): The query's current info.
+        before (CorePlusQueryState | None): The query's state when the start
+            was issued, or ``None`` if it had none.
+
+    Returns:
+        bool: True once the query is serving or the start attempt has ended.
+    """
+    state = info.state
+    if state is None:
+        return False
+    name = state.status.name
+    if name in _STARTED_STATES:
+        return (
+            before is None
+            or state.pb.initializationStartNanos != before.pb.initializationStartNanos
+        )
+    if name in _START_ENDED_STATES:
+        return before is None or state.pb.lastUpdateNanos != before.pb.lastUpdateNanos
+    return False
+
+
+def _stop_settled(info: CorePlusQueryInfo) -> bool:
+    """Return whether ``info`` shows a query that is no longer running.
+
+    Args:
+        info (CorePlusQueryInfo): The query's current info.
+
+    Returns:
+        bool: True when the query has no state or is in a stopped or ended state.
+    """
+    return info.state is None or info.state.status.name in _STOPPED_STATES
+
 
 CONTROLLER_SUBSCRIBING_ERROR_CODE = "CONTROLLER_SUBSCRIBING"
 """Machine-readable token embedded in the error message a controller-backed
@@ -133,7 +197,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         serial = await controller_client.add_query(config)
 
         # Start the query and wait for it to initialize
-        await controller_client.start_and_wait(serial)
+        await controller_client.restart_and_wait(serial)
 
         # Monitor the query state
         query_info = await controller_client.get(serial)
@@ -669,8 +733,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         This method blocks until the subscription map version becomes greater than
         ``map_version``, or until ``timeout_seconds`` elapses. It is a **long-poll**
         API: the underlying ``ControllerClient.wait_for_change_from_version`` call
-        runs in a background thread (via ``asyncio.to_thread``) and parks on a Python
-        ``threading.Condition.wait()`` for up to ``timeout_seconds``.
+        runs on a dedicated daemon thread (via :func:`~deephaven_mcp._blocking.run_blocking`,
+        so it never occupies the shared ``asyncio.to_thread`` executor) and parks on a
+        Python ``threading.Condition.wait()`` for up to ``timeout_seconds``.
 
         **Important**: this wrapper rejects ``timeout_seconds <= 0`` with ``ValueError``.
         The upstream Python implementation does have defined behavior at zero (it returns
@@ -715,8 +780,15 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             f"Waiting for version > {map_version}, timeout={timeout_seconds}s"
         )
         try:
-            result = await asyncio.to_thread(
-                self.wrapped.wait_for_change_from_version, map_version, timeout_seconds
+            # The vendor wait ends on its own at timeout_seconds; the slack only absorbs scheduling delay.
+            result = await run_blocking(
+                partial(
+                    self.wrapped.wait_for_change_from_version,
+                    map_version,
+                    timeout_seconds,
+                ),
+                "dh-mcp-pq-wait-for-change",
+                timeout_seconds + self._timeouts.quick_operation_timeout_seconds,
             )
             _LOGGER.debug(
                 f"[CorePlusControllerClient:wait_for_change_from_version] "
@@ -813,11 +885,11 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         initialized according to its configuration.
 
         The query lifecycle begins with this method, which returns a serial number that uniquely
-        identifies the query. This serial can be used with other methods like get(), start_and_wait(),
+        identifies the query. This serial can be used with other methods like get(), restart_and_wait(),
         stop_query(), and delete_query() to manage the query throughout its lifecycle.
 
         Note that adding a query does not automatically start it. After adding a query, you typically
-        need to call start_and_wait() to ensure the query transitions to the RUNNING state and becomes
+        need to call restart_and_wait() to ensure the query transitions to the RUNNING state and becomes
         usable.
 
         A successful call to authenticate should have happened before this call, as query creation
@@ -1254,7 +1326,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         - restart=True: The query is restarted immediately, applying all configuration changes.
                        This is required for changes like heap size, JVM args, or script content.
         - restart=False: Changes are saved but require a manual restart (via restart_query or
-                        start_and_wait) to take effect. This is useful for preparing configuration
+                        restart_and_wait) to take effect. This is useful for preparing configuration
                         changes without disrupting a running query.
 
         Note that some configuration changes (like resource allocation or script changes) will
@@ -1335,241 +1407,230 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 f"Failed to modify query {pb.serial}: {describe_exception_chain(e)}"
             ) from e
 
-    async def _run_state_change(
+    async def _submit_state_change(
         self,
-        method_name: str,
-        method_args: tuple[Any, ...],
-        wait: bool,
+        operation: str,
+        # Callable[..., None]: the vendor restart/stop methods type their timeout differently.
+        submit: Callable[..., None],
+        serials: Iterable[CorePlusQuerySerial] | CorePlusQuerySerial,
         target_description: str,
-        passthrough_excs: tuple[type[BaseException], ...],
     ) -> None:
-        """Run a controller state-change call with the shared error envelope.
+        """Send a state-change request and return once the controller accepts it.
 
-        Backs :meth:`restart_query`, :meth:`stop_query`,
-        :meth:`start_and_wait`, and :meth:`stop_and_wait`, each of which
-        delegates to a corresponding method on the wrapped controller
-        (``self.wrapped.<method_name>``) executed in a worker thread.
+        The request is bounded by
+        ``EnterpriseClientTimeouts.pq_management_timeout_seconds``. No query
+        state change is awaited.
 
         Args:
-            method_name (str): Name of the method on ``self.wrapped`` to
-                invoke. Also used as the log prefix and looked up via
-                :func:`getattr` so callers cannot bind a non-method.
-            method_args (tuple[Any, ...]): Positional arguments passed
-                to the wrapped method, in order, before the trailing
-                ``timeout_seconds`` argument that this helper appends.
-            wait (bool): When ``True`` the wait duration is sourced from
-                :attr:`EnterpriseClientTimeouts.pq_state_change_timeout_seconds`;
-                when ``False`` the wrapped method is invoked with
-                ``timeout_seconds=0`` (fire-and-forget).
+            operation (str): Name of the calling method, for the log prefix.
+            submit (Callable[..., None]): The wrapped controller method, called
+                as ``submit(serials, timeout_seconds)``.
+            serials (Iterable[CorePlusQuerySerial] | CorePlusQuerySerial): The
+                query serial(s) to act on.
             target_description (str): Human-readable description of the
-                operation target used in log and error messages
-                (e.g. ``"query(s)"`` or ``f"query {serial}"``).
-            passthrough_excs (tuple[type[BaseException], ...]):
-                Exception types from the wrapped method that should
-                propagate unchanged rather than be wrapped in
-                :class:`QueryError`. ``ConnectionError`` is always
-                translated to :class:`DeephavenConnectionError` and is
-                not affected by this tuple.
+                operation used in log and error messages (e.g.
+                ``"restart query(s)"``).
 
         Raises:
             DeephavenConnectionError: If the wrapped call raises
                 :class:`ConnectionError`.
-            QueryError: If the wrapped call raises any other exception
-                not listed in ``passthrough_excs``.
+            ValueError: Propagated unchanged from the wrapped call.
+            KeyError: Propagated unchanged from the wrapped call.
+            QueryError: If the wrapped call raises any other exception,
+                including a gRPC ``DEADLINE_EXCEEDED`` when the controller
+                does not accept the request in time.
         """
-        timeout_seconds = self._timeouts.pq_state_change_timeout_seconds if wait else 0
-        log_prefix = f"[CorePlusControllerClient:{method_name}]"
-        _LOGGER.debug(f"{log_prefix} Starting {target_description} (wait={wait})")
-        wrapped_callable = getattr(self.wrapped, method_name)
-        all_args: tuple[Any, ...] = (*method_args, timeout_seconds)
+        timeout_seconds = self._timeouts.pq_management_timeout_seconds
+        log_prefix = f"[CorePlusControllerClient:{operation}]"
+        _LOGGER.debug(
+            f"{log_prefix} Submitting {target_description} (timeout={timeout_seconds}s)"
+        )
         try:
-            await asyncio.to_thread(wrapped_callable, *all_args)
-            _LOGGER.debug(f"{log_prefix} {target_description} completed successfully")
+            await asyncio.to_thread(submit, serials, timeout_seconds)
+            _LOGGER.debug(f"{log_prefix} {target_description} accepted")
         except ConnectionError as e:
             _LOGGER.error(
-                f"{log_prefix} Connection error while running {target_description}: {e}"
+                f"{log_prefix} Connection error while submitting {target_description}: {e}"
             )
             raise DeephavenConnectionError(
                 f"Unable to connect to controller service: {e}"
             ) from e
-        except passthrough_excs:
+        except (ValueError, KeyError):
             # Re-raise native exceptions unchanged
             raise
         except Exception as e:
-            _LOGGER.error(f"{log_prefix} Failed to run {target_description}: {e}")
+            _LOGGER.error(f"{log_prefix} Failed to {target_description}: {e}")
             raise QueryError(
-                f"Failed to run {target_description}: {describe_exception_chain(e)}"
+                f"Failed to {target_description}: {describe_exception_chain(e)}"
             ) from e
+
+    async def _wait_until(
+        self,
+        serial: CorePlusQuerySerial,
+        settled: Callable[[CorePlusQueryInfo], bool],
+        goal: str,
+    ) -> None:
+        """Wait until ``settled`` holds for the query's info.
+
+        The wait is bounded by
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
+
+        Args:
+            serial (CorePlusQuerySerial): The query to watch.
+            settled (Callable[[CorePlusQueryInfo], bool]): Returns True once
+                the query has reached the awaited state.
+            goal (str): What the query is awaited to do, for error messages
+                (e.g. ``"finish starting"``).
+
+        Raises:
+            QueryError: If the wait times out (the message names the last
+                seen state), if the query disappears while waiting, or if the
+                subscription state is invalid.
+            DeephavenConnectionError: If unable to connect to the controller
+                service, or if the subscription is wedged.
+        """
+        timeout_seconds = self._timeouts.pq_state_change_timeout_seconds
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        while True:
+            query_map, version = await self.map_and_version()
+            info = query_map.get(serial)
+            if info is None:
+                raise QueryError(
+                    f"Query {serial} was deleted while waiting for it to {goal}"
+                )
+            if settled(info):
+                return
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                last_state = info.state.status.name if info.state else "UNKNOWN"
+                _LOGGER.warning(
+                    f"[CorePlusControllerClient:_wait_until] Timed out after {timeout_seconds}s "
+                    f"waiting for query {serial} to {goal}; last seen state {last_state}"
+                )
+                raise QueryError(
+                    f"Timed out after {timeout_seconds}s waiting for query {serial} "
+                    f"to {goal} (last seen state: {last_state}). The controller keeps "
+                    f"going in the background. To wait longer, increase "
+                    f"enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds."
+                )
+            await self.wait_for_change_from_version(version, remaining)
 
     async def restart_query(
         self,
         serials: Iterable[CorePlusQuerySerial] | CorePlusQuerySerial,
-        wait: bool = True,
     ) -> None:
-        """Restart one or more queries asynchronously.
+        """Request a start or restart of one or more queries.
 
-        This method restarts stopped or failed queries, transitioning them from their current state to
-        the RUNNING state. The restart process:
-
-        1. Recreates the query process using the original query configuration
-        2. Re-allocates necessary resources for the query
-        3. Re-initializes the query state from scratch (previous data is not preserved)
-        4. Makes the query available again for client connections
-
-        Restarting is more efficient than deleting and re-adding a query when the same configuration
-        is needed, as it preserves the serial number and query definition.
+        A running query is stopped and started again; a stopped, failed, or
+        completed query is started. The query keeps its serial and
+        configuration. Returns once the controller accepts the request,
+        bounded by ``EnterpriseClientTimeouts.pq_management_timeout_seconds``;
+        use :meth:`restart_and_wait` to also wait for the outcome.
 
         A successful call to authenticate should have happened before this call.
 
-        When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
-        ``wait=False``, the call returns immediately (fire-and-forget).
-
         Args:
-            serials (Iterable[CorePlusQuerySerial] | CorePlusQuerySerial): A query serial number, or an iterable of serial numbers. Each serial must
-                    reference a valid, existing query.
-            wait (bool): When True, wait for the restart to complete using the operator-configured
-                wait duration. When False, fire-and-forget (submit and return immediately).
+            serials (Iterable[CorePlusQuerySerial] | CorePlusQuerySerial): A query
+                serial number, or an iterable of serial numbers. Each serial must
+                reference a valid, existing query.
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
                                     due to network issues or server unavailability.
-            QueryError: If the query restart fails for any other reason such as insufficient resources,
-                       a non-existent serial number, configuration errors, or internal controller issues.
+            ValueError: Propagated unchanged from the upstream client.
+            KeyError: Propagated unchanged from the upstream client.
+            QueryError: If the request fails for any other reason, such as a
+                non-existent serial number, the controller not accepting the
+                request in time, or internal controller issues.
         """
-        await self._run_state_change(
-            method_name="restart_query",
-            method_args=(serials,),
-            wait=wait,
-            target_description="restart query(s)",
-            passthrough_excs=(ValueError, KeyError),
+        await self._submit_state_change(
+            "restart_query",
+            self.wrapped.restart_query,
+            serials,
+            "restart query(s)",
         )
 
-    async def start_and_wait(
-        self,
-        serial: CorePlusQuerySerial,
-        wait: bool = True,
-    ) -> None:
-        """Start the given query and wait for it to become running asynchronously.
+    async def restart_and_wait(self, serial: CorePlusQuerySerial) -> None:
+        """Start or restart a query and wait for the outcome.
 
-        This method initiates a query and waits until it transitions to the 'RUNNING' state, meaning
-        the query has successfully initialized and is actively processing data. A query goes through
-        several state transitions (UNINITIALIZED → INITIALIZING → RUNNING) during startup.
+        Submits the request as :meth:`restart_query` does, then waits until
+        the new run is serving (RUNNING or EXECUTING) or has ended (COMPLETED,
+        FAILED, ERROR, or DISCONNECTED). The state the query was in when the
+        request was issued is never taken for the outcome. The wait is bounded
+        by ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
 
-        If the query transitions to a failure state (e.g., FAILED, CRASHED) during startup,
-        this method will raise an exception with the appropriate error information.
-
-        When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
-        ``wait=False``, the call returns immediately after submitting the
-        start request (fire-and-forget).
+        Reaching an ended state is not an error; inspect the query's state
+        afterwards to tell a serving query from a failed one.
 
         Args:
-            serial (CorePlusQuerySerial): The serial number of the query to start. This must reference a valid query that
-                   has been previously created via add_query.
-            wait (bool): When True, wait for the PQ to reach RUNNING using the operator-configured
-                wait duration. When False, fire-and-forget (submit and return immediately).
+            serial (CorePlusQuerySerial): The query to start or restart.
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.
-            KeyError: If the query with the given serial does not exist (raised by the upstream
-                ``self.map()[serial]`` lookup performed before the wait begins; propagated
-                unchanged by this wrapper).
-            QueryError: If the query fails to reach the RUNNING state within the wait period, or for
-                any other operational issue such as initialization errors or resource constraints.
-                The upstream ``RuntimeError`` raised on timeout-without-target-state is translated
-                to ``QueryError`` by this wrapper.
+            ValueError: Propagated unchanged from the upstream client.
+            KeyError: Propagated unchanged from the upstream client.
+            QueryError: If the query does not exist, the request fails, or the
+                wait times out (the controller keeps going in the background).
         """
-        await self._run_state_change(
-            method_name="start_and_wait",
-            method_args=(serial,),
-            wait=wait,
-            target_description=f"start query {serial}",
-            passthrough_excs=(TimeoutError, ValueError, KeyError),
+        before = (await self.get(serial)).state
+        await self.restart_query(serial)
+        await self._wait_until(
+            serial, lambda info: _start_settled(info, before), "finish starting"
         )
 
     async def stop_query(
         self,
         serials: Iterable[CorePlusQuerySerial] | CorePlusQuerySerial,
-        wait: bool = True,
     ) -> None:
-        """Stop one or more queries asynchronously.
+        """Request a stop of one or more queries.
 
-        This method gracefully stops running queries, transitioning them from the RUNNING state to
-        the STOPPED state. When queries are stopped:
-
-        1. The query processes are terminated, but their definitions remain in the controller
-        2. All resources associated with the queries (memory, computation) are released
-        3. Any client connections to the queries will be disconnected
-        4. Data that was generated by the queries but not persisted elsewhere will be lost
-        5. The queries can be restarted later using restart_query without recreating them
-
-        Stopping queries is less resource-intensive than deleting and recreating them when you
-        need to temporarily pause processing.
+        Stopping is graceful: the worker is terminated and its resources
+        released, but the query definition remains and can be started again.
+        Returns once the controller accepts the request, bounded by
+        ``EnterpriseClientTimeouts.pq_management_timeout_seconds``; use
+        :meth:`stop_and_wait` to also wait for the query to stop.
 
         A successful call to authenticate should have happened before this call.
 
-        When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
-        ``wait=False``, the call returns immediately (fire-and-forget).
-
         Args:
-            serials (Iterable[CorePlusQuerySerial] | CorePlusQuerySerial): A query serial number, or an iterable of serial numbers. Each serial must
-                    reference a valid, existing query.
-            wait (bool): When True, wait for the stop to complete using the operator-configured
-                wait duration. When False, fire-and-forget (submit and return immediately).
+            serials (Iterable[CorePlusQuerySerial] | CorePlusQuerySerial): A query
+                serial number, or an iterable of serial numbers. Each serial must
+                reference a valid, existing query.
 
         Raises:
             DeephavenConnectionError: If not authenticated or unable to connect to the controller
                                     due to network issues or server unavailability.
-            QueryError: If the query stop fails for any other reason such as permission issues,
-                       a non-existent serial number, invalid query state transitions, or internal
-                       controller errors.
+            ValueError: Propagated unchanged from the upstream client.
+            KeyError: Propagated unchanged from the upstream client.
+            QueryError: If the request fails for any other reason, such as
+                permission issues, a non-existent serial number, the controller
+                not accepting the request in time, or internal controller errors.
         """
-        await self._run_state_change(
-            method_name="stop_query",
-            method_args=(serials,),
-            wait=wait,
-            target_description="stop query(s)",
-            passthrough_excs=(ValueError, KeyError),
+        await self._submit_state_change(
+            "stop_query",
+            self.wrapped.stop_query,
+            serials,
+            "stop query(s)",
         )
 
-    async def stop_and_wait(
-        self,
-        serial: CorePlusQuerySerial,
-        wait: bool = True,
-    ) -> None:
-        """Stop the given query and wait for it to become terminal asynchronously.
+    async def stop_and_wait(self, serial: CorePlusQuerySerial) -> None:
+        """Stop a query and wait for it to stop.
 
-        This method gracefully stops a running query and waits until it transitions to a terminal
-        state (STOPPED, FAILED, etc.). The query goes through state transitions during shutdown
-        (RUNNING → STOPPING → STOPPED).
-
-        After stopping, the query process is terminated and its resources are released, but the
-        query definition remains in the controller. The query can be restarted later using
-        restart_query without needing to recreate it.
-
-        When ``wait=True`` (default), the wait duration is sourced from
-        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``. When
-        ``wait=False``, the call returns immediately (fire-and-forget).
+        Submits the request as :meth:`stop_query` does, then waits until the
+        query is no longer running (STOPPED, or another ended or uninitialized
+        state). The wait is bounded by
+        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
 
         Args:
-            serial (CorePlusQuerySerial): The serial number of the query to stop. This must reference a valid query that
-                   has been previously created via add_query.
-            wait (bool): When True, wait for the PQ to reach a terminal state using the
-                operator-configured wait duration. When False, fire-and-forget.
+            serial (CorePlusQuerySerial): The query to stop.
 
         Raises:
             DeephavenConnectionError: If unable to connect to the controller service.
-            QueryError: If the query fails to reach a terminal state within the wait period, or for
-                any other reason such as a non-existent serial number, internal errors, or invalid
-                state transitions. The upstream ``RuntimeError`` raised on
-                timeout-without-terminal-state is translated to ``QueryError`` by this wrapper.
+            ValueError: Propagated unchanged from the upstream client.
+            KeyError: Propagated unchanged from the upstream client.
+            QueryError: If the request fails, the query disappears, or the wait
+                times out (the controller keeps going in the background).
         """
-        await self._run_state_change(
-            method_name="stop_and_wait",
-            method_args=(serial,),
-            wait=wait,
-            target_description=f"stop query {serial}",
-            passthrough_excs=(TimeoutError, ValueError, KeyError),
-        )
+        await self.stop_query(serial)
+        await self._wait_until(serial, _stop_settled, "stop")

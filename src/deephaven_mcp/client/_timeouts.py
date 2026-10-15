@@ -129,12 +129,14 @@ class EnterpriseClientTimeouts(StrictSchema):
 
     pq_management_timeout_seconds: Annotated[float, Field(gt=0)] = 60.0
     """Timeout (seconds) for persistent-query management RPCs (add,
-    delete, modify). These mutate controller state without waiting
-    for the PQ to reach a target running state."""
+    delete, modify, and the start/stop/restart request itself). These
+    mutate controller state without waiting for the PQ to reach a
+    target running state."""
 
     pq_state_change_timeout_seconds: Annotated[int, Field(gt=0)] = 120
     """Timeout (integer seconds) for waiting on a persistent query
-    to reach a target lifecycle state (e.g. RUNNING after start, or
+    to reach a target lifecycle state after the controller accepts a
+    start, stop, or restart (e.g. RUNNING or FAILED after start, or
     STOPPED after stop). Whole-second resolution; sub-second timing
     is not supported."""
 

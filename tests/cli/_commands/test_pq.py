@@ -16,6 +16,7 @@ from deephaven_mcp.cli._commands.pq import _create_modify_args
 from deephaven_mcp.cli._context import ContextKey
 from deephaven_mcp.cli._main import cli
 from deephaven_mcp.cli._runtime import Runtime
+from deephaven_mcp.config.schema import EnterpriseConfig, EnterpriseSettings
 
 from .._helpers import fake_load_runtime, make_entry, make_runtime
 
@@ -332,6 +333,55 @@ def test_lifecycle_default_wait_and_max_concurrent(tmp_path: Path) -> None:
         "wait": True,
         "max_concurrent": 2,
     }
+
+
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        # CLI default 60 + one wave of (management 60 + state change 120).
+        (["pq", "restart", "1"], 240),
+        # --no-wait drops the state-change wait.
+        (["pq", "restart", "1", "--no-wait"], 120),
+        # 21 ids at the default concurrency of 20 take two waves.
+        (["pq", "start", *[str(i) for i in range(21)]], 420),
+        (["pq", "stop", "1", "2", "--max-concurrent", "1"], 420),
+        # A non-positive cap is the tool's to reject; the default concurrency applies.
+        (["pq", "stop", "1", "--max-concurrent", "0"], 240),
+    ],
+)
+def test_lifecycle_request_timeout_covers_the_server_wait(
+    args: list[str], expected: int, tmp_path: Path
+) -> None:
+    result, call = _run(args, {"success": True}, tmp_path)
+    assert result.exit_code == 0
+    assert call.await_args.kwargs["request_timeout_seconds"] == expected
+
+
+def test_lifecycle_request_timeout_reads_enterprise_settings(tmp_path: Path) -> None:
+    base = make_runtime(tmp_path)
+    settings = EnterpriseSettings.model_validate(
+        {
+            "timeouts": {
+                "client": {
+                    "pq_management_timeout_seconds": 10.5,
+                    "pq_state_change_timeout_seconds": 30,
+                }
+            },
+            "pq_tools": {"default_max_concurrent": 1},
+        }
+    )
+    rt = make_runtime(
+        tmp_path,
+        config=base.config.model_copy(
+            update={"enterprise": EnterpriseConfig(settings=settings, systems={})}
+        ),
+    )
+    result, call = _run(
+        ["pq", "start", "1", "2"], {"success": True}, tmp_path, runtime=rt
+    )
+    assert result.exit_code == 0
+    # 60 + ceil(2 waves * 40.5)
+    assert call.await_args.kwargs["request_timeout_seconds"] == 141
 
 
 def test_lifecycle_requires_an_id(tmp_path: Path) -> None:
