@@ -75,6 +75,17 @@ _STARTED_STATES = frozenset({"RUNNING", "EXECUTING"})
 _START_ENDED_STATES = frozenset({"COMPLETED", "FAILED", "ERROR", "DISCONNECTED"})
 """States in which a start attempt ended without the query serving."""
 
+_PRE_INIT_STATES = frozenset(
+    {"FINDING_DISPATCHER", "ACQUIRING_WORKER", "CONNECTING", "AUTHENTICATING"}
+)
+"""States a start attempt passes through before its initialization begins."""
+
+_NEW_ATTEMPT_MARKERS = _PRE_INIT_STATES | {"STOPPING", "STOPPED"}
+"""States that, once updated after a request, show the previous run is gone."""
+
+_LIVE_STATES = _STARTED_STATES | _PRE_INIT_STATES | {"INITIALIZING", "STOPPING"}
+"""States in which a query has a run that could still end on its own."""
+
 _STOPPED_STATES = frozenset(
     {
         "STOPPED",
@@ -89,33 +100,54 @@ _STOPPED_STATES = frozenset(
 """States in which a query is no longer running."""
 
 
-def _start_settled(info: CorePlusQueryInfo, before: CorePlusQueryState | None) -> bool:
-    """Return whether ``info`` shows the outcome of a start issued from state ``before``.
+class _StartWatcher:
+    """Decides when a start or restart issued from a given state has an outcome.
 
-    A serving state counts only once a new initialization has begun, and an
-    ended state only once the state has been updated, so the run that was
-    current when the start was issued is never taken for its outcome.
-
-    Args:
-        info (CorePlusQueryInfo): The query's current info.
-        before (CorePlusQueryState | None): The query's state when the start
-            was issued, or ``None`` if it had none.
-
-    Returns:
-        bool: True once the query is serving or the start attempt has ended.
+    A serving state counts only once a new initialization has begun. An ended
+    state counts once a new initialization has begun, or once the state has
+    changed after the previous run is known to be gone: it was not live when
+    the request was issued, or it has since been seen tearing down or starting
+    over. The run that was live when the request was issued is never taken for
+    its outcome, even if it ends first.
     """
-    state = info.state
-    if state is None:
-        return False
-    name = state.status.name
-    if name in _STARTED_STATES:
-        return (
-            before is None
-            or state.pb.initializationStartNanos != before.pb.initializationStartNanos
+
+    def __init__(self, before: CorePlusQueryState | None) -> None:
+        """Remember the query's state when the request was issued.
+
+        Args:
+            before (CorePlusQueryState | None): That state, or ``None`` if the
+                query had none.
+        """
+        self._before = before
+        self._old_run_gone = before is None or before.status.name not in _LIVE_STATES
+
+    def __call__(self, info: CorePlusQueryInfo) -> bool:
+        """Return whether ``info`` shows the outcome of the request.
+
+        Args:
+            info (CorePlusQueryInfo): The query's current info.
+
+        Returns:
+            bool: True once the new attempt is serving or has ended.
+        """
+        state = info.state
+        if state is None:
+            return False
+        name = state.status.name
+        if self._before is None:
+            return name in _STARTED_STATES or name in _START_ENDED_STATES
+        before = self._before.pb
+        new_init = bool(
+            state.pb.initializationStartNanos != before.initializationStartNanos
         )
-    if name in _START_ENDED_STATES:
-        return before is None or state.pb.lastUpdateNanos != before.pb.lastUpdateNanos
-    return False
+        updated = bool(state.pb.lastUpdateNanos != before.lastUpdateNanos)
+        if updated and name in _NEW_ATTEMPT_MARKERS:
+            self._old_run_gone = True
+        if name in _STARTED_STATES:
+            return new_init
+        if name in _START_ENDED_STATES:
+            return new_init or (self._old_run_gone and updated)
+        return False
 
 
 def _stop_settled(info: CorePlusQueryInfo) -> bool:
@@ -1575,9 +1607,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         """
         before = (await self.get(serial)).state
         await self.restart_query(serial)
-        await self._wait_until(
-            serial, lambda info: _start_settled(info, before), "finish starting"
-        )
+        await self._wait_until(serial, _StartWatcher(before), "finish starting")
 
     async def stop_query(
         self,

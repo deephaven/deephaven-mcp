@@ -1528,23 +1528,43 @@ async def test_state_change_submit_uses_management_timeout(
 
 
 @pytest.mark.parametrize(
-    "now, before, expected",
+    "before, seen, settles_at",
     [
-        (_fake_info(None), None, False),
-        (_fake_info("RUNNING"), None, True),
-        (_fake_info("EXECUTING"), None, True),
-        (_fake_info("FAILED"), None, True),
-        (_fake_info("INITIALIZING"), None, False),
-        (_fake_info("RUNNING", init=1), _fake_info("RUNNING", init=1), False),
-        (_fake_info("RUNNING", init=2), _fake_info("RUNNING", init=1), True),
-        (_fake_info("FAILED", update=1), _fake_info("FAILED", update=1), False),
-        (_fake_info("FAILED", update=2), _fake_info("FAILED", update=1), True),
-        (_fake_info("STOPPED", update=2), _fake_info("RUNNING", update=1), False),
+        (None, [None, ("INITIALIZING", 0, 0), ("RUNNING", 0, 0)], 2),
+        (None, [("FAILED", 0, 0)], 0),
+        # A restart of a running query: teardown, startup, new run.
+        (
+            ("RUNNING", 1, 1),
+            [("RUNNING", 1, 1), ("STOPPING", 1, 2), ("ACQUIRING_WORKER", 1, 3)]
+            + [("RUNNING", 2, 4)],
+            3,
+        ),
+        # The previous run ends before its replacement starts.
+        (("RUNNING", 1, 1), [("FAILED", 1, 2), ("COMPLETED", 1, 3)], None),
+        (
+            ("RUNNING", 1, 1),
+            [("FAILED", 1, 2), ("ACQUIRING_WORKER", 1, 3), ("FAILED", 1, 4)],
+            2,
+        ),
+        # A new initialization identifies the attempt whatever came before.
+        (("RUNNING", 1, 1), [("FAILED", 2, 2)], 0),
+        # Restarting a failed query: a failure before initialization still counts.
+        (("FAILED", 1, 1), [("FAILED", 1, 1), ("FAILED", 1, 2)], 1),
+        (("FAILED", 1, 1), [("STOPPED", 1, 2)], None),
     ],
 )
-def test_start_settled(controller_client_mod, now, before, expected):
-    before_state = None if before is None else before.state
-    assert controller_client_mod._start_settled(now, before_state) is expected
+def test_start_watcher(controller_client_mod, before, seen, settles_at):
+    def info(spec):
+        if spec is None:
+            return _fake_info(None)
+        status, init, update = spec
+        return _fake_info(status, init=init, update=update)
+
+    watcher = controller_client_mod._StartWatcher(
+        None if before is None else info(before).state
+    )
+    settled = [i for i, spec in enumerate(seen) if watcher(info(spec))]
+    assert (settled[0] if settled else None) == settles_at
 
 
 @pytest.mark.parametrize(

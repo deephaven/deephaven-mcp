@@ -53,7 +53,7 @@ _REPO = Path(__file__).resolve().parent.parent
 _LOGIN_ENV = "DH_PQ_WAIT_TEST_PASSWORD"
 
 _STARTED = {"RUNNING", "EXECUTING"}
-_ENDED = {"FAILED", "ERROR", "DISCONNECTED", "COMPLETED"}
+_FAILED = {"FAILED", "ERROR"}
 
 _GOOD_SCRIPT = "pq_wait_test_value = 1\n"
 _BAD_SCRIPT = 'raise Exception("pq_wait_test: intentional startup failure")\n'
@@ -274,10 +274,10 @@ def check_restart_wait(t: Tester, pq_id: str) -> str:
 
 def check_failing_restart(t: Tester, pq_id: str) -> str:
     """Check 3: restart wait=true of a failing script returns FAILED."""
-    t.wait_for(pq_id, lambda s: s.get("status") in _ENDED, "its first failure")
+    t.wait_for(pq_id, lambda s: s.get("status") in _FAILED, "its first failure")
     item, elapsed = t.lifecycle("pq_restart", pq_id, wait=True)
     _expect(
-        item.get("success") is True and item.get("state") in _ENDED,
+        item.get("success") is True and item.get("state") in _FAILED,
         _outcome(item, elapsed),
     )
     return _outcome(item, elapsed)
@@ -328,8 +328,17 @@ def run_checks(t: Tester, args: argparse.Namespace) -> None:
         t.run_check("start wait=true", lambda: check_start_wait(t, good))
     finally:
         if created and not args.keep:
-            t.call("pq_delete", id=created)
-            print("\nDeleted the temporary PQs.")
+            payload = t.call("pq_delete", id=created)
+            deleted = {
+                r.get("id") for r in payload.get("results", []) if r.get("success")
+            }
+            left = [pid for pid in created if pid not in deleted]
+            if left:
+                t.results.append((False, "cleanup"))
+                reason = payload.get("error") or payload.get("message")
+                print(f"\n[FAIL] cleanup -- not deleted: {', '.join(left)} ({reason})")
+            else:
+                print("\nDeleted the temporary PQs.")
         elif created:
             print(f"\nKept the temporary PQs: {', '.join(created)}")
 
@@ -368,6 +377,9 @@ def parse_args() -> argparse.Namespace:
         args.system = args.system or "pqwait"
     elif not args.system:
         parser.error("pass --url (with --username or --key-file) or --system")
+    if args.config_dir:
+        # The server runs from a temp dir, so a relative path would resolve wrongly.
+        args.config_dir = str(Path(args.config_dir).expanduser().resolve())
     return args
 
 
