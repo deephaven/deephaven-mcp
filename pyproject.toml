@@ -30,6 +30,7 @@ dependencies = [
     "mcp[cli]>=1.12.0,<2",       # CLI and fastmcp server; MCP 2.x removed mcp.server.fastmcp
     # Deephaven integration
     "pydeephaven>=0.39",      # Deephaven Python API
+    "bitstring<5",            # pydeephaven (through 42.6) calls BitArray(int), which bitstring 5 removed; drop once pydeephaven fixes it
     "deephaven-server>=0.39", # Deephaven Community Core server for python-based session creation
     "pytz",                   # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
     "deephaven-coreplus-client",  # Client for Deephaven Enterprise (Core+) systems

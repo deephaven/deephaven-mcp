@@ -99,8 +99,9 @@ class EnterpriseClientTimeouts(StrictSchema):
 
     quick_operation_timeout_seconds: Annotated[float, Field(gt=0)] = 5.0
     """Timeout (seconds) for lightweight network round-trips that
-    must fail fast: ping, public-key upload/delete. Increase only if
-    routine network latency exceeds a few seconds."""
+    must fail fast: ping, public-key upload/delete, and a persistent-query
+    start/stop/restart request that does not wait for the outcome.
+    Increase only if routine network latency exceeds a few seconds."""
 
     subscribe_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
     """Timeout (seconds) for subscribing to controller state updates
@@ -133,10 +134,11 @@ class EnterpriseClientTimeouts(StrictSchema):
     for the PQ to reach a target running state."""
 
     pq_state_change_timeout_seconds: Annotated[int, Field(gt=0)] = 120
-    """Timeout (integer seconds) for waiting on a persistent query
-    to reach a target lifecycle state (e.g. RUNNING after start, or
-    STOPPED after stop). Whole-second resolution; sub-second timing
-    is not supported."""
+    """Timeout (integer seconds) for a start, stop, or restart that waits
+    for the outcome: sending the request plus waiting for the persistent
+    query to reach a target lifecycle state (e.g. RUNNING or FAILED after
+    start, or STOPPED after stop). Whole-second resolution; sub-second
+    timing is not supported."""
 
     web_client_data_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
     """Timeout (seconds) for the ``WebClientData`` table-factory widget to

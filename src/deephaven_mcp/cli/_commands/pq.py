@@ -12,6 +12,7 @@ from __future__ import annotations
 
 __all__ = ["pq"]
 
+import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -47,6 +48,7 @@ from deephaven_mcp.cli._help import (
     OutputSpec,
 )
 from deephaven_mcp.cli._runtime import Runtime
+from deephaven_mcp.config.schema import EnterpriseSettings
 
 _PQ_IDENTITY_FIELDS: tuple[OutputField, ...] = (
     OutputField("id", "string", "Fully qualified id 'enterprise:system:serial'."),
@@ -1172,11 +1174,14 @@ async def pq_delete(
 
 
 _WAIT_HELP = (
-    "Wait for the state change before returning (default), for the "
-    "operator-configured duration — enterprise.settings.timeouts.client."
-    "pq_state_change_timeout_seconds, itself 120 seconds unless set. "
-    "--no-wait submits the request and returns immediately, leaving the PQ "
-    "mid-transition."
+    "Wait (default) until each PQ settles: for start and restart, until it is "
+    "serving (RUNNING or EXECUTING) or the attempt has ended (FAILED, ERROR, "
+    "DISCONNECTED, or COMPLETED); for stop, until it is no longer running. "
+    "The wait lasts at most the operator-configured "
+    "enterprise.settings.timeouts.client.pq_state_change_timeout_seconds, "
+    "itself 120 seconds unless set, and the CLI extends its own request "
+    "timeout to cover it. --no-wait returns as soon as the controller accepts "
+    "the request, leaving the PQ mid-transition."
 )
 """Shared help for the lifecycle wait flag, whose duration is server-side."""
 
@@ -1189,15 +1194,56 @@ _TIMEOUT_SEMANTICS = (
 """Shared warning: a lifecycle timeout does not mean the operation stopped."""
 
 _READINESS_SEMANTICS = (
-    "Success is acceptance, not readiness: a per-item success means the "
-    "request was taken and the PQ was last seen in a non-failed state, not "
-    "that a worker is serving. Branch on results[].state_category — "
-    "'TRANSITIONAL' (state CONNECTING or INITIALIZING) is a normal outcome "
-    "with --no-wait or a short wait — and only once it is 'ACTIVE' does the "
-    "id work with the session, table, and catalog verbs. Confirm with 'dhcli "
-    "pq details'."
+    "Success is not readiness. With --wait, a per-item success means the "
+    "start settled, not that it worked: branch on results[].state_category — "
+    "'ACTIVE' means the id works with the session, table, and catalog verbs, "
+    "while 'TERMINAL' with state 'FAILED' means the PQ did not come up (read "
+    "'dhcli pq details' for why); state 'DISCONNECTED' also ends the wait but "
+    "reports 'TRANSITIONAL'. With --no-wait, success only means the "
+    "controller accepted the request, and 'TRANSITIONAL' (state CONNECTING or "
+    "INITIALIZING) is the normal outcome; follow it with 'dhcli pq details'."
 )
 """Shared warning for start/restart, whose success does not imply RUNNING."""
+
+
+def _lifecycle_request_timeout(
+    runtime: Runtime, *, id_count: int, wait: bool, max_concurrent: int | None
+) -> int:
+    """Return the MCP request timeout for a start, stop, or restart call.
+
+    The CLI's default request timeout plus the server's worst case: each
+    wave of up to ``max_concurrent`` ids may spend
+    ``pq_state_change_timeout_seconds`` when waiting (request plus wait),
+    or ``quick_operation_timeout_seconds`` (request only) when not. Both,
+    and the default concurrency, are read from the loaded
+    ``enterprise/settings.json``.
+
+    Args:
+        runtime (Runtime): The active CLI runtime.
+        id_count (int): Number of ids in the batch.
+        wait (bool): Whether the tool waits for each PQ to settle.
+        max_concurrent (int | None): The ``--max-concurrent`` value, or
+            ``None`` for the configured default.
+
+    Returns:
+        int: The request timeout in seconds.
+    """
+    enterprise = runtime.config.enterprise
+    settings = enterprise.settings if enterprise is not None else EnterpriseSettings()
+    timeouts = settings.timeouts.client
+    concurrency = (
+        max_concurrent
+        if max_concurrent is not None and max_concurrent > 0
+        else settings.pq_tools.default_max_concurrent
+    )
+    per_wave = (
+        timeouts.pq_state_change_timeout_seconds
+        if wait
+        else timeouts.quick_operation_timeout_seconds
+    )
+    return runtime.config.cli.request.timeouts.default_seconds + math.ceil(
+        math.ceil(id_count / concurrency) * per_wave
+    )
 
 
 def _lifecycle_command(
@@ -1300,7 +1346,16 @@ def _lifecycle_command(
         if max_concurrent is not None:
             arguments["max_concurrent"] = max_concurrent
         await call_and_echo(
-            runtime, tool, retry_command=f"dhcli pq {name}", arguments=arguments
+            runtime,
+            tool,
+            retry_command=f"dhcli pq {name}",
+            arguments=arguments,
+            request_timeout_seconds=_lifecycle_request_timeout(
+                runtime,
+                id_count=len(ids),
+                wait=wait,
+                max_concurrent=max_concurrent,
+            ),
         )
 
     return yes_option(_cmd) if disruptive else _cmd

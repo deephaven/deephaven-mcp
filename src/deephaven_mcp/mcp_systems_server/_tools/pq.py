@@ -2197,13 +2197,12 @@ async def _pq_start_single(
             return item_result
 
         # Start the PQ
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_start] Calling start_and_wait for PQ {pid} (wait={wait})"
-        )
-        await controller.start_and_wait(serial, wait=wait)
-        _LOGGER.debug(
-            f"[mcp_systems_server:pq_start] start_and_wait completed for PQ {pid}"
-        )
+        _LOGGER.debug(f"[mcp_systems_server:pq_start] Starting PQ {pid} (wait={wait})")
+        if wait:
+            await controller.restart_and_wait(serial)
+        else:
+            await controller.restart_query(serial)
+        _LOGGER.debug(f"[mcp_systems_server:pq_start] Start completed for PQ {pid}")
 
         # Get updated info
         pq_info = await controller.get(serial)
@@ -2237,7 +2236,8 @@ async def pq_start(
 ) -> dict:
     """MCP Tool: Start one or more persistent queries.
 
-    Starts one or more stopped or newly created PQs, waiting for them to transition to RUNNING state.
+    Starts one or more stopped or newly created PQs and, by default, waits for each
+    start to settle.
 
     **Batch Support**: This operation supports batch execution for efficiency.
     Pass a single id string or a list of id strings.
@@ -2249,12 +2249,19 @@ async def pq_start(
     **Important**: All ids must be from the same enterprise system - mixing systems returns error.
 
     **Critical for AI Agents**:
-    - When ``wait=True`` (default), the timeout duration is operator-controlled via
+    - ``wait=True`` (default) waits until the PQ is serving (RUNNING or EXECUTING) or the
+      start attempt has ended (FAILED, ERROR, DISCONNECTED, or COMPLETED). The wait is
+      operator-controlled via
       ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``.
+    - A start that ends in FAILED (e.g. a script error) is still success=True, with
+      state FAILED and state_category TERMINAL. Always branch on state_category and use
+      pq_details to read the failure. A start that ends in DISCONNECTED reports
+      state_category TRANSITIONAL even with ``wait=True``.
     - If the timeout is reached, the call returns failure BUT the PQ keeps starting in background.
     - After failures, use pq_details to check if PQs eventually reached RUNNING state.
     - Initialization time varies: simple sessions ~5-15s, large heap/complex scripts ~30-60s.
-    - Set ``wait=False`` to fire-and-forget (submit start request and return immediately).
+    - ``wait=False`` returns as soon as the controller accepts the start request, without
+      waiting for the PQ to come up.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2281,21 +2288,19 @@ async def pq_start(
       (session_details, session_tables_list, etc.)
     - Cannot start a PQ that is already RUNNING - will be marked as failed
     - Can start a STOPPED or FAILED PQ - this is a normal operation
-    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
-      success outcome when ``wait=False`` or when the operator-configured wait was short —
-      success=True means the start was accepted and the PQ was last seen in a non-failed
-      state, NOT that it is fully RUNNING; use pq_details to confirm RUNNING if needed.
+    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is the usual
+      success outcome when ``wait=False`` — success=True then means the controller accepted
+      the start, NOT that the PQ is RUNNING; use pq_details to follow it.
     - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
         id (str | list[str]): Fully qualified PQ id or list of ids in format 'enterprise:<system_name>:<serial>',
             as returned by pq_list
-        wait (bool): When True (default), wait for the PQ to reach RUNNING (or another
-                     terminal state) using the operator-configured wait duration
+        wait (bool): When True (default), wait until each PQ is serving or its start
+                     attempt has ended, for up to the operator-configured duration
                      (``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``).
-                     When False, fire-and-forget: submit the start request and return
-                     immediately without waiting.
+                     When False, return once the controller accepts the start request.
         max_concurrent (int): Maximum concurrent start operations (default: 20).
                               Must be a positive integer (> 0).
 
@@ -2351,9 +2356,9 @@ async def pq_start(
         system_name = setup.system_name
 
         # Process each PQ with controlled parallelism (best-effort)
-        # Note: Controller start_and_wait() only accepts single serial (no batch support)
-        # We process with parallel individual calls to provide granular per-item
-        # success/failure reporting for AI agents while maintaining performance
+        # Note: start and wait are per-serial, so each PQ is handled individually
+        # to provide granular per-item success/failure reporting for AI agents
+        # while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_start] Processing {len(parsed_pqs)} PQ(s) "
             f"with max_concurrent={validated_max_concurrent}, wait={wait}"
@@ -2430,7 +2435,7 @@ async def pq_stop(
 ) -> dict:
     """MCP Tool: Stop one or more running persistent queries.
 
-    Stops one or more running PQs, waiting for them to transition to STOPPED state.
+    Stops one or more running PQs and, by default, waits for each to stop.
 
     **Batch Support**: This operation supports batch execution for efficiency.
     Pass a single id string or a list of id strings.
@@ -2441,10 +2446,12 @@ async def pq_stop(
 
     **Important**: All ids must be from the same enterprise system - mixing systems returns error.
 
-    **Important**: When ``wait=True`` (default), the timeout duration is operator-controlled
-    via ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
+    **Important**: ``wait=True`` (default) waits until the PQ is no longer running
+    (STOPPED, or another terminal state), for up to the operator-controlled
+    ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
     the call returns failure BUT the PQ keeps stopping in background. Use pq_details to
-    check current state after failures. Set ``wait=False`` for fire-and-forget.
+    check current state after failures. ``wait=False`` returns as soon as the controller
+    accepts the stop request.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2475,11 +2482,10 @@ async def pq_stop(
         context (Context): MCP context object
         id (str | list[str]): Fully qualified PQ id or list of ids in format 'enterprise:<system_name>:<serial>',
             as returned by pq_list
-        wait (bool): When True (default), wait for the PQ to reach a terminal state using
-                     the operator-configured wait duration
+        wait (bool): When True (default), wait until each PQ is no longer running, for
+                     up to the operator-configured duration
                      (``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``).
-                     When False, fire-and-forget: submit the stop request and return
-                     immediately without waiting.
+                     When False, return once the controller accepts the stop request.
         max_concurrent (int): Maximum concurrent stop operations (default: 20).
                               Must be a positive integer (> 0).
 
@@ -2532,9 +2538,9 @@ async def pq_stop(
         validated_max_concurrent = setup.max_concurrent
 
         # Process each PQ with controlled parallelism (best-effort)
-        # Note: Controller stop_query() supports batch, but we process with parallel
-        # individual calls to provide granular per-item success/failure reporting
-        # for AI agents while maintaining performance
+        # Note: stop and wait are per-serial, so each PQ is handled individually
+        # to provide granular per-item success/failure reporting for AI agents
+        # while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_stop] Processing {len(parsed_pqs)} PQ(s) "
             f"with max_concurrent={validated_max_concurrent}, wait={wait}"
@@ -2556,11 +2562,14 @@ async def pq_stop(
             try:
                 # Stop the PQ
                 _LOGGER.debug(
-                    f"[mcp_systems_server:pq_stop] Calling stop_query for PQ {pid} (wait={wait})"
+                    f"[mcp_systems_server:pq_stop] Stopping PQ {pid} (wait={wait})"
                 )
-                await controller.stop_query([serial], wait=wait)
+                if wait:
+                    await controller.stop_and_wait(serial)
+                else:
+                    await controller.stop_query(serial)
                 _LOGGER.debug(
-                    f"[mcp_systems_server:pq_stop] stop_query completed for PQ {pid}"
+                    f"[mcp_systems_server:pq_stop] Stop completed for PQ {pid}"
                 )
 
                 # Get updated info
@@ -2667,10 +2676,13 @@ async def pq_restart(
 
     **Important**: All ids must be from the same enterprise system - mixing systems returns error.
 
-    **Important**: When ``wait=True`` (default), the timeout duration is operator-controlled
-    via ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
+    **Important**: ``wait=True`` (default) waits until the new run is serving (RUNNING or
+    EXECUTING) or has ended (FAILED, ERROR, DISCONNECTED, or COMPLETED), for up to the
+    operator-controlled
+    ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
     the call returns failure BUT the PQ keeps restarting in background. Use pq_details to
-    check current state after failures. Set ``wait=False`` for fire-and-forget.
+    check current state after failures. ``wait=False`` returns as soon as the controller
+    accepts the restart request.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2696,21 +2708,23 @@ async def pq_restart(
     - Works for stopped, failed, or completed PQs
     - Preserves PQ serial numbers and configurations
     - More efficient than deleting and recreating
-    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is a valid
-      success outcome when ``wait=False`` or when the operator-configured wait was short —
-      success=True means the restart was accepted and the PQ was last seen in a non-failed
-      state, NOT that it is fully RUNNING; use pq_details to confirm RUNNING if needed.
+    - A restart that ends in FAILED (e.g. a script error) is still success=True, with
+      state FAILED and state_category TERMINAL. Always branch on state_category and use
+      pq_details to read the failure. A restart that ends in DISCONNECTED reports
+      state_category TRANSITIONAL even with ``wait=True``.
+    - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is the usual
+      success outcome when ``wait=False`` — success=True then means the controller accepted
+      the restart, NOT that the PQ is RUNNING; use pq_details to follow it.
     - Branch on `state_category == "ACTIVE"` rather than `state == "RUNNING"`
 
     Args:
         context (Context): MCP context object
         id (str | list[str]): Fully qualified PQ id or list of ids in format 'enterprise:<system_name>:<serial>',
             as returned by pq_list
-        wait (bool): When True (default), wait for the PQ to reach RUNNING using the
-                     operator-configured wait duration
+        wait (bool): When True (default), wait until each PQ's new run is serving or has
+                     ended, for up to the operator-configured duration
                      (``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``).
-                     When False, fire-and-forget: submit the restart request and return
-                     immediately without waiting.
+                     When False, return once the controller accepts the restart request.
         max_concurrent (int): Maximum concurrent restart operations (default: 20).
                               Must be a positive integer (> 0).
 
@@ -2724,8 +2738,8 @@ async def pq_restart(
                     "serial": 12345,
                     "success": True,
                     "name": "analytics_worker",
-                    "state": "CONNECTING",          # may be RUNNING if fully started within timeout
-                    "state_category": "TRANSITIONAL",  # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
+                    "state": "RUNNING",             # e.g. CONNECTING when wait=False
+                    "state_category": "ACTIVE",      # ACTIVE | TRANSITIONAL | TERMINAL | INVALID
                     "error": None
                 },
                 {
@@ -2767,9 +2781,9 @@ async def pq_restart(
         validated_max_concurrent = setup.max_concurrent
 
         # Process each PQ with controlled parallelism (best-effort)
-        # Note: Controller restart_query() supports batch, but we process with parallel
-        # individual calls to provide granular per-item success/failure reporting
-        # for AI agents while maintaining performance
+        # Note: restart and wait are per-serial, so each PQ is handled individually
+        # to provide granular per-item success/failure reporting for AI agents
+        # while maintaining performance
         _LOGGER.info(
             f"[mcp_systems_server:pq_restart] Processing {len(parsed_pqs)} PQ(s) "
             f"with max_concurrent={validated_max_concurrent}, wait={wait}"
@@ -2792,11 +2806,14 @@ async def pq_restart(
             try:
                 # Restart the PQ (and wait if requested)
                 _LOGGER.debug(
-                    f"[mcp_systems_server:pq_restart] Calling restart_query for PQ {pid} (wait={wait})"
+                    f"[mcp_systems_server:pq_restart] Restarting PQ {pid} (wait={wait})"
                 )
-                await controller.restart_query([serial], wait=wait)
+                if wait:
+                    await controller.restart_and_wait(serial)
+                else:
+                    await controller.restart_query(serial)
                 _LOGGER.debug(
-                    f"[mcp_systems_server:pq_restart] restart_query completed for PQ {pid}"
+                    f"[mcp_systems_server:pq_restart] Restart completed for PQ {pid}"
                 )
 
                 # Get updated info

@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -49,13 +49,10 @@ def dummy_controller_client():
     client.map = MagicMock(return_value={})
     client.get = MagicMock(return_value="info")
     client.delete_query = MagicMock()
-    client.start_and_wait = MagicMock()
     client.stop_query = MagicMock()
     client.wait_for_change = MagicMock(return_value=None)
     client.restart_query = MagicMock()
-    client.start_and_wait = MagicMock()
     client.stop_query = MagicMock()
-    client.stop_and_wait = MagicMock()
     client.ping = MagicMock(return_value=True)
     client.wait_for_change = MagicMock()
     client.get_serial_for_name = MagicMock(return_value="serial")
@@ -987,59 +984,6 @@ async def test_restart_query_other_error(
 
 
 @pytest.mark.asyncio
-async def test_start_and_wait_success(
-    coreplus_controller_client, dummy_controller_client
-):
-    await coreplus_controller_client.start_and_wait("serial")
-    dummy_controller_client.start_and_wait.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_start_and_wait_connection_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.start_and_wait.side_effect = ConnectionError("fail")
-    with pytest.raises(DeephavenConnectionError):
-        await coreplus_controller_client.start_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_start_and_wait_timeout(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.start_and_wait.side_effect = TimeoutError("fail")
-    with pytest.raises(TimeoutError):
-        await coreplus_controller_client.start_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_start_and_wait_value_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.start_and_wait.side_effect = ValueError("fail")
-    with pytest.raises(ValueError):
-        await coreplus_controller_client.start_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_start_and_wait_key_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.start_and_wait.side_effect = KeyError("fail")
-    with pytest.raises(KeyError):
-        await coreplus_controller_client.start_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_start_and_wait_other_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.start_and_wait.side_effect = Exception("fail")
-    with pytest.raises(QueryError):
-        await coreplus_controller_client.start_and_wait("serial")
-
-
-@pytest.mark.asyncio
 async def test_stop_query_success(coreplus_controller_client, dummy_controller_client):
     await coreplus_controller_client.stop_query("serial")
     dummy_controller_client.stop_query.assert_called_once()
@@ -1079,59 +1023,6 @@ async def test_stop_query_other_error(
     dummy_controller_client.stop_query.side_effect = Exception("fail")
     with pytest.raises(QueryError):
         await coreplus_controller_client.stop_query("serial")
-
-
-@pytest.mark.asyncio
-async def test_stop_and_wait_success(
-    coreplus_controller_client, dummy_controller_client
-):
-    await coreplus_controller_client.stop_and_wait("serial")
-    dummy_controller_client.stop_and_wait.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_stop_and_wait_connection_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.stop_and_wait.side_effect = ConnectionError("fail")
-    with pytest.raises(DeephavenConnectionError):
-        await coreplus_controller_client.stop_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_stop_and_wait_timeout(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.stop_and_wait.side_effect = TimeoutError("fail")
-    with pytest.raises(TimeoutError):
-        await coreplus_controller_client.stop_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_stop_and_wait_value_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.stop_and_wait.side_effect = ValueError("fail")
-    with pytest.raises(ValueError):
-        await coreplus_controller_client.stop_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_stop_and_wait_key_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.stop_and_wait.side_effect = KeyError("fail")
-    with pytest.raises(KeyError):
-        await coreplus_controller_client.stop_and_wait("serial")
-
-
-@pytest.mark.asyncio
-async def test_stop_and_wait_other_error(
-    coreplus_controller_client, dummy_controller_client
-):
-    dummy_controller_client.stop_and_wait.side_effect = Exception("fail")
-    with pytest.raises(QueryError):
-        await coreplus_controller_client.stop_and_wait("serial")
 
 
 @pytest.mark.asyncio
@@ -1610,64 +1501,213 @@ async def test_wait_for_change_from_version_invalid_timeout(
 
 
 # ---------------------------------------------------------------------------
-# wait=True/False forwarding to upstream ControllerClient
+# State-change submit + settle wait
 # ---------------------------------------------------------------------------
-#
-# The PQ-state-change wrappers expose a ``wait: bool = True`` parameter.
-# When ``wait=True`` the wrapper passes its configured
-# ``pq_state_change_timeout_seconds`` to upstream; when ``wait=False`` it
-# passes ``0`` (upstream's fire-and-forget convention).
+
+
+def _fake_info(status, *, init=0, update=0):
+    """Build a CorePlusQueryInfo stand-in; ``status=None`` means no state."""
+    info = MagicMock()
+    if status is None:
+        info.state = None
+        return info
+    info.state.status.name = status
+    info.state.pb.initializationStartNanos = init
+    info.state.pb.lastUpdateNanos = update
+    return info
 
 
 @pytest.mark.asyncio
-async def test_start_and_wait_passes_configured_timeout_when_waiting(
-    coreplus_controller_client, dummy_controller_client
+@pytest.mark.parametrize("method", ["restart_query", "stop_query"])
+async def test_state_change_submit_uses_quick_timeout(
+    coreplus_controller_client, dummy_controller_client, method
 ):
-    await coreplus_controller_client.start_and_wait(42)
-    expected = coreplus_controller_client._timeouts.pq_state_change_timeout_seconds
-    dummy_controller_client.start_and_wait.assert_called_once_with(42, expected)
+    await getattr(coreplus_controller_client, method)(42)
+    expected = coreplus_controller_client._timeouts.quick_operation_timeout_seconds
+    getattr(dummy_controller_client, method).assert_called_once_with(42, expected)
+
+
+@pytest.mark.parametrize(
+    "before, seen, settles_at",
+    [
+        (None, [None, ("INITIALIZING", 0, 0), ("RUNNING", 0, 0)], 2),
+        (None, [("FAILED", 0, 0)], 0),
+        # A restart of a running query: teardown, startup, new run.
+        (
+            ("RUNNING", 1, 1),
+            [("RUNNING", 1, 1), ("STOPPING", 1, 2), ("ACQUIRING_WORKER", 1, 3)]
+            + [("RUNNING", 2, 4)],
+            3,
+        ),
+        # The previous run ends before its replacement starts.
+        (("RUNNING", 1, 1), [("FAILED", 1, 2), ("COMPLETED", 1, 3)], None),
+        (("RUNNING", 1, 1), [("STOPPING", 1, 2), ("COMPLETED", 1, 3)], None),
+        (("RUNNING", 1, 1), [("STOPPING", 1, 2), ("FAILED", 1, 3)], None),
+        (
+            ("RUNNING", 1, 1),
+            [("STOPPING", 1, 2), ("STOPPED", 1, 3), ("FAILED", 1, 4)],
+            2,
+        ),
+        (
+            ("RUNNING", 1, 1),
+            [("FAILED", 1, 2), ("ACQUIRING_WORKER", 1, 3), ("FAILED", 1, 4)],
+            2,
+        ),
+        # A run still starting up reports its own pre-init states.
+        (
+            ("ACQUIRING_WORKER", 1, 1),
+            [("ACQUIRING_WORKER", 1, 2), ("FAILED", 1, 3)],
+            None,
+        ),
+        (("ACQUIRING_WORKER", 1, 1), [("STOPPED", 1, 2), ("FAILED", 1, 3)], 1),
+        # A new initialization identifies the attempt whatever came before.
+        (("RUNNING", 1, 1), [("FAILED", 2, 2)], 0),
+        # Restarting a failed query: a failure before initialization still counts.
+        (("FAILED", 1, 1), [("FAILED", 1, 1), ("FAILED", 1, 2)], 1),
+        (("FAILED", 1, 1), [("STOPPED", 1, 2)], None),
+    ],
+)
+def test_start_watcher(controller_client_mod, before, seen, settles_at):
+    def info(spec):
+        if spec is None:
+            return _fake_info(None)
+        status, init, update = spec
+        return _fake_info(status, init=init, update=update)
+
+    watcher = controller_client_mod._StartWatcher(
+        None if before is None else info(before).state
+    )
+    settled = [i for i, spec in enumerate(seen) if watcher(info(spec))]
+    assert (settled[0] if settled else None) == settles_at
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        (None, True),
+        ("STOPPED", True),
+        ("FAILED", True),
+        ("RUNNING", False),
+        ("STOPPING", False),
+    ],
+)
+def test_stop_settled(controller_client_mod, status, expected):
+    assert controller_client_mod._stop_settled(_fake_info(status)) is expected
 
 
 @pytest.mark.asyncio
-async def test_start_and_wait_passes_zero_when_not_waiting(
-    coreplus_controller_client, dummy_controller_client
-):
-    await coreplus_controller_client.start_and_wait(42, wait=False)
-    dummy_controller_client.start_and_wait.assert_called_once_with(42, 0)
+async def test_wait_until_returns_once_settled(coreplus_controller_client):
+    running = _fake_info("RUNNING")
+    with (
+        patch.object(
+            coreplus_controller_client,
+            "map_and_version",
+            new=AsyncMock(
+                side_effect=[({42: _fake_info("INITIALIZING")}, 1), ({42: running}, 2)]
+            ),
+        ),
+        patch.object(
+            coreplus_controller_client,
+            "wait_for_change_from_version",
+            new=AsyncMock(return_value=True),
+        ) as wait,
+    ):
+        await coreplus_controller_client._wait_until(
+            42,
+            lambda info: info is running,
+            "finish starting",
+            asyncio.get_running_loop().time() + 60,
+        )
+    wait.assert_awaited_once()
+    assert wait.await_args.args[0] == 1
 
 
 @pytest.mark.asyncio
-async def test_stop_query_passes_configured_timeout_when_waiting(
-    coreplus_controller_client, dummy_controller_client
+@pytest.mark.parametrize(
+    "status, shown", [("INITIALIZING", "INITIALIZING"), (None, "UNKNOWN")]
+)
+async def test_wait_until_times_out_naming_last_state(
+    coreplus_controller_client, status, shown
 ):
-    await coreplus_controller_client.stop_query([42])
-    expected = coreplus_controller_client._timeouts.pq_state_change_timeout_seconds
-    dummy_controller_client.stop_query.assert_called_once_with([42], expected)
+    with patch.object(
+        coreplus_controller_client,
+        "map_and_version",
+        new=AsyncMock(return_value=({42: _fake_info(status)}, 1)),
+    ):
+        with pytest.raises(QueryError) as exc_info:
+            await coreplus_controller_client._wait_until(
+                42,
+                lambda _info: False,
+                "finish starting",
+                asyncio.get_running_loop().time(),
+            )
+    message = str(exc_info.value)
+    assert "Timed out" in message
+    assert f"last seen state: {shown}" in message
+    assert "pq_state_change_timeout_seconds" in message
 
 
 @pytest.mark.asyncio
-async def test_stop_query_passes_zero_when_not_waiting(
-    coreplus_controller_client, dummy_controller_client
-):
-    await coreplus_controller_client.stop_query([42], wait=False)
-    dummy_controller_client.stop_query.assert_called_once_with([42], 0)
+async def test_wait_until_query_deleted(coreplus_controller_client):
+    with patch.object(
+        coreplus_controller_client,
+        "map_and_version",
+        new=AsyncMock(return_value=({}, 1)),
+    ):
+        with pytest.raises(QueryError, match="was deleted"):
+            await coreplus_controller_client._wait_until(
+                42, lambda _info: True, "stop", asyncio.get_running_loop().time()
+            )
 
 
 @pytest.mark.asyncio
-async def test_stop_and_wait_passes_configured_timeout_when_waiting(
+async def test_restart_and_wait_ignores_the_previous_run(
     coreplus_controller_client, dummy_controller_client
 ):
-    await coreplus_controller_client.stop_and_wait(42)
-    expected = coreplus_controller_client._timeouts.pq_state_change_timeout_seconds
-    dummy_controller_client.stop_and_wait.assert_called_once_with(42, expected)
+    old_run = _fake_info("RUNNING", init=1)
+    new_run = _fake_info("RUNNING", init=2)
+    with (
+        patch.object(
+            coreplus_controller_client, "get", new=AsyncMock(return_value=old_run)
+        ),
+        patch.object(
+            coreplus_controller_client,
+            "map_and_version",
+            new=AsyncMock(side_effect=[({42: old_run}, 1), ({42: new_run}, 2)]),
+        ),
+        patch.object(
+            coreplus_controller_client,
+            "wait_for_change_from_version",
+            new=AsyncMock(return_value=True),
+        ) as wait,
+    ):
+        await coreplus_controller_client.restart_and_wait(42)
+    _assert_submitted_with_wait_budget(
+        coreplus_controller_client, dummy_controller_client.restart_query
+    )
+    wait.assert_awaited_once()
+
+
+def _assert_submitted_with_wait_budget(client, vendor_method):
+    """The waiting variants give the request the remaining wait budget."""
+    vendor_method.assert_called_once()
+    serial, timeout = vendor_method.call_args.args
+    assert serial == 42
+    budget = client._timeouts.pq_state_change_timeout_seconds
+    assert client._timeouts.quick_operation_timeout_seconds < timeout <= budget
 
 
 @pytest.mark.asyncio
-async def test_stop_and_wait_passes_zero_when_not_waiting(
-    coreplus_controller_client, dummy_controller_client
-):
-    await coreplus_controller_client.stop_and_wait(42, wait=False)
-    dummy_controller_client.stop_and_wait.assert_called_once_with(42, 0)
+async def test_stop_and_wait(coreplus_controller_client, dummy_controller_client):
+    with patch.object(
+        coreplus_controller_client,
+        "map_and_version",
+        new=AsyncMock(return_value=({42: _fake_info("STOPPED")}, 1)),
+    ):
+        await coreplus_controller_client.stop_and_wait(42)
+    _assert_submitted_with_wait_budget(
+        coreplus_controller_client, dummy_controller_client.stop_query
+    )
 
 
 # ===========================================================================
