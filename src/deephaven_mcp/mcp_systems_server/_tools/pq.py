@@ -2255,7 +2255,8 @@ async def pq_start(
       ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``.
     - A start that ends in FAILED (e.g. a script error) is still success=True, with
       state FAILED and state_category TERMINAL. Always branch on state_category and use
-      pq_details to read the failure.
+      pq_details to read the failure. A start that ends in DISCONNECTED reports
+      state_category TRANSITIONAL even with ``wait=True``.
     - If the timeout is reached, the call returns failure BUT the PQ keeps starting in background.
     - After failures, use pq_details to check if PQs eventually reached RUNNING state.
     - Initialization time varies: simple sessions ~5-15s, large heap/complex scripts ~30-60s.
@@ -2709,7 +2710,8 @@ async def pq_restart(
     - More efficient than deleting and recreating
     - A restart that ends in FAILED (e.g. a script error) is still success=True, with
       state FAILED and state_category TERMINAL. Always branch on state_category and use
-      pq_details to read the failure.
+      pq_details to read the failure. A restart that ends in DISCONNECTED reports
+      state_category TRANSITIONAL even with ``wait=True``.
     - state_category == "TRANSITIONAL" (e.g. state CONNECTING or INITIALIZING) is the usual
       success outcome when ``wait=False`` — success=True then means the controller accepted
       the restart, NOT that the PQ is RUNNING; use pq_details to follow it.

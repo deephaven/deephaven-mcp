@@ -711,16 +711,18 @@ None of these verbs report readiness on their own:
   failed to come up. Branch on each `results[].state_category`: only
   `ACTIVE` means the id is usable with the `session`, `table`, and
   `catalog` verbs; `TERMINAL` with state `FAILED` means it did not come up
-  (read `pq details` for why). With `--no-wait`, `TRANSITIONAL` (state
+  (read `pq details` for why). State `DISCONNECTED` also ends the wait but
+  reports `TRANSITIONAL`. With `--no-wait`, `TRANSITIONAL` (state
   `CONNECTING` or `INITIALIZING`) is the normal outcome.
 - A `--wait` that runs out is reported as a per-item failure even though
   the controller keeps going in the background. Treat a timeout as
   *unknown* rather than failed: re-read `pq details` instead of retrying
-  blindly. The wait duration is
+  blindly. With `--wait`, sending the request and waiting share
   `timeouts.client.pq_state_change_timeout_seconds` in
-  `enterprise/settings.json` (120 seconds unless set), the controller
-  request itself is bounded by `pq_management_timeout_seconds` there (60
-  seconds unless set), and `--max-concurrent` defaults to
+  `enterprise/settings.json` (120 seconds unless set); with `--no-wait`,
+  the request alone is bounded by `quick_operation_timeout_seconds` there
+  (5 seconds unless set), so a slow controller is a reason to use
+  `--wait`. `--max-concurrent` defaults to
   `pq_tools.default_max_concurrent` there (20 unless set). The CLI
   extends its request timeout for these three verbs to cover those
   durations, so `cli.request.timeouts.default_seconds` does not cut a

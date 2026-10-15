@@ -1457,12 +1457,11 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         submit: Callable[..., None],
         serials: Iterable[CorePlusQuerySerial] | CorePlusQuerySerial,
         target_description: str,
+        timeout_seconds: float,
     ) -> None:
         """Send a state-change request and return once the controller accepts it.
 
-        The request is bounded by
-        ``EnterpriseClientTimeouts.pq_management_timeout_seconds``. No query
-        state change is awaited.
+        No query state change is awaited.
 
         Args:
             operation (str): Name of the calling method, for the log prefix.
@@ -1473,6 +1472,8 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             target_description (str): Human-readable description of the
                 operation used in log and error messages (e.g.
                 ``"restart query(s)"``).
+            timeout_seconds (float): Deadline for the controller to accept
+                the request.
 
         Raises:
             DeephavenConnectionError: If the wrapped call raises
@@ -1483,7 +1484,6 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 including a gRPC ``DEADLINE_EXCEEDED`` when the controller
                 does not accept the request in time.
         """
-        timeout_seconds = self._timeouts.pq_management_timeout_seconds
         log_prefix = f"[CorePlusControllerClient:{operation}]"
         _LOGGER.debug(
             f"{log_prefix} Submitting {target_description} (timeout={timeout_seconds}s)"
@@ -1512,11 +1512,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         serial: CorePlusQuerySerial,
         settled: Callable[[CorePlusQueryInfo], bool],
         goal: str,
+        deadline: float,
     ) -> None:
-        """Wait until ``settled`` holds for the query's info.
-
-        The wait is bounded by
-        ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
+        """Wait until ``settled`` holds for the query's info, or ``deadline`` passes.
 
         Args:
             serial (CorePlusQuerySerial): The query to watch.
@@ -1524,6 +1522,8 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 the query has reached the awaited state.
             goal (str): What the query is awaited to do, for error messages
                 (e.g. ``"finish starting"``).
+            deadline (float): Event-loop time (``loop.time()``) at which to
+                give up.
 
         Raises:
             QueryError: If the wait times out (the message names the last
@@ -1534,7 +1534,6 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         """
         timeout_seconds = self._timeouts.pq_state_change_timeout_seconds
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_seconds
         while True:
             query_map, version = await self.map_and_version()
             info = query_map.get(serial)
@@ -1568,7 +1567,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         A running query is stopped and started again; a stopped, failed, or
         completed query is started. The query keeps its serial and
         configuration. Returns once the controller accepts the request,
-        bounded by ``EnterpriseClientTimeouts.pq_management_timeout_seconds``;
+        bounded by ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``;
         use :meth:`restart_and_wait` to also wait for the outcome.
 
         A successful call to authenticate should have happened before this call.
@@ -1592,19 +1591,23 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             self.wrapped.restart_query,
             serials,
             "restart query(s)",
+            self._timeouts.quick_operation_timeout_seconds,
         )
 
     async def restart_and_wait(self, serial: CorePlusQuerySerial) -> None:
         """Start or restart a query and wait for the outcome.
 
-        Submits the request as :meth:`restart_query` does, then waits until
-        the new run is serving (RUNNING or EXECUTING) or has ended (COMPLETED,
-        FAILED, ERROR, or DISCONNECTED). The state the query was in when the
-        request was issued is never taken for the outcome. The wait is bounded
-        by ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
+        Sends the request, then waits until the new run is serving (RUNNING
+        or EXECUTING) or has ended (COMPLETED, FAILED, ERROR, or
+        DISCONNECTED). The state the query was in when the request was issued
+        is never taken for the outcome. Sending the request and waiting share
+        one budget, ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
 
         Reaching an ended state is not an error; inspect the query's state
-        afterwards to tell a serving query from a failed one.
+        afterwards to tell a serving query from a failed one. If the previous
+        run was live and the new attempt fails before initializing without any
+        intermediate state being observed, the wait times out rather than
+        report an outcome that may belong to the previous run.
 
         Args:
             serial (CorePlusQuerySerial): The query to start or restart.
@@ -1617,8 +1620,18 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 wait times out (the controller keeps going in the background).
         """
         before = (await self.get(serial)).state
-        await self.restart_query(serial)
-        await self._wait_until(serial, _StartWatcher(before), "finish starting")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._timeouts.pq_state_change_timeout_seconds
+        await self._submit_state_change(
+            "restart_and_wait",
+            self.wrapped.restart_query,
+            serial,
+            f"restart query {serial}",
+            deadline - loop.time(),
+        )
+        await self._wait_until(
+            serial, _StartWatcher(before), "finish starting", deadline
+        )
 
     async def stop_query(
         self,
@@ -1629,7 +1642,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         Stopping is graceful: the worker is terminated and its resources
         released, but the query definition remains and can be started again.
         Returns once the controller accepts the request, bounded by
-        ``EnterpriseClientTimeouts.pq_management_timeout_seconds``; use
+        ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``; use
         :meth:`stop_and_wait` to also wait for the query to stop.
 
         A successful call to authenticate should have happened before this call.
@@ -1653,14 +1666,15 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             self.wrapped.stop_query,
             serials,
             "stop query(s)",
+            self._timeouts.quick_operation_timeout_seconds,
         )
 
     async def stop_and_wait(self, serial: CorePlusQuerySerial) -> None:
         """Stop a query and wait for it to stop.
 
-        Submits the request as :meth:`stop_query` does, then waits until the
-        query is no longer running (STOPPED, or another ended or uninitialized
-        state). The wait is bounded by
+        Sends the request, then waits until the query is no longer running
+        (STOPPED, or another ended or uninitialized state). Sending the request
+        and waiting share one budget,
         ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
 
         Args:
@@ -1673,5 +1687,13 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             QueryError: If the request fails, the query disappears, or the wait
                 times out (the controller keeps going in the background).
         """
-        await self.stop_query(serial)
-        await self._wait_until(serial, _stop_settled, "stop")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._timeouts.pq_state_change_timeout_seconds
+        await self._submit_state_change(
+            "stop_and_wait",
+            self.wrapped.stop_query,
+            serial,
+            f"stop query {serial}",
+            deadline - loop.time(),
+        )
+        await self._wait_until(serial, _stop_settled, "stop", deadline)

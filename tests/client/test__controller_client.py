@@ -1519,11 +1519,11 @@ def _fake_info(status, *, init=0, update=0):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["restart_query", "stop_query"])
-async def test_state_change_submit_uses_management_timeout(
+async def test_state_change_submit_uses_quick_timeout(
     coreplus_controller_client, dummy_controller_client, method
 ):
     await getattr(coreplus_controller_client, method)(42)
-    expected = coreplus_controller_client._timeouts.pq_management_timeout_seconds
+    expected = coreplus_controller_client._timeouts.quick_operation_timeout_seconds
     getattr(dummy_controller_client, method).assert_called_once_with(42, expected)
 
 
@@ -1613,7 +1613,10 @@ async def test_wait_until_returns_once_settled(coreplus_controller_client):
         ) as wait,
     ):
         await coreplus_controller_client._wait_until(
-            42, lambda info: info is running, "finish starting"
+            42,
+            lambda info: info is running,
+            "finish starting",
+            asyncio.get_running_loop().time() + 60,
         )
     wait.assert_awaited_once()
     assert wait.await_args.args[0] == 1
@@ -1626,12 +1629,6 @@ async def test_wait_until_returns_once_settled(coreplus_controller_client):
 async def test_wait_until_times_out_naming_last_state(
     coreplus_controller_client, status, shown
 ):
-    # model_copy skips validation, so a zero wait expires on the first check.
-    coreplus_controller_client._timeouts = (
-        coreplus_controller_client._timeouts.model_copy(
-            update={"pq_state_change_timeout_seconds": 0}
-        )
-    )
     with patch.object(
         coreplus_controller_client,
         "map_and_version",
@@ -1639,7 +1636,10 @@ async def test_wait_until_times_out_naming_last_state(
     ):
         with pytest.raises(QueryError) as exc_info:
             await coreplus_controller_client._wait_until(
-                42, lambda _info: False, "finish starting"
+                42,
+                lambda _info: False,
+                "finish starting",
+                asyncio.get_running_loop().time(),
             )
     message = str(exc_info.value)
     assert "Timed out" in message
@@ -1655,7 +1655,9 @@ async def test_wait_until_query_deleted(coreplus_controller_client):
         new=AsyncMock(return_value=({}, 1)),
     ):
         with pytest.raises(QueryError, match="was deleted"):
-            await coreplus_controller_client._wait_until(42, lambda _info: True, "stop")
+            await coreplus_controller_client._wait_until(
+                42, lambda _info: True, "stop", asyncio.get_running_loop().time()
+            )
 
 
 @pytest.mark.asyncio
@@ -1680,8 +1682,19 @@ async def test_restart_and_wait_ignores_the_previous_run(
         ) as wait,
     ):
         await coreplus_controller_client.restart_and_wait(42)
-    dummy_controller_client.restart_query.assert_called_once()
+    _assert_submitted_with_wait_budget(
+        coreplus_controller_client, dummy_controller_client.restart_query
+    )
     wait.assert_awaited_once()
+
+
+def _assert_submitted_with_wait_budget(client, vendor_method):
+    """The waiting variants give the request the remaining wait budget."""
+    vendor_method.assert_called_once()
+    serial, timeout = vendor_method.call_args.args
+    assert serial == 42
+    budget = client._timeouts.pq_state_change_timeout_seconds
+    assert client._timeouts.quick_operation_timeout_seconds < timeout <= budget
 
 
 @pytest.mark.asyncio
@@ -1692,7 +1705,9 @@ async def test_stop_and_wait(coreplus_controller_client, dummy_controller_client
         new=AsyncMock(return_value=({42: _fake_info("STOPPED")}, 1)),
     ):
         await coreplus_controller_client.stop_and_wait(42)
-    dummy_controller_client.stop_query.assert_called_once()
+    _assert_submitted_with_wait_budget(
+        coreplus_controller_client, dummy_controller_client.stop_query
+    )
 
 
 # ===========================================================================

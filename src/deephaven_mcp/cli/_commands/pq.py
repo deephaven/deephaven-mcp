@@ -1198,7 +1198,8 @@ _READINESS_SEMANTICS = (
     "start settled, not that it worked: branch on results[].state_category — "
     "'ACTIVE' means the id works with the session, table, and catalog verbs, "
     "while 'TERMINAL' with state 'FAILED' means the PQ did not come up (read "
-    "'dhcli pq details' for why). With --no-wait, success only means the "
+    "'dhcli pq details' for why); state 'DISCONNECTED' also ends the wait but "
+    "reports 'TRANSITIONAL'. With --no-wait, success only means the "
     "controller accepted the request, and 'TRANSITIONAL' (state CONNECTING or "
     "INITIALIZING) is the normal outcome; follow it with 'dhcli pq details'."
 )
@@ -1211,10 +1212,11 @@ def _lifecycle_request_timeout(
     """Return the MCP request timeout for a start, stop, or restart call.
 
     The CLI's default request timeout plus the server's worst case: each
-    wave of up to ``max_concurrent`` ids may spend the controller request
-    deadline (``pq_management_timeout_seconds``) and, when waiting, the
-    state wait (``pq_state_change_timeout_seconds``). Both, and the default
-    concurrency, are read from the loaded ``enterprise/settings.json``.
+    wave of up to ``max_concurrent`` ids may spend
+    ``pq_state_change_timeout_seconds`` when waiting (request plus wait),
+    or ``quick_operation_timeout_seconds`` (request only) when not. Both,
+    and the default concurrency, are read from the loaded
+    ``enterprise/settings.json``.
 
     Args:
         runtime (Runtime): The active CLI runtime.
@@ -1234,8 +1236,10 @@ def _lifecycle_request_timeout(
         if max_concurrent is not None and max_concurrent > 0
         else settings.pq_tools.default_max_concurrent
     )
-    per_wave = timeouts.pq_management_timeout_seconds + (
-        timeouts.pq_state_change_timeout_seconds if wait else 0
+    per_wave = (
+        timeouts.pq_state_change_timeout_seconds
+        if wait
+        else timeouts.quick_operation_timeout_seconds
     )
     return runtime.config.cli.request.timeouts.default_seconds + math.ceil(
         math.ceil(id_count / concurrency) * per_wave

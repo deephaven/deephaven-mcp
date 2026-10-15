@@ -412,12 +412,12 @@ Java API requires it. Every field must be greater than zero except
 | `pq_connection_timeout_seconds`                   | float | `60.0`  | Client-to-worker session handshake against a running persistent query                                  |
 | `auth_timeout_seconds`                            | float | `60.0`  | Non-SAML authentication: password, private key, service token                                          |
 | `saml_auth_timeout_seconds`                       | float | `120.0` | SAML authentication, including the browser redirect                                                    |
-| `quick_operation_timeout_seconds`                 | float | `5.0`   | Fast round-trips: ping, public-key upload/delete, and cached `WebClientData` session liveness/close     |
+| `quick_operation_timeout_seconds`                 | float | `5.0`   | Fast round-trips: ping, public-key upload/delete, cached `WebClientData` session liveness/close, and a PQ start/stop/restart request with `wait=False` |
 | `subscribe_timeout_seconds`                       | float | `30.0`  | Initial snapshot of a controller state subscription                                                    |
 | `controller_resubscribe_backoff_initial_seconds`  | float | `30.0`  | First delay before the healer recreates a wedged controller subscription; doubles after each attempt   |
 | `controller_resubscribe_backoff_max_seconds`      | float | `300.0` | Ceiling for that backoff delay during a prolonged controller outage                                    |
-| `pq_management_timeout_seconds`                   | float | `60.0`  | Persistent-query management RPCs: add, delete, modify, and the start/stop/restart request             |
-| `pq_state_change_timeout_seconds`                 | int   | `120`   | Waiting for a persistent query to settle after a start, stop, or restart is accepted                  |
+| `pq_management_timeout_seconds`                   | float | `60.0`  | Persistent-query management RPCs: add, delete, modify                                                  |
+| `pq_state_change_timeout_seconds`                 | int   | `120`   | A PQ start/stop/restart with `wait=True`: sending the request plus waiting for the PQ to settle        |
 | `web_client_data_timeout_seconds`                 | float | `30.0`  | One `WebClientData` widget round-trip (backs the catalog listing tools)                                |
 | `no_wait_seconds`                                 | float | `0.0`   | Wait window for controller subscription-map lookups                                                    |
 
