@@ -11,7 +11,10 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 import pytest
 
 from deephaven_mcp import config
-from deephaven_mcp._exceptions import RegistryItemNotFoundError
+from deephaven_mcp._exceptions import (
+    BlockingDeadlineExceeded,
+    RegistryItemNotFoundError,
+)
 from deephaven_mcp.mcp_systems_server._tools.script import (
     session_pip_list,
     session_script_run,
@@ -275,7 +278,9 @@ def test_run_script_reads_script_from_file():
             )
         )
         assert result["success"] is True
-        mock_session.run_script.assert_called_once_with(file_content)
+        mock_session.run_script.assert_called_once_with(
+            file_content, timeout_seconds=None
+        )
 
 
 @pytest.mark.asyncio
@@ -312,7 +317,7 @@ async def test_session_script_run_both_script_and_path():
     )
     assert result["success"] is True
     assert session.run_script.call_count >= 1
-    session.run_script.assert_any_call("print('hi')")
+    session.run_script.assert_any_call("print('hi')", timeout_seconds=None)
 
 
 @pytest.mark.asyncio
@@ -377,7 +382,7 @@ async def test_session_script_run_success():
         called = None
 
         @staticmethod
-        async def run_script(script):
+        async def run_script(script, timeout_seconds=None):
             DummySession.called = script
             return None
 
@@ -518,7 +523,7 @@ async def test_session_script_run_script_path():
         called = None
 
         @staticmethod
-        async def run_script(script):
+        async def run_script(script, timeout_seconds=None):
             DummySession.called = script
             return None
 
@@ -578,6 +583,45 @@ async def test_session_script_run_script_path_none_error():
 
     # Verify the session registry was NOT called (validation fails before that)
     session_registry.get.assert_not_awaited()
+
+
+def _context_for(session) -> MockContext:
+    manager = MagicMock()
+    manager.get = AsyncMock(return_value=session)
+    registry = MagicMock()
+    registry.get = AsyncMock(return_value=manager)
+    return MockContext({"config_manager": MagicMock(), "registry": registry})
+
+
+@pytest.mark.asyncio
+async def test_session_script_run_forwards_timeout():
+    session = MagicMock()
+    session.run_script = AsyncMock(return_value=None)
+    res = await session_script_run(
+        _context_for(session),
+        id="community:community:worker",
+        script="print(1)",
+        timeout_seconds=2.5,
+    )
+    assert res == {"success": True, "id": "community:community:worker"}
+    session.run_script.assert_awaited_once_with("print(1)", timeout_seconds=2.5)
+
+
+@pytest.mark.asyncio
+async def test_session_script_run_timeout_says_the_script_is_still_running():
+    session = MagicMock()
+    session.run_script = AsyncMock(side_effect=BlockingDeadlineExceeded("late"))
+    res = await session_script_run(
+        _context_for(session),
+        id="community:community:worker",
+        script="slow()",
+        timeout_seconds=30.0,
+    )
+    assert res["success"] is False
+    assert res["isError"] is True
+    assert "did not finish within 30s" in res["error"]
+    assert "still running on the server" in res["error"]
+    assert "cannot cancel" in res["error"]
 
 
 @pytest.mark.asyncio

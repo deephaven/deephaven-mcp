@@ -14,6 +14,7 @@ from __future__ import annotations
 
 __all__ = ["session"]
 
+import math
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, assert_never, cast
@@ -931,6 +932,10 @@ _OUTPUT_EXEC = OutputSpec(
             "The file is read by the CLI itself, so a relative path resolves "
             "against your working directory; an unreadable file exits 2. "
             "Supplying no source or several exits 2; a script error exits 3. "
+            "--script-timeout stops waiting after that many seconds and exits 3, "
+            "but the script keeps running in the session: Deephaven cannot "
+            "cancel a running script, and later scripts in that session may "
+            "wait behind it. "
             "The script runs with the session's full privileges and its "
             "effects persist there, so run scripts in a session you created "
             "or were pointed at. " + CONTEXT_RISK_DESTRUCTIVE
@@ -947,6 +952,8 @@ _OUTPUT_EXEC = OutputSpec(
         examples=(
             "$ dhcli session exec community:community:dev --script 'print(1+1)'",
             "$ dhcli session exec community:community:dev --script-path /tmp/job.py",
+            "$ dhcli session exec community:community:dev --script-path /tmp/job.py "
+            "--script-timeout 30",
             "$ cat job.py | dhcli session exec community:community:dev --script-path -",
             "$ dhcli session exec community:community:dev --script "
             "'t = empty_table(5)' && dhcli table list community:community:dev | jq .",
@@ -987,6 +994,18 @@ _OUTPUT_EXEC = OutputSpec(
         "'-' to read the script from stdin. Mutually exclusive with --script."
     ),
 )
+@click.option(
+    "--script-timeout",
+    "timeout_seconds",
+    type=click.FloatRange(min=0, min_open=True),
+    default=None,
+    help=(
+        "Seconds to wait for the script to finish (must be > 0). On expiry "
+        "the command exits 3 and the script keeps running in the session. "
+        "Unset waits indefinitely. The request timeout (--timeout) is "
+        "extended by this amount for this call."
+    ),
+)
 @yes_option
 @click.pass_obj
 @run_async
@@ -995,6 +1014,7 @@ async def session_exec(
     id: str | None,
     script: str | None,
     script_path: str | None,
+    timeout_seconds: float | None,
     yes: bool,
 ) -> None:
     """Run a script in a session."""
@@ -1018,11 +1038,19 @@ async def session_exec(
     if script_path is not None:
         script = read_local_script(script_path)
     arguments: dict[str, Any] = {"id": id, "script": script}
+    request_timeout_seconds: int | None = None
+    if timeout_seconds is not None:
+        arguments["timeout_seconds"] = timeout_seconds
+        request_timeout_seconds = (
+            runtime.config.cli.request.timeouts.default_seconds
+            + (math.ceil(timeout_seconds))
+        )
     await call_and_echo(
         runtime,
         "session_script_run",
         retry_command="dhcli session exec",
         arguments=arguments,
+        request_timeout_seconds=request_timeout_seconds,
     )
 
 

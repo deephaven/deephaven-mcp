@@ -1000,6 +1000,42 @@ async def test_run_script_other_error(core_session):
         await core_session.run_script("print('hi')")
 
 
+@pytest.mark.asyncio
+async def test_run_script_with_timeout_runs_off_the_shared_executor(core_session):
+    core_session.wrapped.run_script = MagicMock()
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        await core_session.run_script("print('hi')", True, timeout_seconds=5.0)
+        runner.call_args[0][0]()
+    core_session.wrapped.run_script.assert_called_once_with("print('hi')", True)
+    assert runner.call_args[0][2] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_run_script_timeout_propagates_rather_than_becoming_query_error(
+    core_session,
+):
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = BlockingDeadlineExceeded
+        with pytest.raises(BlockingDeadlineExceeded):
+            await core_session.run_script("print('hi')", timeout_seconds=0.01)
+
+
+@pytest.mark.asyncio
+async def test_run_script_with_timeout_vendor_error_becomes_query_error(
+    core_session,
+):
+    with patch(
+        "deephaven_mcp.client._session.run_blocking", new_callable=AsyncMock
+    ) as runner:
+        runner.side_effect = Exception("bad script")
+        with pytest.raises(QueryError, match="bad script"):
+            await core_session.run_script("print('hi')", timeout_seconds=5.0)
+
+
 # --- Programming Language Property Tests ---
 
 

@@ -463,7 +463,7 @@ the right backend by the id's prefix; `create` chooses the backend from
 | `show [ID]`                   | Shows one session's detail object. `--connect` actively verifies liveness. Wraps `session_details`. |
 | `create [NAME] --system SYS`  | Creates a session. `--system community` (default) → local Community worker (`NAME` required); any other system → an Enterprise worker on that named system, `NAME` optional/auto-generated (discover system names with `system list`). Wraps `session_community_create` / `session_enterprise_create`. |
 | `delete [ID]`                 | Deletes a session, routing by the id prefix. Only a session `create` made (`origin: dynamic`) is eligible; others exit `3`. `--yes` skips the context confirmation. Wraps `session_community_delete` / `session_enterprise_delete`. |
-| `exec [ID]`                   | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. `--yes` skips the context confirmation. Wraps `session_script_run`. |
+| `exec [ID]`                   | Runs a script in the session via `--script TEXT`, `--script-path PATH` (read by the CLI), or `--script-path -` (stdin); supply exactly one. `--script-timeout SECONDS` bounds the wait. `--yes` skips the context confirmation. Wraps `session_script_run`. |
 | `pip-list [ID]`               | Lists the session's installed pip packages as a `{package, version}` array. Wraps `session_pip_list`. |
 | `credentials [ID]`            | Prints a Community session's browser-login credentials (`id`, `auth_type`, `auth_token`, `connection_url`, `connection_url_with_auth`). Wraps `session_community_credentials`. |
 | `url [ID]`                    | Prints only the authenticated browser URL (`connection_url_with_auth`) — pipe-friendly. |
@@ -498,6 +498,15 @@ against your working directory; an unreadable file exits `2`
 (`missing_argument` / `mutually_exclusive_options`); a script error
 exits `3`.
 
+`exec --script-timeout SECONDS` (must be > 0; unset waits indefinitely)
+stops waiting after that many seconds and exits `3`. The script is
+**not** stopped: Deephaven cannot cancel a running script, so it keeps
+running in the session until it finishes or the session's worker is
+shut down, and later scripts in that session may wait behind it. The
+request timeout (`--timeout` / `cli.request.timeouts.default_seconds`)
+is extended by the script timeout for that call, so the script timeout
+fires first.
+
 `credentials`, `url`, and `open` are Community-only and share the
 `session_community_credentials` tool, whose output contains a
 **plaintext auth token by design**. Retrieval is gated by
@@ -521,6 +530,7 @@ dhcli session list --type community
 dhcli session create dev --launch-method python --env LOG_LEVEL=DEBUG
 dhcli session create rpt --system prod --engine DeephavenEnterprise
 dhcli session exec community:community:dev --script 'print(1)'
+dhcli session exec community:community:dev --script-path job.py --script-timeout 30
 cat job.py | dhcli session exec community:community:dev --script-path -
 dhcli session pip-list community:community:dev
 dhcli session delete community:community:dev
