@@ -118,6 +118,31 @@ async def test_call_tool_success(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_call_tool_request_timeout_defaults_to_config(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    fake = _fake_client(CallToolResult(content=[]))
+    with patch.object(
+        _wrapping.McpClient, "for_daemon", return_value=fake
+    ) as for_daemon:
+        await call_tool(make_entry(), rt, "list_systems", {})
+    assert (
+        for_daemon.call_args.kwargs["request_timeout_seconds"]
+        == rt.config.cli.request.timeouts.default_seconds
+    )
+
+
+@pytest.mark.asyncio
+async def test_call_tool_request_timeout_override(tmp_path: Path) -> None:
+    rt = make_runtime(tmp_path)
+    fake = _fake_client(CallToolResult(content=[]))
+    with patch.object(
+        _wrapping.McpClient, "for_daemon", return_value=fake
+    ) as for_daemon:
+        await call_tool(make_entry(), rt, "list_systems", {}, request_timeout_seconds=7)
+    assert for_daemon.call_args.kwargs["request_timeout_seconds"] == 7
+
+
+@pytest.mark.asyncio
 async def test_call_tool_transport_error_maps_to_mcp_request_failed(
     tmp_path: Path,
 ) -> None:
