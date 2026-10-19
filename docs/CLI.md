@@ -498,14 +498,16 @@ against your working directory; an unreadable file exits `2`
 (`missing_argument` / `mutually_exclusive_options`); a script error
 exits `3`.
 
-`exec --script-timeout SECONDS` (must be > 0; unset waits indefinitely)
-stops waiting after that many seconds and exits `3`. The script is
+`exec --script-timeout SECONDS` (must be > 0) stops waiting after that
+many seconds and exits `3`. The script is
 **not** stopped: Deephaven cannot cancel a running script, so it keeps
 running in the session until it finishes or the session's worker is
-shut down, and later scripts in that session may wait behind it. The
-request timeout (`--timeout` / `cli.request.timeouts.default_seconds`)
-is extended by the script timeout for that call, so the script timeout
-fires first.
+shut down, and later scripts in that session may wait behind it. Without
+`--script-timeout`, only the request timeout (`--timeout` /
+`cli.request.timeouts.default_seconds`) bounds the call, and its expiry
+exits `2` (`mcp_request_timeout`) with the script likewise still
+running. With it, the request timeout is extended by the script timeout
+for that call, so the script timeout fires first.
 
 `credentials`, `url`, and `open` are Community-only and share the
 `session_community_credentials` tool, whose output contains a

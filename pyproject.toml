@@ -32,6 +32,7 @@ dependencies = [
     "pydeephaven>=0.39",      # Deephaven Python API
     "deephaven-server>=0.39", # Deephaven Community Core server for python-based session creation
     "pytz",                   # Required by deephaven-server <41.1 (missing from its dependencies) - https://deephaven.atlassian.net/browse/DOC-1132
+    "bitstring<5",            # pydeephaven <42.7 (pinned to 42.5 by deephaven-coreplus-client) calls BitArray(int), removed in bitstring 5
     "deephaven-coreplus-client",  # Client for Deephaven Enterprise (Core+) systems
     "numba>=0.63.1",          # Force Python 3.12+ compatible numba (see https://github.com/deephaven/deephaven-mcp/issues/145)
     # Docs/LLM and web server dependencies

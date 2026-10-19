@@ -1002,8 +1002,9 @@ _OUTPUT_EXEC = OutputSpec(
     help=(
         "Seconds to wait for the script to finish (must be > 0). On expiry "
         "the command exits 3 and the script keeps running in the session. "
-        "Unset waits indefinitely. The request timeout (--timeout) is "
-        "extended by this amount for this call."
+        "Unset, only the request timeout (--timeout) bounds the call, and "
+        "its expiry exits 2 with mcp_request_timeout. When set, the request "
+        "timeout is extended by this amount for this call."
     ),
 )
 @yes_option
