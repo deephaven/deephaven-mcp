@@ -8,7 +8,12 @@ import type { CommunityMethod } from "./community.ts";
 import { keyPairOf } from "./flows.ts";
 import { type KeyPair, readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
-import { candidates, type ResolvedServer, resolveServer } from "./resolve.ts";
+import {
+  candidates,
+  type ResolvedServer,
+  resolveServer,
+  withPort,
+} from "./resolve.ts";
 import {
   connectServer,
   disconnectServer,
@@ -114,16 +119,20 @@ export async function trustAndResolveServer(
   caCert: string | undefined,
   rerun: string[],
 ): Promise<ResolvedServer> {
-  const knownOrigin = candidates(input)
-    .map((u) => u.origin)
-    .find((o) => o in servers);
+  // A saved origin is exact; anything else expands in discovery order.
+  const exact = input in servers;
+  const knownOrigin = exact
+    ? input
+    : candidates(input)
+        .map((u) => u.origin)
+        .find((o) => o in servers);
   const known = knownOrigin ? servers[knownOrigin] : undefined;
   await ensureCa(caCert ?? known?.caCert, rerun);
   // A new CA is checked by probing.
   if (knownOrigin && known && !caCert) {
     return { origin: knownOrigin, kind: known.kind };
   }
-  const found = await resolveServer(input);
+  const found = await resolveServer(exact ? withPort(input) : input);
   note(`✔ ${found.origin} (${KIND_LABEL[found.kind]})`);
   return found;
 }

@@ -18,6 +18,17 @@ export function isLocal(url: URL): boolean {
   return LOCAL_HOSTS.has(url.hostname);
 }
 
+const DEFAULT_PORTS: Record<string, string> = {
+  "https:": "443",
+  "http:": "80",
+};
+
+/** `origin` with its port spelled out, so {@link candidates} tries only it. */
+export function withPort(origin: string): string {
+  const url = new URL(origin);
+  return `${url.protocol}//${url.hostname}:${url.port || DEFAULT_PORTS[url.protocol]}`;
+}
+
 /** Origins to probe for `input`, in preference order. */
 export function candidates(input: string): URL[] {
   const text = input.trim();

@@ -95,6 +95,8 @@ export interface OrphanKey {
   user: string;
   keyType: string;
   publicKey: string;
+  /** Set while a sign-in is still authorizing the key; it's left alone until then. */
+  pendingUntil?: string;
 }
 
 /** Both files, as read or about to be written. */
@@ -128,7 +130,17 @@ export function emptyState(): State {
 
 /** `config.json` and `credentials.json` in `dir`, always read and written together. */
 export class Store {
-  constructor(readonly dir: string = configDir()) {}
+  #dir: string | undefined;
+
+  /** `dir` defaults to {@link configDir}, found on first use so env-only sign-in needs no home directory. */
+  constructor(dir?: string) {
+    this.#dir = dir;
+  }
+
+  get dir(): string {
+    this.#dir ??= configDir();
+    return this.#dir;
+  }
 
   get configPath(): string {
     return join(this.dir, "config.json");

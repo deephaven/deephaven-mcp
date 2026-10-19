@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { saveProfile } from "../../src/auth/flows.ts";
+import { addOrphan, revokeOrphans, saveProfile } from "../../src/auth/flows.ts";
 import { Store } from "../../src/auth/store.ts";
 import { run, tempDir, WINDOWS } from "../helpers.ts";
 
@@ -167,6 +167,56 @@ test("store: a leftover lock file doesn't block; only a live holder does", async
   await store.update(() => {});
   expect(Date.now() - waited).toBeGreaterThan(500);
   await holder.exited;
+});
+
+test("saveProfile: saving a new key drops its pending record; sign-ins skip pending ones", async () => {
+  const store = await tempStore();
+  const key = (publicKey: string) => ({
+    type: "keyPair" as const,
+    keyType: "ec",
+    publicKey,
+    privateKey: "PRIV",
+    generated: true,
+  });
+  const later = new Date(Date.now() + 60_000).toISOString();
+  await store.update(({ credentials }) => {
+    addOrphan(credentials, "https://dhe", "alice", key("NEW"), later);
+    addOrphan(credentials, "https://dhe", "alice", key("OTHER"), later);
+  });
+  // Another sign-in's key is still being authorized, so nothing is touched.
+  const session = { origin: "https://dhe", user: "alice", enterprise: {} };
+  expect(await revokeOrphans(store, session as never)).toEqual({
+    deleted: 0,
+    kept: 0,
+    failed: undefined,
+  });
+  await saveProfile(store, {
+    origin: "https://dhe",
+    kind: "enterprise",
+    user: "alice",
+    method: "password",
+    credential: key("NEW"),
+  });
+  const { credentials } = await store.read();
+  expect(credentials.orphans?.map((o) => o.publicKey)).toEqual(["OTHER"]);
+});
+
+test("store: the config directory is found on first use, not on construction", () => {
+  const saved = {
+    HOME: process.env.HOME,
+    DH_CONFIG_DIR: process.env.DH_CONFIG_DIR,
+  };
+  try {
+    delete process.env.HOME;
+    delete process.env.DH_CONFIG_DIR;
+    const store = new Store();
+    expect(() => store.dir).toThrow();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });
 
 test("saveProfile: keeps every legacy entry merged into one profile", async () => {

@@ -245,8 +245,8 @@ export async function userName(
   }
 }
 
-/** A key {@link createKey} uploaded; `comment` is how it's labeled on the server. */
-export interface UploadedKey extends KeyPair {
+/** A key pair from {@link newKey}; `comment` is how it's labeled on the server. */
+export interface LabeledKey extends KeyPair {
   comment: string;
 }
 
@@ -278,18 +278,23 @@ function uploadHint(status: number, body: string, user: string): string {
   return body || "The server gave no reason.";
 }
 
-/** Generates a key pair and uploads its public key for `username`. */
-export async function createKey(
-  conn: EnterpriseConnection,
-  username: string,
-): Promise<UploadedKey> {
-  const keyPair = generateBase64KeyPair();
+/** A new key pair labeled for this computer; nothing is sent until {@link uploadKey}. */
+export function newKey(): LabeledKey {
   const date = new Date().toISOString().slice(0, 10);
   // The server rejects comments that aren't printable ASCII.
   const comment = `${BIN} CLI - ${hostname()} - ${date}`.replace(
     /[^\x20-\x7e]/g,
     "?",
   );
+  return { ...generateBase64KeyPair(), comment };
+}
+
+/** Uploads `keyPair`'s public key for `username`. */
+export async function uploadKey(
+  conn: EnterpriseConnection,
+  username: string,
+  keyPair: LabeledKey,
+): Promise<void> {
   let res: Response;
   try {
     res = await withTimeout(
@@ -297,9 +302,11 @@ export async function createKey(
         dheClient: conn.client,
         // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
         userName: username as any,
-        publicKey: keyPair.publicKey,
-        comment,
-        type: keyPair.type,
+        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
+        publicKey: keyPair.publicKey as any,
+        comment: keyPair.comment,
+        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
+        type: keyPair.type as any,
       }),
       timeoutMs(),
       () => new DhError("server_unreachable", "Timed out"),
@@ -324,7 +331,6 @@ export async function createKey(
     );
   }
   res.body?.cancel().catch(() => {});
-  return { ...keyPair, comment };
 }
 
 /** Short: a key that isn't deleted now is remembered and deleted at the next sign-in. */

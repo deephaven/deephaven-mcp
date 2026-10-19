@@ -2,12 +2,13 @@ import { DhError, describe, reasonOf, timeoutMs } from "../errors.ts";
 import { BIN } from "../version.ts";
 import {
   connectEnterprise,
-  createKey,
   DELETE_KEY_TIMEOUT_MS,
   deleteKey,
   disconnect as disconnectEnterprise,
   type EnterpriseConnection,
   loginKey,
+  newKey,
+  uploadKey,
 } from "./enterprise.ts";
 import type { KeyPair } from "./keyfile.ts";
 import {
@@ -24,6 +25,7 @@ import type {
   Credentials,
   Kind,
   Method,
+  OrphanKey,
   State,
   Store,
 } from "./store.ts";
@@ -73,7 +75,8 @@ export interface SavedSignIn extends Saved {
 
 /**
  * Saves `session` as a profile: authorizes this computer if asked, saves,
- * then deletes keys the save made obsolete. A failed save deletes the new key.
+ * then deletes keys the save made obsolete. A failed save deletes the new key,
+ * or leaves it recorded for the next sign-in.
  * `makeDefault` undefined → only if there's no default yet.
  */
 export async function commitSignIn(
@@ -111,8 +114,7 @@ export async function commitSignIn(
       makeDefault,
     );
   } catch (e) {
-    // Nothing references a new key until it's saved.
-    if (key) await revokeWith(session, credential).catch(() => {});
+    if (key) await revokeNewKey(store, session, credential);
     throw e;
   }
 
@@ -378,6 +380,11 @@ export async function saveProfile(
       createdAt: existing?.[1].createdAt ?? new Date().toISOString(),
     };
     credentials.credentials[id] = p.credential;
+    // A new key stays recorded as pending until it's saved here.
+    const cred = p.credential;
+    if (cred.type === "keyPair") {
+      dropOrphans(credentials, (o) => o.publicKey === cred.publicKey);
+    }
 
     // A default that points at a removed profile counts as none.
     const hasDefault =
@@ -398,7 +405,9 @@ export async function saveProfile(
 
 /**
  * Uploads a new key for the signed-in Enterprise user, and checks it logs in
- * on a new connection before returning it.
+ * on a new connection before returning it. The key is recorded as an orphan
+ * before it's sent, so a key that lands despite an error (a timed-out upload,
+ * a crash) is deleted at a later sign-in; saving the profile drops the record.
  */
 export async function authorizeComputer(
   store: Store,
@@ -407,7 +416,7 @@ export async function authorizeComputer(
   const conn = session.enterprise;
   if (!conn)
     throw new DhError("internal", `${session.origin} is not Enterprise`);
-  const key = await createKey(conn, session.user);
+  const key = newKey();
   const credential = {
     type: "keyPair" as const,
     keyType: key.type,
@@ -415,11 +424,23 @@ export async function authorizeComputer(
     privateKey: key.privateKey,
     generated: true,
   };
-
-  // An uploaded key can still be refused at login (e.g. a server ACL), so try it.
   const timeout = timeoutMs();
+  // Long enough to upload, check and save; until then other sign-ins leave it alone.
+  const pendingUntil = new Date(Date.now() + 4 * timeout + 60_000);
+  await store.update(({ credentials }) =>
+    addOrphan(
+      credentials,
+      session.origin,
+      session.user,
+      credential,
+      pendingUntil.toISOString(),
+    ),
+  );
+
   let check: EnterpriseConnection | undefined;
   try {
+    await uploadKey(conn, session.user, key);
+    // An uploaded key can still be refused at login (e.g. a server ACL), so try it.
     check = await connectEnterprise(session.origin, session.cacheRoot, timeout);
     await loginKey(
       check,
@@ -430,13 +451,8 @@ export async function authorizeComputer(
       "auth_failed",
     );
   } catch (e) {
-    // Take the key back, or remember it for the next sign-in if that fails too.
-    await deleteKey(conn, session.user, key).catch(() =>
-      store.update(({ credentials }) =>
-        addOrphan(credentials, session.origin, session.user, credential),
-      ),
-    );
-    // No check connection means the server was unreachable, not that it refused the key.
+    await revokeNewKey(store, session, credential);
+    // No check connection: the upload or the connection failed, not the key's login.
     if (!check) throw e;
     throw new DhError(
       "key_upload_failed",
@@ -488,6 +504,7 @@ export function addOrphan(
   server: string,
   user: string,
   cred: Credential | undefined,
+  pendingUntil?: string,
 ): void {
   if (cred?.type !== "keyPair" || !cred.generated) return;
   credentials.orphans ??= [];
@@ -498,6 +515,7 @@ export function addOrphan(
     user,
     keyType: cred.keyType,
     publicKey: cred.publicKey,
+    ...(pendingUntil ? { pendingUntil } : {}),
   });
 }
 
@@ -509,8 +527,13 @@ export async function revokeOrphans(
   const conn = session.enterprise;
   if (!conn) return { deleted: 0, kept: 0 };
   const { credentials } = await store.read();
+  const now = Date.now();
   const mine = (credentials.orphans ?? []).filter(
-    (o) => o.server === session.origin && o.user === session.user,
+    (o) =>
+      o.server === session.origin &&
+      o.user === session.user &&
+      // Another sign-in may be authorizing it right now.
+      !(o.pendingUntil && Date.parse(o.pendingUntil) > now),
   );
   const deleted = new Set<string>();
   let failed: string | undefined;
@@ -525,14 +548,40 @@ export async function revokeOrphans(
   }
   const kept = mine.length - deleted.size;
   if (deleted.size === 0) return { deleted: 0, kept, failed };
-  await store.update(({ credentials }) => {
-    const left = (credentials.orphans ?? []).filter(
-      (o) => !deleted.has(o.publicKey),
-    );
-    if (left.length) credentials.orphans = left;
-    else delete credentials.orphans;
-  });
+  await store.update(({ credentials }) =>
+    dropOrphans(credentials, (o) => deleted.has(o.publicKey)),
+  );
   return { deleted: deleted.size, kept, failed };
+}
+
+/** Removes the orphan records `drop` picks. */
+function dropOrphans(
+  credentials: Credentials,
+  drop: (o: OrphanKey) => boolean,
+): void {
+  const left = (credentials.orphans ?? []).filter((o) => !drop(o));
+  if (left.length) credentials.orphans = left;
+  else delete credentials.orphans;
+}
+
+/**
+ * Deletes a new key that won't be saved, then its pending record. If the
+ * delete fails, the record stays and a later sign-in deletes the key.
+ */
+async function revokeNewKey(
+  store: Store,
+  session: Session,
+  credential: Credential,
+): Promise<void> {
+  if (credential.type !== "keyPair") return;
+  try {
+    await revokeWith(session, credential);
+    await store.update(({ credentials }) =>
+      dropOrphans(credentials, (o) => o.publicKey === credential.publicKey),
+    );
+  } catch {
+    // Recorded already.
+  }
 }
 
 /** One line on what {@link revokeOrphans} did, or undefined if there was nothing to do. */

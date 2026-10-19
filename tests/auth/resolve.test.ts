@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { candidates, resolveServer } from "../../src/auth/resolve.ts";
+import { candidates, resolveServer, withPort } from "../../src/auth/resolve.ts";
 
 const origins = (input: string) => candidates(input).map((u) => u.origin);
 
@@ -40,6 +40,10 @@ test("candidates: an explicit default port is tried alone", () => {
   ]);
   expect(origins("localhost:80")).toEqual(["http://localhost"]);
   expect(origins("localhost:443")).toEqual(["http://localhost:443"]);
+  expect(origins(withPort("http://localhost"))).toEqual(["http://localhost"]);
+  expect(origins(withPort("https://[::1]:8123"))).toEqual([
+    "https://[::1]:8123",
+  ]);
 });
 
 test("candidates: explicit http stays http; https is never downgraded", () => {
