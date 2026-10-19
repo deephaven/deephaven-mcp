@@ -202,13 +202,11 @@ test("saveProfile: saving a new key drops its pending record; sign-ins skip pend
 });
 
 test("store: the config directory is found on first use, not on construction", () => {
-  const saved = {
-    HOME: process.env.HOME,
-    DH_CONFIG_DIR: process.env.DH_CONFIG_DIR,
-  };
+  // Every variable configDir() reads, on any platform.
+  const names = ["HOME", "USERPROFILE", "APPDATA", "DH_CONFIG_DIR"];
+  const saved = Object.fromEntries(names.map((k) => [k, process.env[k]]));
   try {
-    delete process.env.HOME;
-    delete process.env.DH_CONFIG_DIR;
+    for (const k of names) delete process.env[k];
     const store = new Store();
     expect(() => store.dir).toThrow();
   } finally {
