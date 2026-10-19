@@ -193,7 +193,7 @@ export async function signIn(
       return {
         ...server,
         enterprise: signedIn,
-        user: await userName(signedIn),
+        user: await userName(signedIn, timeout),
         operateAs: request.operateAs,
       };
     }

@@ -227,10 +227,22 @@ export async function loginSaml(
   }
 }
 
-/** Who `conn` is signed in as; how SSO learns the user name. */
-export async function userName(conn: EnterpriseConnection): Promise<string> {
-  const info = await conn.client.getUserInfo();
-  return info.username;
+/** Who `conn` is signed in as; how SSO learns the user name. Closes `conn` on failure. */
+export async function userName(
+  conn: EnterpriseConnection,
+  timeout: number,
+): Promise<string> {
+  try {
+    const info = await withTimeout<{ username: string }>(
+      conn.client.getUserInfo(),
+      timeout,
+      () => unreachable(conn.origin),
+    );
+    return info.username;
+  } catch (e) {
+    disconnect(conn);
+    throw e instanceof DhError ? e : unreachable(conn.origin, e);
+  }
 }
 
 /** A key {@link createKey} uploaded; `comment` is how it's labeled on the server. */
@@ -300,14 +312,18 @@ export async function createKey(
       describe(e),
     );
   }
-  const body = (await res.text().catch(() => "")).trim().slice(0, 300);
   if (!res.ok) {
+    // The reason is a nicety; a stalled body mustn't hold up the error.
+    const body = await withTimeout(res.text(), timeoutMs(), () =>
+      unreachable(conn.origin),
+    ).catch(() => "");
     throw new DhError(
       "key_upload_failed",
       `${conn.origin} rejected this computer's key (HTTP ${res.status})`,
-      uploadHint(res.status, body, username),
+      uploadHint(res.status, body.trim().slice(0, 300), username),
     );
   }
+  res.body?.cancel().catch(() => {});
   return { ...keyPair, comment };
 }
 
