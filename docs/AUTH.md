@@ -347,7 +347,7 @@ prints what it's waiting on for each server:
 | `DH_PROFILE`                           | Profile to use, like `--profile`                                |
 | `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`)                   |
 | `DH_TIMEOUT`                           | Seconds to wait for connecting and non-SSO sign-in (default 30) |
-| `DH_DEBUG`                             | Show client library logs and internal error details             |
+| `DH_DEBUG`                             | Show client library logs (on stderr) and internal error details |
 | `DH_SERVER`, …                         | Environment-only sign-in ([above](#environment-only-sign-in))   |
 | `DH_MCP_CONFIG_FILE`, `DH_AI_DATA_DIR` | Where to look for an old config to migrate                      |
 

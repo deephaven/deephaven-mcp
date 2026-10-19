@@ -19,7 +19,7 @@ export type LegacyPlan =
       password: SecretRef;
       operateAs?: string;
     }
-  | { method: "private-key"; keyPath?: string; keyText?: string }
+  | { method: "private-key"; keyPath?: string; keyText?: SecretRef }
   | { method: "anonymous" }
   | { method: "psk"; secret: SecretRef }
   /** Without `username`, v1 keeps `user:password` in `secret`. */
@@ -185,7 +185,7 @@ function v1Enterprise(name: string, cfg: Json): LegacyItem {
 export function parseV1(text: string, path: string): LegacyConfig {
   let cfg: Json;
   try {
-    cfg = Bun.JSONC.parse(text);
+    cfg = Bun.JSON5.parse(text);
   } catch (e) {
     throw new DhError(
       "usage",
@@ -285,8 +285,7 @@ function v2Enterprise(file: string, cfg: Json): LegacyItem {
     if (ref && "file" in ref) {
       return { ...base, plan: { method: "private-key", keyPath: ref.file } };
     }
-    const keyText = ref && "literal" in ref ? ref.literal : undefined;
-    return { ...base, plan: { method: "private-key", keyText } };
+    return { ...base, plan: { method: "private-key", keyText: ref } };
   }
   if (cred.type !== "password") {
     return { ...base, plan: unsupported(cred.type) };

@@ -39,6 +39,7 @@ test("candidates: an explicit default port is tried alone", () => {
     "http://dhc.example.com",
   ]);
   expect(origins("localhost:80")).toEqual(["http://localhost"]);
+  expect(origins("localhost:443")).toEqual(["http://localhost:443"]);
 });
 
 test("candidates: explicit http stays http; https is never downgraded", () => {
@@ -92,5 +93,23 @@ test("resolveServer: a non-Deephaven server is server_unreachable", async () => 
     ).rejects.toMatchObject({ code: "server_unreachable" });
   } finally {
     await other.stop(true);
+  }
+});
+
+test("resolveServer: a stalled Enterprise probe doesn't hide Community", async () => {
+  const dhc = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (req) =>
+      new URL(req.url).pathname === "/jsapi/dh-core.js"
+        ? new Response("ok")
+        : new Promise<Response>(() => {}),
+  });
+  try {
+    expect((await resolveServer(`127.0.0.1:${dhc.port}`, 300)).kind).toBe(
+      "community",
+    );
+  } finally {
+    await dhc.stop(true);
   }
 });

@@ -3,6 +3,7 @@
  * then goes through the same connectServer → signIn → commitSignIn as login.
  */
 
+import { resolve } from "node:path";
 import { DhError, describe } from "../errors.ts";
 import { BIN } from "../version.ts";
 import {
@@ -135,9 +136,20 @@ async function keySignIn(
   item: LegacyItem,
   plan: PlanFor<"private-key">,
 ): Promise<LegacySignIn> {
-  const key = plan.keyPath
-    ? await readKeyFile(plan.keyPath)
-    : parseKeyFile(plan.keyText ?? "", item.source);
+  // Saved as verified, so a later command from another directory finds it.
+  const keyPath = plan.keyPath && resolve(plan.keyPath);
+  const keyText = plan.keyText && (await resolveSecret(plan.keyText));
+  if (!keyPath && !keyText) {
+    throw new DhError(
+      "credential_unavailable",
+      plan.keyText && "env" in plan.keyText
+        ? `needs $${plan.keyText.env} set`
+        : "no saved key",
+    );
+  }
+  const key = keyPath
+    ? await readKeyFile(keyPath)
+    : parseKeyFile(keyText ?? "", item.source);
   if (!key.user) throw new DhError("usage", "key file has no user line");
   return {
     request: {
@@ -148,8 +160,8 @@ async function keySignIn(
     },
     toSave: {
       method: "private-key",
-      credential: plan.keyPath
-        ? { type: "keyFile", path: plan.keyPath }
+      credential: keyPath
+        ? { type: "keyFile", path: keyPath }
         : {
             type: "keyPair",
             keyType: key.keyPair.type,
@@ -160,7 +172,7 @@ async function keySignIn(
     },
     verify: true,
     waiting: `signing in to ${new URL(item.origin).host} as ${key.user} with the key`,
-    detail: plan.keyPath ? `uses ${plan.keyPath}` : "key copied",
+    detail: keyPath ? `uses ${keyPath}` : "key copied",
   };
 }
 

@@ -36,7 +36,11 @@ export function candidates(input: string): URL[] {
   const typed = new URL(
     hasScheme ? text.replace(SCHEME, "dh://") : `dh://${text}`,
   );
-  if (typed.port) return [new URL(url.origin)];
+  if (typed.port) {
+    // Reapplied: the scheme switch above loses a port that was https's default.
+    url.port = typed.port;
+    return [new URL(url.origin)];
+  }
   const ports = url.protocol === "https:" ? HTTPS_PORTS : HTTP_PORTS;
   return ports.map((port) => {
     const candidate = new URL(url.origin);
@@ -56,12 +60,15 @@ async function answers(url: URL, signal: AbortSignal): Promise<boolean> {
 async function detect(origin: URL, timeoutMs: number): Promise<Kind | null> {
   const signal = AbortSignal.timeout(timeoutMs);
   const probe = (path: string) => answers(new URL(path, origin), signal);
-  const [dhe, dhc] = await Promise.all([
+  const [dhe, dhc] = await Promise.allSettled([
     probe("/iris/connection.json"),
     probe("/jsapi/dh-core.js"),
   ]);
-  if (dhe) return "enterprise";
-  if (dhc) return "community";
+  if (dhe.status === "fulfilled" && dhe.value) return "enterprise";
+  if (dhc.status === "fulfilled" && dhc.value) return "community";
+  // Neither matched; a failed probe says why better than "not found".
+  const failed = [dhe, dhc].find((r) => r.status === "rejected");
+  if (failed) throw failed.reason;
   return null;
 }
 

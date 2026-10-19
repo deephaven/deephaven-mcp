@@ -18,7 +18,12 @@ function quietLibraries(libraryDir: string): void {
   if (quieted) return;
   quieted = true;
   const debug = process.env.DH_DEBUG;
-  if (!debug) {
+  if (debug) {
+    // stdout is for results, and `-o json` promises a single value there.
+    for (const m of ["log", "info", "debug"] as const) {
+      console[m] = console.error.bind(console);
+    }
+  } else {
     for (const m of [
       "log",
       "info",
@@ -162,12 +167,17 @@ export async function loadCommunityApi(
   return mod.default ?? mod;
 }
 
+const enterpriseApis = new Map<string, Api>();
+
 /** Downloads and imports the Enterprise jsapi (`iris`) from `origin`. */
 export async function loadEnterpriseApi(
   origin: URL,
   cacheRoot: string,
   timeout: number,
 ): Promise<Api> {
+  // The script sets a global once per import, so a later server's would shadow this one's.
+  const loaded = enterpriseApis.get(origin.origin);
+  if (loaded) return loaded;
   assertTrusted(origin);
   const dir = await originDir(cacheRoot, origin);
   const file = join(dir, "irisapi.nocache.js");
@@ -176,5 +186,7 @@ export async function loadEnterpriseApi(
   quietLibraries(await runDir(cacheRoot));
   await import(pathToFileURL(file).href);
   // biome-ignore lint/suspicious/noExplicitAny: set by the loaded script.
-  return (globalThis as any).iris;
+  const api = (globalThis as any).iris;
+  enterpriseApis.set(origin.origin, api);
+  return api;
 }

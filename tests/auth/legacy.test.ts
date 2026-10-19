@@ -119,6 +119,41 @@ test("unknown auth types are unsupported, not anonymous or password", async () =
   expect(v2.items[0]?.plan).toEqual({ method: "unsupported", type: "oauth" });
 });
 
+test("parseV1: reads JSON5, not only JSON with comments", () => {
+  const v1 = parseV1(
+    `{
+      // unquoted keys and single quotes
+      community: { sessions: { dev: { host: 'localhost', port: 10000, auth_type: 'PSK', auth_token: 'p', } } },
+    }`,
+    "v1.json5",
+  );
+  expect(v1.items[0]?.origin).toBe("http://localhost:10000");
+  expect(v1.items[0]?.plan).toEqual({
+    method: "psk",
+    secret: { literal: "p" },
+  });
+});
+
+test("parseV2: key_text from an env var stays a reference", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dh-legacy-"));
+  await mkdir(join(dir, "enterprise", "systems"), { recursive: true });
+  await writeFile(
+    join(dir, "enterprise", "systems", "x.json"),
+    JSON.stringify({
+      connection_json_url: "https://x.example.com/iris/connection.json",
+      auth: {
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the legacy env syntax.
+        credentials: { type: "private_key", key_text: "${env:DH_KEY}" },
+      },
+    }),
+  );
+  const v2 = await parseV2(dir);
+  expect(v2.items[0]?.plan).toEqual({
+    method: "private-key",
+    keyText: { env: "DH_KEY" },
+  });
+});
+
 test("resolveSecret: a file keeps its spaces, loses one line ending, and empty is unset", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dh-legacy-"));
   const file = join(dir, "secret");
