@@ -22,7 +22,6 @@ import type { KeyPair } from "./keyfile.ts";
 const SAML_CLASS = "authentication.client.customlogin.class.SAMLAuth";
 const SAML_URL = "authentication.client.samlauth.login.url";
 const SAML_NAME = "authentication.client.samlauth.provider.name";
-const SAML_CONFIRM_URL = "authentication.client.samlauth.confirm.url";
 const PASSWORDS = "authentication.passwordsEnabled";
 
 /** A connected Enterprise client; signed in once a login call succeeds. */
@@ -37,8 +36,7 @@ export interface EnterpriseConnection {
 /** The sign-in options an Enterprise server advertises. */
 export interface EnterpriseAuthConfig {
   passwordsEnabled: boolean;
-  /** `confirmUrl`: a server page where the user confirms the account, so dh needn't ask. */
-  saml?: { loginUrl: string; providerName: string; confirmUrl?: string };
+  saml?: { loginUrl: string; providerName: string };
 }
 
 /** The error code for rejected credentials: `auth_failed` at login, `auth_expired` for a saved profile. */
@@ -110,12 +108,9 @@ function samlConfig(
   origin: string,
 ): EnterpriseAuthConfig["saml"] {
   if (!c[SAML_CLASS] || !c[SAML_URL]) return undefined;
-  const resolve = (url: string) => new URL(url, origin).href;
-  const confirmUrl = c[SAML_CONFIRM_URL];
   return {
-    loginUrl: resolve(c[SAML_URL]),
+    loginUrl: new URL(c[SAML_URL], origin).href,
     providerName: c[SAML_NAME] || "SSO",
-    confirmUrl: confirmUrl ? resolve(confirmUrl) : undefined,
   };
 }
 

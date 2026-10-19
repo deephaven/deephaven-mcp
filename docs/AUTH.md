@@ -98,9 +98,8 @@ operate-as user gets its own profile.
 2. Sign in with your identity provider. `dh` waits up to `--timeout` seconds
    (default 300).
 3. `dh` confirms the account:
-   - If the server provides a confirmation page, you confirm in the browser.
-   - Otherwise the terminal asks `Use alice@example.com? (Y/n)`. Answer `n` and
-     nothing is saved.
+   - The terminal asks `Use alice@example.com? (Y/n)`. Answer `n` and nothing is
+     saved.
    - `--expect-user <user>` checks the account without asking. A different
      account fails with `auth_failed` and nothing is saved.
 

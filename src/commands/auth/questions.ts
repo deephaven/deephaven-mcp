@@ -415,8 +415,6 @@ export async function confirmSsoAccount(
       `Signed in as ${session.user}, expected ${opts.expectUser}`,
     );
   }
-  // The server already asked the user to confirm the account.
-  if (saml.confirmUrl) return;
   if (await ui.confirm(`Use ${session.user}?`, true, "--expect-user")) return;
   throw new DhError(
     "cancelled",

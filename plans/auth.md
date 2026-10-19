@@ -51,9 +51,10 @@ Run `dh --help` to learn more.
   write server address that couldn't be reached.
 - DHC methods: anonymous, PSK, username/password, custom handler.
 - The profile is saved only after a successful login.
-- SSO account confirmation: a warning the browser is going to open and the
-  server's confirmation page if it advertises one. Otherwise
-  `Use user-a@example.com? (Y/n)` in the terminal. No → nothing saved.
+- SSO account confirmation: a warning the browser is going to open, then
+  `Use user-a@example.com? (Y/n)` in the terminal. No → nothing saved. A server
+  confirmation page is a possible later addition
+  ([saml-confirmation.md](saml-confirmation.md)).
 - Default: first profile → default. Otherwise `Make this the default? (y/N)`.
   `--default` / `--no-default` skip the prompt. No TTY and no flag → not
   default.

@@ -1,5 +1,7 @@
 # SAML sign-in confirmation
 
+Not implemented, in iris or `dh`. `dh` always confirms in the terminal.
+
 A dedicated SAML entry path that makes the user actively sign in and confirm the
 account. `dh` uses it. Every other sign-in is unchanged.
 

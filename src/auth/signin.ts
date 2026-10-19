@@ -212,10 +212,7 @@ async function waitForSaml(
   request: SignInRequest & { method: "saml" },
 ): Promise<EnterpriseConnection> {
   const nonce = samlNonce();
-  const url = signInUrl(
-    request.saml.confirmUrl ?? request.saml.loginUrl,
-    nonce,
-  );
+  const url = signInUrl(request.saml.loginUrl, nonce);
   if (request.browser) {
     note(
       `Opening your browser to sign in. If it doesn't open, go to:\n  ${url}`,
