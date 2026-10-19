@@ -95,7 +95,18 @@ async function download(
       `HTTP ${res.status} fetching ${url}`,
     );
   }
-  await writeFile(dest, await res.text());
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (e) {
+    // The timeout covers the body too; a stall after the headers lands here.
+    throw new DhError(
+      "server_unreachable",
+      `Could not fetch ${url}`,
+      describe(e),
+    );
+  }
+  await writeFile(dest, text);
 }
 
 const runDirs = new Map<string, Promise<string>>();
