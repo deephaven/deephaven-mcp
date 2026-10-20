@@ -696,25 +696,44 @@ exit `0` means the batch ran, not that every id succeeded — check the
 `summary` and per-item `results` in the payload for failures. All ids in
 one invocation must belong to the same Enterprise system.
 
-None of these verbs report a settled state:
+None of these verbs report readiness on their own:
 
 - `create` does not wait. Its `state` is always the placeholder
   `UNINITIALIZED` — the state at the instant the controller accepted the
   definition, not the live state. Poll `pq details` for what the PQ is
   actually doing.
-- `start` / `restart` succeed on *acceptance*, not readiness. Branch on
-  each `results[].state_category`: `TRANSITIONAL` (state `CONNECTING` or
-  `INITIALIZING`) is a normal outcome with `--no-wait` or a short wait,
-  and only `ACTIVE` means the id is usable with the `session`, `table`,
-  and `catalog` verbs.
+- `start` / `restart` / `stop` wait by default until each PQ settles:
+  `start` and `restart` until it is serving (`RUNNING` or `EXECUTING`) or
+  the attempt has ended (`FAILED`, `ERROR`, `DISCONNECTED`, or
+  `COMPLETED`); `stop` until it is no longer running. With `--no-wait` they
+  return as soon as the controller accepts the request, which it does only
+  after stopping any running worker.
+- A settled `start` / `restart` is still a per-item success when the PQ
+  failed to come up. Branch on each `results[].state_category`: only
+  `ACTIVE` means the id is usable with the `session`, `table`, and
+  `catalog` verbs; `TERMINAL` with state `FAILED` means it did not come up
+  (read `pq details` for why). State `DISCONNECTED` also ends the wait but
+  reports `TRANSITIONAL`. With `--no-wait`, `TRANSITIONAL` (state
+  `CONNECTING` or `INITIALIZING`) is the normal outcome.
+- Avoid `--wait` on a PQ that is still starting up (state `CONNECTING`,
+  `AUTHENTICATING`, or `ACQUIRING_WORKER`): the reported outcome can belong
+  to that earlier attempt rather than the new one. Let it settle first, or
+  confirm with `pq details`.
 - A `--wait` that runs out is reported as a per-item failure even though
-  the controller keeps going in the background. Treat a timeout as
+  the controller keeps going in the background, and so is a `--no-wait`
+  request that runs out. Treat a timeout as
   *unknown* rather than failed: re-read `pq details` instead of retrying
-  blindly. The wait duration is
+  blindly. With `--wait`, sending the request and waiting share
   `timeouts.client.pq_state_change_timeout_seconds` in
-  `enterprise/settings.json` (120 seconds unless set), and
-  `--max-concurrent` defaults to `pq_tools.default_max_concurrent` there
-  (20 unless set).
+  `enterprise/settings.json` (120 seconds unless set); with `--no-wait`,
+  the request alone, including stopping any running worker, is bounded by
+  `quick_operation_timeout_seconds` there (5 seconds unless set), so a slow
+  controller or a worker that is slow to stop is a reason to use
+  `--wait`. `--max-concurrent` defaults to
+  `pq_tools.default_max_concurrent` there (20 unless set). The CLI
+  extends its request timeout for these three verbs to cover those
+  durations, so `cli.request.timeouts.default_seconds` does not cut a
+  wait short.
 
 Modifying a running PQ without `--restart` stores the new definition
 while the live worker keeps serving the old one; the response then
