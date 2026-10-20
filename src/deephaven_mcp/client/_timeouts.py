@@ -100,7 +100,8 @@ class EnterpriseClientTimeouts(StrictSchema):
     quick_operation_timeout_seconds: Annotated[float, Field(gt=0)] = 5.0
     """Timeout (seconds) for lightweight network round-trips that
     must fail fast: ping, public-key upload/delete, and a persistent-query
-    start/stop/restart request that does not wait for the outcome.
+    start/stop/restart request that does not wait for the outcome (the
+    controller accepts it only after stopping any running worker).
     Increase only if routine network latency exceeds a few seconds."""
 
     subscribe_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0

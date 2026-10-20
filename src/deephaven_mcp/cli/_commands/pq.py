@@ -1181,15 +1181,18 @@ _WAIT_HELP = (
     "enterprise.settings.timeouts.client.pq_state_change_timeout_seconds, "
     "itself 120 seconds unless set, and the CLI extends its own request "
     "timeout to cover it. --no-wait returns as soon as the controller accepts "
-    "the request, leaving the PQ mid-transition."
+    "the request, which it does only after stopping any running worker, "
+    "leaving the PQ mid-transition; that request is bounded by "
+    "enterprise.settings.timeouts.client.quick_operation_timeout_seconds, "
+    "itself 5 seconds unless set, so use --wait if a worker may be slow to stop."
 )
 """Shared help for the lifecycle wait flag, whose duration is server-side."""
 
 _TIMEOUT_SEMANTICS = (
-    "A --wait that runs out is reported as a per-item failure even though the "
-    "controller keeps going in the background, so treat a timeout as unknown "
-    "rather than failed: re-read 'dhcli pq details' instead of retrying "
-    "blindly."
+    "A timeout, with or without --wait, is reported as a per-item failure "
+    "even though the controller keeps going in the background, so treat a "
+    "timeout as unknown rather than failed: re-read 'dhcli pq details' "
+    "instead of retrying blindly."
 )
 """Shared warning: a lifecycle timeout does not mean the operation stopped."""
 

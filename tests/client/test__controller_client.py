@@ -1528,56 +1528,53 @@ async def test_state_change_submit_uses_quick_timeout(
 
 
 @pytest.mark.parametrize(
-    "before, seen, settles_at",
+    "at_request, seen, settles_at",
     [
         (None, [None, ("INITIALIZING", 0, 0), ("RUNNING", 0, 0)], 2),
         (None, [("FAILED", 0, 0)], 0),
-        # A restart of a running query: teardown, startup, new run.
+        # Restart of a running query: the old run stops, then a new attempt starts.
         (
             ("RUNNING", 1, 1),
-            [("RUNNING", 1, 1), ("STOPPING", 1, 2), ("ACQUIRING_WORKER", 1, 3)]
-            + [("RUNNING", 2, 4)],
-            3,
+            [("RUNNING", 1, 1), ("STOPPING", 1, 2), ("STOPPED", 1, 3)]
+            + [("CONNECTING", 0, 4), ("INITIALIZING", 5, 5), ("RUNNING", 5, 6)],
+            5,
         ),
-        # The previous run ends before its replacement starts.
-        (("RUNNING", 1, 1), [("FAILED", 1, 2), ("COMPLETED", 1, 3)], None),
+        # The old run's own ending is never taken for the outcome.
         (("RUNNING", 1, 1), [("STOPPING", 1, 2), ("COMPLETED", 1, 3)], None),
-        (("RUNNING", 1, 1), [("STOPPING", 1, 2), ("FAILED", 1, 3)], None),
+        (("RUNNING", 1, 1), [("FAILED", 1, 2)], None),
+        # A new attempt that fails before initializing.
         (
             ("RUNNING", 1, 1),
-            [("STOPPING", 1, 2), ("STOPPED", 1, 3), ("FAILED", 1, 4)],
+            [("STOPPING", 1, 2), ("STOPPED", 1, 3), ("FAILED", 0, 4)],
             2,
         ),
         (
             ("RUNNING", 1, 1),
-            [("FAILED", 1, 2), ("ACQUIRING_WORKER", 1, 3), ("FAILED", 1, 4)],
+            [("FAILED", 1, 2), ("ACQUIRING_WORKER", 0, 3), ("FAILED", 0, 4)],
             2,
         ),
-        # A run still starting up reports its own pre-init states.
-        (
-            ("ACQUIRING_WORKER", 1, 1),
-            [("ACQUIRING_WORKER", 1, 2), ("FAILED", 1, 3)],
-            None,
-        ),
-        (("ACQUIRING_WORKER", 1, 1), [("STOPPED", 1, 2), ("FAILED", 1, 3)], 1),
-        # A new initialization identifies the attempt whatever came before.
-        (("RUNNING", 1, 1), [("FAILED", 2, 2)], 0),
-        # Restarting a failed query: a failure before initialization still counts.
-        (("FAILED", 1, 1), [("FAILED", 1, 1), ("FAILED", 1, 2)], 1),
-        (("FAILED", 1, 1), [("STOPPED", 1, 2)], None),
+        # Restarting a run that has not initialized: old and new both show 0.
+        (("ACQUIRING_WORKER", 0, 1), [("STOPPED", 0, 2), ("FAILED", 0, 3)], None),
+        (("ACQUIRING_WORKER", 0, 1), [("INITIALIZING", 5, 2), ("RUNNING", 5, 3)], 1),
+        # Starting a query that is not running: any update is the new attempt's.
+        (("FAILED", 1, 1), [("FAILED", 1, 1), ("FAILED", 0, 2)], 1),
+        (("FAILED", 0, 1), [("FAILED", 0, 1), ("FAILED", 0, 2)], 1),
+        (("STOPPED", 1, 1), [("CONNECTING", 0, 2), ("RUNNING", 3, 3)], 1),
     ],
 )
-def test_start_watcher(controller_client_mod, before, seen, settles_at):
+def test_start_settled(controller_client_mod, at_request, seen, settles_at):
     def info(spec):
         if spec is None:
             return _fake_info(None)
         status, init, update = spec
         return _fake_info(status, init=init, update=update)
 
-    watcher = controller_client_mod._StartWatcher(
-        None if before is None else info(before).state
-    )
-    settled = [i for i, spec in enumerate(seen) if watcher(info(spec))]
+    state_at_request = None if at_request is None else info(at_request).state
+    settled = [
+        i
+        for i, spec in enumerate(seen)
+        if controller_client_mod._start_settled(state_at_request, info(spec))
+    ]
     assert (settled[0] if settled else None) == settles_at
 
 
@@ -1626,7 +1623,7 @@ async def test_wait_until_returns_once_settled(coreplus_controller_client):
 @pytest.mark.parametrize(
     "status, shown", [("INITIALIZING", "INITIALIZING"), (None, "UNKNOWN")]
 )
-async def test_wait_until_times_out_naming_last_state(
+async def test_wait_until_times_out_naming_last_status(
     coreplus_controller_client, status, shown
 ):
     with patch.object(
@@ -1643,7 +1640,7 @@ async def test_wait_until_times_out_naming_last_state(
             )
     message = str(exc_info.value)
     assert "Timed out" in message
-    assert f"last seen state: {shown}" in message
+    assert f"last seen status: {shown}" in message
     assert "pq_state_change_timeout_seconds" in message
 
 

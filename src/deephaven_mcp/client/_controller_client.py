@@ -69,28 +69,24 @@ from ._timeouts import EnterpriseClientTimeouts
 
 _LOGGER = logging.getLogger(__name__)
 
-_STARTED_STATES = frozenset({"RUNNING", "EXECUTING"})
-"""States in which a started query is serving."""
+_STARTED_STATUSES = frozenset({"RUNNING", "EXECUTING"})
+"""Statuses in which a started query is serving."""
 
-_START_ENDED_STATES = frozenset({"COMPLETED", "FAILED", "ERROR", "DISCONNECTED"})
-"""States in which a start attempt ended without the query serving."""
+_START_ENDED_STATUSES = frozenset({"COMPLETED", "FAILED", "ERROR", "DISCONNECTED"})
+"""Statuses in which a start attempt ended without the query serving."""
 
-_PRE_INIT_STATES = frozenset(
+_START_OUTCOME_STATUSES = _STARTED_STATUSES | _START_ENDED_STATUSES
+"""Statuses in which a start attempt has an outcome."""
+
+_PRE_INIT_STATUSES = frozenset(
     {"FINDING_DISPATCHER", "ACQUIRING_WORKER", "CONNECTING", "AUTHENTICATING"}
 )
-"""States a start attempt passes through before its initialization begins."""
+"""Statuses a start attempt passes through before its initialization begins."""
 
-_OLD_RUN_GONE_STATES = _PRE_INIT_STATES | {"STOPPED"}
-"""States that, once updated after a request, show the previous run has finished.
+_LIVE_STATUSES = _STARTED_STATUSES | _PRE_INIT_STATUSES | {"INITIALIZING", "STOPPING"}
+"""Statuses in which a query has a run that could still end on its own."""
 
-STOPPING is excluded: the previous run can still end in COMPLETED or FAILED
-from it.
-"""
-
-_LIVE_STATES = _STARTED_STATES | _PRE_INIT_STATES | {"INITIALIZING", "STOPPING"}
-"""States in which a query has a run that could still end on its own."""
-
-_STOPPED_STATES = frozenset(
+_STOPPED_STATUSES = frozenset(
     {
         "STOPPED",
         "COMPLETED",
@@ -101,64 +97,45 @@ _STOPPED_STATES = frozenset(
         "UNSPECIFIED",
     }
 )
-"""States in which a query is no longer running."""
+"""Statuses in which a query is no longer running."""
 
 
-class _StartWatcher:
-    """Decides when a start or restart issued from a given state has an outcome.
+def _start_settled(
+    state_at_request: CorePlusQueryState | None, info: CorePlusQueryInfo
+) -> bool:
+    """Return whether ``info`` shows the outcome of a start or restart.
 
-    A serving state counts only once a new initialization has begun. An ended
-    state counts once a new initialization has begun, or once the state has
-    changed after the previous run is known to have finished: it was not live
-    when the request was issued, or it has since been seen STOPPED or in a new
-    attempt's pre-initialization state. The run that was live when the request
-    was issued is never taken for its outcome, even if it ends first.
+    The outcome is a serving status (RUNNING, EXECUTING) or an ended status
+    (COMPLETED, FAILED, ERROR, DISCONNECTED) of the new attempt, never of the
+    run the query had when the request was issued.
+
+    Args:
+        state_at_request (CorePlusQueryState | None): The query's state when
+            the request was issued, or ``None`` if it had none.
+        info (CorePlusQueryInfo): The query's current info.
+
+    Returns:
+        bool: True once the new attempt is serving or has ended.
     """
-
-    def __init__(self, before: CorePlusQueryState | None) -> None:
-        """Remember the query's state when the request was issued.
-
-        Args:
-            before (CorePlusQueryState | None): That state, or ``None`` if the
-                query had none.
-        """
-        before_name = None if before is None else before.status.name
-        self._before = before
-        self._old_run_gone = before_name not in _LIVE_STATES
-        # A run still starting up when the request was issued reports pre-init states itself.
-        self._gone_markers = (
-            frozenset({"STOPPED"})
-            if before_name in _PRE_INIT_STATES
-            else _OLD_RUN_GONE_STATES
-        )
-
-    def __call__(self, info: CorePlusQueryInfo) -> bool:
-        """Return whether ``info`` shows the outcome of the request.
-
-        Args:
-            info (CorePlusQueryInfo): The query's current info.
-
-        Returns:
-            bool: True once the new attempt is serving or has ended.
-        """
-        state = info.state
-        if state is None:
-            return False
-        name = state.status.name
-        if self._before is None:
-            return name in _STARTED_STATES or name in _START_ENDED_STATES
-        before = self._before.pb
-        new_init = bool(
-            state.pb.initializationStartNanos != before.initializationStartNanos
-        )
-        updated = bool(state.pb.lastUpdateNanos != before.lastUpdateNanos)
-        if updated and name in self._gone_markers:
-            self._old_run_gone = True
-        if name in _STARTED_STATES:
-            return new_init
-        if name in _START_ENDED_STATES:
-            return new_init or (self._old_run_gone and updated)
+    state = info.state
+    if state is None or state.status.name not in _START_OUTCOME_STATUSES:
         return False
+    if state_at_request is None:
+        return True
+    pb, pb_at_request = state.pb, state_at_request.pb
+    # The controller gives each attempt a fresh state whose initialization time stays
+    # unset (0) until it initializes, and the old run's states all keep the old run's
+    # time, so a different time can only come from the new attempt.
+    if pb.initializationStartNanos != pb_at_request.initializationStartNanos:
+        return True
+    # Same time: if nothing was running, the old run has published its last state,
+    # so any later update is the new attempt's. A live run that has not initialized
+    # yet looks like a new attempt that has not either; that case waits for
+    # initialization or times out.
+    return bool(
+        state_at_request.status.name not in _LIVE_STATUSES
+        and pb.lastUpdateNanos != pb_at_request.lastUpdateNanos
+    )
 
 
 def _stop_settled(info: CorePlusQueryInfo) -> bool:
@@ -168,9 +145,9 @@ def _stop_settled(info: CorePlusQueryInfo) -> bool:
         info (CorePlusQueryInfo): The query's current info.
 
     Returns:
-        bool: True when the query has no state or is in a stopped or ended state.
+        bool: True when the query has no state or has a stopped or ended status.
     """
-    return info.state is None or info.state.status.name in _STOPPED_STATES
+    return info.state is None or info.state.status.name in _STOPPED_STATUSES
 
 
 CONTROLLER_SUBSCRIBING_ERROR_CODE = "CONTROLLER_SUBSCRIBING"
@@ -1527,7 +1504,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         Raises:
             QueryError: If the wait times out (the message names the last
-                seen state), if the query disappears while waiting, or if the
+                seen status), if the query disappears while waiting, or if the
                 subscription state is invalid.
             DeephavenConnectionError: If unable to connect to the controller
                 service, or if the subscription is wedged.
@@ -1545,14 +1522,14 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
                 return
             remaining = deadline - loop.time()
             if remaining <= 0:
-                last_state = info.state.status.name if info.state else "UNKNOWN"
+                last_status = info.state.status.name if info.state else "UNKNOWN"
                 _LOGGER.warning(
                     f"[CorePlusControllerClient:_wait_until] Timed out after {timeout_seconds}s "
-                    f"waiting for query {serial} to {goal}; last seen state {last_state}"
+                    f"waiting for query {serial} to {goal}; last seen status {last_status}"
                 )
                 raise QueryError(
                     f"Timed out after {timeout_seconds}s waiting for query {serial} "
-                    f"to {goal} (last seen state: {last_state}). The controller keeps "
+                    f"to {goal} (last seen status: {last_status}). The controller keeps "
                     f"going in the background. To wait longer, increase "
                     f"enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds."
                 )
@@ -1566,8 +1543,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         A running query is stopped and started again; a stopped, failed, or
         completed query is started. The query keeps its serial and
-        configuration. Returns once the controller accepts the request,
-        bounded by ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``;
+        configuration. Returns once the controller accepts the request, which
+        it does only after stopping any running worker, bounded by
+        ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``;
         use :meth:`restart_and_wait` to also wait for the outcome.
 
         A successful call to authenticate should have happened before this call.
@@ -1604,10 +1582,9 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         one budget, ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
 
         Reaching an ended state is not an error; inspect the query's state
-        afterwards to tell a serving query from a failed one. If the previous
-        run was live and the new attempt fails before initializing without any
-        intermediate state being observed, the wait times out rather than
-        report an outcome that may belong to the previous run.
+        afterwards to tell a serving query from a failed one. If the query was
+        live but had not initialized when the request was issued, and the new
+        attempt also fails before initializing, the wait times out.
 
         Args:
             serial (CorePlusQuerySerial): The query to start or restart.
@@ -1619,7 +1596,7 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             QueryError: If the query does not exist, the request fails, or the
                 wait times out (the controller keeps going in the background).
         """
-        before = (await self.get(serial)).state
+        state_at_request = (await self.get(serial)).state
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._timeouts.pq_state_change_timeout_seconds
         await self._submit_state_change(
@@ -1630,7 +1607,10 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
             deadline - loop.time(),
         )
         await self._wait_until(
-            serial, _StartWatcher(before), "finish starting", deadline
+            serial,
+            partial(_start_settled, state_at_request),
+            "finish starting",
+            deadline,
         )
 
     async def stop_query(
@@ -1641,7 +1621,8 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
 
         Stopping is graceful: the worker is terminated and its resources
         released, but the query definition remains and can be started again.
-        Returns once the controller accepts the request, bounded by
+        Returns once the controller accepts the request, which it does only
+        after the worker has stopped, bounded by
         ``EnterpriseClientTimeouts.quick_operation_timeout_seconds``; use
         :meth:`stop_and_wait` to also wait for the query to stop.
 

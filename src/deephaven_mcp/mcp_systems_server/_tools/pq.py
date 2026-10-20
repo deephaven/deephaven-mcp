@@ -2261,7 +2261,9 @@ async def pq_start(
     - After failures, use pq_details to check if PQs eventually reached RUNNING state.
     - Initialization time varies: simple sessions ~5-15s, large heap/complex scripts ~30-60s.
     - ``wait=False`` returns as soon as the controller accepts the start request, without
-      waiting for the PQ to come up.
+      waiting for the PQ to come up. The controller accepts only after stopping any
+      running worker, and that request has a short operator-configured bound; use
+      ``wait=True`` if a worker may be slow to stop.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2451,7 +2453,8 @@ async def pq_stop(
     ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
     the call returns failure BUT the PQ keeps stopping in background. Use pq_details to
     check current state after failures. ``wait=False`` returns as soon as the controller
-    accepts the stop request.
+    accepts the stop request, which it does only after the worker has stopped, within a
+    short operator-configured bound; use ``wait=True`` if a worker may be slow to stop.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance
@@ -2682,7 +2685,9 @@ async def pq_restart(
     ``enterprise/settings.json: timeouts.client.pq_state_change_timeout_seconds``. If reached,
     the call returns failure BUT the PQ keeps restarting in background. Use pq_details to
     check current state after failures. ``wait=False`` returns as soon as the controller
-    accepts the restart request.
+    accepts the restart request, which it does only after stopping any running worker,
+    within a short operator-configured bound; use ``wait=True`` if a worker may be slow
+    to stop.
 
     Terminology Note:
     - 'Session' and 'worker' are interchangeable terms - both refer to a running Deephaven instance

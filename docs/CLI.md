@@ -706,7 +706,8 @@ None of these verbs report readiness on their own:
   `start` and `restart` until it is serving (`RUNNING` or `EXECUTING`) or
   the attempt has ended (`FAILED`, `ERROR`, `DISCONNECTED`, or
   `COMPLETED`); `stop` until it is no longer running. With `--no-wait` they
-  return as soon as the controller accepts the request.
+  return as soon as the controller accepts the request, which it does only
+  after stopping any running worker.
 - A settled `start` / `restart` is still a per-item success when the PQ
   failed to come up. Branch on each `results[].state_category`: only
   `ACTIVE` means the id is usable with the `session`, `table`, and
@@ -715,13 +716,15 @@ None of these verbs report readiness on their own:
   reports `TRANSITIONAL`. With `--no-wait`, `TRANSITIONAL` (state
   `CONNECTING` or `INITIALIZING`) is the normal outcome.
 - A `--wait` that runs out is reported as a per-item failure even though
-  the controller keeps going in the background. Treat a timeout as
+  the controller keeps going in the background, and so is a `--no-wait`
+  request that runs out. Treat a timeout as
   *unknown* rather than failed: re-read `pq details` instead of retrying
   blindly. With `--wait`, sending the request and waiting share
   `timeouts.client.pq_state_change_timeout_seconds` in
   `enterprise/settings.json` (120 seconds unless set); with `--no-wait`,
-  the request alone is bounded by `quick_operation_timeout_seconds` there
-  (5 seconds unless set), so a slow controller is a reason to use
+  the request alone, including stopping any running worker, is bounded by
+  `quick_operation_timeout_seconds` there (5 seconds unless set), so a slow
+  controller or a worker that is slow to stop is a reason to use
   `--wait`. `--max-concurrent` defaults to
   `pq_tools.default_max_concurrent` there (20 unless set). The CLI
   extends its request timeout for these three verbs to cover those
