@@ -1204,7 +1204,10 @@ _READINESS_SEMANTICS = (
     "'dhcli pq details' for why); state 'DISCONNECTED' also ends the wait but "
     "reports 'TRANSITIONAL'. With --no-wait, success only means the "
     "controller accepted the request, and 'TRANSITIONAL' (state CONNECTING or "
-    "INITIALIZING) is the normal outcome; follow it with 'dhcli pq details'."
+    "INITIALIZING) is the normal outcome; follow it with 'dhcli pq details'. "
+    "Avoid --wait on a PQ that is still starting up (state CONNECTING, "
+    "AUTHENTICATING, or ACQUIRING_WORKER): the reported outcome can belong "
+    "to that earlier attempt rather than the new one."
 )
 """Shared warning for start/restart, whose success does not imply RUNNING."""
 

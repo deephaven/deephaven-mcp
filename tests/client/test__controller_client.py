@@ -1553,9 +1553,15 @@ async def test_state_change_submit_uses_quick_timeout(
             [("FAILED", 1, 2), ("ACQUIRING_WORKER", 0, 3), ("FAILED", 0, 4)],
             2,
         ),
-        # Restarting a run that has not initialized: old and new both show 0.
-        (("ACQUIRING_WORKER", 0, 1), [("STOPPED", 0, 2), ("FAILED", 0, 3)], None),
+        # Restarting an attempt that has not initialized: old and new both show 0.
+        (
+            ("ACQUIRING_WORKER", 0, 1),
+            [("STOPPING", 0, 2), ("STOPPED", 0, 3), ("FAILED", 0, 4)],
+            2,
+        ),
         (("ACQUIRING_WORKER", 0, 1), [("INITIALIZING", 5, 2), ("RUNNING", 5, 3)], 1),
+        # An old attempt that ends on its own first is taken for the outcome.
+        (("ACQUIRING_WORKER", 0, 1), [("FAILED", 0, 2)], 0),
         # Starting a query that is not running: any update is the new attempt's.
         (("FAILED", 1, 1), [("FAILED", 1, 1), ("FAILED", 0, 2)], 1),
         (("FAILED", 0, 1), [("FAILED", 0, 1), ("FAILED", 0, 2)], 1),

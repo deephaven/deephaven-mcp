@@ -715,6 +715,10 @@ None of these verbs report readiness on their own:
   (read `pq details` for why). State `DISCONNECTED` also ends the wait but
   reports `TRANSITIONAL`. With `--no-wait`, `TRANSITIONAL` (state
   `CONNECTING` or `INITIALIZING`) is the normal outcome.
+- Avoid `--wait` on a PQ that is still starting up (state `CONNECTING`,
+  `AUTHENTICATING`, or `ACQUIRING_WORKER`): the reported outcome can belong
+  to that earlier attempt rather than the new one. Let it settle first, or
+  confirm with `pq details`.
 - A `--wait` that runs out is reported as a per-item failure even though
   the controller keeps going in the background, and so is a `--no-wait`
   request that runs out. Treat a timeout as

@@ -78,14 +78,6 @@ _START_ENDED_STATUSES = frozenset({"COMPLETED", "FAILED", "ERROR", "DISCONNECTED
 _START_OUTCOME_STATUSES = _STARTED_STATUSES | _START_ENDED_STATUSES
 """Statuses in which a start attempt has an outcome."""
 
-_PRE_INIT_STATUSES = frozenset(
-    {"FINDING_DISPATCHER", "ACQUIRING_WORKER", "CONNECTING", "AUTHENTICATING"}
-)
-"""Statuses a start attempt passes through before its initialization begins."""
-
-_LIVE_STATUSES = _STARTED_STATUSES | _PRE_INIT_STATUSES | {"INITIALIZING", "STOPPING"}
-"""Statuses in which a query has a run that could still end on its own."""
-
 _STOPPED_STATUSES = frozenset(
     {
         "STOPPED",
@@ -106,8 +98,10 @@ def _start_settled(
     """Return whether ``info`` shows the outcome of a start or restart.
 
     The outcome is a serving status (RUNNING, EXECUTING) or an ended status
-    (COMPLETED, FAILED, ERROR, DISCONNECTED) of the new attempt, never of the
-    run the query had when the request was issued.
+    (COMPLETED, FAILED, ERROR, DISCONNECTED) of the new attempt. If the query
+    had not initialized when the request was issued, an outcome reached by
+    that earlier attempt before the request took effect is taken as the new
+    attempt's.
 
     Args:
         state_at_request (CorePlusQueryState | None): The query's state when
@@ -121,6 +115,7 @@ def _start_settled(
     if state is None or state.status.name not in _START_OUTCOME_STATUSES:
         return False
     if state_at_request is None:
+        # No state at request: any outcome is considered the new attempt's.
         return True
     pb, pb_at_request = state.pb, state_at_request.pb
     # The controller gives each attempt a fresh state whose initialization time stays
@@ -128,12 +123,11 @@ def _start_settled(
     # time, so a different time can only come from the new attempt.
     if pb.initializationStartNanos != pb_at_request.initializationStartNanos:
         return True
-    # Same time: if nothing was running, the old run has published its last state,
-    # so any later update is the new attempt's. A live run that has not initialized
-    # yet looks like a new attempt that has not either; that case waits for
-    # initialization or times out.
+    # Same time and both 0: neither attempt had initialized. The controller stops the
+    # old attempt before starting the new one, so any later outcome is the new one's
+    # unless the old attempt ended on its own just before the request took effect.
     return bool(
-        state_at_request.status.name not in _LIVE_STATUSES
+        pb_at_request.initializationStartNanos == 0
         and pb.lastUpdateNanos != pb_at_request.lastUpdateNanos
     )
 
@@ -1582,9 +1576,10 @@ class CorePlusControllerClient(ClientObjectWrapper[ControllerClient]):
         one budget, ``EnterpriseClientTimeouts.pq_state_change_timeout_seconds``.
 
         Reaching an ended state is not an error; inspect the query's state
-        afterwards to tell a serving query from a failed one. If the query was
-        live but had not initialized when the request was issued, and the new
-        attempt also fails before initializing, the wait times out.
+        afterwards to tell a serving query from a failed one. If the query is
+        still starting up (CONNECTING, AUTHENTICATING, or ACQUIRING_WORKER)
+        when the request is issued, the reported outcome can belong to that
+        earlier attempt.
 
         Args:
             serial (CorePlusQuerySerial): The query to start or restart.
