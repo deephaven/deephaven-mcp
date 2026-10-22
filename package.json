@@ -1,0 +1,24 @@
+{
+  "name": "dh",
+  "version": "3.0.0",
+  "repository": "deephaven/deephaven-mcp",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "build": "bun run scripts/build.ts",
+    "release": "bun run scripts/release.ts",
+    "check": "biome check . && tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "semver": "^7.8.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/bun": "^1.4.2",
+    "@types/semver": "^7.8.0",
+    "typescript": "^7.0.2"
+  }
+}
