@@ -1,0 +1,55 @@
+{
+  // Deephaven MCP v1 config (JSON5: comments + trailing commas).
+  "community": {
+    "sessions": {
+      "local_dev": {
+        "host": "localhost",
+        "port": 10000,
+        "auth_type": "PSK",
+        "auth_token": "Deephaven123"
+      },
+      "anon": {
+        "host": "anon.example.com",
+        "port": 10001,
+        "auth_type": "Anonymous"
+      },
+      "psk_env": {
+        "host": "groovy.example.com",
+        "port": 10002,
+        "use_tls": true,
+        "auth_type": "PSK",
+        "auth_token_env_var": "DH_COMMUNITY_PSK"
+      },
+      "basic": {
+        "host": "basic.example.com",
+        "port": 10003,
+        "auth_type": "Basic",
+        "auth_token": "user:pass"
+      },
+      "custom": {
+        "host": "custom.example.com",
+        "port": 10004,
+        "auth_type": "com.example.auth.TokenHandler",
+        "auth_token": "tok"
+      }
+    },
+    "session_creation": { "max_concurrent_sessions": 2 }
+  },
+  "enterprise": {
+    "systems": {
+      "prod": {
+        "connection_json_url": "https://prod.example.com:8123/iris/connection.json",
+        "auth_type": "password",
+        "username": "alice",
+        "password_env_var": "DH_PROD_PASSWORD",
+        "effective_user": "svc",
+        "session_creation": { "max_concurrent_sessions": 5 }
+      },
+      "keyed": {
+        "connection_json_url": "https://keyed.example.com:8123/iris/connection.json",
+        "auth_type": "private_key",
+        "private_key_path": "/etc/deephaven/priv-keyed.base64.txt"
+      }
+    }
+  }
+}

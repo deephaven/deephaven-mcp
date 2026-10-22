@@ -8,6 +8,8 @@ declare const DH_BUILD_REPOSITORY: string | undefined;
 export const STANDALONE: boolean = Bun.isStandaloneExecutable;
 export const VERSION: string =
   typeof DH_BUILD_VERSION !== "undefined" ? DH_BUILD_VERSION : pkg.version;
+/** Command name; also names release binaries and install targets. */
+export const BIN: string = pkg.name;
 /** GitHub `owner/repo` that releases (and updates) come from. */
 export const REPOSITORY: string =
   typeof DH_BUILD_REPOSITORY !== "undefined"

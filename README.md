@@ -29,6 +29,18 @@ curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/i
 Note that running `dh` still updates itself to the latest release unless
 `DH_AUTO_UPDATE=off`.
 
+## Signing in
+
+```sh
+dh auth login dhe.example.com      # Enterprise: SSO in the browser, once
+dh auth login localhost:10000      # Community
+dh auth                            # list profiles
+```
+
+Each sign-in is saved as a profile, and later commands use the default one.
+Methods, profiles, scripting and CI, JSON output and error codes are covered in
+[Signing in with `dh auth`](docs/AUTH.md).
+
 ## Auto-update
 
 `dh` checks for a newer release at most once per `DH_UPDATE_INTERVAL` (default
@@ -49,4 +61,5 @@ HTTPS.
 ## Development
 
 Building, testing and releasing are covered in the
-[Developer Guide](docs/DEVELOPER_GUIDE.md).
+[Developer Guide](docs/DEVELOPER_GUIDE.md). Read
+[Architecture](docs/ARCHITECTURE.md) before adding or changing a command.

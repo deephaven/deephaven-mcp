@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { binaryName, build } from "../scripts/build.ts";
 import { PLATFORM } from "../src/updater.ts";
-import { VERSION } from "../src/version.ts";
+import { BIN, VERSION } from "../src/version.ts";
+import { http2OnlyEnterprise, TEST_CA } from "./helpers.ts";
 
 const NEXT = "9.9.9";
 // Every asset of this release redirects to plain HTTP (never resolves: .invalid).
@@ -176,7 +177,7 @@ test("dh installed with the install script updates itself from GitHub releases",
         DH_INSTALL_REPO_URL: repo,
       }),
     );
-    expect(install.stdout).toContain(`Installed dh v${VERSION}`);
+    expect(install.stdout).toContain(`Installed ${BIN} v${VERSION}`);
 
     if (!WINDOWS) {
       // A temp HOME/ZDOTDIR keeps this away from the real shell config.
@@ -238,15 +239,29 @@ test("dh installed with the install script updates itself from GitHub releases",
       }
     }
 
-    const exe = join(bin, WINDOWS ? "dh.exe" : "dh");
+    const exe = join(bin, WINDOWS ? `${BIN}.exe` : BIN);
     const env = {
       DH_UPDATE_URL: `${repo}/releases/latest/download/manifest.json`,
       DH_DEBUG: "1",
+      DH_CONFIG_DIR: join(tmp, "config"),
     };
     const now = { ...env, DH_UPDATE_INTERVAL: "0" };
     const version = async () => (await run(exe, ["--version"], env)).stdout;
 
     expect(await version()).toContain(VERSION);
+
+    // The compiled binary must offer HTTP/2: Enterprise's key service needs it.
+    const h2 = await http2OnlyEnterprise();
+    try {
+      const found = await run(
+        exe,
+        ["auth", "login", `https://localhost:${h2.port}`, "--no-prompt"],
+        { ...env, DH_AUTO_UPDATE: "off", NODE_EXTRA_CA_CERTS: TEST_CA },
+      );
+      expect(found.stdout).toContain("(Deephaven Enterprise)");
+    } finally {
+      await h2.stop(true);
+    }
 
     // Tag exists but its assets aren't uploaded: the check fails, but still starts the interval.
     latest.tag = `v${NEXT}`;
@@ -259,7 +274,7 @@ test("dh installed with the install script updates itself from GitHub releases",
     });
 
     const throttled = await run(exe, [], env);
-    expect(throttled.stderr).not.toContain("Updated dh");
+    expect(throttled.stderr).not.toContain(`Updated ${BIN}`);
     expect(await version()).toContain(VERSION);
 
     await run(exe, [], { ...now, DH_AUTO_UPDATE: "off" });
@@ -276,11 +291,11 @@ test("dh installed with the install script updates itself from GitHub releases",
     await writeFile(asset, good);
 
     const first = await run(exe, [], now);
-    expect(first.stderr).toContain(`Updated dh ${VERSION} -> ${NEXT}`);
+    expect(first.stderr).toContain(`Updated ${BIN} ${VERSION} -> ${NEXT}`);
     expect(await version()).toContain(NEXT);
 
     const second = await run(exe, [], now);
-    expect(second.stderr).not.toContain("Updated dh");
+    expect(second.stderr).not.toContain(`Updated ${BIN}`);
     if (WINDOWS) {
       // The previous binary is cleaned up on the next run.
       expect(await stat(`${exe}.old`).catch(() => null)).toBeNull();
