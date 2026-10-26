@@ -48,8 +48,8 @@ Default profile for ~/repo/.dh: staging
   folder removes its workspace. `main` starts with today's saved profile.
 - `dh auth use`, `login --default`, and first login set the workspace's
   profile; `dh auth` marks it.
-- `--profile`, `DH_PROFILE`, and `DH_SERVER` override the profile, and its
-  console, for one command; the workspace is unchanged.
+- Profile overrides (`--profile`, `DH_PROFILE`, `DH_SERVER`) apply to one
+  command; `console use` also saves the profile as the workspace's current one.
 - All callers in a folder share choices and can clobber each other.
 - Freeze protects choices in `main` or a folder workspace. Copies start
   editable.
@@ -134,7 +134,8 @@ For commands given no console:
   interrupted creates remain discoverable by name.
 - Shortcodes in `DH_CONFIG_DIR`, choices in the workspace; locked atomic
   owner-only files. Network calls outside locks.
-- `.dh/.gitignore`: `*`. Profile references: server + user, surviving renames.
+- `.dh/.gitignore`: `*`. Profile references: server + login user + operate-as
+  user, surviving renames.
 
 ## Stack
 
@@ -169,11 +170,11 @@ For commands given no console:
 - [ ] (PR 1) Resolution order; frozen workspaces reject changes; git ignores
       `.dh/`.
 - [ ] (PR 2) `dh auth use` stays workspace-local; `main` keeps today's
-      default; renames preserve references.
+      default; renames preserve references; operate-as identities stay distinct.
 - [ ] (PR 3) Concurrent creates get unique shortcodes.
-- [ ] (PR 5) Profile switch restores its console; overrides leave the
-      workspace unchanged; deleted console entry cleared. Enterprise API
-      checked: filtering, stable IDs, fields.
+- [ ] (PR 5) Profile switch restores its console; `console use --profile`
+      switches both; other overrides preserve the workspace's current profile.
+      Deleted console entry cleared. Enterprise API checked: filtering, stable IDs, fields.
 - [ ] (PR 6) Enterprise API checked: server defaults, idle-timeout units.
 - [ ] (PR 7) Interrupted create leaves one console listed by `dh console`;
       consoles survive CLI exit.
