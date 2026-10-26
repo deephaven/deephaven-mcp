@@ -65,15 +65,24 @@ Raise the limit with --timeout <seconds>; 0 waits indefinitely.
 
 - One deadline covers the whole command. Defaults: 60 s; 300 s for
   `auth login`, `console create`, and `console destroy`.
+- These are initial budgets; validate them against successful operation
+  timings and adjust before release. A terminal server state or explicit
+  request error fails immediately; wait only while the operation is pending.
 - `DH_TIMEOUT` retains its 30 s default for individual connections and requests,
   capped by the remaining command time. `--timeout 0` removes the command
   deadline only. Global `--timeout` replaces the SSO-only login option.
+- Long waits report phase changes and periodic progress on stderr, including
+  elapsed time and time remaining.
 - Completion, failure, timeout, SIGINT, and SIGTERM share cleanup: close clients,
   release locks, report, exit. Cleanup has a 2 s limit; a second Ctrl-C exits
   immediately.
-- Reports include step, elapsed time, last known state, and recovery command
-  where available, with profile and shortcode. Server work may continue;
-  check before retrying.
+- Reports include phase, elapsed time, last successful observation and its age,
+  plus a recovery command where available. JSON exposes these as structured
+  fields. Server work may continue; check before retrying.
+- Persist create/destroy state per shortcode: `not_sent`, `unconfirmed`, or
+  `confirmed`. On retry, look up an `unconfirmed` operation on the server first;
+  if its outcome remains unknown, stop and show how to inspect it rather than
+  resubmitting.
 - SIGKILL skips cleanup and reporting; the OS releases local locks.
 
 ## Errors
@@ -137,8 +146,9 @@ Raise the limit with --timeout <seconds>; 0 waits indefinitely.
 
 - [ ] (PR 1) Cleanup runs once, reports failures, and stops within 2 s.
 - [ ] (PR 2) Slow-wait tests: timeout/SIGINT/SIGTERM report progress, release
-      resources, and exit within 2 s with codes 6/3/3; second Ctrl-C exits immediately.
-      Test shared deadlines, `--timeout 0`, CA handoff, and auth compatibility.
+      resources, and exit within 2 s with codes 6/3/3; second Ctrl-C exits
+      immediately. Test shared deadlines, `--timeout 0`, CA handoff, and auth
+      compatibility. Validate defaults against representative successful timings.
 - [ ] (PR 3) Concurrent creates get unique shortcodes; renames preserve
       references; operate-as identities stay distinct.
 - [ ] (PR 4) Selection precedence and deleted-reference cleanup work;
@@ -148,9 +158,12 @@ Raise the limit with --timeout <seconds>; 0 waits indefinitely.
       match the API, including idle-timeout units.
 - [ ] (PR 6) `--no-use` leaves the console in use unchanged. Timed-out or
       interrupted create reports the shortcode and profile; a server-accepted
-      create remains discoverable without resubmission. Consoles survive CLI exit.
+      create remains discoverable without resubmission. Re-running after an
+      uncertain create reconciles before retrying and never silently duplicates
+      it. Terminal startup failures return immediately. Consoles survive CLI exit.
 - [ ] (PR 7) Test destroy confirmation, deletion wait, interruption recovery,
-      and stopped/failed explicit and remembered targets.
+      stopped/failed explicit and remembered targets, and reconciliation when
+      the delete response is lost.
 - [ ] (PR 8) Real-server tests: Enterprise lifecycle, Community discovery.
 - [ ] (Every PR) Help, agent guidance, JSON, and user docs ship together;
       `bun run check` and `bun test` pass.
