@@ -41,8 +41,9 @@ shared cleanup for completion, failure, and interruption.
   Community uses its shared console.
 - Global auth profiles stay unchanged. Each remembers one console;
   `use --profile <name>` changes that console, leaving the default profile alone.
-- Stopped selection → `console_not_ready`; deleted selection →
-  `console_not_found` and clear the reference.
+- `show` and `destroy` accept stopped or failed consoles, explicit or remembered.
+  Only operations requiring a running console reject these with `console_not_ready`.
+- Deleted selection → `console_not_found` and clear the reference.
 - Consoles survive profile switches and CLI exit; logout keeps references.
 - Agents: pass profile and console explicitly; create with `--no-use`.
   Remembered defaults are shared; concurrent commands can interleave.
@@ -82,7 +83,7 @@ Raise the limit with --timeout <seconds>; 0 waits indefinitely.
 | `usage` | 2 | Bad settings. |
 | `console_required` | 2 | No console in use; list running CLI consoles. |
 | `console_not_found` | 2 | Unknown or deleted console; suggest `dh console`. |
-| `console_not_ready` | 5 | Console stopped or failed; show its state. |
+| `console_not_ready` | 5 | Operation requires a running console; show its state. |
 | `console_unsupported` | 5 | Server lacks the operation, language, or field. |
 | `console_forbidden` | 4 | Server denied access. |
 | `console_failed` | 5 | Server rejected create or delete; show its reason. |
@@ -141,13 +142,15 @@ Raise the limit with --timeout <seconds>; 0 waits indefinitely.
 - [ ] (PR 3) Concurrent creates get unique shortcodes; renames preserve
       references; operate-as identities stay distinct.
 - [ ] (PR 4) Selection precedence and deleted-reference cleanup work;
-      `use --profile` preserves default profile. Verify API filtering and stable IDs.
+      `use --profile` preserves default profile; show accepts stopped/failed
+      explicit and remembered targets. Verify API filtering and stable IDs.
 - [ ] (PR 5) Settings precedence, resets, unsupported fields, and defaults
       match the API, including idle-timeout units.
 - [ ] (PR 6) `--no-use` leaves the console in use unchanged. Timed-out or
       interrupted create reports the shortcode and profile; a server-accepted
       create remains discoverable without resubmission. Consoles survive CLI exit.
-- [ ] (PR 7) Test destroy confirmation, deletion wait, and interruption recovery.
+- [ ] (PR 7) Test destroy confirmation, deletion wait, interruption recovery,
+      and stopped/failed explicit and remembered targets.
 - [ ] (PR 8) Real-server tests: Enterprise lifecycle, Community discovery.
 - [ ] (Every PR) Help, agent guidance, JSON, and user docs ship together;
       `bun run check` and `bun test` pass.
