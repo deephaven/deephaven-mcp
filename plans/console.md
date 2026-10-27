@@ -87,10 +87,8 @@ The same failure with `-o json`, on stderr:
 - Completion, failure, timeout, SIGINT, and SIGTERM share cleanup: close clients,
   release locks, report, exit. Cleanup has a 2 s limit; a second Ctrl-C exits
   immediately.
-- Persist create/destroy state per shortcode: `not_sent`, `unconfirmed`, or
-  `confirmed`. On retry, look up an `unconfirmed` operation on the server first;
-  if its outcome remains unknown, stop and show how to inspect it rather than
-  resubmitting.
+- An uncertain create reports its shortcode; `dh console show <shortcode>`
+  establishes the result. Each `create` run starts a new console.
 - SIGKILL skips cleanup and reporting; the OS releases local locks.
 
 ### Failure reports
@@ -161,7 +159,7 @@ Auth, credential, network, and internal errors use their existing codes and exit
   mappings under the store lock before create; retry collisions across all
   profiles and retain reservations after deletion. Interrupted creates remain
   discoverable by name.
-- Store shortcode/full-ID-to-profile mappings, selections, operation state,
+- Store shortcode/full-ID-to-profile mappings, selections,
   and defaults in `DH_CONFIG_DIR`: locked atomic
   owner-only files; network calls outside locks. Profile references use
   server + login user + operate-as user and survive renames.
@@ -175,8 +173,8 @@ Auth, credential, network, and internal errors use their existing codes and exit
 | 3 | Console store | Global shortcode reservations, ID/profile mappings, remembered console per profile | 300 |
 | 4 | Discovery | Enterprise list, show, use; agent guidance | 450 |
 | 5 | Creation defaults | Settings validation and merge, `dh console default` | 550 |
-| 6 | Create | `--no-use`, readiness wait, interruption recovery | 400 |
-| 7 | Destroy | Confirmation, deletion wait, interruption recovery | 350 |
+| 6 | Create | `--no-use`, readiness wait, interruption reports | 400 |
+| 7 | Destroy | Confirmation, deletion wait, interruption reports | 350 |
 | 8 | Community | Shared console, real-server tests, README | 350 |
 
 ## Out of scope
@@ -212,12 +210,11 @@ Auth, credential, network, and internal errors use their existing codes and exit
       match the API, including idle-timeout units.
 - [ ] (PR 6) `--no-use` leaves the console in use unchanged. Timed-out or
       interrupted create reports the shortcode and profile; a server-accepted
-      create remains discoverable by shortcode. Re-running after an
-      uncertain create reconciles before retrying and prevents duplicates.
-      Terminal startup failures return immediately. Consoles survive CLI exit.
-- [ ] (PR 7) Test destroy confirmation, deletion wait, interruption recovery,
-      stopped/failed explicit and remembered targets, and reconciliation when
-      the delete response is lost.
+      create remains discoverable by shortcode. Terminal startup failures
+      return immediately. Consoles survive CLI exit.
+- [ ] (PR 7) Test destroy confirmation, deletion wait, interruption reports,
+      stopped/failed explicit and remembered targets, and `outcome: unknown`
+      with a `show` recovery command when the delete response is lost.
 - [ ] (PR 8) Real-server tests: Enterprise lifecycle, Community discovery.
 - [ ] (Every PR) Help, agent guidance, JSON, and user docs ship together;
       `bun run check` and `bun test` pass.
