@@ -1,9 +1,9 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DhError, isErrno, reasonOf } from "../errors.ts";
-import { note } from "../output.ts";
-import { BIN, STANDALONE } from "../version.ts";
+import { DhError, isErrno, reasonOf } from "../../errors.ts";
+import { note } from "../../output.ts";
+import { BIN, STANDALONE } from "../../version.ts";
 import type { CommunityMethod } from "./community.ts";
 import { keyPairOf } from "./flows.ts";
 import { type KeyPair, readKeyFile } from "./keyfile.ts";
@@ -99,8 +99,18 @@ export async function ensureCa(
       stdio: ["inherit", "inherit", "inherit"],
     },
   );
-  const code = await proc.exited;
-  if (dir) await rm(dir, { recursive: true, force: true });
+  const forwardInterrupt = () => proc.kill("SIGINT");
+  const forwardTermination = () => proc.kill("SIGTERM");
+  process.on("SIGINT", forwardInterrupt);
+  process.on("SIGTERM", forwardTermination);
+  let code: number;
+  try {
+    code = await proc.exited;
+    if (dir) await rm(dir, { recursive: true, force: true });
+  } finally {
+    process.off("SIGINT", forwardInterrupt);
+    process.off("SIGTERM", forwardTermination);
+  }
   process.exit(code);
 }
 
@@ -144,7 +154,7 @@ export async function trustAndResolveServer(
 function savedSecret(cred: Credential, profile: Profile): string | undefined {
   if (cred.type === "secret") return cred.value;
   if (cred.type !== "envRef") return undefined;
-  const value = process.env[cred.env];
+  const value = env(cred.env);
   if (value === undefined) {
     throw new DhError(
       "credential_unavailable",

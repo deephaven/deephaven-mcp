@@ -1,15 +1,15 @@
 import { resolve } from "node:path";
-import { InvalidArgumentError, Option } from "commander";
-import { commitSignIn, type SavedSignIn } from "../../auth/flows.ts";
-import { trustAndResolveServer } from "../../auth/session.ts";
+import { Option } from "commander";
+import { commitSignIn, type SavedSignIn } from "../../actions/auth/flows.ts";
+import { trustAndResolveServer } from "../../actions/auth/session.ts";
 import {
   connectServer,
   disconnectServer,
   offeredMethods,
   type Session,
   signIn,
-} from "../../auth/signin.ts";
-import type { Method } from "../../auth/store.ts";
+} from "../../actions/auth/signin.ts";
+import type { Method } from "../../actions/auth/store.ts";
 import { defineCommand, type Output } from "../../cli/command.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
@@ -27,6 +27,7 @@ import {
   confirmSsoAccount,
   priorSignIn,
 } from "./questions.ts";
+import { use } from "./use.ts";
 
 /** Every `--method` choice. */
 export const METHODS: Method[] = [
@@ -53,7 +54,6 @@ export interface LoginOptions {
   privateKeyFile?: string;
   copyKey?: boolean;
   caCert?: string;
-  timeout?: number;
   operateAs?: string;
   browser?: boolean;
   expectUser?: string;
@@ -84,9 +84,6 @@ export const login = defineCommand<LoginOptions>({
     ),
     new Option("--copy-key", "Save the key itself instead of its path."),
     new Option("--ca-cert <file>", "Trust this CA certificate for the server."),
-    new Option("--timeout <seconds>", "How long to wait for SSO sign-in.")
-      .argParser(seconds)
-      .default(300),
     new Option("--operate-as <user>", "Enterprise user to operate as."),
     new Option("--no-browser", "Print the SSO URL without opening a browser."),
     new Option(
@@ -101,10 +98,10 @@ export const login = defineCommand<LoginOptions>({
   async run(ctx, [serverArg], opts) {
     await ctx.store.ensureDir();
     let state = await ctx.store.read();
-    // First run: migrating a legacy config replaces signing in, unless nothing was tried.
+    // First run: migrating a legacy config replaces signing in, unless nothing migrated.
     if (!serverArg && shouldOfferMigration(state)) {
       const result = await migrateLegacy(ctx, { yes: opts.yes }, true);
-      if (result && result.migrated + result.failed > 0) {
+      if (result && result.migrated > 0) {
         return migratedOutput(result);
       }
       state = await ctx.store.read();
@@ -119,6 +116,7 @@ export const login = defineCommand<LoginOptions>({
       profile,
       opts,
     );
+    if (target === "use") return await use.run(ctx, [], {});
     if (target === "remove") return await logout.run(ctx, [], {});
     const prior = priorSignIn(state, target.profile);
     const { origin, kind } = await trustAndResolveServer(
@@ -190,13 +188,4 @@ function loggedInOutput(saved: SavedSignIn, session: Session): Output {
       default: saved.isDefault,
     },
   };
-}
-
-/** Parses `--timeout`: a positive number of seconds. */
-function seconds(value: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new InvalidArgumentError("Not a positive number.");
-  }
-  return n;
 }

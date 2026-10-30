@@ -1,14 +1,14 @@
 import { Option } from "commander";
-import { findLegacy, type LegacyItem } from "../../auth/legacy.ts";
+import { findLegacy, type LegacyItem } from "../../actions/auth/legacy.ts";
 import {
   type Migrated,
   migrateLegacyEntry,
   recordMigration,
   splitMigrated,
-} from "../../auth/migrate.ts";
-import type { State } from "../../auth/store.ts";
+} from "../../actions/auth/migrate.ts";
+import type { State } from "../../actions/auth/store.ts";
 import { type Context, defineCommand, type Output } from "../../cli/command.ts";
-import { timeoutMs } from "../../errors.ts";
+import { DhError, timeoutMs } from "../../errors.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { askLegacyEntriesToMigrate } from "./questions.ts";
@@ -118,11 +118,16 @@ async function migrateAndReport(
   return outcome;
 }
 
-/** "Migrated N profiles.", shared with login's first-run offer. */
+/** "Migrated N profiles.", shared with login's first-run offer. Any failure makes the exit status `migration_failed`. */
 export function migratedOutput({ migrated, failed }: MigrationResult): Output {
   const counted = `Migrated ${migrated} profile${migrated === 1 ? "" : "s"}`;
+  if (!failed) return { human: `${counted}.`, json: { migrated, failed } };
   return {
-    human: failed ? `${counted}; ${failed} failed.` : `${counted}.`,
+    human: `${counted}; ${failed} failed.`,
     json: { migrated, failed },
+    error: new DhError(
+      "migration_failed",
+      `${failed} legacy ${failed === 1 ? "entry" : "entries"} not migrated`,
+    ),
   };
 }

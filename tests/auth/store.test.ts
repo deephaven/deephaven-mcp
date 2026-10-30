@@ -3,8 +3,12 @@ import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { addOrphan, revokeOrphans, saveProfile } from "../../src/auth/flows.ts";
-import { Store } from "../../src/auth/store.ts";
+import {
+  addOrphan,
+  revokeOrphans,
+  saveProfile,
+} from "../../src/actions/auth/flows.ts";
+import { Store } from "../../src/actions/auth/store.ts";
 import { run, tempDir, WINDOWS } from "../helpers.ts";
 
 async function tempStore(): Promise<Store> {
@@ -118,7 +122,7 @@ test("store: concurrent updates in one process don't lose writes", async () => {
 test("store: concurrent processes don't lose writes", async () => {
   const store = await tempStore();
   const module = pathToFileURL(
-    resolve(import.meta.dir, "../../src/auth/store.ts"),
+    resolve(import.meta.dir, "../../src/actions/auth/store.ts"),
   ).href;
   const worker = (n: number) =>
     run([
@@ -147,7 +151,7 @@ test("store: a leftover lock file doesn't block; only a live holder does", async
   expect(Date.now() - started).toBeLessThan(5_000);
 
   const module = pathToFileURL(
-    resolve(import.meta.dir, "../../src/auth/lock.ts"),
+    resolve(import.meta.dir, "../../src/actions/auth/lock.ts"),
   ).href;
   const holder = Bun.spawn(
     [

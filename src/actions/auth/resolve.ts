@@ -1,4 +1,5 @@
-import { DhError, describe } from "../errors.ts";
+import { DhError, describe } from "../../errors.ts";
+import { isLocal } from "../../net.ts";
 import type { Kind } from "./store.ts";
 
 /** A server address normalized to its origin, and which product answered there. */
@@ -7,16 +8,11 @@ export interface ResolvedServer {
   kind: Kind;
 }
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const HTTPS_PORTS = [443, 8000, 8123];
 const HTTP_PORTS = [10000, 8000, 8123, 80];
 const PROBE_TIMEOUT_MS = 2_000;
 /** A leading `scheme://`; without one, the input is a bare host. */
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
-
-export function isLocal(url: URL): boolean {
-  return LOCAL_HOSTS.has(url.hostname);
-}
 
 const DEFAULT_PORTS: Record<string, string> = {
   "https:": "443",

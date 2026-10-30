@@ -1,10 +1,14 @@
 import { hostname } from "node:os";
 import { NodeHttp2gRPCTransport } from "@deephaven/jsapi-nodejs";
 import {
+  type Base64PublicKey,
   createPasswordCredentials,
   deletePublicKeys,
   generateBase64KeyPair,
+  type KeyPairCredentials,
+  type KeyPairType,
   loginClientWithKeyPair,
+  type Username,
   uploadPublicKey,
 } from "@deephaven-enterprise/auth-nodejs";
 import {
@@ -12,10 +16,11 @@ import {
   describe,
   reasonOf,
   timeoutMs,
+  serverUnreachable as unreachable,
   withTimeout,
-} from "../errors.ts";
-import { err } from "../output.ts";
-import { BIN } from "../version.ts";
+} from "../../errors.ts";
+import { err } from "../../output.ts";
+import { BIN } from "../../version.ts";
 import { type Api, loadEnterpriseApi } from "./jsapi.ts";
 import type { KeyPair } from "./keyfile.ts";
 
@@ -42,22 +47,22 @@ export interface EnterpriseAuthConfig {
 /** The error code for rejected credentials: `auth_failed` at login, `auth_expired` for a saved profile. */
 type Rejected = "auth_failed" | "auth_expired";
 
-/** `cause`: why it failed; without one, the error says it timed out. */
-function unreachable(origin: string, cause?: unknown): DhError {
-  return new DhError(
-    "server_unreachable",
-    `Could not reach ${origin}`,
-    cause === undefined ? "Timed out" : describe(cause),
-  );
-}
-
-/** Loads `origin`'s irisapi (cached under `cacheRoot`) and waits for the gRPC connection. Not signed in yet. */
+/**
+ * Loads `origin`'s irisapi (cached under `cacheRoot`) and waits for the gRPC
+ * connection. Not signed in yet. `downloadTimeout` limits the irisapi download
+ * (several MB); `timeout` the connection.
+ */
 export async function connectEnterprise(
   origin: string,
   cacheRoot: string,
   timeout: number,
+  downloadTimeout = timeout,
 ): Promise<EnterpriseConnection> {
-  const dhe = await loadEnterpriseApi(new URL(origin), cacheRoot, timeout);
+  const dhe = await loadEnterpriseApi(
+    new URL(origin),
+    cacheRoot,
+    downloadTimeout,
+  );
   const client = new dhe.Client(new URL(origin).href, {
     transportFactory: NodeHttp2gRPCTransport.factory,
   });
@@ -138,13 +143,14 @@ async function guardedLogin(
   }
 }
 
-/** `operateAs` defaults to `username`. A rejection is `auth_failed`. */
+/** `operateAs` defaults to `username`. A rejection throws `rejected` (`auth_failed` or `auth_expired`). */
 export function loginPassword(
   conn: EnterpriseConnection,
   username: string,
   password: string,
   operateAs: string | undefined,
   timeout: number,
+  rejected: Rejected,
 ): Promise<void> {
   const credentials = {
     ...createPasswordCredentials(username, password),
@@ -154,7 +160,7 @@ export function loginPassword(
     conn,
     () => conn.client.login(credentials),
     timeout,
-    "auth_failed",
+    rejected,
   );
 }
 
@@ -170,49 +176,41 @@ export function loginKey(
   return guardedLogin(
     conn,
     () =>
-      loginClientWithKeyPair(
-        conn.client,
-        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-        { type: "keyPair", username, keyPair, operateAs } as any,
-      ),
+      loginClientWithKeyPair(conn.client, {
+        type: "keyPair",
+        username,
+        keyPair,
+        operateAs,
+      } as KeyPairCredentials),
     timeout,
     rejected,
   );
 }
 
+/** Heuristic cutoff below the server's ~60s SSO wait limit; it is not a status code. */
+const SAML_MIN_HOLD_MS = 5_000;
+
 /**
- * Waits for the browser sign-in for `nonce`. The server holds each `login()`
- * only up to its SAML wait limit; a sign-in that lands later is picked up by
- * calling again on a new connection.
+ * Waits for the browser sign-in for `nonce` without an overall timeout. The
+ * server doesn't distinguish a wait-limit rejection from cancellation or other
+ * failures. Treat a non-DhError rejection after at least 5s as a possible
+ * wait-limit expiry and retry with the same nonce. This timing heuristic can
+ * also retry other slow failures.
  */
 export async function loginSaml(
   first: EnterpriseConnection,
   reconnect: () => Promise<EnterpriseConnection>,
   nonce: string,
-  timeout: number,
 ): Promise<EnterpriseConnection> {
-  const deadline = Date.now() + timeout;
   let conn = first;
   for (;;) {
-    const remaining = deadline - Date.now();
+    const started = Date.now();
     try {
-      await withTimeout(
-        conn.client.login({ type: "saml", token: nonce }),
-        Math.max(remaining, 0),
-        () =>
-          new DhError(
-            "auth_failed",
-            "Timed out waiting for sign-in",
-            "Run the command again, or raise --timeout.",
-          ),
-      );
+      await conn.client.login({ type: "saml", token: nonce });
       return conn;
     } catch (e) {
       disconnect(conn);
-      if (process.env.DH_DEBUG) {
-        err(`${BIN}: SSO login call ended (${describe(e)}); asking again`);
-      }
-      if (e instanceof DhError || Date.now() >= deadline) {
+      if (e instanceof DhError || Date.now() - started < SAML_MIN_HOLD_MS) {
         throw e instanceof DhError
           ? e
           : new DhError(
@@ -221,6 +219,9 @@ export async function loginSaml(
               undefined,
               reasonOf(e),
             );
+      }
+      if (process.env.DH_DEBUG) {
+        err(`${BIN}: SSO login call ended (${describe(e)}); asking again`);
       }
     }
     conn = await reconnect();
@@ -300,13 +301,10 @@ export async function uploadKey(
     res = await withTimeout(
       uploadPublicKey({
         dheClient: conn.client,
-        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-        userName: username as any,
-        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-        publicKey: keyPair.publicKey as any,
+        userName: username as Username,
+        publicKey: keyPair.publicKey as Base64PublicKey,
         comment: keyPair.comment,
-        // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-        type: keyPair.type as any,
+        type: keyPair.type as KeyPairType,
       }),
       timeoutMs(),
       () => new DhError("server_unreachable", "Timed out"),
@@ -344,12 +342,9 @@ export async function deleteKey(
 ): Promise<void> {
   const deleted = deletePublicKeys({
     dheClient: conn.client,
-    // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-    userName: username as any,
-    // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-    publicKeys: [keyPair.publicKey as any],
-    // biome-ignore lint/suspicious/noExplicitAny: the library's branded types.
-    type: keyPair.type as any,
+    userName: username as Username,
+    publicKeys: [keyPair.publicKey as Base64PublicKey],
+    type: keyPair.type as KeyPairType,
   });
   await withTimeout(
     deleted,

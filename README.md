@@ -46,12 +46,12 @@ Methods, profiles, scripting and CI, JSON output and error codes are covered in
 `dh` checks for a newer release at most once per `DH_UPDATE_INTERVAL` (default
 24 hours) and, if one exists, replaces itself after verifying its SHA-256.
 
-| Env var              | Effect                                                |
-| -------------------- | ----------------------------------------------------- |
-| `DH_UPDATE_URL`      | Manifest URL (defaults to this repo's latest release) |
-| `DH_UPDATE_INTERVAL` | Hours between update checks (default 24; 0 = always)  |
-| `DH_AUTO_UPDATE=off` | Disable auto-update                                   |
-| `DH_DEBUG=1`         | Print update errors (otherwise updates fail silently) |
+| Env var              | Effect                                                    |
+| -------------------- | --------------------------------------------------------- |
+| `DH_UPDATE_URL`      | Manifest URL (unset or empty: this repo's latest release) |
+| `DH_UPDATE_INTERVAL` | Hours between update checks (default 24; 0 = always)      |
+| `DH_AUTO_UPDATE=off` | Disable auto-update                                       |
+| `DH_DEBUG=1`         | Print update errors (otherwise updates fail silently)     |
 
 Update and install URLs, including every redirect, must use HTTPS. Plain HTTP is
 allowed only for loopback (`localhost`, `127.0.0.1`, `[::1]`) test servers;

@@ -1,6 +1,6 @@
-import { noProfile, setDefault } from "../../auth/flows.ts";
-import { findByName, sortedProfiles } from "../../auth/profile.ts";
-import type { Config } from "../../auth/store.ts";
+import { noProfile, setDefault } from "../../actions/auth/flows.ts";
+import { findByName, sortedProfiles } from "../../actions/auth/profile.ts";
+import type { Config } from "../../actions/auth/store.ts";
 import { defineCommand } from "../../cli/command.ts";
 import { DhError } from "../../errors.ts";
 import { BIN } from "../../version.ts";

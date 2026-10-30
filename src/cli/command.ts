@@ -1,5 +1,5 @@
 import { type Command, Option } from "commander";
-import { Store } from "../auth/store.ts";
+import { Store } from "../actions/auth/store.ts";
 import { DhError } from "../errors.ts";
 import { result, setFormat } from "../output.ts";
 import { lazyPrompter, type Prompter } from "../ui/prompt.ts";
@@ -28,6 +28,8 @@ export interface Output {
   human: string | string[];
   /** Printed as one JSON value with `-o json`. */
   json: unknown;
+  /** A partial failure: reported after the result, and sets the exit status. */
+  error?: DhError;
 }
 
 /** One positional argument. */
@@ -128,6 +130,7 @@ export function registerCommand(
       self.opts() as never,
     );
     result(() => out.human, out.json);
+    if (out.error) throw out.error;
   });
   // `command()` (not addCommand) so subcommands inherit the root's settings.
   for (const child of spec.commands ?? []) {

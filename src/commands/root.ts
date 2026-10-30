@@ -1,5 +1,5 @@
 import { styleText } from "node:util";
-import type { Profile } from "../auth/store.ts";
+import type { Profile } from "../actions/auth/store.ts";
 import { defineCommand } from "../cli/command.ts";
 import { BIN, VERSION } from "../version.ts";
 import { agents } from "./agents.ts";

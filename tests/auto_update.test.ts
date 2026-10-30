@@ -138,6 +138,61 @@ function fakeGitHub(root: string, latest: { tag: string }) {
   });
 }
 
+test("auto-update uses the default URL when DH_UPDATE_URL is unset or empty", async () => {
+  const probe = `
+    import { mock } from "bun:test";
+    mock.module("./src/version.ts", () => ({
+      BIN: "dh",
+      REPOSITORY: "example/repo",
+      STANDALONE: true,
+      VERSION: "3.0.0",
+    }));
+    mock.module("node:fs/promises", () => ({
+      chmod: async () => {},
+      readFile: async () => "0",
+      rename: async () => {},
+      rm: async () => {},
+      writeFile: async () => {},
+    }));
+    globalThis.fetch = async (url) => {
+      console.log(String(url));
+      return Response.json({ version: "3.0.0", binaries: {} });
+    };
+    const { autoUpdate } = await import("./src/updater.ts");
+    await autoUpdate();
+  `;
+  const cwd = resolve(import.meta.dir, "..");
+  const env = { DH_AUTO_UPDATE: "", DH_UPDATE_INTERVAL: "0" };
+  const defaultUrl =
+    "https://github.com/example/repo/releases/latest/download/manifest.json";
+  const overrideUrl = "https://updates.example.invalid/manifest.json";
+
+  const cases: [string | undefined, string][] = [
+    [undefined, defaultUrl],
+    ["", defaultUrl],
+    [overrideUrl, overrideUrl],
+  ];
+  for (const [value, expected] of cases) {
+    const result = await run(
+      process.execPath,
+      ["--no-env-file", "-e", probe],
+      { ...env, DH_UPDATE_URL: value },
+      cwd,
+    );
+    expect(result.success, result.stderr).toBe(true);
+    expect(result.stdout.trim()).toBe(expected);
+  }
+
+  const invalid = await run(
+    process.execPath,
+    ["--no-env-file", "-e", probe],
+    { ...env, DH_UPDATE_URL: "   " },
+    cwd,
+  );
+  expect(invalid.success).toBe(false);
+  expect(invalid.stderr).toContain("Invalid URL");
+});
+
 test("dh installed with the install script updates itself from GitHub releases", async () => {
   const tmp = await mkdtemp(join(tmpdir(), "dh-update-test-"));
   const latest = { tag: `v${VERSION}` };

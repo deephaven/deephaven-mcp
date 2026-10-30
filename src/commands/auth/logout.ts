@@ -3,8 +3,8 @@ import {
   type Removed,
   removeProfiles,
   trustCasToRevoke,
-} from "../../auth/flows.ts";
-import { sortedProfiles } from "../../auth/profile.ts";
+} from "../../actions/auth/flows.ts";
+import { sortedProfiles } from "../../actions/auth/profile.ts";
 import { type Context, defineCommand, type Output } from "../../cli/command.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";

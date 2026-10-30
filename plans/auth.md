@@ -44,7 +44,6 @@ Run `dh --help` to learn more.
 
 - Server choices: imported config, previous logins, and **Other…**.
 - The method prompt only appears if the server offers 2+ methods.
-- SSO wait: `--timeout` (default 300 s). Not bounded by `DH_TIMEOUT`.
 - DHE: after SSO or password login, upload a key. Later logins use the key. The
   password is not saved.
 - Key upload fails → `key_upload_failed`, with the server's reason or the ACL
@@ -144,7 +143,6 @@ Exit codes: 0 ok, 1 internal error, 2 usage, 3 cancelled, 4 auth, 5 server. With
 | `--handler <class>`, `--token-stdin`, `--token-env <VAR>`             | DHC custom handler and token                    |
 | `--private-key-file <path>`, `--copy-key`                             | Existing DHE key: store the path / the contents |
 | `--ca-cert <file>`                                                    | CA cert for the server                          |
-| `--timeout <seconds>`                                                 | SSO wait (default 300)                          |
 | `--operate-as <u>`                                                    | DHE operate-as user                             |
 | `--no-browser`                                                        | Print the SSO URL without opening a browser     |
 | `--expect-user <u>`                                                   | Check the SSO account; mismatch → `auth_failed` |
@@ -215,8 +213,10 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`, `@deephaven/jsapi-nodejs`
   - The login URL comes from the server's auth config. It may be on another
     port.
   - Nonce: ≥ 96 CSPRNG bytes.
-  - One `login({type: "saml"})` call. The server blocks until the browser
-    sign-in completes.
+  - The server holds each `login({type: "saml"})` call while waiting for the
+    browser. A non-`DhError` rejection after at least 5 s may be its wait
+    limit; retry with the same nonce. This heuristic can also retry other slow
+    failures.
 - Key upload:
   - Target: the ACL writer host from `getServerConfigValues()`.
   - Check the HTTP status.
@@ -239,8 +239,8 @@ Dependencies: `@deephaven-enterprise/auth-nodejs`, `@deephaven/jsapi-nodejs`
 - CA cert: re-run `dh` with `NODE_EXTRA_CA_CERTS` set (added to any the user
   already set), which covers `fetch` and the transport.
 - Proxy: `fetch` honors `HTTPS_PROXY`; the transport doesn't yet.
-- Timeouts: race connect + non-SSO login against `DH_TIMEOUT`, and the SSO wait
-  against `--timeout`. On timeout, discard the client.
+- Timeouts: race connect + non-SSO login against `DH_TIMEOUT`. On timeout,
+  discard the client.
 - Command name: `"name"` in `package.json`, the only place it is set.
 - Build: bake `--experimental-http2-fetch` into the binary; the ACL write server
   is HTTP/2-only.

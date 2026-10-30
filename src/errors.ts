@@ -23,6 +23,10 @@ export const ERROR_CODES = {
     exit: 4,
     description: "Uploading this computer's key to DHE failed",
   },
+  migration_failed: {
+    exit: 4,
+    description: "Some legacy config entries weren't migrated",
+  },
   server_unreachable: { exit: 5, description: "Network or TLS failure" },
   server_unsupported: {
     exit: 5,
@@ -77,6 +81,15 @@ function messageOf(reason: unknown): string {
 export function reasonOf(reason: unknown): string | undefined {
   const text = describe(reason);
   return !text || text.startsWith("[object ") ? undefined : text;
+}
+
+/** `server_unreachable` for `origin`. `cause`: why it failed; without one, the error says it timed out. */
+export function serverUnreachable(origin: string, cause?: unknown): DhError {
+  return new DhError(
+    "server_unreachable",
+    `Could not reach ${origin}`,
+    cause === undefined ? "Timed out" : describe(cause),
+  );
 }
 
 /** Rejects with `onTimeout()` if `promise` hasn't settled within `ms`. */

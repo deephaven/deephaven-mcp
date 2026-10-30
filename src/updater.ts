@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
 import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { gt } from "semver";
+import { isTrustedSource } from "./net.ts";
 import { BIN, REPOSITORY, STANDALONE, VERSION } from "./version.ts";
 
 export const releasesUrl = (repository: string): string =>
@@ -10,7 +11,6 @@ export const releasesUrl = (repository: string): string =>
 const DEFAULT_UPDATE_URL = `${releasesUrl(
   REPOSITORY,
 )}/latest/download/manifest.json`;
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const DEFAULT_INTERVAL_HOURS = 24;
 const MAX_REDIRECTS = 5;
 
@@ -29,8 +29,7 @@ export interface Manifest {
 
 /** Updates only over https, or http to this machine (for tests). */
 function assertTrusted(url: URL): void {
-  if (url.protocol === "https:") return;
-  if (url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname)) return;
+  if (isTrustedSource(url)) return;
   throw new Error(`Refusing to update over insecure URL: ${url}`);
 }
 
@@ -116,7 +115,7 @@ export async function autoUpdate(): Promise<void> {
   if (process.env.DH_AUTO_UPDATE === "off") return;
   if (!(await claimCheck())) return;
 
-  const manifestUrl = new URL(process.env.DH_UPDATE_URL ?? DEFAULT_UPDATE_URL);
+  const manifestUrl = new URL(process.env.DH_UPDATE_URL || DEFAULT_UPDATE_URL);
   const manifest = (await (
     await fetchOk(manifestUrl, 5_000)
   ).json()) as Manifest;

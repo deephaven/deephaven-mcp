@@ -1,4 +1,4 @@
-import { renameProfile } from "../../auth/flows.ts";
+import { renameProfile } from "../../actions/auth/flows.ts";
 import { defineCommand } from "../../cli/command.ts";
 
 export const rename = defineCommand({

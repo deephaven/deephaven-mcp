@@ -53,26 +53,27 @@ flowchart LR
   main["main.ts<br/>root settings, exit codes"] --> handler["cli/command.ts<br/>shared handler"]
   handler --> run["command's run()"]
   run --> q["questions<br/>commands/&lt;group&gt;/questions.ts"]
-  run --> a["actions<br/>auth/"]
+  run --> a["actions<br/>actions/&lt;area&gt;/"]
   q --> ui["ui/prompt.ts"]
   a --> net["servers"]
   a --> disk["config directory"]
 ```
 
-| Path                                                                 | Holds                                                                                 | Imports                                |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------- |
-| [src/main.ts](../src/main.ts)                                        | Root command settings; turns any thrown error into an exit code                       | everything below                       |
-| [src/cli/](../src/cli/)                                              | `defineCommand`, `Context`, `Output`, the global flags; `readSecret` for secret flags | `ui`, `output`, `errors`, `auth/store` |
-| [src/output.ts](../src/output.ts), [src/errors.ts](../src/errors.ts) | The only writer to stdout/stderr; `DhError` and the error codes                       | `output` imports `errors`              |
-| [src/ui/](../src/ui/)                                                | The `Prompter` interface and its Ink implementation                                   | `errors`                               |
-| [src/commands/](../src/commands/)                                    | One file per command, plus each group's `questions.ts`                                | `cli`, actions                         |
-| [src/auth/](../src/auth/)                                            | Auth actions: sign-in, profiles, keys, the config store                               | `errors`, `output`                     |
+| Path                                                                 | Holds                                                                                 | Imports                                        |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| [src/main.ts](../src/main.ts)                                        | Root command settings; turns any thrown error into an exit code                       | everything below                               |
+| [src/cli/](../src/cli/)                                              | `defineCommand`, `Context`, `Output`, the global flags; `readSecret` for secret flags | `ui`, `output`, `errors`, `actions/auth/store` |
+| [src/output.ts](../src/output.ts), [src/errors.ts](../src/errors.ts) | The only writer to stdout/stderr; `DhError` and the error codes                       | `output` imports `errors`                      |
+| [src/ui/](../src/ui/)                                                | The `Prompter` interface and its Ink implementation                                   | `errors`                                       |
+| [src/commands/](../src/commands/)                                    | One file per command, plus each group's `questions.ts`                                | `cli`, actions                                 |
+| [src/actions/](../src/actions/)                                      | Actions, one folder per area; [auth/](../src/actions/auth/): sign-in, profiles, keys, the config store | `errors`, `output`, `net`          |
+| [src/net.ts](../src/net.ts)                                          | Which URLs are local, and which may supply code                                       | —                                              |
 
 Imports go down the table. `cli/`, `output.ts`, `errors.ts` and `ui/` are shared
 by every command and contain nothing auth-specific, except that `Context.store`
-is the profile store from `auth/store.ts`; every command signs in with a
-profile. Actions for a new area, such as running queries, would go in a folder
-beside `auth/`.
+is the profile store from `actions/auth/store.ts`; every command signs in with a
+profile. Actions for a new area, such as running queries, go in a folder beside
+`actions/auth/`, mirroring its commands in `commands/<group>/`.
 
 ## Adding a command
 

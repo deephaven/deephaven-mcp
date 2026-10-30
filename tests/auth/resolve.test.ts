@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { candidates, resolveServer, withPort } from "../../src/auth/resolve.ts";
+import {
+  candidates,
+  resolveServer,
+  withPort,
+} from "../../src/actions/auth/resolve.ts";
 
 const origins = (input: string) => candidates(input).map((u) => u.origin);
 

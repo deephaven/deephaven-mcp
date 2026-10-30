@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
+import { isErrno } from "../src/errors.ts";
 import { BIN } from "../src/version.ts";
 import {
   CLI,
@@ -30,6 +39,55 @@ async function setup() {
         stdin,
       ),
   };
+}
+
+async function within<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Timed out in test")), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForSso(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error(`CLI exited before SSO: ${text}`);
+      text += decoder.decode(value, { stream: true });
+      const pid = /SSO_TEST_PID=(\d+)\n/.exec(text)?.[1];
+      if (pid) return { pid: Number(pid), output: text };
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (isErrno(e, "ESRCH")) return false;
+    throw e;
+  }
+}
+
+function stopProcess(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (e) {
+    if (!isErrno(e, "ESRCH")) throw e;
+  }
 }
 
 interface Extra {
@@ -119,6 +177,146 @@ test("cli: usage errors exit 2, with JSON on stderr", async () => {
   expect(extra.stderr).toContain("dh auth status --help");
 });
 
+test("cli: SSO no longer has a timeout option", async () => {
+  const { run } = await setup();
+  const help = await run(["auth", "login", "--help"]);
+  expect(help.code).toBe(0);
+  expect(help.stdout).not.toContain("--timeout");
+
+  const removed = await run(["auth", "login", "--timeout", "1", "-o", "json"]);
+  expect(removed.code).toBe(2);
+  expect(JSON.parse(removed.stderr).code).toBe("usage");
+  expect(removed.stderr).toContain("--timeout");
+});
+
+test.skipIf(WINDOWS)(
+  "cli: SSO waits beyond DH_TIMEOUT and responds to interrupts, including CA re-runs",
+  async () => {
+    const { tmp, configDir } = await setup();
+    const api = `
+      class Client {
+        static EVENT_CONNECT = "connect";
+        addEventListener(_type, listener) {
+          queueMicrotask(listener);
+          return () => {};
+        }
+        async getAuthConfigValues() {
+          return [
+            ["authentication.client.customlogin.class.SAMLAuth", "enabled"],
+            ["authentication.client.samlauth.login.url", "/saml"],
+            ["authentication.passwordsEnabled", "false"]
+          ];
+        }
+        login() {
+          process.stderr.write("SSO_TEST_PID=" + process.pid + "\\n");
+          setInterval(() => {}, 1000);
+          return new Promise(() => {});
+        }
+        disconnect() {}
+      }
+      globalThis.iris = { Client };
+    `;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path === "/iris/connection.json") return new Response("{}");
+        if (path === "/irisapi/irisapi.nocache.js") return new Response(api);
+        return new Response(null, { status: 404 });
+      },
+    });
+
+    try {
+      for (const signal of ["SIGINT", "SIGTERM"] as const) {
+        for (const ca of [false, true]) {
+          const proc = Bun.spawn(
+            [
+              ...CLI,
+              "auth",
+              "login",
+              `http://127.0.0.1:${server.port}`,
+              "--method",
+              "saml",
+              "--no-browser",
+              "--no-prompt",
+              "-o",
+              "json",
+              ...(ca ? ["--ca-cert", TEST_CA] : []),
+            ],
+            {
+              env: {
+                ...process.env,
+                DH_CONFIG_DIR: configDir,
+                DH_AI_DATA_DIR: join(tmp, "legacy"),
+                DH_AUTO_UPDATE: "off",
+                DH_PROFILE: "",
+                DH_SERVER: "",
+                DH_TIMEOUT: "1",
+                DH_LOADED_CA_CERT: "",
+                NODE_EXTRA_CA_CERTS: ca ? TEST_CA : "",
+                TMPDIR: tmp,
+              },
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "pipe",
+            },
+          );
+          let ssoPid: number | undefined;
+          try {
+            const progress = await within(waitForSso(proc.stderr), 5_000);
+            ssoPid = progress.pid;
+            expect(progress.output).toContain("Waiting for sign-in");
+            expect(progress.output).toContain("Ctrl-C to cancel");
+            expect(progress.output).not.toContain("--timeout");
+            expect(ssoPid === proc.pid).toBe(!ca);
+            if (signal === "SIGINT" && !ca) await Bun.sleep(1_200);
+            expect(proc.exitCode).toBeNull();
+            expect(isRunning(ssoPid)).toBe(true);
+            if (ca) {
+              expect(
+                (await readdir(tmp)).filter((name) =>
+                  name.startsWith(`${BIN}-ca-`),
+                ),
+              ).toHaveLength(1);
+            }
+
+            proc.kill(signal);
+            const exit = await within(proc.exited, 3_000);
+            expect([3, signal === "SIGINT" ? 130 : 143]).toContain(exit);
+            expect(isRunning(ssoPid)).toBe(false);
+            expect(
+              await Bun.file(join(configDir, "config.json")).exists(),
+            ).toBe(false);
+            expect(
+              await Bun.file(join(configDir, "credentials.json")).exists(),
+            ).toBe(false);
+            expect(
+              (await readdir(tmp)).filter((name) =>
+                name.startsWith(`${BIN}-ca-`),
+              ),
+            ).toHaveLength(0);
+          } finally {
+            if (proc.exitCode === null) proc.kill("SIGKILL");
+            await proc.exited;
+            if (
+              ssoPid !== undefined &&
+              ssoPid !== proc.pid &&
+              isRunning(ssoPid)
+            ) {
+              stopProcess(ssoPid);
+            }
+          }
+        }
+      }
+    } finally {
+      await server.stop(true);
+      await rm(tmp, { recursive: true, force: true });
+    }
+  },
+  15_000,
+);
+
 test("cli: -o follows commander: the last one wins, and nothing after --", async () => {
   const { run } = await setup();
   const last = await run(["auth", "-o", "json", "-o", "human"]);
@@ -183,14 +381,22 @@ test("cli: migrate refuses a remote plain-HTTP server even when it can't sign in
   ]);
   expect(JSON.parse(res.stdout)).toEqual({ migrated: 0, failed: 1 });
   expect(res.stderr).toContain("Refusing to load client code over plain HTTP");
+  expect(res.code).toBe(4);
+  expect(JSON.parse(res.stderr.trim().split("\n").at(-1) ?? "").code).toBe(
+    "migration_failed",
+  );
 
-  // Login's first-run offer reports the failed migration instead of moving on.
+  // Login's first-run offer: with nothing migrated, it goes on to a normal sign-in.
   const login = await run(
     ["auth", "login", "--yes", "--no-prompt", "-o", "json"],
     { DH_MCP_CONFIG_FILE: legacy },
   );
-  expect(login.code, login.stderr).toBe(0);
-  expect(JSON.parse(login.stdout)).toEqual({ migrated: 0, failed: 1 });
+  expect(login.stderr).toContain(
+    "Refusing to load client code over plain HTTP",
+  );
+  expect(login.stdout).toBe("");
+  expect(login.code, login.stderr).toBe(2);
+  expect(login.stderr).toContain("<server>");
 });
 
 test("cli: agents summarizes, and lists every command and error code as JSON", async () => {
@@ -208,6 +414,12 @@ test("cli: agents summarizes, and lists every command and error code as JSON", a
   );
   expect(auth.commands.map((c: { command: string }) => c.command)).toContain(
     `${BIN} auth login`,
+  );
+  const login = auth.commands.find(
+    (c: { command: string }) => c.command === `${BIN} auth login`,
+  );
+  expect(login.options.map((o: { flags: string }) => o.flags)).not.toContain(
+    "--timeout <seconds>",
   );
   const codes = manifest.errors.map((e: { code: string }) => e.code);
   for (const code of [

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assertTrusted } from "../../src/auth/jsapi.ts";
+import { assertTrusted } from "../../src/actions/auth/jsapi.ts";
 
 test("assertTrusted: https anywhere, http only to this machine, nothing else", () => {
   expect(() => assertTrusted(new URL("https://dh.example.com"))).not.toThrow();

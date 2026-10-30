@@ -7,7 +7,7 @@ import {
   parseV1,
   parseV2,
   resolveSecret,
-} from "../../src/auth/legacy.ts";
+} from "../../src/actions/auth/legacy.ts";
 
 const fixture = (path: string) =>
   resolve(import.meta.dir, "../fixtures/legacy", path);

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { DhError, isErrno } from "../errors.ts";
+import { DhError, isErrno } from "../../errors.ts";
+import { BIN } from "../../version.ts";
 
 /** An Enterprise key pair, base64; `type` is the algorithm, e.g. `EC`. */
 export interface KeyPair {
@@ -25,7 +26,7 @@ function stripEc(value: string, where: string): string {
     throw new DhError(
       "credential_unavailable",
       `${where}: unsupported key type (only EC keys are supported)`,
-      "Run `dh auth login` to create a new key.",
+      `Run \`${BIN} auth login\` to create a new key.`,
     );
   }
   return bytes.subarray(EC_PREFIX.length).toString("base64");

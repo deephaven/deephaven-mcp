@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import {
   signInRequestFor,
   trustAndResolveServer,
-} from "../../src/auth/session.ts";
-import type { Profile } from "../../src/auth/store.ts";
+} from "../../src/actions/auth/session.ts";
+import type { Profile } from "../../src/actions/auth/store.ts";
 
 test("trustAndResolveServer: a saved origin is matched exactly, not in discovery order", async () => {
   const servers = {

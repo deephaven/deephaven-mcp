@@ -1,5 +1,5 @@
-import { requireAuth } from "../../auth/session.ts";
-import { disconnectServer } from "../../auth/signin.ts";
+import { requireAuth } from "../../actions/auth/session.ts";
+import { disconnectServer } from "../../actions/auth/signin.ts";
 import { defineCommand } from "../../cli/command.ts";
 
 export const status = defineCommand({

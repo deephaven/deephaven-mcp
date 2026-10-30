@@ -2,8 +2,8 @@ import { rmSync, writeSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DhError, describe } from "../errors.ts";
-import { isLocal } from "./resolve.ts";
+import { DhError, describe } from "../../errors.ts";
+import { isTrustedSource } from "../../net.ts";
 
 /** A value from the server's untyped client code. */
 // biome-ignore lint/suspicious/noExplicitAny: the jsapi is untyped.
@@ -45,8 +45,7 @@ function quietLibraries(libraryDir: string): void {
 
 /** The jsapi is code from the server, so only https or a local server may supply it. */
 export function assertTrusted(url: URL): void {
-  if (url.protocol === "https:") return;
-  if (url.protocol === "http:" && isLocal(url)) return;
+  if (isTrustedSource(url)) return;
   throw new DhError(
     "server_unsupported",
     `Refusing to load client code over plain HTTP from ${url.origin}`,
@@ -142,14 +141,14 @@ async function originDir(cacheRoot: string, origin: URL): Promise<string> {
 }
 
 /** The jsapi expects to run in a browser tab; give it `self`, `window` and a `location`. */
-function polyfillBrowserGlobals(origin: URL): void {
+function polyfillBrowserGlobals(): void {
   // biome-ignore lint/suspicious/noExplicitAny: browser globals the jsapi expects.
   const g = globalThis as any;
   g.self = globalThis;
   g.window = globalThis;
-  g.window.location ??= new URL(
-    `${origin.protocol}//deephaven-polyfill.localhost/`,
-  );
+  // Shared by every server in a run; http works for both http and https servers
+  // (the VS Code extension does the same).
+  g.window.location ??= new URL("http://deephaven-polyfill.localhost/");
 }
 
 /** Downloads and imports the Community jsapi (`dh`) from `origin`. */
@@ -172,7 +171,7 @@ export async function loadCommunityApi(
     timeout,
     true,
   );
-  polyfillBrowserGlobals(origin);
+  polyfillBrowserGlobals();
   quietLibraries(await runDir(cacheRoot));
   const mod = await import(pathToFileURL(join(dir, "dh-core.js")).href);
   return mod.default ?? mod;
@@ -193,7 +192,7 @@ export async function loadEnterpriseApi(
   const dir = await originDir(cacheRoot, origin);
   const file = join(dir, "irisapi.nocache.js");
   await download(new URL("/irisapi/irisapi.nocache.js", origin), file, timeout);
-  polyfillBrowserGlobals(origin);
+  polyfillBrowserGlobals();
   quietLibraries(await runDir(cacheRoot));
   await import(pathToFileURL(file).href);
   // biome-ignore lint/suspicious/noExplicitAny: set by the loaded script.

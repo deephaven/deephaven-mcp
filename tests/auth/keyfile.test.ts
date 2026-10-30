@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { generateBase64KeyPair } from "@deephaven-enterprise/auth-nodejs";
-import { parseKeyFile } from "../../src/auth/keyfile.ts";
+import { parseKeyFile } from "../../src/actions/auth/keyfile.ts";
 import { DhError } from "../../src/errors.ts";
 
 const withEc = (key: string) =>

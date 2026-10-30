@@ -74,8 +74,8 @@ export async function build(
       "--no-compile-autoload-dotenv",
       "--no-compile-autoload-bunfig",
       `--compile-exec-argv=${RUNTIME_FLAGS.join(" ")}`,
-      // Ink's react-devtools-core is a devDependency only so this can resolve it;
-      // it loads only when DEV=true (marking it external breaks startup).
+      // No --external for Ink's react-devtools-core: it loads only when DEV=true, but
+      // marking it external breaks startup, so it's a devDependency for this build to bundle.
       `--target=bun-${target}`,
       "--define",
       `DH_BUILD_VERSION=${JSON.stringify(version)}`,

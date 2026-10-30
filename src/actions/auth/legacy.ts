@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { DhError, isErrno, reasonOf } from "../errors.ts";
+import { DhError, isErrno, reasonOf } from "../../errors.ts";
 import type { Kind } from "./store.ts";
 
 /** Where a legacy config kept a secret: inline, in an env var, or in a file. */
@@ -268,9 +268,14 @@ function v2Community(file: string, cfg: Json): LegacyItem {
   }
 }
 
-/** One v2 `enterprise/systems/*.json` file; the name defaults to the file's. */
+/** A v2 system's name: its `system_name`, else its file's name. */
+function v2SystemName(file: string, cfg: Json): string {
+  return cfg.system_name ?? file.replace(/^.*[\\/]|\.json$/g, "");
+}
+
+/** One v2 `enterprise/systems/*.json` file. */
 function v2Enterprise(file: string, cfg: Json): LegacyItem {
-  const name = cfg.system_name ?? file.replace(/^.*[\\/]|\.json$/g, "");
+  const name = v2SystemName(file, cfg);
   const source = `enterprise/systems/${name}.json`;
   const cred = cfg.auth?.credentials ?? {};
   const base = {
@@ -319,7 +324,9 @@ export async function parseV2(configDir: string): Promise<LegacyConfig> {
     ...(settings.session_creation ? ["community session creation"] : []),
     ...systems
       .filter(([, c]) => c.session_creation)
-      .map(([, c]) => `enterprise/systems/${c.system_name} session creation`),
+      .map(
+        ([f, c]) => `enterprise/systems/${v2SystemName(f, c)} session creation`,
+      ),
   ];
   const context = await readFile(
     join(dirname(configDir), "runtime", "context.json"),

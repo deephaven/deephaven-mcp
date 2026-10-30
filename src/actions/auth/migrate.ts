@@ -4,8 +4,8 @@
  */
 
 import { resolve } from "node:path";
-import { DhError, describe } from "../errors.ts";
-import { BIN } from "../version.ts";
+import { DhError, describe } from "../../errors.ts";
+import { BIN } from "../../version.ts";
 import {
   type CommunityLogin,
   type CommunityMethod,

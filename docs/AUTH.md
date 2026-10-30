@@ -95,8 +95,7 @@ operate-as user gets its own profile.
 
 1. `dh` opens the server's sign-in page in your browser and prints the URL. With
    `--no-browser`, it only prints it.
-2. Sign in with your identity provider. `dh` waits up to `--timeout` seconds
-   (default 300).
+2. Sign in with your identity provider.
 3. `dh` confirms the account:
    - The terminal asks `Use alice@example.com? (Y/n)`. Answer `n` and nothing is
      saved.
@@ -152,7 +151,8 @@ again as the same combination updates that profile instead of adding a new one.
 
 In a terminal, `dh auth login` with no server and existing profiles offers a
 menu: log in to another server, log in as a different user, sign in again with a
-profile, or remove one.
+profile, switch the default profile (as `dh auth use` does), remove one, or
+cancel.
 
 ### Where profiles are stored
 
@@ -270,6 +270,7 @@ With `-o json`, an error is one line of JSON on stderr:
 | 4    | `auth_expired`           | The server rejected a saved profile's credentials             | `dh auth login --profile <name>`        |
 | 4    | `credential_unavailable` | The profile's env var or key file is missing                  | Set the variable or restore the file    |
 | 4    | `key_upload_failed`      | Uploading this computer's key to the Enterprise server failed | See [Enterprise](#enterprise)           |
+| 4    | `migration_failed`       | Some legacy config entries weren't migrated                   | Fix the problems listed, then `dh auth migrate` |
 | 5    | `server_unreachable`     | Network or TLS failure, or no server at the address           | Check the address, VPN and certificates |
 | 5    | `server_unsupported`     | Not a supported Deephaven server, or unsafe to load from      | Use `https://` or a local server        |
 
@@ -303,7 +304,9 @@ DH_SERVER=localhost:10000 DH_PSK=… dh auth status -o json
 ## Migrating an old config
 
 If you used the earlier dhcli / Deephaven MCP tools, `dh` can migrate their
-servers. Your first `dh auth login` offers it, or run `dh auth migrate`.
+servers. Your first `dh auth login` offers it, or run `dh auth migrate`. If
+nothing migrates, login goes on to a normal sign-in. When any entry fails, the
+command still prints its result and exits with `migration_failed`.
 
 `dh` looks for `$DH_MCP_CONFIG_FILE`, then `$DH_AI_DATA_DIR/config` or
 `~/.deephaven/ai/config`. `--from <path>` points it at another file or
@@ -337,6 +340,8 @@ prints what it's waiting on for each server:
 
 - `--ca-cert <file>` trusts that CA for the server, and `dh` remembers it with
   the server. `DH_CA_CERT` does the same for environment-only sign-in.
+- When a CA certificate requires `dh` to re-run, it forwards SIGINT (Ctrl-C)
+  and SIGTERM to the re-run process.
 - `HTTPS_PROXY` and `NO_PROXY` apply to finding the server and downloading its
   client library. The connection to the server itself doesn't use a proxy.
 
@@ -363,4 +368,3 @@ prints what it's waiting on for each server:
 | `… can be read by other users`                                | `chmod 600 ~/.deephaven/cli/credentials.json`                                              |
 | `Input needed: pass <flag>`                                   | Running without a terminal; pass that flag                                                 |
 | SSO keeps signing in as the wrong account                     | Choose the account in your identity provider, or sign out of it first; use `--expect-user` |
-| `Timed out waiting for sign-in`                               | Finish signing in within `--timeout` seconds, or raise it                                  |

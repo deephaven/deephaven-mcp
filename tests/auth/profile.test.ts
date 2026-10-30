@@ -4,8 +4,12 @@ import {
   findByIdentity,
   newProfileId,
   removeProfile,
-} from "../../src/auth/profile.ts";
-import { type Config, emptyState, type Profile } from "../../src/auth/store.ts";
+} from "../../src/actions/auth/profile.ts";
+import {
+  type Config,
+  emptyState,
+  type Profile,
+} from "../../src/actions/auth/store.ts";
 
 test("newProfileId: skips ids already taken", () => {
   let tries = 0;

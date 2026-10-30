@@ -1,5 +1,5 @@
 import { styleText } from "node:util";
-import { sortedProfiles } from "../../auth/profile.ts";
+import { sortedProfiles } from "../../actions/auth/profile.ts";
 import { defineCommand } from "../../cli/command.ts";
 import { BIN } from "../../version.ts";
 import { login } from "./login.ts";

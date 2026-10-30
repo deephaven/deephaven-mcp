@@ -3,8 +3,8 @@
  * server kind or method. Nothing here asks the user anything.
  */
 
-import { DhError, timeoutMs } from "../errors.ts";
-import { note } from "../output.ts";
+import { DhError, timeoutMs } from "../../errors.ts";
+import { note } from "../../output.ts";
 import {
   type CommunityConnection,
   type CommunityLogin,
@@ -66,7 +66,6 @@ export type SignInRequest =
   | {
       method: "saml";
       saml: Saml;
-      waitMs: number;
       browser: boolean;
       operateAs?: string;
     }
@@ -181,6 +180,7 @@ export async function signIn(
         request.password,
         request.operateAs,
         timeout,
+        rejected,
       );
       return {
         ...server,
@@ -221,14 +221,11 @@ async function waitForSaml(
   } else {
     note(`Sign in at:\n  ${url}`);
   }
-  note(
-    `Waiting up to ${Math.round(request.waitMs / 1000)}s for you to sign in in the browser…\n  --timeout to change, Ctrl-C to cancel`,
-  );
+  note("Waiting for sign-in…\n  Ctrl-C to cancel");
   return await loginSaml(
     conn,
     () => connectEnterprise(server.origin, server.cacheRoot, timeoutMs()),
     nonce,
-    request.waitMs,
   );
 }
 

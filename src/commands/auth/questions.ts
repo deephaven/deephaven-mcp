@@ -5,19 +5,27 @@
  */
 import { resolve } from "node:path";
 import { styleText } from "node:util";
-import { keyPairOf, noProfile, type ProfileToSave } from "../../auth/flows.ts";
-import { type KeyFile, type KeyPair, readKeyFile } from "../../auth/keyfile.ts";
-import { describePlan, type LegacyItem } from "../../auth/legacy.ts";
+import {
+  keyPairOf,
+  noProfile,
+  type ProfileToSave,
+} from "../../actions/auth/flows.ts";
+import {
+  type KeyFile,
+  type KeyPair,
+  readKeyFile,
+} from "../../actions/auth/keyfile.ts";
+import { describePlan, type LegacyItem } from "../../actions/auth/legacy.ts";
 import {
   findByIdentity,
   findByName,
   sortedProfiles,
-} from "../../auth/profile.ts";
+} from "../../actions/auth/profile.ts";
 import type {
   OfferedMethod,
   Session,
   SignInRequest,
-} from "../../auth/signin.ts";
+} from "../../actions/auth/signin.ts";
 import type {
   Config,
   Credential,
@@ -25,7 +33,7 @@ import type {
   Method,
   ServerEntry,
   State,
-} from "../../auth/store.ts";
+} from "../../actions/auth/store.ts";
 import { readSecret, type Secret } from "../../cli/secret.ts";
 import { DhError } from "../../errors.ts";
 import { note } from "../../output.ts";
@@ -41,6 +49,7 @@ import type { LoginOptions } from "./login.ts";
  */
 export type LoginTarget =
   | { server: string; profile?: string; rerun: string[] }
+  | "use"
   | "remove";
 
 /** What a profile being signed in again already says about its identity. */
@@ -83,7 +92,7 @@ export async function askLoginTarget(
     !opts.privateKeyFile;
   const action = menu ? await askLoginMenuChoice(ui, config) : "server";
   // Each `rerun` repeats the answer as flags, so a re-run with a CA doesn't ask again.
-  if (action === "remove") return "remove";
+  if (action === "use" || action === "remove") return action;
   if (action === "reauth") {
     const id = await ui.select(
       "Which profile?",
@@ -109,7 +118,7 @@ export async function askLoginTarget(
 async function askLoginMenuChoice(
   ui: Prompter,
   config: Config,
-): Promise<"server" | "user" | "reauth" | "remove"> {
+): Promise<"server" | "user" | "reauth" | "use" | "remove"> {
   note("Authenticated profiles:");
   for (const [id, p] of sortedProfiles(config)) {
     const isDefault = id === config.defaultProfile;
@@ -117,16 +126,20 @@ async function askLoginMenuChoice(
       `  ${isDefault ? styleText("green", "●") : " "} ${p.name}${isDefault ? "   (default)" : ""}`,
     );
   }
-  return await ui.select(
+  const choice = await ui.select(
     "What would you like to do?",
     [
       { label: "Log in to another server", value: "server" as const },
       { label: "Log in as a different user", value: "user" as const },
       { label: "Re-authenticate a profile", value: "reauth" as const },
+      { label: "Use a profile", value: "use" as const },
       { label: "Remove a profile", value: "remove" as const },
+      { label: "Cancel", value: "cancel" as const },
     ],
     "<server>",
   );
+  if (choice === "cancel") throw new DhError("cancelled", "Cancelled");
+  return choice;
 }
 
 /** Picks a saved server, or asks for an address if there are none or the user picks "Other". */
@@ -275,7 +288,6 @@ export async function askSignInCredentials(
         request: {
           method: "saml",
           saml: chosen.saml,
-          waitMs: (opts.timeout ?? 300) * 1000,
           browser: opts.browser !== false,
           operateAs,
         },

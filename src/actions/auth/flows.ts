@@ -1,5 +1,5 @@
-import { DhError, describe, reasonOf, timeoutMs } from "../errors.ts";
-import { BIN } from "../version.ts";
+import { DhError, describe, reasonOf, timeoutMs } from "../../errors.ts";
+import { BIN } from "../../version.ts";
 import {
   connectEnterprise,
   DELETE_KEY_TIMEOUT_MS,
@@ -487,7 +487,8 @@ export async function revokeOwnKey(
 ): Promise<boolean> {
   if (cred.type !== "keyPair" || !cred.generated) return false;
   const timeout = DELETE_KEY_TIMEOUT_MS;
-  const conn = await connectEnterprise(origin, cacheRoot, timeout);
+  // The download gets the usual limit: a slow link shouldn't leave the key live.
+  const conn = await connectEnterprise(origin, cacheRoot, timeout, timeoutMs());
   try {
     const keyPair = keyPairOf(cred);
     await loginKey(conn, user, keyPair, operateAs, timeout, "auth_expired");

@@ -1,4 +1,9 @@
-import { DhError, describe, reasonOf, withTimeout } from "../errors.ts";
+import {
+  DhError,
+  reasonOf,
+  serverUnreachable as unreachable,
+  withTimeout,
+} from "../../errors.ts";
 import { type Api, loadCommunityApi } from "./jsapi.ts";
 import type { Method } from "./store.ts";
 
@@ -30,15 +35,6 @@ export interface CommunityLogin {
   handler?: string;
   username?: string;
   secret?: string;
-}
-
-/** `cause`: why it failed; without one, the error says it timed out. */
-function unreachable(origin: string, cause?: unknown): DhError {
-  return new DhError(
-    "server_unreachable",
-    `Could not reach ${origin}`,
-    cause === undefined ? "Timed out" : describe(cause),
-  );
 }
 
 /**
