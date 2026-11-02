@@ -44,12 +44,14 @@ export function findByIdentity(
   user: string,
   operateAs?: string,
 ): [string, Profile] | undefined {
-  return Object.entries(config.profiles).find(
+  const matches = Object.entries(config.profiles).filter(
     ([, p]) =>
       p.server === server &&
       p.user === user &&
-      (p.operateAs ?? "") === (operateAs ?? ""),
+      (p.operateAs ?? p.user) === (operateAs ?? user),
   );
+  // Prefer an exact match if older versions left duplicates.
+  return matches.find(([, p]) => p.operateAs === operateAs) ?? matches[0];
 }
 
 /** Removes `id`; if it was the default, picks another on the same server first. */

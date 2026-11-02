@@ -89,7 +89,8 @@ While uploads fail, a password account can still sign in with
 existing key file works with `--private-key-file`.
 
 `--operate-as <user>` signs in as you and operates as another user. Each
-operate-as user gets its own profile.
+operate-as user gets its own profile. Omitting it and specifying your own
+username both use the same profile.
 
 ### SSO sign-in
 

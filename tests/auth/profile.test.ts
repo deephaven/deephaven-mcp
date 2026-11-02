@@ -63,6 +63,41 @@ test("findByIdentity: server + user + operate-as", () => {
   expect(
     findByIdentity(c, "https://dhe.example.com", "user-a", "user-b")?.[0],
   ).toBe("b");
+  expect(
+    findByIdentity(c, "https://dhe.example.com", "user-a", "user-a")?.[0],
+  ).toBe("a");
+  expect(
+    findByIdentity(c, "https://other.example.com", "user-a", "user-a"),
+  ).toBeUndefined();
+  expect(
+    findByIdentity(c, "https://dhe.example.com", "user-a", "user-c"),
+  ).toBeUndefined();
+});
+
+test("findByIdentity: omitted operate-as matches an explicitly saved self", () => {
+  const c = config({
+    a: {
+      ...profile("x", "https://dhe.example.com", "user-a"),
+      operateAs: "user-a",
+    },
+  });
+  expect(findByIdentity(c, "https://dhe.example.com", "user-a")?.[0]).toBe("a");
+});
+
+test("findByIdentity: existing duplicates prefer the exact operate-as", () => {
+  const c = config({
+    explicit: {
+      ...profile("explicit", "https://dhe.example.com", "user-a"),
+      operateAs: "user-a",
+    },
+    implicit: profile("implicit", "https://dhe.example.com", "user-a"),
+  });
+  expect(findByIdentity(c, "https://dhe.example.com", "user-a")?.[0]).toBe(
+    "implicit",
+  );
+  expect(
+    findByIdentity(c, "https://dhe.example.com", "user-a", "user-a")?.[0],
+  ).toBe("explicit");
 });
 
 test("removeProfile: promotes a profile on the same server first", () => {

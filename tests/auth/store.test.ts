@@ -241,3 +241,44 @@ test("saveProfile: keeps every legacy entry merged into one profile", async () =
     "dhcli:a#two",
   ]);
 });
+
+test("saveProfile: self operate-as reuses the profile and replaces its key", async () => {
+  const store = await tempStore();
+  const base = {
+    origin: "https://dhe.example.com",
+    kind: "enterprise" as const,
+    user: "alice",
+    method: "password" as const,
+  };
+  const key = (publicKey: string) => ({
+    type: "keyPair" as const,
+    keyType: "ec",
+    publicKey,
+    privateKey: `private-${publicKey}`,
+    generated: true,
+  });
+  const first = await saveProfile(store, {
+    ...base,
+    credential: key("old"),
+  });
+  const second = await saveProfile(store, {
+    ...base,
+    operateAs: "alice",
+    credential: key("new"),
+  });
+  expect(second.id).toBe(first.id);
+  expect(second.name).toBe(first.name);
+  expect(second.previous).toEqual(key("old"));
+
+  const third = await saveProfile(store, {
+    ...base,
+    credential: key("latest"),
+  });
+  expect(third.id).toBe(first.id);
+  expect(third.previous).toEqual(key("new"));
+  const { config, credentials } = await store.read();
+  expect(Object.keys(config.profiles)).toEqual([first.id]);
+  expect(config.defaultProfile).toBe(first.id);
+  expect(config.profiles[first.id]?.operateAs).toBeUndefined();
+  expect(credentials.credentials[first.id]).toEqual(key("latest"));
+});
