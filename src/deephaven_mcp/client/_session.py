@@ -840,7 +840,12 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                 f"Failed to close session: {describe_exception_chain(e)}"
             ) from e
 
-    async def run_script(self, script: str, systemic: bool | None = None) -> None:
+    async def run_script(
+        self,
+        script: str,
+        systemic: bool | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
         """
         Asynchronously execute a Python script on the server in the context of this session.
 
@@ -872,8 +877,12 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
                                       which may affect how the server prioritizes or logs the
                                       execution. If None, uses the server's default behavior.
                                       System scripts may have different timeout or resource limits.
+            timeout_seconds (float | None): How long to wait for the script to finish.
+                                      ``None`` waits indefinitely. On expiry the server keeps
+                                      running the script; Deephaven cannot cancel it.
 
         Raises:
+            BlockingDeadlineExceeded: If ``timeout_seconds`` elapses before the script finishes.
             DeephavenConnectionError: If a network or connection error occurs while sending
                                      the script to the server or receiving results.
             QueryError: If the script cannot be run or encounters an error during execution,
@@ -947,7 +956,16 @@ class BaseSession[T: Session](ClientObjectWrapper[T]):
         """
         _LOGGER.debug("[CoreSession:run_script] Called")
         try:
-            await asyncio.to_thread(self.wrapped.run_script, script, systemic)
+            if timeout_seconds is None:
+                await asyncio.to_thread(self.wrapped.run_script, script, systemic)
+            else:
+                await run_blocking(
+                    lambda: self.wrapped.run_script(script, systemic),
+                    "dh-mcp-session-run-script",
+                    timeout_seconds,
+                )
+        except BlockingDeadlineExceeded:
+            raise
         except ConnectionError as e:
             _LOGGER.error(
                 f"[CoreSession:run_script] Connection error running script: {e}"

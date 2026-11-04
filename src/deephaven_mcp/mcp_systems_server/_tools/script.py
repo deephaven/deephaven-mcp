@@ -8,12 +8,15 @@ These tools work with both Community and Enterprise sessions.
 """
 
 import logging
+from typing import Annotated
 
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
+from pydantic import Field
 
 from deephaven_mcp import queries
 from deephaven_mcp._exception_utils import exception_summary
+from deephaven_mcp._exceptions import BlockingDeadlineExceeded
 from deephaven_mcp.mcp_systems_server._tools.shared import (
     get_session_from_context,
 )
@@ -26,6 +29,7 @@ async def session_script_run(
     id: str,
     script: str | None = None,
     script_path: str | None = None,
+    timeout_seconds: Annotated[float | None, Field(gt=0)] = None,
 ) -> dict:
     r"""
     MCP Tool: Execute a script on a specified Deephaven session.
@@ -53,6 +57,10 @@ async def session_script_run(
     - Script executes in the session's environment with access to session state
     - Any tables or variables created will persist in the session for future use
     - Script language depends on the session's configured programming language
+    - Set 'timeout_seconds' for scripts that might run long (e.g. reading a large table) so the
+      call returns instead of blocking. A timeout only stops the wait: Deephaven cannot cancel a
+      running script, so it keeps running on the server and later calls on that session may wait
+      behind it. It ends only when it finishes or its worker is shut down
 
     Args:
         context (Context): The MCP context object.
@@ -60,6 +68,9 @@ async def session_script_run(
             ('type:system:name', as returned by sessions_list). This argument is required.
         script (str | None, optional): The script to execute. Defaults to None.
         script_path (str | None, optional): Path to a script file to execute. Defaults to None.
+        timeout_seconds (float | None, optional): Seconds to wait for the script to finish
+            (must be > 0). Covers script execution only, not connecting to the session.
+            Defaults to None (wait indefinitely).
 
     Returns:
         dict: Structured result object with the following keys:
@@ -74,6 +85,7 @@ async def session_script_run(
     Example Error Responses:
         {'success': False, 'error': 'Must provide either script or script_path.', 'isError': True}
         {'success': False, 'error': 'Script execution failed: ...', 'isError': True}
+        {'success': False, 'error': "Script on session 'community:community:local' did not finish within 30s. It is still running on the server: ...", 'isError': True}
 
     Example Usage:
         # Execute inline Python script
@@ -89,9 +101,17 @@ async def session_script_run(
             "id": "community:community:local",
             "script_path": "/path/to/analysis_script.py"
         }
+
+        # Give up waiting after 30 seconds
+        Tool: session_script_run
+        Parameters: {
+            "id": "enterprise:prod:analysis",
+            "script": "t = db.historical_table('Market', 'Trades')",
+            "timeout_seconds": 30
+        }
     """
     _LOGGER.info(
-        f"[mcp_systems_server:session_script_run] Invoked: id={id!r}, script={'<provided>' if script else None}, script_path={script_path!r}"
+        f"[mcp_systems_server:session_script_run] Invoked: id={id!r}, script={'<provided>' if script else None}, script_path={script_path!r}, timeout_seconds={timeout_seconds!r}"
     )
     result: dict[str, object] = {"success": False}
     try:
@@ -132,13 +152,25 @@ async def session_script_run(
             f"[mcp_systems_server:session_script_run] Script length: {len(script)} characters"
         )
 
-        await session.run_script(script)
+        await session.run_script(script, timeout_seconds=timeout_seconds)
 
         _LOGGER.info(
             f"[mcp_systems_server:session_script_run] Script executed successfully on session: '{id}'"
         )
         result["success"] = True
         result["id"] = id
+    except BlockingDeadlineExceeded:
+        _LOGGER.warning(
+            f"[mcp_systems_server:session_script_run] Script on session '{id}' exceeded timeout_seconds={timeout_seconds}; still running on the server"
+        )
+        result["error"] = (
+            f"Script on session '{id}' did not finish within {timeout_seconds:g}s. "
+            f"It is still running on the server: Deephaven cannot cancel a running "
+            f"script, so it ends only when it finishes or the session's worker is "
+            f"shut down. Until then, further scripts on this session may wait "
+            f"behind it."
+        )
+        result["isError"] = True
     except Exception as e:
         _LOGGER.error(
             f"[mcp_systems_server:session_script_run] Failed for session: '{id}', error: {e!r}",

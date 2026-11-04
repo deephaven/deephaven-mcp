@@ -243,6 +243,8 @@ async def call_tool(
     runtime: Runtime,
     name: str,
     arguments: dict[str, Any],
+    *,
+    request_timeout_seconds: int | None = None,
 ) -> CallToolResult:
     """Invoke one MCP tool over a fresh client connection.
 
@@ -251,6 +253,8 @@ async def call_tool(
         runtime (Runtime): The active CLI runtime, for the request timeout.
         name (str): The MCP tool name to invoke.
         arguments (dict[str, Any]): The tool arguments.
+        request_timeout_seconds (int | None): Request timeout for this call.
+            ``None`` uses ``cli.request.timeouts.default_seconds``.
 
     Returns:
         CallToolResult: The raw MCP call result.
@@ -263,7 +267,11 @@ async def call_tool(
     try:
         async with McpClient.for_daemon(
             handle,
-            request_timeout_seconds=runtime.config.cli.request.timeouts.default_seconds,
+            request_timeout_seconds=(
+                request_timeout_seconds
+                if request_timeout_seconds is not None
+                else runtime.config.cli.request.timeouts.default_seconds
+            ),
         ) as client:
             return await client.call_tool(name, arguments)
     except McpRequestTimeoutError as exc:
@@ -407,7 +415,12 @@ def require_success(payload: dict[str, Any], *, tool: str) -> dict[str, Any]:
 
 
 async def call_for_payload(
-    runtime: Runtime, tool: str, *, retry_command: str, arguments: dict[str, Any]
+    runtime: Runtime,
+    tool: str,
+    *,
+    retry_command: str,
+    arguments: dict[str, Any],
+    request_timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Acquire the daemon, invoke ``tool``, and return its success payload.
 
@@ -422,6 +435,7 @@ async def call_for_payload(
         retry_command (str): The command rendered into the corrupt-registry
             recovery hint.
         arguments (dict[str, Any]): The tool arguments.
+        request_timeout_seconds (int | None): Forwarded to :func:`call_tool`.
 
     Returns:
         dict[str, Any]: The tool payload, envelope bookkeeping keys removed.
@@ -431,7 +445,13 @@ async def call_for_payload(
             fails, or the tool reports ``success=False`` (exit 3).
     """
     handle = await acquire(runtime, retry_command=retry_command)
-    result = await call_tool(handle, runtime, tool, arguments)
+    result = await call_tool(
+        handle,
+        runtime,
+        tool,
+        arguments,
+        request_timeout_seconds=request_timeout_seconds,
+    )
     return require_success(tool_payload(result), tool=tool)
 
 
@@ -443,6 +463,7 @@ async def call_and_echo(
     arguments: dict[str, Any],
     sort_keys: bool = True,
     human_exclude: Collection[str] = (),
+    request_timeout_seconds: int | None = None,
 ) -> None:
     """Acquire, invoke ``tool``, and print its whole success payload.
 
@@ -460,13 +481,18 @@ async def call_and_echo(
             payloads whose key order is meaningful.
         human_exclude (Collection[str]): Forwarded to :func:`echo_payload`. Keys
             dropped from a dict payload in ``human`` mode only.
+        request_timeout_seconds (int | None): Forwarded to :func:`call_tool`.
 
     Raises:
         CliError: When the daemon cannot be acquired, the MCP transport
             fails, or the tool reports ``success=False`` (exit 3).
     """
     payload = await call_for_payload(
-        runtime, tool, retry_command=retry_command, arguments=arguments
+        runtime,
+        tool,
+        retry_command=retry_command,
+        arguments=arguments,
+        request_timeout_seconds=request_timeout_seconds,
     )
     echo_payload(runtime, payload, sort_keys=sort_keys, human_exclude=human_exclude)
 
