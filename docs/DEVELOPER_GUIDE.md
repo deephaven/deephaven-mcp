@@ -1,6 +1,8 @@
 # dh — Developer Guide
 
-For installing and using `dh`, see the [README](../README.md).
+For installing and using `dh`, see the [README](../README.md). For how the code
+is organized and the rules for adding commands, see
+[Architecture](ARCHITECTURE.md).
 
 ## Prerequisites
 
@@ -12,7 +14,7 @@ For installing and using `dh`, see the [README](../README.md).
 ```sh
 bun run dev              # run from source (never auto-updates)
 bun run build            # compile for this platform -> dist/ (--all for every target)
-bun test                 # installs via install.sh/install.ps1 from a fake GitHub and proves dh updates itself
+bun test                 # unit and CLI tests, plus an install from a fake GitHub that proves dh updates itself
 bun run check            # Biome format + lint, and tsc type-check
 ```
 

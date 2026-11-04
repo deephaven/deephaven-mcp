@@ -30,14 +30,24 @@ await build(outDir, {
 });
 
 const upstream = `github.com/${pkg.repository}`;
-for (const name of ["install.sh", "install.ps1"]) {
+// The scripts declare the command name once, as `BIN=` / `$bin =`.
+const binLine = {
+  "install.sh": [/^BIN=.*$/m, `BIN=${pkg.name}`],
+  "install.ps1": [/^ {2}\$bin = .*$/m, `  $bin = '${pkg.name}'`],
+} as const;
+for (const [name, [pattern, line]] of Object.entries(binLine)) {
   const script = await readFile(join(ROOT, name), "utf8");
   if (!script.includes(upstream)) {
     throw new Error(`${name} does not reference ${upstream}`);
   }
+  if (!pattern.test(script)) {
+    throw new Error(`${name} does not declare the command name`);
+  }
   await writeFile(
     join(outDir, name),
-    script.replaceAll(upstream, `github.com/${repository}`),
+    script
+      .replaceAll(upstream, `github.com/${repository}`)
+      .replace(pattern, () => line),
   );
 }
 console.log(`release assets for ${repository} ${tag} in ${outDir}`);
