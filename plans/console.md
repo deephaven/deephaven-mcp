@@ -140,7 +140,7 @@ Auth, credential, network, and internal errors use their existing codes and exit
   mode; JSON errors carry the failure-report fields. Commands used mostly by
   agents, like `dh console`, follow the sparse-output rule; auth keeps its notes.
   Extend `src/errors.ts` and the `dh agents` error listing with console errors.
-- Console actions: `src/console/`; commands/questions: `src/commands/console/`.
+- Console actions: `src/actions/console/`; commands/questions: `src/commands/console/`.
   Use `InteractiveConsole`.
 - Reserve six-character lowercase alphanumeric shortcodes and save their profile
   mappings under the store lock before create; retry collisions across all
