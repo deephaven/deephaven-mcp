@@ -19,7 +19,7 @@ import {
   serverUnreachable as unreachable,
   withTimeout,
 } from "../../errors.ts";
-import { err } from "../../output.ts";
+import { err, note } from "../../output.ts";
 import { BIN } from "../../version.ts";
 import { type Api, loadEnterpriseApi } from "./jsapi.ts";
 import type { KeyPair } from "./keyfile.ts";
@@ -203,6 +203,7 @@ export async function loginSaml(
   nonce: string,
 ): Promise<EnterpriseConnection> {
   let conn = first;
+  let showedRetryNotice = false;
   for (;;) {
     const started = Date.now();
     try {
@@ -219,6 +220,10 @@ export async function loginSaml(
               undefined,
               reasonOf(e),
             );
+      }
+      if (!showedRetryNotice) {
+        note("Browser error? Interrupt and retry.");
+        showedRetryNotice = true;
       }
       if (process.env.DH_DEBUG) {
         err(`${BIN}: SSO login call ended (${describe(e)}); asking again`);

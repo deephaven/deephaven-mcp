@@ -1,9 +1,10 @@
-import { expect, jest, mock, test } from "bun:test";
+import { expect, jest, mock, spyOn, test } from "bun:test";
 import {
   type EnterpriseConnection,
   loginSaml,
 } from "../../src/actions/auth/enterprise.ts";
 import { DhError } from "../../src/errors.ts";
+import * as output from "../../src/output.ts";
 
 type SamlCredentials = { type: "saml"; token: string };
 
@@ -56,6 +57,7 @@ test("loginSaml: a pending sign-in has no overall timeout", async () => {
 
 test("loginSaml: retries server wait-limit rejections beyond five minutes", async () => {
   jest.useFakeTimers({ now: 0 });
+  const notice = spyOn(output, "note").mockImplementation(() => {});
   try {
     const failures = Array.from({ length: 6 }, () =>
       connection(async () => {
@@ -78,6 +80,8 @@ test("loginSaml: retries server wait-limit rejections beyond five minutes", asyn
     );
     expect(Date.now()).toBe(360_000);
     expect(reconnect).toHaveBeenCalledTimes(6);
+    expect(notice).toHaveBeenCalledTimes(1);
+    expect(notice).toHaveBeenCalledWith("Browser error? Interrupt and retry.");
     for (const attempt of [...failures, success]) {
       expect(attempt.call.mock.calls).toEqual([
         [{ type: "saml", token: "same-nonce" }],
@@ -88,6 +92,7 @@ test("loginSaml: retries server wait-limit rejections beyond five minutes", asyn
     }
     expect(success.disconnect).not.toHaveBeenCalled();
   } finally {
+    notice.mockRestore();
     jest.useRealTimers();
   }
 });
@@ -98,6 +103,7 @@ for (const [elapsed, retry] of [
 ] as const) {
   test(`loginSaml: a rejection after ${elapsed}ms ${retry ? "retries" : "fails"}`, async () => {
     jest.useFakeTimers({ now: 0 });
+    const notice = spyOn(output, "note").mockImplementation(() => {});
     try {
       const first = connection(async () => {
         jest.advanceTimersByTime(elapsed);
@@ -109,6 +115,7 @@ for (const [elapsed, retry] of [
 
       if (retry) {
         expect(await attempt).toBe(next.conn);
+        expect(notice).toHaveBeenCalledTimes(1);
         expect(reconnect).toHaveBeenCalledTimes(1);
         expect(next.call.mock.calls).toEqual([
           [{ type: "saml", token: "nonce" }],
@@ -118,10 +125,12 @@ for (const [elapsed, retry] of [
           code: "auth_failed",
           message: "Sign-in failed: Denied",
         });
+        expect(notice).not.toHaveBeenCalled();
         expect(reconnect).not.toHaveBeenCalled();
       }
       expect(first.disconnect).toHaveBeenCalledTimes(1);
     } finally {
+      notice.mockRestore();
       jest.useRealTimers();
     }
   });
@@ -151,6 +160,7 @@ test("loginSaml: a DhError remains final even after a long hold", async () => {
 
 test("loginSaml: a failed reconnect is reported", async () => {
   jest.useFakeTimers({ now: 0 });
+  const notice = spyOn(output, "note").mockImplementation(() => {});
   try {
     const first = connection(async () => {
       jest.advanceTimersByTime(60_000);
@@ -164,9 +174,11 @@ test("loginSaml: a failed reconnect is reported", async () => {
     await expect(loginSaml(first.conn, reconnect, "nonce")).rejects.toBe(
       failure,
     );
+    expect(notice).toHaveBeenCalledTimes(1);
     expect(first.disconnect).toHaveBeenCalledTimes(1);
     expect(reconnect).toHaveBeenCalledTimes(1);
   } finally {
+    notice.mockRestore();
     jest.useRealTimers();
   }
 });
