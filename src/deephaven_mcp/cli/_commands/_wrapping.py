@@ -253,7 +253,7 @@ async def call_tool(
         runtime (Runtime): The active CLI runtime, for the request timeout.
         name (str): The MCP tool name to invoke.
         arguments (dict[str, Any]): The tool arguments.
-        request_timeout_seconds (int | None): Per-call request timeout;
+        request_timeout_seconds (int | None): Request timeout for this call.
             ``None`` uses ``cli.request.timeouts.default_seconds``.
 
     Returns:
@@ -264,12 +264,14 @@ async def call_tool(
             ``mcp_request_timeout`` for a request timeout,
             ``mcp_request_failed`` for everything else.
     """
-    if request_timeout_seconds is None:
-        request_timeout_seconds = runtime.config.cli.request.timeouts.default_seconds
     try:
         async with McpClient.for_daemon(
             handle,
-            request_timeout_seconds=request_timeout_seconds,
+            request_timeout_seconds=(
+                request_timeout_seconds
+                if request_timeout_seconds is not None
+                else runtime.config.cli.request.timeouts.default_seconds
+            ),
         ) as client:
             return await client.call_tool(name, arguments)
     except McpRequestTimeoutError as exc:

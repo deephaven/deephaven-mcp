@@ -646,6 +646,38 @@ def test_exec_inline_script(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert call.await_args.args[2] == "session_script_run"
     assert call.await_args.args[3] == {"id": _SID, "script": "print(1)"}
+    assert call.await_args.kwargs == {"request_timeout_seconds": None}
+
+
+def test_exec_script_timeout_forwards_and_extends_request_timeout(
+    tmp_path: Path,
+) -> None:
+    rt = make_runtime(tmp_path)
+    result, call = _run(
+        ["session", "exec", _SID, "--script", "slow()", "--script-timeout", "2.5"],
+        {"success": True, "id": _SID},
+        tmp_path,
+        runtime=rt,
+    )
+    assert result.exit_code == 0
+    assert call.await_args.args[3] == {
+        "id": _SID,
+        "script": "slow()",
+        "timeout_seconds": 2.5,
+    }
+    assert call.await_args.kwargs == {
+        "request_timeout_seconds": rt.config.cli.request.timeouts.default_seconds + 3
+    }
+
+
+def test_exec_script_timeout_must_be_positive(tmp_path: Path) -> None:
+    result, call = _run(
+        ["session", "exec", _SID, "--script", "x", "--script-timeout", "0"],
+        {"success": True},
+        tmp_path,
+    )
+    assert result.exit_code == 2
+    call.assert_not_awaited()
 
 
 def test_exec_script_path_reads_file_client_side(tmp_path: Path) -> None:
