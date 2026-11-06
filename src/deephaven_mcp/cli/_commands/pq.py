@@ -1217,11 +1217,13 @@ def _lifecycle_request_timeout(
 ) -> int:
     """Return the MCP request timeout for a start, stop, or restart call.
 
-    The CLI's default request timeout plus the server's worst case: each
-    wave of up to ``max_concurrent`` ids may spend
+    The CLI's default request timeout plus the server's worst case: the
+    first call to a system may first authenticate
+    (``auth_timeout_seconds``) and subscribe (``subscribe_timeout_seconds``),
+    then each wave of up to ``max_concurrent`` ids may spend
     ``pq_state_change_timeout_seconds`` when waiting (request plus wait),
-    or ``quick_operation_timeout_seconds`` (request only) when not. Both,
-    and the default concurrency, are read from the loaded
+    or ``quick_operation_timeout_seconds`` (request only) when not. All of
+    these, and the default concurrency, are read from the loaded
     ``enterprise/settings.json``.
 
     Args:
@@ -1247,8 +1249,9 @@ def _lifecycle_request_timeout(
         if wait
         else timeouts.quick_operation_timeout_seconds
     )
+    setup = timeouts.auth_timeout_seconds + timeouts.subscribe_timeout_seconds
     return runtime.config.cli.request.timeouts.default_seconds + math.ceil(
-        math.ceil(id_count / concurrency) * per_wave
+        setup + math.ceil(id_count / concurrency) * per_wave
     )
 
 

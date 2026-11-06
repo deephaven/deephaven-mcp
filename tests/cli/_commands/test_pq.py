@@ -338,15 +338,15 @@ def test_lifecycle_default_wait_and_max_concurrent(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "args, expected",
     [
-        # CLI default 60 + one wave of the 120 s request-plus-wait budget.
-        (["pq", "restart", "1"], 180),
+        # CLI default 60 + 90 s auth/subscribe + one wave of the 120 s request-plus-wait budget.
+        (["pq", "restart", "1"], 270),
         # --no-wait budgets only the 5 s request.
-        (["pq", "restart", "1", "--no-wait"], 65),
+        (["pq", "restart", "1", "--no-wait"], 155),
         # 21 ids at the default concurrency of 20 take two waves.
-        (["pq", "start", *[str(i) for i in range(21)]], 300),
-        (["pq", "stop", "1", "2", "--max-concurrent", "1"], 300),
+        (["pq", "start", *[str(i) for i in range(21)]], 390),
+        (["pq", "stop", "1", "2", "--max-concurrent", "1"], 390),
         # A non-positive cap is the tool's to reject; the default concurrency applies.
-        (["pq", "stop", "1", "--max-concurrent", "0"], 180),
+        (["pq", "stop", "1", "--max-concurrent", "0"], 270),
     ],
 )
 def test_lifecycle_request_timeout_covers_the_server_wait(
@@ -360,10 +360,10 @@ def test_lifecycle_request_timeout_covers_the_server_wait(
 @pytest.mark.parametrize(
     "flag, expected",
     [
-        # 60 + 2 waves * 30
-        ("--wait", 120),
-        # 60 + ceil(2 waves * 2.5)
-        ("--no-wait", 65),
+        # 60 + 10 + 5 + 2 waves * 30
+        ("--wait", 135),
+        # 60 + ceil(10 + 5 + 2 waves * 2.5)
+        ("--no-wait", 80),
     ],
 )
 def test_lifecycle_request_timeout_reads_enterprise_settings(
@@ -374,6 +374,8 @@ def test_lifecycle_request_timeout_reads_enterprise_settings(
         {
             "timeouts": {
                 "client": {
+                    "auth_timeout_seconds": 10,
+                    "subscribe_timeout_seconds": 5,
                     "quick_operation_timeout_seconds": 2.5,
                     "pq_state_change_timeout_seconds": 30,
                 }
