@@ -1,16 +1,13 @@
 import { resolve } from "node:path";
 import { Option } from "commander";
+import { commitSignIn, type SavedSignIn } from "../../actions/auth/flows.ts";
+import { trustAndResolveServer } from "../../actions/auth/session.ts";
 import {
-  commitSignInAction,
-  type SavedSignIn,
-} from "../../actions/auth/flows.ts";
-import { trustAndResolveServerAction } from "../../actions/auth/session.ts";
-import {
-  connectServerAction,
+  connectServer,
   disconnectServer,
-  offeredMethodsAction,
+  offeredMethods,
   type Session,
-  signInAction,
+  signIn,
 } from "../../actions/auth/signin.ts";
 import type { Method } from "../../actions/auth/store.ts";
 import { defineCommand, type Output } from "../../cli/command.ts";
@@ -122,7 +119,7 @@ export const login = defineCommand<LoginOptions>({
     if (target === "use") return await use.run(ctx, [], {});
     if (target === "remove") return await logout.run(ctx, [], {});
     const prior = priorSignIn(state, target.profile);
-    const { origin, kind } = await trustAndResolveServerAction(
+    const { origin, kind } = await trustAndResolveServer(
       target.server,
       state.config.servers,
       opts.caCert,
@@ -130,7 +127,7 @@ export const login = defineCommand<LoginOptions>({
       ctx.lifecycle,
     );
 
-    const server = await connectServerAction(
+    const server = await connectServer(
       origin,
       kind,
       ctx.store.cacheDir,
@@ -138,7 +135,7 @@ export const login = defineCommand<LoginOptions>({
     );
     try {
       // Sign in, then confirm the account before anything is saved.
-      const methods = await offeredMethodsAction(server, ctx.lifecycle);
+      const methods = await offeredMethods(server, ctx.lifecycle);
       const method = await askSignInMethod(ctx.ui, kind, methods, prior, opts);
       const { request, toSave } = await askSignInCredentials(
         ctx.ui,
@@ -146,7 +143,7 @@ export const login = defineCommand<LoginOptions>({
         prior,
         opts,
       );
-      const session = await signInAction(
+      const session = await signIn(
         server,
         request,
         "auth_failed",
@@ -170,7 +167,7 @@ export const login = defineCommand<LoginOptions>({
           opts.default,
         );
         const caCert = opts.caCert ? resolve(opts.caCert) : undefined;
-        const saved = await commitSignInAction(
+        const saved = await commitSignIn(
           ctx.store,
           session,
           { ...toSave, caCert },

@@ -1,6 +1,6 @@
 /**
  * Migrating legacy dhcli / Deephaven MCP entries: each becomes a sign-in request,
- * then goes through the same connectServerAction → signInAction → commitSignInAction as login.
+ * then goes through the same connectServer → signIn → commitSignIn as login.
  */
 
 import { resolve } from "node:path";
@@ -16,7 +16,7 @@ import {
   communityUser,
 } from "./community.ts";
 import {
-  commitSignInAction,
+  commitSignIn,
   type ProfileToSave,
   type SavedSignIn,
   saveProfile,
@@ -34,10 +34,10 @@ import {
 import { profileMigrationReport } from "./reporting.ts";
 import { loadedCa } from "./session.ts";
 import {
-  connectServerAction,
+  connectServer,
   disconnectServer,
   type SignInRequest,
-  signInAction,
+  signIn,
 } from "./signin.ts";
 import type { Config, Credential, Store } from "./store.ts";
 
@@ -237,7 +237,7 @@ async function communitySignIn(
  * is told what each server call is about to wait on. Never throws: failures
  * are outcomes.
  */
-export async function migrateLegacyEntryAction(
+export async function migrateLegacyEntry(
   store: Store,
   legacyPath: string,
   item: LegacyItem,
@@ -248,7 +248,7 @@ export async function migrateLegacyEntryAction(
   return runLifecycleAction(
     lifecycle,
     report,
-    migrateLegacyEntry,
+    migrateLegacyEntryAction,
     store,
     legacyPath,
     item,
@@ -257,7 +257,7 @@ export async function migrateLegacyEntryAction(
   );
 }
 
-async function migrateLegacyEntry(
+async function migrateLegacyEntryAction(
   store: Store,
   legacyPath: string,
   item: LegacyItem,
@@ -336,28 +336,17 @@ async function signInAndSave(
   toSave: ProfileToSave,
   lifecycle?: CommandLifecycle,
 ): Promise<SavedSignIn> {
-  const server = await connectServerAction(
+  const server = await connectServer(
     item.origin,
     item.kind,
     store.cacheDir,
     lifecycle,
   );
   try {
-    const session = await signInAction(
-      server,
-      request,
-      "auth_failed",
-      lifecycle,
-    );
+    const session = await signIn(server, request, "auth_failed", lifecycle);
     try {
       lifecycle?.onCleanup(() => disconnectServer(session));
-      return await commitSignInAction(
-        store,
-        session,
-        toSave,
-        undefined,
-        lifecycle,
-      );
+      return await commitSignIn(store, session, toSave, undefined, lifecycle);
     } finally {
       disconnectServer(session);
     }

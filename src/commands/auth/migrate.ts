@@ -2,7 +2,7 @@ import { Option } from "commander";
 import { findLegacy, type LegacyItem } from "../../actions/auth/legacy.ts";
 import {
   type Migrated,
-  migrateLegacyEntryAction,
+  migrateLegacyEntry,
   recordMigration,
   splitMigrated,
 } from "../../actions/auth/migrate.ts";
@@ -100,7 +100,7 @@ async function migrateAndReport(
   item: LegacyItem,
 ): Promise<Migrated> {
   const seconds = timeoutMs() / 1000;
-  const outcome = await migrateLegacyEntryAction(
+  const outcome = await migrateLegacyEntry(
     ctx.store,
     legacyPath,
     item,

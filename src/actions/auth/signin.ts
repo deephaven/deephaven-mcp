@@ -92,7 +92,7 @@ export type SignInRequest =
   | CommunityLogin;
 
 /** Loads the server's client code (cached under `cacheRoot`) and connects. Not signed in yet. */
-export async function connectServerAction(
+export async function connectServer(
   origin: string,
   kind: Kind,
   cacheRoot: string,
@@ -102,7 +102,7 @@ export async function connectServerAction(
   return runLifecycleAction(
     lifecycle,
     report,
-    connectServer,
+    connectServerAction,
     origin,
     kind,
     cacheRoot,
@@ -110,7 +110,7 @@ export async function connectServerAction(
   );
 }
 
-async function connectServer(
+async function connectServerAction(
   origin: string,
   kind: Kind,
   cacheRoot: string,
@@ -150,15 +150,15 @@ const COMMUNITY_LABELS: Partial<Record<Method, string>> = {
 };
 
 /** What the server advertises. Enterprise key login always works but isn't advertised. */
-export async function offeredMethodsAction(
+export async function offeredMethods(
   server: Server,
   lifecycle?: CommandLifecycle,
 ): Promise<OfferedMethod[]> {
   const report = authActionReport("reading sign-in methods", server.origin);
-  return runLifecycleAction(lifecycle, report, offeredMethods, server);
+  return runLifecycleAction(lifecycle, report, offeredMethodsAction, server);
 }
 
-async function offeredMethods(server: Server): Promise<OfferedMethod[]> {
+async function offeredMethodsAction(server: Server): Promise<OfferedMethod[]> {
   if (server.community) {
     return communityMethods(server.community.handlers).map((o) => ({
       method: o.method,
@@ -192,7 +192,7 @@ async function offeredMethods(server: Server): Promise<OfferedMethod[]> {
  * browser and waits; it may replace the connection, so use the returned
  * session's.
  */
-export async function signInAction(
+export async function signIn(
   server: Server,
   request: SignInRequest,
   rejected: "auth_failed" | "auth_expired" = "auth_failed",
@@ -206,14 +206,14 @@ export async function signInAction(
   return runLifecycleAction(
     lifecycle,
     report,
-    signIn,
+    signInAction,
     server,
     request,
     rejected,
   );
 }
 
-async function signIn(
+async function signInAction(
   server: Server,
   request: SignInRequest,
   rejected: "auth_failed" | "auth_expired",

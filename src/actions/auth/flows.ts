@@ -80,7 +80,7 @@ export interface ProfileToSave {
   importedFrom?: string;
 }
 
-/** The profile {@link commitSignInAction} saved, and what it couldn't clean up. */
+/** The profile {@link commitSignIn} saved, and what it couldn't clean up. */
 export interface SavedSignIn extends Saved {
   /** The new key's comment, if one was made. */
   key?: string;
@@ -94,7 +94,7 @@ export interface SavedSignIn extends Saved {
  * or leaves it recorded for the next sign-in.
  * `makeDefault` undefined → only if there's no default yet.
  */
-export async function commitSignInAction(
+export async function commitSignIn(
   store: Store,
   session: Session,
   save: ProfileToSave,
@@ -105,7 +105,7 @@ export async function commitSignInAction(
   return runLifecycleAction(
     lifecycle,
     report,
-    commitSignIn,
+    commitSignInAction,
     store,
     session,
     save,
@@ -114,7 +114,7 @@ export async function commitSignInAction(
   );
 }
 
-async function commitSignIn(
+async function commitSignInAction(
   store: Store,
   session: Session,
   save: ProfileToSave,
@@ -219,7 +219,7 @@ export async function trustCasToRevoke(
   return { ids: ids.filter((id) => !skipped.includes(id)), skipped };
 }
 
-/** What {@link removeProfilesAction} did. */
+/** What {@link removeProfiles} did. */
 export interface Removed {
   /** `revoked`: its key was deleted on the server. */
   removed: { profile: string; server: string; revoked: boolean }[];
@@ -236,7 +236,7 @@ export interface Removed {
  * `state` is what was read before; a profile signed in again since is kept.
  * `waiting` is told what each server call waits on, before it starts.
  */
-export async function removeProfilesAction(
+export async function removeProfiles(
   store: Store,
   state: State,
   ids: string[],
@@ -247,7 +247,7 @@ export async function removeProfilesAction(
   return runLifecycleAction(
     lifecycle,
     report,
-    removeProfiles,
+    removeProfilesAction,
     store,
     state,
     ids,
@@ -255,7 +255,7 @@ export async function removeProfilesAction(
   );
 }
 
-async function removeProfiles(
+async function removeProfilesAction(
   store: Store,
   state: State,
   ids: string[],

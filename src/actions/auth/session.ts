@@ -20,11 +20,11 @@ import {
   withPort,
 } from "./resolve.ts";
 import {
-  connectServerAction,
+  connectServer,
   disconnectServer,
   type Session,
   type SignInRequest,
-  signInAction,
+  signIn,
 } from "./signin.ts";
 import {
   type Config,
@@ -44,9 +44,9 @@ async function connectAndSignIn(
   rejected: "auth_failed" | "auth_expired",
   lifecycle?: CommandLifecycle,
 ): Promise<Session> {
-  const server = await connectServerAction(origin, kind, cacheRoot, lifecycle);
+  const server = await connectServer(origin, kind, cacheRoot, lifecycle);
   try {
-    const session = await signInAction(server, request, rejected, lifecycle);
+    const session = await signIn(server, request, rejected, lifecycle);
     return session;
   } catch (e) {
     disconnectServer(server);
@@ -142,7 +142,7 @@ const KIND_LABEL: Record<Kind, string> = {
  * Trusts `caCert` (re-running with `rerun` appended if it must), then finds
  * the server `input` names: a saved one, else by probing it.
  */
-export async function trustAndResolveServerAction(
+export async function trustAndResolveServer(
   input: string,
   servers: Config["servers"],
   caCert: string | undefined,
@@ -153,7 +153,7 @@ export async function trustAndResolveServerAction(
   return runLifecycleAction(
     lifecycle,
     report,
-    trustAndResolveServer,
+    trustAndResolveServerAction,
     input,
     servers,
     caCert,
@@ -162,7 +162,7 @@ export async function trustAndResolveServerAction(
   );
 }
 
-async function trustAndResolveServer(
+async function trustAndResolveServerAction(
   input: string,
   servers: Config["servers"],
   caCert: string | undefined,
