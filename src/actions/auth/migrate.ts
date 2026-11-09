@@ -343,7 +343,6 @@ async function signInAndSave(
     lifecycle,
   );
   try {
-    lifecycle?.onCleanup(() => disconnectServer(server));
     const session = await signInAction(
       server,
       request,

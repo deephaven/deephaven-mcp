@@ -106,6 +106,7 @@ export async function connectServerAction(
     origin,
     kind,
     cacheRoot,
+    lifecycle,
   );
 }
 
@@ -113,21 +114,33 @@ async function connectServer(
   origin: string,
   kind: Kind,
   cacheRoot: string,
+  lifecycle?: CommandLifecycle,
 ): Promise<Server> {
   const timeout = timeoutMs();
-  return kind === "enterprise"
-    ? {
-        origin,
-        kind,
-        cacheRoot,
-        enterprise: await connectEnterprise(origin, cacheRoot, timeout),
-      }
-    : {
-        origin,
-        kind,
-        cacheRoot,
-        community: await connectCommunity(origin, cacheRoot, timeout),
-      };
+  const server: Server =
+    kind === "enterprise"
+      ? {
+          origin,
+          kind,
+          cacheRoot,
+          enterprise: await connectEnterprise(origin, cacheRoot, timeout),
+        }
+      : {
+          origin,
+          kind,
+          cacheRoot,
+          community: await connectCommunity(origin, cacheRoot, timeout),
+        };
+  if (lifecycle) {
+    try {
+      lifecycle.signal.throwIfAborted();
+      lifecycle.onCleanup(() => disconnectServer(server));
+    } catch (error) {
+      disconnectServer(server);
+      throw error;
+    }
+  }
+  return server;
 }
 
 const COMMUNITY_LABELS: Partial<Record<Method, string>> = {

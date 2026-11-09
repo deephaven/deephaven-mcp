@@ -87,6 +87,57 @@ test("runner: does not start an already cancelled command", async () => {
   expect(started).toBe(false);
 });
 
+test("runner: interruption during failed cleanup preserves its reason", async () => {
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    const lifecycle = new CommandLifecycle();
+    lifecycle.onCleanup(() => {
+      process.emit(signal, signal);
+      throw new Error("Close failed");
+    });
+    await expect(
+      runWithLifecycle(lifecycle, async () => {}),
+    ).rejects.toMatchObject({
+      code: "cancelled",
+      headline: "Interrupted",
+      detail: `Interrupted by ${signal}`,
+      cleanupDetail: "Close failed",
+    });
+  }
+});
+
+test("runner: an earlier command failure takes precedence over cleanup interruption", async () => {
+  const lifecycle = new CommandLifecycle();
+  lifecycle.onCleanup(() => {
+    process.emit("SIGTERM", "SIGTERM");
+    throw new Error("Close failed");
+  });
+
+  await expect(
+    runWithLifecycle(lifecycle, async () => {
+      throw new DhError("auth_failed", "Rejected");
+    }),
+  ).rejects.toMatchObject({
+    code: "auth_failed",
+    headline: "Rejected",
+    cleanupDetail: "Close failed",
+  });
+});
+
+test("runner: interruption during a cleanup timeout remains primary", async () => {
+  const lifecycle = new CommandLifecycle();
+  lifecycle.onCleanup(() => {
+    process.emit("SIGINT", "SIGINT");
+    return new Promise(() => {});
+  });
+  await expect(
+    runWithLifecycle(lifecycle, async () => {}),
+  ).rejects.toMatchObject({
+    code: "cancelled",
+    detail: "Interrupted by SIGINT",
+    cleanupDetail: "Cleanup timed out",
+  });
+});
+
 test("command registration: separate invocations do not share lifecycles", async () => {
   const first = new CommandLifecycle();
   const second = new CommandLifecycle();

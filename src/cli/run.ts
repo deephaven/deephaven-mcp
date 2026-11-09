@@ -37,6 +37,10 @@ export async function runWithLifecycle(
     }
 
     const cleanup = await lifecycle.cleanup();
+    if (!failed && lifecycle.signal.aborted) {
+      failed = true;
+      failure = interruptedError(lifecycle.signal.reason);
+    }
     if (cleanup.failures.length > 0) {
       throw cleanupError(
         cleanup.failures,
@@ -44,8 +48,6 @@ export async function runWithLifecycle(
       );
     }
     if (failed) throw failure;
-    if (lifecycle.signal.aborted)
-      throw interruptedError(lifecycle.signal.reason);
   } finally {
     lifecycle.signal.removeEventListener("abort", onAbort);
     process.off("SIGINT", onSignal);

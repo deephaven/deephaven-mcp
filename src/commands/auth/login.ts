@@ -137,7 +137,6 @@ export const login = defineCommand<LoginOptions>({
       ctx.lifecycle,
     );
     try {
-      ctx.lifecycle.onCleanup(() => disconnectServer(server));
       // Sign in, then confirm the account before anything is saved.
       const methods = await offeredMethodsAction(server, ctx.lifecycle);
       const method = await askSignInMethod(ctx.ui, kind, methods, prior, opts);

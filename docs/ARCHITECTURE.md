@@ -120,6 +120,8 @@ show up in `dh agents`.
 `Context.lifecycle` owns cancellation and cleanup for one invocation.
 Pass it to actions that need it, or just its signal to request helpers; never
 use a global lifecycle. [cli/run.ts](../src/cli/run.ts) handles signals and cleanup.
+Acquisition actions register connection cleanup before returning, and close
+connections immediately if cancellation or cleanup prevents registration.
 
 `Output.human` is for people and `Output.json` for `-o json`. In JSON mode,
 stdout carries only the result and everything else goes to stderr.

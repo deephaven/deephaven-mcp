@@ -46,7 +46,6 @@ async function connectAndSignIn(
 ): Promise<Session> {
   const server = await connectServerAction(origin, kind, cacheRoot, lifecycle);
   try {
-    lifecycle?.onCleanup(() => disconnectServer(server));
     const session = await signInAction(server, request, rejected, lifecycle);
     return session;
   } catch (e) {
