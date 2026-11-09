@@ -1,7 +1,7 @@
 import { Option } from "commander";
 import {
   type Removed,
-  removeProfiles,
+  removeProfilesAction,
   trustCasToRevoke,
 } from "../../actions/auth/flows.ts";
 import { sortedProfiles } from "../../actions/auth/profile.ts";
@@ -46,7 +46,7 @@ export const logout = defineCommand<LogoutOptions>({
       );
     }
 
-    const done = await removeProfiles(
+    const done = await removeProfilesAction(
       ctx.store,
       state,
       ids,

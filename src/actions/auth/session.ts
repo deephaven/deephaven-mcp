@@ -1,7 +1,10 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CommandLifecycle, runAction } from "../../cli/lifecycle.ts";
+import {
+  type CommandLifecycle,
+  runLifecycleAction,
+} from "../../cli/lifecycle.ts";
 import { DhError, isErrno, reasonOf } from "../../errors.ts";
 import { note } from "../../output.ts";
 import { BIN, STANDALONE } from "../../version.ts";
@@ -17,11 +20,11 @@ import {
   withPort,
 } from "./resolve.ts";
 import {
-  connectServer,
+  connectServerAction,
   disconnectServer,
   type Session,
   type SignInRequest,
-  signIn,
+  signInAction,
 } from "./signin.ts";
 import {
   type Config,
@@ -41,10 +44,10 @@ async function connectAndSignIn(
   rejected: "auth_failed" | "auth_expired",
   lifecycle?: CommandLifecycle,
 ): Promise<Session> {
-  const server = await connectServer(origin, kind, cacheRoot, lifecycle);
+  const server = await connectServerAction(origin, kind, cacheRoot, lifecycle);
   try {
     lifecycle?.onCleanup(() => disconnectServer(server));
-    const session = await signIn(server, request, rejected, lifecycle);
+    const session = await signInAction(server, request, rejected, lifecycle);
     return session;
   } catch (e) {
     disconnectServer(server);
@@ -140,39 +143,53 @@ const KIND_LABEL: Record<Kind, string> = {
  * Trusts `caCert` (re-running with `rerun` appended if it must), then finds
  * the server `input` names: a saved one, else by probing it.
  */
-export async function trustAndResolveServer(
+export async function trustAndResolveServerAction(
   input: string,
   servers: Config["servers"],
   caCert: string | undefined,
   rerun: string[],
   lifecycle?: CommandLifecycle,
 ): Promise<ResolvedServer> {
-  return runAction(
+  const report = authActionReport("finding the server", input);
+  return runLifecycleAction(
     lifecycle,
-    authActionReport("finding the server", input),
-    async () => {
-      // A saved origin is exact; anything else expands in discovery order.
-      const exact = input in servers;
-      const knownOrigin = exact
-        ? input
-        : candidates(input)
-            .map((u) => u.origin)
-            .find((o) => o in servers);
-      const known = knownOrigin ? servers[knownOrigin] : undefined;
-      await ensureCa(caCert ?? known?.caCert, rerun, undefined, lifecycle);
-      // A new CA is checked by probing.
-      if (knownOrigin && known && !caCert) {
-        return { origin: knownOrigin, kind: known.kind };
-      }
-      const found = await resolveServer(
-        exact ? withPort(input) : input,
-        undefined,
-        lifecycle?.signal,
-      );
-      note(`✔ ${found.origin} (${KIND_LABEL[found.kind]})`);
-      return found;
-    },
+    report,
+    trustAndResolveServer,
+    input,
+    servers,
+    caCert,
+    rerun,
+    lifecycle,
   );
+}
+
+async function trustAndResolveServer(
+  input: string,
+  servers: Config["servers"],
+  caCert: string | undefined,
+  rerun: string[],
+  lifecycle?: CommandLifecycle,
+): Promise<ResolvedServer> {
+  // A saved origin is exact; anything else expands in discovery order.
+  const exact = input in servers;
+  const knownOrigin = exact
+    ? input
+    : candidates(input)
+        .map((u) => u.origin)
+        .find((o) => o in servers);
+  const known = knownOrigin ? servers[knownOrigin] : undefined;
+  await ensureCa(caCert ?? known?.caCert, rerun, undefined, lifecycle);
+  // A new CA is checked by probing.
+  if (knownOrigin && known && !caCert) {
+    return { origin: knownOrigin, kind: known.kind };
+  }
+  const found = await resolveServer(
+    exact ? withPort(input) : input,
+    undefined,
+    lifecycle?.signal,
+  );
+  note(`✔ ${found.origin} (${KIND_LABEL[found.kind]})`);
+  return found;
 }
 
 /**
@@ -250,10 +267,13 @@ async function envSession(
     throw new DhError("usage", `Set only one of ${secrets.join(", ")}`);
   }
   await ensureCa(env("DH_CA_CERT"), [], undefined, lifecycle);
-  const { origin, kind } = await runAction(
+  const { origin, kind } = await runLifecycleAction(
     lifecycle,
     authActionReport("finding the server", server),
-    () => resolveServer(server, undefined, lifecycle?.signal),
+    resolveServer,
+    server,
+    undefined,
+    lifecycle?.signal,
   );
   const request =
     kind === "enterprise"

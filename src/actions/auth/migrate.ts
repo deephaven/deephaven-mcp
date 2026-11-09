@@ -1,10 +1,13 @@
 /**
  * Migrating legacy dhcli / Deephaven MCP entries: each becomes a sign-in request,
- * then goes through the same connectServer → signIn → commitSignIn as login.
+ * then goes through the same connectServerAction → signInAction → commitSignInAction as login.
  */
 
 import { resolve } from "node:path";
-import { type CommandLifecycle, runAction } from "../../cli/lifecycle.ts";
+import {
+  type CommandLifecycle,
+  runLifecycleAction,
+} from "../../cli/lifecycle.ts";
 import { DhError, describe } from "../../errors.ts";
 import { BIN } from "../../version.ts";
 import {
@@ -13,7 +16,7 @@ import {
   communityUser,
 } from "./community.ts";
 import {
-  commitSignIn,
+  commitSignInAction,
   type ProfileToSave,
   type SavedSignIn,
   saveProfile,
@@ -31,10 +34,10 @@ import {
 import { profileMigrationReport } from "./reporting.ts";
 import { loadedCa } from "./session.ts";
 import {
-  connectServer,
+  connectServerAction,
   disconnectServer,
   type SignInRequest,
-  signIn,
+  signInAction,
 } from "./signin.ts";
 import type { Config, Credential, Store } from "./store.ts";
 
@@ -234,7 +237,7 @@ async function communitySignIn(
  * is told what each server call is about to wait on. Never throws: failures
  * are outcomes.
  */
-export async function migrateLegacyEntry(
+export async function migrateLegacyEntryAction(
   store: Store,
   legacyPath: string,
   item: LegacyItem,
@@ -242,51 +245,68 @@ export async function migrateLegacyEntry(
   lifecycle?: CommandLifecycle,
 ): Promise<Migrated> {
   const report = profileMigrationReport(item.origin);
-  return runAction(lifecycle, report, async () => {
-    try {
-      if (item.caCert && loadedCa() !== item.caCert) {
-        throw new DhError(
-          "usage",
-          "uses a custom CA",
-          `Run \`${BIN} auth login ${item.origin} --ca-cert ${item.caCert}\`.`,
-        );
-      }
-      const entry = await legacySignIn(item);
-      const toSave = {
-        ...entry.toSave,
-        caCert: item.caCert,
-        importedFrom: importedFrom(legacyPath, item),
-      };
-      let saved: Pick<SavedSignIn, "name" | "warnings">;
-      if (entry.verify) {
-        waiting(entry.waiting);
-        saved = await signInAndSave(
-          store,
-          item,
-          entry.request,
-          toSave,
-          lifecycle,
-        );
-      } else {
-        saved = await saveUnverified(store, item, entry.request, toSave);
-      }
-      return {
-        item,
-        profile: saved.name,
-        detail: entry.detail,
-        ok: true,
-        warnings: saved.warnings,
-      };
-    } catch (e) {
-      lifecycle?.signal.throwIfAborted();
-      return {
-        item,
-        detail: migrationFailure(item, e),
-        ok: false,
-        warnings: [],
-      };
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    migrateLegacyEntry,
+    store,
+    legacyPath,
+    item,
+    waiting,
+    lifecycle,
+  );
+}
+
+async function migrateLegacyEntry(
+  store: Store,
+  legacyPath: string,
+  item: LegacyItem,
+  waiting: (what: string) => void,
+  lifecycle?: CommandLifecycle,
+): Promise<Migrated> {
+  try {
+    if (item.caCert && loadedCa() !== item.caCert) {
+      throw new DhError(
+        "usage",
+        "uses a custom CA",
+        `Run \`${BIN} auth login ${item.origin} --ca-cert ${item.caCert}\`.`,
+      );
     }
-  });
+    const entry = await legacySignIn(item);
+    const toSave = {
+      ...entry.toSave,
+      caCert: item.caCert,
+      importedFrom: importedFrom(legacyPath, item),
+    };
+    let saved: Pick<SavedSignIn, "name" | "warnings">;
+    if (entry.verify) {
+      waiting(entry.waiting);
+      saved = await signInAndSave(
+        store,
+        item,
+        entry.request,
+        toSave,
+        lifecycle,
+      );
+    } else {
+      saved = await saveUnverified(store, item, entry.request, toSave);
+    }
+    return {
+      item,
+      profile: saved.name,
+      detail: entry.detail,
+      ok: true,
+      warnings: saved.warnings,
+    };
+  } catch (e) {
+    lifecycle?.signal.throwIfAborted();
+    return {
+      item,
+      detail: migrationFailure(item, e),
+      ok: false,
+      warnings: [],
+    };
+  }
 }
 
 /** Saves a Community entry whose secret's env var isn't set, so it can't sign in yet. */
@@ -316,7 +336,7 @@ async function signInAndSave(
   toSave: ProfileToSave,
   lifecycle?: CommandLifecycle,
 ): Promise<SavedSignIn> {
-  const server = await connectServer(
+  const server = await connectServerAction(
     item.origin,
     item.kind,
     store.cacheDir,
@@ -324,10 +344,21 @@ async function signInAndSave(
   );
   try {
     lifecycle?.onCleanup(() => disconnectServer(server));
-    const session = await signIn(server, request, "auth_failed", lifecycle);
+    const session = await signInAction(
+      server,
+      request,
+      "auth_failed",
+      lifecycle,
+    );
     try {
       lifecycle?.onCleanup(() => disconnectServer(session));
-      return await commitSignIn(store, session, toSave, undefined, lifecycle);
+      return await commitSignInAction(
+        store,
+        session,
+        toSave,
+        undefined,
+        lifecycle,
+      );
     } finally {
       disconnectServer(session);
     }

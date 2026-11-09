@@ -1,5 +1,8 @@
 import { expect, spyOn, test } from "bun:test";
-import { CommandLifecycle, runAction } from "../../src/cli/lifecycle.ts";
+import {
+  CommandLifecycle,
+  runLifecycleAction,
+} from "../../src/cli/lifecycle.ts";
 import type { FailureReport } from "../../src/errors.ts";
 
 test("lifecycle: cleanup runs once in reverse order and collects failures", async () => {
@@ -45,7 +48,7 @@ test("lifecycle: identifies a repeated termination signal", () => {
 test("lifecycle: actions restore their caller without leaking into prompts", async () => {
   const lifecycle = new CommandLifecycle();
   lifecycle.setFailureReport({ command: "auth login", profile: "prod" });
-  await lifecycle.runAction(
+  await lifecycle.runLifecycleAction(
     {
       operation: "profile save",
       target: "https://example.com",
@@ -54,7 +57,7 @@ test("lifecycle: actions restore their caller without leaking into prompts", asy
       outcome: "unknown",
     },
     async () => {
-      await lifecycle.runAction(
+      await lifecycle.runLifecycleAction(
         { operation: "SSO sign-in", phase: "signing_in" },
         async () => {
           expect(lifecycle.failureReport).toEqual({
@@ -84,7 +87,7 @@ test("lifecycle: interruption freezes operation timing and observation age befor
   );
   try {
     await expect(
-      lifecycle.runAction(
+      lifecycle.runLifecycleAction(
         {
           operation: "console startup",
           observation: {
@@ -119,7 +122,7 @@ test("lifecycle: cleanup freezes failure context without requiring cancellation"
   const clock = spyOn(performance, "now").mockReturnValue(1_000);
   try {
     await expect(
-      lifecycle.runAction(
+      lifecycle.runLifecycleAction(
         { operation: "connection", target: "https://example.com" },
         async () => {
           clock.mockReturnValue(6_000);
@@ -149,7 +152,7 @@ test("lifecycle: actions update plain facts and interruption captures an indepen
     human: { summary: "Cancelled before creation.", details: [] },
   };
   await expect(
-    lifecycle.runAction(report, async () => {
+    lifecycle.runLifecycleAction(report, async () => {
       report.outcome = "unknown";
       report.continuation = "continues";
       report.target = "abc123";
@@ -175,9 +178,9 @@ test("lifecycle: actions update plain facts and interruption captures an indepen
 
 test("lifecycle: a handled action failure does not leak after its caller succeeds", async () => {
   const lifecycle = new CommandLifecycle();
-  await lifecycle.runAction({ operation: "migration" }, async () => {
+  await lifecycle.runLifecycleAction({ operation: "migration" }, async () => {
     await expect(
-      lifecycle.runAction({ operation: "sign-in" }, async () => {
+      lifecycle.runLifecycleAction({ operation: "sign-in" }, async () => {
         throw new Error("Rejected");
       }),
     ).rejects.toThrow("Rejected");
@@ -186,14 +189,58 @@ test("lifecycle: a handled action failure does not leak after its caller succeed
 });
 
 test("lifecycle: action helpers work without a CLI lifecycle and refuse cancelled work", async () => {
-  expect(await runAction(undefined, {}, async () => 42)).toBe(42);
+  expect(await runLifecycleAction(undefined, {}, async () => 42)).toBe(42);
   const lifecycle = new CommandLifecycle();
   lifecycle.receiveSignal("SIGINT");
   let started = false;
   await expect(
-    runAction(lifecycle, {}, async () => {
+    runLifecycleAction(lifecycle, {}, async () => {
       started = true;
     }),
+  ).rejects.toMatchObject({ code: "cancelled" });
+  expect(started).toBe(false);
+});
+
+test("lifecycle: action helpers forward arguments and preserve defaults", async () => {
+  async function work(target: string, count = 2) {
+    return { target, count };
+  }
+  for (const lifecycle of [undefined, new CommandLifecycle()]) {
+    expect(await runLifecycleAction(lifecycle, {}, work, "server")).toEqual({
+      target: "server",
+      count: 2,
+    });
+    expect(await runLifecycleAction(lifecycle, {}, work, "server", 3)).toEqual({
+      target: "server",
+      count: 3,
+    });
+  }
+});
+
+test("lifecycle: named helpers update their scoped report and retain failures", async () => {
+  const lifecycle = new CommandLifecycle();
+  const report = { operation: "saving", progress: "" };
+  const failure = new Error("Cleanup failed");
+  async function work(current: typeof report, context: CommandLifecycle) {
+    current.progress = "Profile saved.";
+    expect(context.failureReport.progress).toBe("Profile saved.");
+    throw failure;
+  }
+  await expect(
+    runLifecycleAction(lifecycle, report, work, report, lifecycle),
+  ).rejects.toBe(failure);
+  expect(lifecycle.failureReport).toMatchObject({
+    operation: "saving",
+    progress: "Profile saved.",
+  });
+  lifecycle.receiveSignal("SIGINT");
+  let started = false;
+  async function cancelledWork(target: string) {
+    started = true;
+    return target;
+  }
+  await expect(
+    runLifecycleAction(lifecycle, {}, cancelledWork, "server"),
   ).rejects.toMatchObject({ code: "cancelled" });
   expect(started).toBe(false);
 });

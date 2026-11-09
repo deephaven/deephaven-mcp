@@ -1,5 +1,14 @@
-import { type CommandLifecycle, runAction } from "../../cli/lifecycle.ts";
-import { DhError, describe, reasonOf, timeoutMs } from "../../errors.ts";
+import {
+  type CommandLifecycle,
+  runLifecycleAction,
+} from "../../cli/lifecycle.ts";
+import {
+  DhError,
+  describe,
+  type FailureReport,
+  reasonOf,
+  timeoutMs,
+} from "../../errors.ts";
 import { BIN } from "../../version.ts";
 import {
   connectEnterprise,
@@ -71,7 +80,7 @@ export interface ProfileToSave {
   importedFrom?: string;
 }
 
-/** The profile {@link commitSignIn} saved, and what it couldn't clean up. */
+/** The profile {@link commitSignInAction} saved, and what it couldn't clean up. */
 export interface SavedSignIn extends Saved {
   /** The new key's comment, if one was made. */
   key?: string;
@@ -85,7 +94,7 @@ export interface SavedSignIn extends Saved {
  * or leaves it recorded for the next sign-in.
  * `makeDefault` undefined → only if there's no default yet.
  */
-export async function commitSignIn(
+export async function commitSignInAction(
   store: Store,
   session: Session,
   save: ProfileToSave,
@@ -93,44 +102,61 @@ export async function commitSignIn(
   lifecycle?: CommandLifecycle,
 ): Promise<SavedSignIn> {
   const report = profileSaveReport(session.origin);
-  return runAction(lifecycle, report, async () => {
-    // Uploaded only now, so a cancelled question never leaves a key on the server.
-    let credential: Credential;
-    let key: string | undefined;
-    if (save.credential === "new-key") {
-      const made = await authorizeComputer(store, session);
-      credential = made.credential;
-      key = made.comment;
-    } else {
-      credential = save.credential;
-    }
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    commitSignIn,
+    store,
+    session,
+    save,
+    makeDefault,
+    report,
+  );
+}
 
-    let saved: Saved;
-    try {
-      saved = await saveProfile(
-        store,
-        {
-          origin: session.origin,
-          kind: session.kind,
-          user: session.user,
-          operateAs: session.operateAs,
-          method: save.method,
-          handler: save.handler,
-          caCert: save.caCert,
-          importedFrom: save.importedFrom,
-          credential,
-        },
-        makeDefault,
-      );
-    } catch (e) {
-      if (key) await revokeNewKey(store, session, credential);
-      throw e;
-    }
+async function commitSignIn(
+  store: Store,
+  session: Session,
+  save: ProfileToSave,
+  makeDefault: boolean | undefined,
+  report: FailureReport,
+): Promise<SavedSignIn> {
+  // Uploaded only now, so a cancelled question never leaves a key on the server.
+  let credential: Credential;
+  let key: string | undefined;
+  if (save.credential === "new-key") {
+    const made = await authorizeComputer(store, session);
+    credential = made.credential;
+    key = made.comment;
+  } else {
+    credential = save.credential;
+  }
 
-    Object.assign(report, oldKeyCleanupReport(saved.name));
-    const warnings = await deleteObsoleteKeys(store, session, saved.previous);
-    return { ...saved, key, warnings };
-  });
+  let saved: Saved;
+  try {
+    saved = await saveProfile(
+      store,
+      {
+        origin: session.origin,
+        kind: session.kind,
+        user: session.user,
+        operateAs: session.operateAs,
+        method: save.method,
+        handler: save.handler,
+        caCert: save.caCert,
+        importedFrom: save.importedFrom,
+        credential,
+      },
+      makeDefault,
+    );
+  } catch (e) {
+    if (key) await revokeNewKey(store, session, credential);
+    throw e;
+  }
+
+  Object.assign(report, oldKeyCleanupReport(saved.name));
+  const warnings = await deleteObsoleteKeys(store, session, saved.previous);
+  return { ...saved, key, warnings };
 }
 
 /**
@@ -193,7 +219,7 @@ export async function trustCasToRevoke(
   return { ids: ids.filter((id) => !skipped.includes(id)), skipped };
 }
 
-/** What {@link removeProfiles} did. */
+/** What {@link removeProfilesAction} did. */
 export interface Removed {
   /** `revoked`: its key was deleted on the server. */
   removed: { profile: string; server: string; revoked: boolean }[];
@@ -210,7 +236,7 @@ export interface Removed {
  * `state` is what was read before; a profile signed in again since is kept.
  * `waiting` is told what each server call waits on, before it starts.
  */
-export async function removeProfiles(
+export async function removeProfilesAction(
   store: Store,
   state: State,
   ids: string[],
@@ -218,43 +244,58 @@ export async function removeProfiles(
   lifecycle?: CommandLifecycle,
 ): Promise<Removed> {
   const report = profileRemovalReport();
-  return runAction(lifecycle, report, async () => {
-    const { config, credentials } = state;
-    const { removed, unrevoked, warnings } = await revokeKeys(
-      store,
-      state,
-      ids,
-      waiting,
-    );
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    removeProfiles,
+    store,
+    state,
+    ids,
+    waiting,
+  );
+}
 
-    // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
-    const resaved: string[] = [];
-    const next = await store.update((now) => {
-      let next = now.config.defaultProfile;
-      for (const id of ids) {
-        const cred = now.credentials.credentials[id];
-        if (
-          JSON.stringify(cred) !== JSON.stringify(credentials.credentials[id])
-        ) {
-          resaved.push(config.profiles[id]?.name ?? id);
-          continue;
-        }
-        next = removeProfile(now.config, id);
-        delete now.credentials.credentials[id];
-        const p = config.profiles[id];
-        if (p && unrevoked.includes(id)) {
-          addOrphan(now.credentials, p.server, p.user, cred);
-        }
+async function removeProfiles(
+  store: Store,
+  state: State,
+  ids: string[],
+  waiting: (what: string) => void,
+): Promise<Removed> {
+  const { config, credentials } = state;
+  const { removed, unrevoked, warnings } = await revokeKeys(
+    store,
+    state,
+    ids,
+    waiting,
+  );
+
+  // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
+  const resaved: string[] = [];
+  const next = await store.update((now) => {
+    let next = now.config.defaultProfile;
+    for (const id of ids) {
+      const cred = now.credentials.credentials[id];
+      if (
+        JSON.stringify(cred) !== JSON.stringify(credentials.credentials[id])
+      ) {
+        resaved.push(config.profiles[id]?.name ?? id);
+        continue;
       }
-      return next ? now.config.profiles[next]?.name : undefined;
-    });
-    return {
-      removed: removed.filter((r) => !resaved.includes(r.profile)),
-      resaved,
-      default: next,
-      warnings,
-    };
+      next = removeProfile(now.config, id);
+      delete now.credentials.credentials[id];
+      const p = config.profiles[id];
+      if (p && unrevoked.includes(id)) {
+        addOrphan(now.credentials, p.server, p.user, cred);
+      }
+    }
+    return next ? now.config.profiles[next]?.name : undefined;
   });
+  return {
+    removed: removed.filter((r) => !resaved.includes(r.profile)),
+    resaved,
+    default: next,
+    warnings,
+  };
 }
 
 /** Deletes each profile's generated key on its server. `unrevoked`: the ids whose deletion failed. */

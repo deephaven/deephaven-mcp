@@ -54,7 +54,10 @@ export class CommandLifecycle {
   }
 
   /** Captures this action's report on failure; restores its caller on success. */
-  async runAction<T>(report: FailureReport, run: () => Promise<T>): Promise<T> {
+  async runLifecycleAction<T>(
+    report: FailureReport,
+    run: () => Promise<T>,
+  ): Promise<T> {
     this.signal.throwIfAborted();
     const previous = this.#operation;
     if (!this.#reportFrozen) {
@@ -146,10 +149,13 @@ export class CommandLifecycle {
   }
 }
 
-export function runAction<T>(
+export function runLifecycleAction<Args extends unknown[], T>(
   lifecycle: CommandLifecycle | undefined,
   report: FailureReport,
-  run: () => Promise<T>,
+  run: (...args: Args) => Promise<T>,
+  ...args: Args
 ): Promise<T> {
-  return lifecycle ? lifecycle.runAction(report, run) : run();
+  return lifecycle
+    ? lifecycle.runLifecycleAction(report, () => run(...args))
+    : run(...args);
 }

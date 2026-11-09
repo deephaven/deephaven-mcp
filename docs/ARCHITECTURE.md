@@ -19,18 +19,18 @@ exit codes, so commands don't do either.
 `dh auth login` ([login.ts](../src/commands/auth/login.ts)) runs:
 
 ```text
-askLoginTarget → trustAndResolveServer → connectServer → offeredMethods
-  → askSignInMethod → askSignInCredentials → signIn → confirmSsoAccount
-  → askMakeDefault → commitSignIn → Output
+askLoginTarget → trustAndResolveServerAction → connectServerAction → offeredMethodsAction
+  → askSignInMethod → askSignInCredentials → signInAction → confirmSsoAccount
+  → askMakeDefault → commitSignInAction → Output
 ```
 
 Reading `run` tells you what a command does, and a change in behavior shows up
 as a changed line there. The details are one call down.
 
 Because actions take plain data, it doesn't matter where the answers came from.
-`dh auth migrate` reads them from an old config file and calls the same `signIn`
-and `commitSignIn` as login. Saved profiles and `DH_*` environment variables
-also go through `signIn`, so a new sign-in method needs one case in
+`dh auth migrate` reads them from an old config file and calls the same `signInAction`
+and `commitSignInAction` as login. Saved profiles and `DH_*` environment variables
+also go through `signInAction`, so a new sign-in method needs one case in
 `askSignInCredentials` and one in `signIn`. Code outside the CLI, like an MCP
 tool, could call the actions the same way. Actions can be tested without a
 terminal, and questions with a fake `Prompter`.
@@ -157,10 +157,12 @@ information, not wording or line order. Avoid repetition and sensitive payloads.
 Prompt cancellation needs only `✖ Cancelled.`, plus any cleanup failure.
 Don't imply remote work stopped or failed without evidence.
 
-Actions use `runAction(lifecycle, report, work)` to scope reporting to their
-work. Successful actions restore their caller's context; failures retain it,
-and interruption captures it before cleanup. Commands only sequence questions
+Actions use `runLifecycleAction(lifecycle, report, work, ...args)` to scope
+reporting to their work. Successful actions restore their caller's context;
+failures retain it, and interruption captures it before cleanup. Commands only sequence questions
 and actions, without setting or clearing reporting state.
+Keep wrappers short: pass a named implementation helper and its arguments to
+`runLifecycleAction`; pass the report to that helper only when it needs updating.
 
 Reports are plain data: `human` contains operation wording, alongside structured
 facts for JSON. Actions build and update reports where those facts are known;
@@ -188,6 +190,7 @@ Names should make sense where they're called, not just where they're defined.
   `askMethod`).
 - Actions are a verb and an object: `connectServer`, `commitSignIn`,
   `removeProfiles`, `trustAndResolveServer` (rather than `connect` or `open`).
+  Lifecycle wrappers add `Action`: `removeProfilesAction` wraps `removeProfiles`.
 - Data types name what they hold: `SignInRequest`, `ProfileToSave`,
   `OfferedMethod`, `PriorSignIn` (rather than `how`, `known` or `recipe`).
 - Shared modules don't use auth terms.

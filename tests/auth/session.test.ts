@@ -1,21 +1,28 @@
 import { expect, test } from "bun:test";
 import {
   signInRequestFor,
-  trustAndResolveServer,
+  trustAndResolveServerAction,
 } from "../../src/actions/auth/session.ts";
 import type { Profile } from "../../src/actions/auth/store.ts";
 
-test("trustAndResolveServer: a saved origin is matched exactly, not in discovery order", async () => {
+test("trustAndResolveServerAction: a saved origin is matched exactly, not in discovery order", async () => {
   const servers = {
     "http://localhost": { kind: "community" as const },
     "http://localhost:10000": { kind: "community" as const },
   };
   expect(
-    (await trustAndResolveServer("http://localhost", servers, undefined, []))
-      .origin,
+    (
+      await trustAndResolveServerAction(
+        "http://localhost",
+        servers,
+        undefined,
+        [],
+      )
+    ).origin,
   ).toBe("http://localhost");
   expect(
-    (await trustAndResolveServer("localhost", servers, undefined, [])).origin,
+    (await trustAndResolveServerAction("localhost", servers, undefined, []))
+      .origin,
   ).toBe("http://localhost:10000");
 });
 
