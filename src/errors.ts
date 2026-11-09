@@ -37,8 +37,41 @@ export const ERROR_CODES = {
 /** A key of {@link ERROR_CODES}. */
 export type ErrorCode = keyof typeof ERROR_CODES;
 
+/** Optional command context attached to a structured failure report. */
+export interface FailureReport {
+  /** Operation-specific prose; never serialized into JSON. */
+  human?: HumanFailure;
+  command?: string;
+  target?: string;
+  profile?: string;
+  operation?: string;
+  phase?: string;
+  elapsedSeconds?: number;
+  progress?: string;
+  outcome?: "not_started" | "succeeded" | "failed" | "unknown";
+  continuation?: "continues" | "stopped" | "unknown";
+  retryWarning?: string;
+  observation?: {
+    state: string;
+    observedAt: string;
+    ageSeconds: number;
+  } | null;
+  recoveryCommand?: string[];
+}
+
+export interface HumanFailure {
+  /** Cancellation summary; ordinary failures retain their own error summary. */
+  summary: string;
+  context?: string;
+  details?: string[];
+  recoveryLabel?: string;
+}
+
 /** Thrown for every expected failure; `main.ts` turns `code` into an exit code and `hint` into advice. */
 export class DhError extends Error {
+  /** Cleanup diagnostics that must remain visible even for routine cancellation. */
+  cleanupDetail?: string;
+
   /** The message without `detail`. */
   readonly headline: string;
 
@@ -81,6 +114,60 @@ function messageOf(reason: unknown): string {
 export function reasonOf(reason: unknown): string | undefined {
   const text = describe(reason);
   return !text || text.startsWith("[object ") ? undefined : text;
+}
+
+/** A cancellation error carrying the abort reason as detail when it is useful. */
+export function cancellationError(reason?: unknown): DhError {
+  return new DhError(
+    "cancelled",
+    "Cancelled",
+    undefined,
+    reason === undefined ? undefined : reasonOf(reason),
+  );
+}
+
+export function interruptedError(reason?: unknown): DhError {
+  if (reason instanceof DhError && reason.code === "cancelled") return reason;
+  return new DhError(
+    "cancelled",
+    "Interrupted",
+    undefined,
+    reason === undefined ? undefined : reasonOf(reason),
+  );
+}
+
+export function commandUsageError(message: string, command: string): DhError {
+  return new DhError(
+    "usage",
+    message.replace(/^error: /, ""),
+    `Run \`${command} --help\` for usage.`,
+  );
+}
+
+export function asDhError(error: unknown): DhError {
+  if (error instanceof DhError) return error;
+  return new DhError(
+    "internal",
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
+/** Adds cleanup diagnostics without replacing the command's primary error. */
+export function cleanupError(failures: unknown[], primary?: DhError): DhError {
+  const detail = failures
+    .map((error) => (error instanceof Error ? error.message : String(error)))
+    .join("; ");
+  if (!primary) {
+    return new DhError("internal", "Command cleanup failed", undefined, detail);
+  }
+  const error = new DhError(
+    primary.code,
+    primary.headline,
+    primary.hint,
+    primary.detail,
+  );
+  error.cleanupDetail = detail;
+  return error;
 }
 
 /** `server_unreachable` for `origin`. `cause`: why it failed; without one, the error says it timed out. */

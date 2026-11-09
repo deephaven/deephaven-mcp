@@ -2,8 +2,10 @@ import { writeSync } from "node:fs";
 import { styleText } from "node:util";
 import { Command, CommanderError, Help } from "commander";
 import { commandPath, GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
+import { CommandLifecycle } from "./cli/lifecycle.ts";
+import { runWithLifecycle } from "./cli/run.ts";
 import { rootCommand } from "./commands/root.ts";
-import { DhError } from "./errors.ts";
+import { commandUsageError } from "./errors.ts";
 import { err, reportError, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
 import { BIN, VERSION } from "./version.ts";
@@ -79,30 +81,42 @@ const root = new Command()
   .exitOverride();
 for (const option of GLOBAL_OPTIONS) root.addOption(option);
 // After the settings above, so subcommands inherit them.
-registerCommand(root, rootCommand);
+const lifecycle = new CommandLifecycle();
+registerCommand(root, rootCommand, lifecycle);
 
 setFormat(formatFromArgs(process.argv.slice(2)));
 let code = 0;
 try {
-  await root.parseAsync();
+  await runWithLifecycle(lifecycle, async () => {
+    try {
+      await root.parseAsync();
+    } catch (error) {
+      if (error instanceof CommanderError && error.exitCode !== 0) {
+        throw commandUsageError(
+          error.message,
+          commandPath(commandIn(process.argv.slice(2))),
+        );
+      }
+      throw error;
+    }
+  });
 } catch (e) {
   // --help and --version: answered, with no update check.
   if (e instanceof CommanderError && e.exitCode === 0) process.exit(0);
-  code = reportError(
-    e instanceof CommanderError
-      ? new DhError(
-          "usage",
-          e.message.replace(/^error: /, ""),
-          `Run \`${commandPath(commandIn(process.argv.slice(2)))} --help\` for usage.`,
-        )
-      : e,
-  );
+  code = reportError(e, {
+    ...lifecycle.failureReport,
+    command:
+      lifecycle.failureReport.command ??
+      commandPath(commandIn(process.argv.slice(2)), false),
+  });
 }
 
-try {
-  await autoUpdate();
-} catch (e) {
-  if (process.env.DH_DEBUG) err(`${BIN}: auto-update failed: ${e}`);
+if (code !== 3) {
+  try {
+    await autoUpdate();
+  } catch (e) {
+    if (process.env.DH_DEBUG) err(`${BIN}: auto-update failed: ${e}`);
+  }
 }
 // The Deephaven client libraries keep sockets open.
 process.exit(code);

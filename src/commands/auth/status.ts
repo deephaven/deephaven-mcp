@@ -7,7 +7,11 @@ export const status = defineCommand({
   description: "Check the profile against its server.",
 
   async run(ctx) {
-    const session = await requireAuth(ctx.profileFlag, ctx.store);
+    const session = await requireAuth(
+      ctx.profileFlag,
+      ctx.store,
+      ctx.lifecycle,
+    );
     disconnectServer(session);
     const operating =
       session.operateAs && session.operateAs !== session.user

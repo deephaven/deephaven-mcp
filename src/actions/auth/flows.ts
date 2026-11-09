@@ -1,3 +1,4 @@
+import { type CommandLifecycle, runAction } from "../../cli/lifecycle.ts";
 import { DhError, describe, reasonOf, timeoutMs } from "../../errors.ts";
 import { BIN } from "../../version.ts";
 import {
@@ -18,6 +19,11 @@ import {
   newProfileId,
   removeProfile,
 } from "./profile.ts";
+import {
+  oldKeyCleanupReport,
+  profileRemovalReport,
+  profileSaveReport,
+} from "./reporting.ts";
 import { ensureCa, loadedCa } from "./session.ts";
 import type { Session } from "./signin.ts";
 import type {
@@ -84,42 +90,47 @@ export async function commitSignIn(
   session: Session,
   save: ProfileToSave,
   makeDefault?: boolean,
+  lifecycle?: CommandLifecycle,
 ): Promise<SavedSignIn> {
-  // Uploaded only now, so a cancelled question never leaves a key on the server.
-  let credential: Credential;
-  let key: string | undefined;
-  if (save.credential === "new-key") {
-    const made = await authorizeComputer(store, session);
-    credential = made.credential;
-    key = made.comment;
-  } else {
-    credential = save.credential;
-  }
+  const report = profileSaveReport(session.origin);
+  return runAction(lifecycle, report, async () => {
+    // Uploaded only now, so a cancelled question never leaves a key on the server.
+    let credential: Credential;
+    let key: string | undefined;
+    if (save.credential === "new-key") {
+      const made = await authorizeComputer(store, session);
+      credential = made.credential;
+      key = made.comment;
+    } else {
+      credential = save.credential;
+    }
 
-  let saved: Saved;
-  try {
-    saved = await saveProfile(
-      store,
-      {
-        origin: session.origin,
-        kind: session.kind,
-        user: session.user,
-        operateAs: session.operateAs,
-        method: save.method,
-        handler: save.handler,
-        caCert: save.caCert,
-        importedFrom: save.importedFrom,
-        credential,
-      },
-      makeDefault,
-    );
-  } catch (e) {
-    if (key) await revokeNewKey(store, session, credential);
-    throw e;
-  }
+    let saved: Saved;
+    try {
+      saved = await saveProfile(
+        store,
+        {
+          origin: session.origin,
+          kind: session.kind,
+          user: session.user,
+          operateAs: session.operateAs,
+          method: save.method,
+          handler: save.handler,
+          caCert: save.caCert,
+          importedFrom: save.importedFrom,
+          credential,
+        },
+        makeDefault,
+      );
+    } catch (e) {
+      if (key) await revokeNewKey(store, session, credential);
+      throw e;
+    }
 
-  const warnings = await deleteObsoleteKeys(store, session, saved.previous);
-  return { ...saved, key, warnings };
+    Object.assign(report, oldKeyCleanupReport(saved.name));
+    const warnings = await deleteObsoleteKeys(store, session, saved.previous);
+    return { ...saved, key, warnings };
+  });
 }
 
 /**
@@ -162,6 +173,7 @@ export async function trustCasToRevoke(
   state: State,
   ids: string[],
   rerun: string[],
+  lifecycle?: CommandLifecycle,
 ): Promise<{ ids: string[]; skipped: string[] }> {
   const { config, credentials } = state;
   const caOf = (id: string) => {
@@ -172,7 +184,7 @@ export async function trustCasToRevoke(
       : undefined;
   };
   const cas = new Set(ids.map(caOf).filter((ca) => ca !== undefined));
-  if (cas.size === 1) await ensureCa([...cas][0], [], rerun);
+  if (cas.size === 1) await ensureCa([...cas][0], [], rerun, lifecycle);
   const trusted = loadedCa();
   const skipped = ids.filter((id) => {
     const ca = caOf(id);
@@ -203,42 +215,46 @@ export async function removeProfiles(
   state: State,
   ids: string[],
   waiting: (what: string) => void,
+  lifecycle?: CommandLifecycle,
 ): Promise<Removed> {
-  const { config, credentials } = state;
-  const { removed, unrevoked, warnings } = await revokeKeys(
-    store,
-    state,
-    ids,
-    waiting,
-  );
+  const report = profileRemovalReport();
+  return runAction(lifecycle, report, async () => {
+    const { config, credentials } = state;
+    const { removed, unrevoked, warnings } = await revokeKeys(
+      store,
+      state,
+      ids,
+      waiting,
+    );
 
-  // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
-  const resaved: string[] = [];
-  const next = await store.update((now) => {
-    let next = now.config.defaultProfile;
-    for (const id of ids) {
-      const cred = now.credentials.credentials[id];
-      if (
-        JSON.stringify(cred) !== JSON.stringify(credentials.credentials[id])
-      ) {
-        resaved.push(config.profiles[id]?.name ?? id);
-        continue;
+    // Revoking can be slow; a profile signed in again meanwhile has a new key to keep.
+    const resaved: string[] = [];
+    const next = await store.update((now) => {
+      let next = now.config.defaultProfile;
+      for (const id of ids) {
+        const cred = now.credentials.credentials[id];
+        if (
+          JSON.stringify(cred) !== JSON.stringify(credentials.credentials[id])
+        ) {
+          resaved.push(config.profiles[id]?.name ?? id);
+          continue;
+        }
+        next = removeProfile(now.config, id);
+        delete now.credentials.credentials[id];
+        const p = config.profiles[id];
+        if (p && unrevoked.includes(id)) {
+          addOrphan(now.credentials, p.server, p.user, cred);
+        }
       }
-      next = removeProfile(now.config, id);
-      delete now.credentials.credentials[id];
-      const p = config.profiles[id];
-      if (p && unrevoked.includes(id)) {
-        addOrphan(now.credentials, p.server, p.user, cred);
-      }
-    }
-    return next ? now.config.profiles[next]?.name : undefined;
+      return next ? now.config.profiles[next]?.name : undefined;
+    });
+    return {
+      removed: removed.filter((r) => !resaved.includes(r.profile)),
+      resaved,
+      default: next,
+      warnings,
+    };
   });
-  return {
-    removed: removed.filter((r) => !resaved.includes(r.profile)),
-    resaved,
-    default: next,
-    warnings,
-  };
 }
 
 /** Deletes each profile's generated key on its server. `unrevoked`: the ids whose deletion failed. */

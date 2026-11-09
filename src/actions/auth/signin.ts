@@ -3,6 +3,7 @@
  * server kind or method. Nothing here asks the user anything.
  */
 
+import { type CommandLifecycle, runAction } from "../../cli/lifecycle.ts";
 import { DhError, timeoutMs } from "../../errors.ts";
 import { note } from "../../output.ts";
 import {
@@ -28,6 +29,7 @@ import {
   userName,
 } from "./enterprise.ts";
 import type { KeyPair } from "./keyfile.ts";
+import { authActionReport } from "./reporting.ts";
 import { openBrowser, samlNonce, signInUrl } from "./saml.ts";
 import type { Kind, Method } from "./store.ts";
 
@@ -91,21 +93,28 @@ export async function connectServer(
   origin: string,
   kind: Kind,
   cacheRoot: string,
+  lifecycle?: CommandLifecycle,
 ): Promise<Server> {
-  const timeout = timeoutMs();
-  return kind === "enterprise"
-    ? {
-        origin,
-        kind,
-        cacheRoot,
-        enterprise: await connectEnterprise(origin, cacheRoot, timeout),
-      }
-    : {
-        origin,
-        kind,
-        cacheRoot,
-        community: await connectCommunity(origin, cacheRoot, timeout),
-      };
+  return runAction(
+    lifecycle,
+    authActionReport("connecting", origin),
+    async () => {
+      const timeout = timeoutMs();
+      return kind === "enterprise"
+        ? {
+            origin,
+            kind,
+            cacheRoot,
+            enterprise: await connectEnterprise(origin, cacheRoot, timeout),
+          }
+        : {
+            origin,
+            kind,
+            cacheRoot,
+            community: await connectCommunity(origin, cacheRoot, timeout),
+          };
+    },
+  );
 }
 
 const COMMUNITY_LABELS: Partial<Record<Method, string>> = {
@@ -115,32 +124,41 @@ const COMMUNITY_LABELS: Partial<Record<Method, string>> = {
 };
 
 /** What the server advertises. Enterprise key login always works but isn't advertised. */
-export async function offeredMethods(server: Server): Promise<OfferedMethod[]> {
-  if (server.community) {
-    return communityMethods(server.community.handlers).map((o) => ({
-      method: o.method,
-      handler: o.handler,
-      label: COMMUNITY_LABELS[o.method] ?? o.handler,
-    }));
-  }
-  const auth = await enterpriseAuthConfig(
-    enterpriseConnection(server),
-    timeoutMs(),
+export async function offeredMethods(
+  server: Server,
+  lifecycle?: CommandLifecycle,
+): Promise<OfferedMethod[]> {
+  return runAction(
+    lifecycle,
+    authActionReport("reading sign-in methods", server.origin),
+    async () => {
+      if (server.community) {
+        return communityMethods(server.community.handlers).map((o) => ({
+          method: o.method,
+          handler: o.handler,
+          label: COMMUNITY_LABELS[o.method] ?? o.handler,
+        }));
+      }
+      const auth = await enterpriseAuthConfig(
+        enterpriseConnection(server),
+        timeoutMs(),
+      );
+      return [
+        ...(auth.saml
+          ? [
+              {
+                method: "saml" as const,
+                label: `${auth.saml.providerName} (SSO)`,
+                saml: auth.saml,
+              },
+            ]
+          : []),
+        ...(auth.passwordsEnabled
+          ? [{ method: "password" as const, label: "Username and password" }]
+          : []),
+      ];
+    },
   );
-  return [
-    ...(auth.saml
-      ? [
-          {
-            method: "saml" as const,
-            label: `${auth.saml.providerName} (SSO)`,
-            saml: auth.saml,
-          },
-        ]
-      : []),
-    ...(auth.passwordsEnabled
-      ? [{ method: "password" as const, label: "Username and password" }]
-      : []),
-  ];
 }
 
 /**
@@ -153,61 +171,69 @@ export async function signIn(
   server: Server,
   request: SignInRequest,
   rejected: "auth_failed" | "auth_expired" = "auth_failed",
+  lifecycle?: CommandLifecycle,
 ): Promise<Session> {
-  const timeout = timeoutMs();
-  if (server.community) {
-    const login = request as CommunityLogin;
-    await loginCommunity(server.community, login, timeout, rejected);
-    // A Community server has no Enterprise connection; leave the field out.
-    const { enterprise: _enterprise, ...community } = server;
-    return { ...community, user: communityUser(login) };
-  }
-  const conn = enterpriseConnection(server);
-  switch (request.method) {
-    case "private-key":
-      return {
-        ...server,
-        enterprise: await loginKey(
-          conn,
-          request.username,
-          request.keyPair,
-          request.operateAs,
-          timeout,
-          rejected,
-        ),
-        user: request.username,
-        operateAs: request.operateAs,
-      };
-    case "password":
-      return {
-        ...server,
-        enterprise: await loginPassword(
-          conn,
-          request.username,
-          request.password,
-          request.operateAs,
-          timeout,
-          rejected,
-        ),
-        user: request.username,
-        operateAs: request.operateAs,
-      };
-    case "saml": {
-      const signedIn = await waitForSaml(server, conn, request);
-      // SSO signs in as the user; operate-as applies to the key made next, whose login checks it.
-      return {
-        ...server,
-        enterprise: signedIn,
-        user: await userName(signedIn, timeout),
-        operateAs: request.operateAs,
-      };
+  const report = authActionReport(
+    request.method === "saml" ? "waiting for SSO sign-in" : "signing in",
+    server.origin,
+  );
+  report.phase = "signing_in";
+  return runAction(lifecycle, report, async () => {
+    const timeout = timeoutMs();
+    if (server.community) {
+      const login = request as CommunityLogin;
+      await loginCommunity(server.community, login, timeout, rejected);
+      // A Community server has no Enterprise connection; leave the field out.
+      const { enterprise: _enterprise, ...community } = server;
+      return { ...community, user: communityUser(login) };
     }
-    default:
-      throw new DhError(
-        "internal",
-        `${request.method} is not an Enterprise method`,
-      );
-  }
+    const conn = enterpriseConnection(server);
+    switch (request.method) {
+      case "private-key":
+        return {
+          ...server,
+          enterprise: await loginKey(
+            conn,
+            request.username,
+            request.keyPair,
+            request.operateAs,
+            timeout,
+            rejected,
+          ),
+          user: request.username,
+          operateAs: request.operateAs,
+        };
+      case "password":
+        return {
+          ...server,
+          enterprise: await loginPassword(
+            conn,
+            request.username,
+            request.password,
+            request.operateAs,
+            timeout,
+            rejected,
+          ),
+          user: request.username,
+          operateAs: request.operateAs,
+        };
+      case "saml": {
+        const signedIn = await waitForSaml(server, conn, request);
+        // SSO signs in as the user; operate-as applies to the key made next, whose login checks it.
+        return {
+          ...server,
+          enterprise: signedIn,
+          user: await userName(signedIn, timeout),
+          operateAs: request.operateAs,
+        };
+      }
+      default:
+        throw new DhError(
+          "internal",
+          `${request.method} is not an Enterprise method`,
+        );
+    }
+  });
 }
 
 /** Opens the SSO page and waits for the browser sign-in; returns the signed-in connection. */

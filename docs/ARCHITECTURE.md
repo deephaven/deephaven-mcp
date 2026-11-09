@@ -117,6 +117,10 @@ Errors are `DhError(code, message, hint?, reason?)`, caught only in
 [main.ts](../src/main.ts). New codes go in [errors.ts](../src/errors.ts) and
 show up in `dh agents`.
 
+`Context.lifecycle` owns cancellation and cleanup for one invocation.
+Pass it to actions that need it, or just its signal to request helpers; never
+use a global lifecycle. [cli/run.ts](../src/cli/run.ts) handles signals and cleanup.
+
 `Output.human` is for people and `Output.json` for `-o json`. In JSON mode,
 stdout carries only the result and everything else goes to stderr.
 
@@ -128,6 +132,41 @@ line.
 Keep lines short, since names and URLs make them long fast. Put a reason, a hint
 or a detail on its own indented line under the main line. A `DhError`'s `hint`
 and `detail` print that way already.
+
+### Failure reporting
+
+Write coherent prose for the operation, not a field dump. These rules select
+information, not wording or line order. Avoid repetition and sensitive payloads.
+
+| Information | Include when | Example |
+| --- | --- | --- |
+| Summary | Cancellation or failure occurs | `✖ Cancelled.` |
+| Operation and target | Waiting outside the CLI | `Cancelled while waiting for console abc123 to start.` |
+| Elapsed time | Interrupted during a long-running wait (5s or more) | `Waited 95s.` |
+| Last observed state | Available and useful for understanding the result | `Last observed: Initializing, 5s ago.` |
+| Confirmed progress | Some steps completed before interruption or failure | `Request accepted; startup not yet confirmed.` |
+| Outcome | The operation's result needs clarification | `Result unknown.` |
+| Remote continuation | Remote work continues, stopped, or cannot be confirmed | `Work continues on the server.` |
+| Resource or operation identifier | Needed to inspect or recover across invocations | `Console abc123 has not finished starting.` |
+| Underlying reason | A concrete failure reason is available | `Connection refused.` |
+| Follow-up command | A command can establish the result or help recover | `Check status: <command>` |
+| Retry warning | Retrying could duplicate work or side effects | `Check the existing operation before retrying.` |
+| Other guidance | Action is needed but no suitable command exists | `Check your server permissions.` |
+| Cleanup diagnostic | Cleanup failed, regardless of the primary result | `Cleanup failed: <reason>.` |
+
+Prompt cancellation needs only `✖ Cancelled.`, plus any cleanup failure.
+Don't imply remote work stopped or failed without evidence.
+
+Actions use `runAction(lifecycle, report, work)` to scope reporting to their
+work. Successful actions restore their caller's context; failures retain it,
+and interruption captures it before cleanup. Commands only sequence questions
+and actions, without setting or clearing reporting state.
+
+Reports are plain data: `human` contains operation wording, alongside structured
+facts for JSON. Actions build and update reports where those facts are known;
+there are no presentation callbacks or phase-to-message dispatchers.
+[output.ts](../src/output.ts) appends reasons, guidance, quoted recovery commands
+and cleanup failures; don't repeat these in operation prose.
 
 ## Keeping functions readable
 
