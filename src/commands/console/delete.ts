@@ -1,5 +1,8 @@
 import { Option } from "commander";
-import { deleteConsole } from "../../actions/console/actions.ts";
+import {
+  deleteConsole,
+  resolveConsoleDeletion,
+} from "../../actions/console/actions.ts";
 import { defineCommand } from "../../cli/command.ts";
 import { confirmDeleteConsole } from "./questions.ts";
 
@@ -16,10 +19,22 @@ export const remove = defineCommand<DeleteOptions>({
   options: [new Option("-f, --force", "Delete without confirmation.")],
 
   async run(ctx, [target], opts) {
-    if (!(await confirmDeleteConsole(ctx.ui, target, Boolean(opts.force)))) {
+    const resolved = await resolveConsoleDeletion(
+      ctx.store,
+      target,
+      ctx.profileFlag,
+      ctx.lifecycle,
+    );
+    if (
+      !(await confirmDeleteConsole(
+        ctx.ui,
+        resolved.console.shortcode,
+        Boolean(opts.force),
+      ))
+    ) {
       return { human: "", json: {}, empty: true };
     }
-    await deleteConsole(ctx.store, target, ctx.profileFlag, ctx.lifecycle);
+    await deleteConsole(ctx.store, resolved, ctx.lifecycle);
     return { human: "", json: {}, empty: true };
   },
 });

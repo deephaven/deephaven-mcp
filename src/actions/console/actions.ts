@@ -460,20 +460,32 @@ async function createConsoleAction(
   return created;
 }
 
-/** Delete a resolved console with scoped interruption and recovery reporting. */
-export async function deleteConsole(
+/** Resolve the console before asking the user to confirm deletion. */
+export async function resolveConsoleDeletion(
   store: Store,
   target: string | undefined,
   profileFlag: string | undefined,
   lifecycle: CommandLifecycle,
+): Promise<{ session: Session; console: ConsoleInfo }> {
+  return await consoleForTarget(store, target, profileFlag, lifecycle);
+}
+
+/** Delete a resolved console with scoped interruption and recovery reporting. */
+export async function deleteConsole(
+  store: Store,
+  resolved: { session: Session; console: ConsoleInfo },
+  lifecycle: CommandLifecycle,
 ): Promise<void> {
   return await runLifecycleAction(
     lifecycle,
-    consoleActionReport("delete", target),
+    consoleActionReport(
+      "delete",
+      resolved.console.shortcode,
+      resolved.session.profileName,
+    ),
     deleteConsoleAction,
     store,
-    target,
-    profileFlag,
+    resolved,
     lifecycle,
   );
 }
@@ -481,16 +493,9 @@ export async function deleteConsole(
 /** Submit deletion, wait for disappearance, and clear stale local references. */
 async function deleteConsoleAction(
   store: Store,
-  target: string | undefined,
-  profileFlag: string | undefined,
+  { session, console }: { session: Session; console: ConsoleInfo },
   lifecycle: CommandLifecycle,
 ): Promise<void> {
-  const { session, console } = await consoleForTarget(
-    store,
-    target,
-    profileFlag,
-    lifecycle,
-  );
   lifecycle.setFailureReport(
     consoleDeleteRequestReport(console.shortcode, session.profileName),
   );
