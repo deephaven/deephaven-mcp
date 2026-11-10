@@ -547,12 +547,25 @@ export async function waitForConsole(
   target: string,
   lifecycle: CommandLifecycle,
 ): Promise<ConsoleInfo> {
+  let observed = false;
   for (;;) {
     lifecycle.signal.throwIfAborted();
     const console = findEnterpriseConsole(session, target);
+    if (!console && observed) {
+      lifecycle.setFailureReport(consoleStartupFailedReport("Deleted"));
+      throw new DhError(
+        "console_not_found",
+        `Console ${target} disappeared before startup completed`,
+      );
+    }
     if (console) {
+      observed = true;
       lifecycle.setFailureReport(
-        consoleObservationReport("starting", console.state),
+        consoleObservationReport(
+          "starting",
+          console.state,
+          lifecycle.failureReport.human,
+        ),
       );
     }
     if (console && isRunning(console.state)) {
@@ -586,7 +599,11 @@ export async function waitForConsoleDeletion(
       return;
     }
     lifecycle.setFailureReport(
-      consoleObservationReport("deleting", current.state),
+      consoleObservationReport(
+        "deleting",
+        current.state,
+        lifecycle.failureReport.human,
+      ),
     );
     await sleep(POLL_INTERVAL_MS, lifecycle.signal);
   }
