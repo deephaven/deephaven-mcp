@@ -149,6 +149,28 @@ export class CommandLifecycle {
   }
 }
 
+/** Forward interruption signals to the child and return a function to stop forwarding. */
+export function forwardSignalsToChild(
+  child: Pick<Bun.Subprocess, "kill">,
+  lifecycle?: CommandLifecycle,
+): () => void {
+  const forwardSignal = (signal: NodeJS.Signals) => {
+    child.kill(signal);
+  };
+  if (lifecycle) {
+    lifecycle.setSignalDelegate(forwardSignal);
+    return () => lifecycle.setSignalDelegate(undefined);
+  }
+  const forwardInterrupt = () => forwardSignal("SIGINT");
+  const forwardTermination = () => forwardSignal("SIGTERM");
+  process.on("SIGINT", forwardInterrupt);
+  process.on("SIGTERM", forwardTermination);
+  return () => {
+    process.off("SIGINT", forwardInterrupt);
+    process.off("SIGTERM", forwardTermination);
+  };
+}
+
 export function runLifecycleAction<Args extends unknown[], T>(
   lifecycle: CommandLifecycle | undefined,
   report: FailureReport,

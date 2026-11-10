@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type CommandLifecycle,
+  forwardSignalsToChild,
   runLifecycleAction,
 } from "../../cli/lifecycle.ts";
 import { DhError, isErrno, reasonOf } from "../../errors.ts";
@@ -107,28 +108,14 @@ export async function ensureCa(
       stdio: ["inherit", "inherit", "inherit"],
     },
   );
-  const forwardSignal = (signal: NodeJS.Signals) => {
-    proc.kill(signal);
-  };
-  const forwardInterrupt = () => forwardSignal("SIGINT");
-  const forwardTermination = () => forwardSignal("SIGTERM");
-  if (lifecycle) {
-    lifecycle.setSignalDelegate(forwardSignal);
-  } else {
-    process.on("SIGINT", forwardInterrupt);
-    process.on("SIGTERM", forwardTermination);
-  }
+  // The child owns cancellation; the parent forwards signals and waits for cleanup.
+  const stopForwarding = forwardSignalsToChild(proc, lifecycle);
   let code: number;
   try {
     code = await proc.exited;
     if (dir) await rm(dir, { recursive: true, force: true });
   } finally {
-    if (lifecycle) {
-      lifecycle.setSignalDelegate(undefined);
-    } else {
-      process.off("SIGINT", forwardInterrupt);
-      process.off("SIGTERM", forwardTermination);
-    }
+    stopForwarding();
   }
   process.exit(code);
 }
