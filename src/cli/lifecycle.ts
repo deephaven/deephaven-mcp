@@ -36,6 +36,10 @@ export class CommandLifecycle {
 
   setFailureReport(report: FailureReport): void {
     if (this.#reportFrozen) return;
+    if (this.#operation) {
+      this.#operation.report = { ...this.#operation.report, ...report };
+      return;
+    }
     this.#failureReport = { ...this.#failureReport, ...report };
   }
 

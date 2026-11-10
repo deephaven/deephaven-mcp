@@ -28,7 +28,7 @@ console, not the default profile.
 | `--engine` | `engine` | String | Worker engine name. |
 | — | `jvmArgs` | Array of strings | JVM arguments. |
 | — | `environment` | String-to-string object | Environment variables. |
-| — | `autoDeleteTimeoutSeconds` | Positive integer | Auto-delete timeout. |
+| — | `autoDeleteTimeoutSeconds` | Positive integer | Disconnect grace period in seconds (default 600). |
 
 JSON may be positional or passed with `--json`; flags override matching JSON
 fields. For example:

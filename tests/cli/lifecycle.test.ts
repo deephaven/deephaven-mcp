@@ -144,6 +144,62 @@ test("lifecycle: cleanup freezes failure context without requiring cancellation"
   }
 });
 
+test("lifecycle: report updates override initial action facts and restore caller on success", async () => {
+  const lifecycle = new CommandLifecycle();
+  lifecycle.setFailureReport({ command: "console create", profile: "prod" });
+  await lifecycle.runLifecycleAction(
+    {
+      phase: "creating",
+      outcome: "not_started",
+      human: { summary: "Starting a console." },
+    },
+    async () => {
+      lifecycle.setFailureReport({
+        phase: "starting",
+        outcome: "unknown",
+        target: "abc123",
+        human: { summary: "Waiting for console abc123 (profile prod)." },
+      });
+      expect(lifecycle.failureReport).toMatchObject({
+        profile: "prod",
+        phase: "starting",
+        outcome: "unknown",
+        target: "abc123",
+        human: { summary: "Waiting for console abc123 (profile prod)." },
+      });
+    },
+  );
+  expect(lifecycle.failureReport).toEqual({
+    command: "console create",
+    profile: "prod",
+  });
+});
+
+test("lifecycle: interruption preserves updated target, phase, and human report", async () => {
+  const lifecycle = new CommandLifecycle();
+  await expect(
+    lifecycle.runLifecycleAction(
+      {
+        phase: "creating",
+        human: { summary: "Starting a console." },
+      },
+      async () => {
+        lifecycle.setFailureReport({
+          target: "abc123",
+          phase: "starting",
+          human: { summary: "Waiting for console abc123." },
+        });
+        lifecycle.receiveSignal("SIGTERM");
+      },
+    ),
+  ).rejects.toMatchObject({ code: "cancelled" });
+  expect(lifecycle.failureReport).toMatchObject({
+    target: "abc123",
+    phase: "starting",
+    human: { summary: "Waiting for console abc123." },
+  });
+});
+
 test("lifecycle: actions update plain facts and interruption captures an independent snapshot", async () => {
   const lifecycle = new CommandLifecycle();
   const report: FailureReport = {

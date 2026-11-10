@@ -1,5 +1,6 @@
 import { detailConsole } from "../../actions/console/actions.ts";
 import { defineCommand } from "../../cli/command.ts";
+import { consoleHeading, consoleStateLines } from "./formatting.ts";
 
 export const detail = defineCommand({
   name: "detail",
@@ -17,8 +18,8 @@ export const detail = defineCommand({
     );
     return {
       human: [
-        `${console.name} (${console.id})`,
-        `  State: ${console.state}`,
+        consoleHeading(console),
+        ...consoleStateLines(console.state),
         `  Language: ${console.language ?? "unknown"}`,
         `  Heap size (GB): ${console.heapSizeGb ?? "unknown"}`,
         `  Server: ${console.server ?? "unknown"}`,

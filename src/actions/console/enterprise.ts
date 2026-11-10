@@ -29,6 +29,9 @@ export interface ConsoleInfo {
 /** A snapshot of available settings and derived defaults for one server. */
 export interface ConsoleServerSettings {
   settings: EffectiveConsoleSettings;
+  dataMemoryRatio: number;
+  jvmProfile: string;
+  scheduling: string[];
   servers: string[];
   engines: string[];
   languages: string[];
@@ -36,8 +39,9 @@ export interface ConsoleServerSettings {
 
 export const CLI_CONSOLE_PREFIX = "IC - dh CLI - ";
 const QUERY_TYPE = "InteractiveConsole";
-const TEMPORARY_QUEUE = "InteractiveConsoleTemporaryQueue";
 const DEFAULT_AUTO_DELETE_SECONDS = 600;
+const STARTUP_TIMEOUT_MS = 600_000;
+const TEMPORARY_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 1_000;
 
 interface ApiQuery {
@@ -56,10 +60,12 @@ interface ApiQuery {
   envVars?: string | null;
   envVarEntries?: string[];
   timeout?: number;
+  typeSpecificFields?: Record<string, { type: string; value: unknown }> | null;
 }
 
 interface ServerConfig {
   defaultWorkerKind?: string;
+  jvmProfileDefault?: string;
   workerKinds?: { name: string; protocols?: string[] }[];
   scriptSessionProviders?: string[];
 }
@@ -70,6 +76,9 @@ interface ConsoleServer {
 
 interface QueryConstants {
   consoleDefaultHeap?: number;
+  minDataRatio?: number;
+  maxDataRatio?: number;
+  defaultSchedulingDetails?: readonly string[];
 }
 
 interface EnvironmentVariables {
@@ -157,9 +166,27 @@ export function consoleInfo(query: ApiQuery): ConsoleInfo {
     engine: query.workerKind ?? null,
     jvmArgs: query.jvmArgs ?? query.jvmArguments?.join(" ") ?? null,
     environment: environmentOf(query),
-    autoDeleteTimeoutSeconds:
-      typeof query.timeout === "number" ? query.timeout / 1000 : null,
+    autoDeleteTimeoutSeconds: autoDeleteTimeoutOf(query),
   };
+}
+
+/** Read the idle grace period; query.timeout instead controls initialization. */
+function autoDeleteTimeoutOf(query: ApiQuery): number | null {
+  const field = query.typeSpecificFields?.TerminationDelay;
+  if (!field) return null;
+  const milliseconds = Number(field.value);
+  if (
+    field.type !== "long" ||
+    (typeof field.value !== "string" && typeof field.value !== "number") ||
+    !Number.isSafeInteger(milliseconds) ||
+    milliseconds <= 0
+  ) {
+    throw new DhError(
+      "console_failed",
+      "The server returned an invalid console idle timeout",
+    );
+  }
+  return milliseconds / 1000;
 }
 
 /** Read environment variables from either supported Enterprise API shape. */
@@ -214,7 +241,18 @@ export async function serverDefaults(
     client.getQueryConstants?.(),
     "read console defaults",
   );
-  return deriveConsoleServerSettings(config, serverList, constants);
+  const queues = await call<string[]>(
+    client.getTemporaryQueueNames?.(),
+    "list temporary console queues",
+  );
+  const queue = queues[0];
+  if (!queue) {
+    throw new DhError(
+      "console_unsupported",
+      "The server has no temporary console queues",
+    );
+  }
+  return deriveConsoleServerSettings(config, serverList, constants, queue);
 }
 
 /** Derive CLI defaults from raw server metadata without making network calls. */
@@ -222,6 +260,7 @@ function deriveConsoleServerSettings(
   config: ServerConfig,
   serverList: ConsoleServer[],
   constants: QueryConstants,
+  queue: string,
 ): ConsoleServerSettings {
   if (!Array.isArray(serverList) || serverList.length === 0) {
     throw new DhError(
@@ -240,6 +279,12 @@ function deriveConsoleServerSettings(
     config.scriptSessionProviders ?? [],
   );
   const engine = defaultConsoleEngine(config.defaultWorkerKind, engines);
+  if (!config.jvmProfileDefault) {
+    throw new DhError(
+      "console_unsupported",
+      "The server did not provide a default console JVM profile",
+    );
+  }
   if (
     typeof constants.consoleDefaultHeap !== "number" ||
     !Number.isFinite(constants.consoleDefaultHeap)
@@ -249,7 +294,26 @@ function deriveConsoleServerSettings(
       "The server did not provide a console heap default",
     );
   }
+  if (
+    typeof constants.minDataRatio !== "number" ||
+    typeof constants.maxDataRatio !== "number" ||
+    !Number.isFinite(constants.minDataRatio) ||
+    !Number.isFinite(constants.maxDataRatio) ||
+    constants.minDataRatio < 0 ||
+    constants.minDataRatio > constants.maxDataRatio
+  ) {
+    throw new DhError(
+      "console_unsupported",
+      "The server did not provide valid console data-memory ratio limits",
+    );
+  }
   return {
+    dataMemoryRatio: constants.minDataRatio,
+    jvmProfile: config.jvmProfileDefault,
+    scheduling: temporaryConsoleScheduling(
+      constants.defaultSchedulingDetails,
+      queue,
+    ),
     settings: {
       language: languages.includes("python")
         ? "python"
@@ -265,6 +329,34 @@ function deriveConsoleServerSettings(
     engines,
     languages,
   };
+}
+
+/** Retain required scheduler initialization fields while selecting temporary-console lifecycle. */
+function temporaryConsoleScheduling(
+  defaults: readonly string[] | undefined,
+  queue: string,
+): string[] {
+  if (
+    !Array.isArray(defaults) ||
+    !defaults.every((entry) => typeof entry === "string")
+  ) {
+    throw new DhError(
+      "console_unsupported",
+      "The server did not provide default console scheduling details",
+    );
+  }
+  return [
+    "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerTemporary",
+    ...defaults.filter(
+      (entry) =>
+        !/^(SchedulerType|AutoDelete|TemporaryAutoDelete|QueueName|TemporaryQueueName|TemporaryExpirationTimeMillis)=/.test(
+          entry,
+        ),
+    ),
+    "TemporaryAutoDelete=true",
+    `TemporaryQueueName=${queue}`,
+    `TemporaryExpirationTimeMillis=${TEMPORARY_EXPIRATION_MS}`,
+  ];
 }
 
 /** Detect supported languages, allowing older servers that omit provider metadata. */
@@ -333,11 +425,16 @@ export async function createEnterpriseConsole(
         userInfo.operateAs ?? session.operateAs ?? session.user,
         settings,
         environment,
+        capabilities.dataMemoryRatio,
+        capabilities.jvmProfile,
+        capabilities.scheduling,
       ),
     ),
     "create console",
   );
-  lifecycle.setFailureReport(consoleStartupAcceptedReport(shortcode));
+  lifecycle.setFailureReport(
+    consoleStartupAcceptedReport(shortcode, session.profileName),
+  );
   return serial;
 }
 
@@ -389,6 +486,9 @@ function consoleQuery(
   owner: string,
   settings: EffectiveConsoleSettings,
   environment: EnvironmentVariables,
+  dataMemoryRatio: number,
+  jvmProfile: string,
+  scheduling: string[],
 ) {
   return {
     additionalMemory: 0,
@@ -396,7 +496,7 @@ function consoleQuery(
     assignmentPolicy: null,
     assignmentPolicyParams: null,
     classpathAdditions: [],
-    dataMemoryRatio: 0,
+    dataMemoryRatio,
     dbServerName: settings.server,
     enabled: true,
     enableGcLogs: false,
@@ -406,22 +506,27 @@ function consoleQuery(
     heapSize: settings.heapSizeGb,
     jvmArgs: settings.jvmArgs.join(" "),
     jvmArguments: settings.jvmArgs,
-    jvmProfile: "",
+    jvmProfile,
     kubernetesControl: null,
     name,
     owner,
     pythonControl: null,
     replicaCount: 1,
-    restartUsers: 0,
-    scheduling: ["AutoDelete=true", `QueueName=${TEMPORARY_QUEUE}`],
+    restartUsers: 1,
+    scheduling,
     scriptCode: null,
     scriptLanguage: settings.language === "python" ? "Python" : "Groovy",
     scriptPath: null,
     serial: null,
     spareCount: 0,
-    timeout: settings.autoDeleteTimeoutSeconds * 1000,
+    timeout: STARTUP_TIMEOUT_MS,
     type: QUERY_TYPE,
-    typeSpecificFields: null,
+    typeSpecificFields: {
+      TerminationDelay: {
+        type: "long",
+        value: String(settings.autoDeleteTimeoutSeconds * 1000),
+      },
+    },
     viewerGroups: [],
     workerKind: settings.engine,
   };
