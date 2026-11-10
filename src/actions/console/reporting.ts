@@ -38,7 +38,6 @@ export function consoleStartupReport(): FailureReport {
     outcome: "unknown",
     human: {
       summary: "Interrupted while waiting for the console to start.",
-      details: ["Check the result before retrying an interrupted create."],
       recoveryLabel: "Check whether it started",
     },
   };

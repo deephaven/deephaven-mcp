@@ -205,7 +205,7 @@ export async function requireEnterpriseConsole(
   if (session.community) {
     throw new DhError(
       "console_unsupported",
-      "This console operation is not supported on Community servers",
+      "Console creation defaults are not available on Community servers",
     );
   }
   return session;
@@ -278,6 +278,7 @@ async function consoleForTarget(
   target: string | undefined,
   profileFlag: string | undefined,
   lifecycle: CommandLifecycle,
+  operation: "detail" | "delete" = "detail",
 ): Promise<{ session: Session; console: ConsoleInfo }> {
   const session = target
     ? await sessionForTarget(store, target, profileFlag, lifecycle)
@@ -285,7 +286,9 @@ async function consoleForTarget(
   if (session.community) {
     throw new DhError(
       "console_unsupported",
-      "Console details are not available on Community servers",
+      operation === "delete"
+        ? "Deleting consoles is not supported on Community servers"
+        : "Console details are not available on Community servers",
     );
   }
   const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
@@ -350,6 +353,15 @@ export async function selectConsole(
   lifecycle: CommandLifecycle,
 ): Promise<void> {
   const session = await sessionForTarget(store, target, profileFlag, lifecycle);
+  if (!target) {
+    throw new DhError(
+      "usage",
+      "A console is required for console use",
+      session.community
+        ? `Community servers provide one shared console. Run \`${BIN} console use shared\`.`
+        : `Run \`${BIN} console\` to list consoles, then \`${BIN} console use <console>\`.`,
+    );
+  }
   const identity = identityOf(session);
   if (session.community) {
     if (target !== COMMUNITY_SHARED_ID && target !== session.origin) {
@@ -467,7 +479,13 @@ export async function resolveConsoleDeletion(
   profileFlag: string | undefined,
   lifecycle: CommandLifecycle,
 ): Promise<{ session: Session; console: ConsoleInfo }> {
-  return await consoleForTarget(store, target, profileFlag, lifecycle);
+  return await consoleForTarget(
+    store,
+    target,
+    profileFlag,
+    lifecycle,
+    "delete",
+  );
 }
 
 /** Delete a resolved console with scoped interruption and recovery reporting. */
