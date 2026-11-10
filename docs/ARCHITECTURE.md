@@ -66,7 +66,7 @@ flowchart LR
 | [src/output.ts](../src/output.ts), [src/errors.ts](../src/errors.ts) | The only writer to stdout/stderr; `DhError` and the error codes                       | `output` imports `errors`                      |
 | [src/ui/](../src/ui/)                                                | The `Prompter` interface and its Ink implementation                                   | `errors`                                       |
 | [src/commands/](../src/commands/)                                    | One file per command, plus each group's `questions.ts`                                | `cli`, actions                                 |
-| [src/actions/](../src/actions/)                                      | Actions, one folder per area; [auth/](../src/actions/auth/): sign-in, profiles, keys, the config store | `errors`, `output`, `net`          |
+| [src/actions/](../src/actions/)                                      | Actions, one folder per area; [auth/](../src/actions/auth/): sign-in, profiles, keys, the config store; [console/](../src/actions/console/): console discovery, settings and lifecycle | `errors`, `output`, `net`          |
 | [src/net.ts](../src/net.ts)                                          | Which URLs are local, and which may supply code                                       | —                                              |
 
 Imports go down the table. `cli/`, `output.ts`, `errors.ts` and `ui/` are shared

@@ -178,6 +178,41 @@ test("cli: no profiles", async () => {
   expect(bare.stdout).toContain(`Run \`${BIN} auth login\``);
 });
 
+test("cli: console commands and errors are discoverable to agents", async () => {
+  const { run } = await setup();
+  const help = await run(["console", "--help"]);
+  expect(help.code).toBe(0);
+  expect(help.stdout).toContain("create");
+  expect(help.stdout).toContain("default");
+  expect(help.stdout).toContain("delete");
+
+  const agents = await run(["agents", "-o", "json"]);
+  expect(agents.code).toBe(0);
+  const manifest = JSON.parse(agents.stdout);
+  const console = manifest.commands.find(
+    (command: { command: string }) => command.command === "dh console",
+  );
+  expect(
+    console.commands.map((command: { command: string }) => command.command),
+  ).toEqual([
+    "dh console detail",
+    "dh console use",
+    "dh console create",
+    "dh console default",
+    "dh console delete",
+  ]);
+  expect(manifest.errors.map((error: { code: string }) => error.code)).toEqual(
+    expect.arrayContaining([
+      "console_required",
+      "console_not_found",
+      "console_forbidden",
+      "console_not_ready",
+      "console_unsupported",
+      "console_failed",
+    ]),
+  );
+});
+
 test("cli: usage errors exit 2, with JSON on stderr", async () => {
   const { run } = await setup();
   const login = await run(["auth", "login", "--no-prompt", "-o", "json"]);
