@@ -150,6 +150,10 @@ export class Store {
     return join(this.dir, "credentials.json");
   }
 
+  get consoleDataPath(): string {
+    return join(this.dir, "consoles.json");
+  }
+
   get cacheDir(): string {
     return join(this.dir, "cache");
   }
@@ -180,6 +184,29 @@ export class Store {
     });
   }
 
+  /** Reads the owner-only console registry, or a fresh copy of `empty`. */
+  async readConsoleData<T extends object>(empty: T): Promise<T> {
+    const data = await readJson<T>(this.consoleDataPath);
+    if (!data) return structuredClone(empty);
+    await this.assertPrivatePath(this.consoleDataPath);
+    return Object.assign(structuredClone(empty), data);
+  }
+
+  /** Updates the owner-only console registry under the profile-store lock. */
+  async updateConsoleData<T extends object, R = void>(
+    empty: T,
+    fn: (data: T) => R | Promise<R>,
+  ): Promise<R> {
+    await this.makeDir(false);
+    const lock = join(this.dir, "config.lock");
+    return await withFileLock(lock, LOCK_WAIT_MS, async () => {
+      const data = await this.readConsoleData(empty);
+      const result = await fn(data);
+      await writeAtomic(this.consoleDataPath, data, 0o600);
+      return result;
+    });
+  }
+
   /** Owner-only directory, re-securing an existing one. Call once per command, before writing. */
   async ensureDir(): Promise<void> {
     await this.makeDir(true);
@@ -199,13 +226,17 @@ export class Store {
   }
 
   private async assertPrivate(): Promise<void> {
+    await this.assertPrivatePath(this.credentialsPath);
+  }
+
+  private async assertPrivatePath(path: string): Promise<void> {
     if (WINDOWS) return;
-    const { mode } = await stat(this.credentialsPath);
+    const { mode } = await stat(path);
     if ((mode & 0o077) !== 0) {
       throw new DhError(
         "credential_unavailable",
-        `${this.credentialsPath} can be read by other users`,
-        `Run: chmod 600 ${this.credentialsPath}`,
+        `${path} can be read by other users`,
+        `Run: chmod 600 ${path}`,
       );
     }
   }

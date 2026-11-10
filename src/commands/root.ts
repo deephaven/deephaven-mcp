@@ -4,12 +4,13 @@ import { defineCommand } from "../cli/command.ts";
 import { BIN, VERSION } from "../version.ts";
 import { agents } from "./agents.ts";
 import { auth } from "./auth/index.ts";
+import { consoleCommand } from "./console/index.ts";
 
 /** `dh` alone: help and who's logged in. Every command is listed under `commands`. */
 export const rootCommand = defineCommand({
   name: BIN,
   description: "Deephaven command line interface.",
-  commands: [auth, agents],
+  commands: [auth, consoleCommand, agents],
 
   async run(ctx) {
     let p: Profile | undefined;

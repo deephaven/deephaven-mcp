@@ -5,6 +5,14 @@ export const ERROR_CODES = {
     exit: 2,
     description: "Bad arguments, or input needed without a TTY",
   },
+  console_required: {
+    exit: 2,
+    description: "No console is selected",
+  },
+  console_not_found: {
+    exit: 2,
+    description: "Console does not exist",
+  },
   cancelled: { exit: 3, description: "Cancelled by the user" },
   auth_required: { exit: 4, description: "No profile" },
   auth_failed: {
@@ -19,6 +27,10 @@ export const ERROR_CODES = {
     exit: 4,
     description: "Profile's env var or key file missing",
   },
+  console_forbidden: {
+    exit: 4,
+    description: "Server denied access to the console",
+  },
   key_upload_failed: {
     exit: 4,
     description: "Uploading this computer's key to DHE failed",
@@ -31,6 +43,18 @@ export const ERROR_CODES = {
   server_unsupported: {
     exit: 5,
     description: "Not a supported Deephaven server",
+  },
+  console_not_ready: {
+    exit: 5,
+    description: "Console is not running",
+  },
+  console_unsupported: {
+    exit: 5,
+    description: "Server does not support this console operation or setting",
+  },
+  console_failed: {
+    exit: 5,
+    description: "Server rejected the console operation",
   },
 } as const;
 
