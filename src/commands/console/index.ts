@@ -4,6 +4,7 @@ import { create } from "./create.ts";
 import { defaults } from "./default.ts";
 import { remove } from "./delete.ts";
 import { detail } from "./detail.ts";
+import { consoleListLines } from "./formatting.ts";
 import { use } from "./use.ts";
 
 export const consoleCommand = defineCommand({
@@ -21,10 +22,7 @@ export const consoleCommand = defineCommand({
       human:
         consoles.length === 0
           ? "No CLI-created consoles."
-          : consoles.map(
-              (console) =>
-                `${console.inUse ? "●" : " "} ${console.shortcode}  ${console.state}  ${console.name}`,
-            ),
+          : consoles.flatMap(consoleListLines),
       json: consoles,
     };
   },

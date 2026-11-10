@@ -1,6 +1,14 @@
 import type { FailureReport } from "../../errors.ts";
 import { BIN } from "../../version.ts";
 
+/** Explain an unavailable worker state without inferring a server-side cause. */
+export function consoleStateDetails(state: string): string[] {
+  if (state !== "Unknown") return [];
+  return [
+    "No worker state is available. Startup may be pending; the reason is not confirmed.",
+  ];
+}
+
 /** Describe interruption of a console operation before its target is resolved. */
 export function consoleActionReport(
   action: string,
@@ -30,7 +38,7 @@ export function consoleStartupReport(): FailureReport {
     outcome: "unknown",
     human: {
       summary: "Interrupted while waiting for the console to start.",
-      details: ["The console keeps starting on the server after dh exits."],
+      details: ["Check the result before retrying an interrupted create."],
       recoveryLabel: "Check whether it started",
     },
   };
@@ -52,8 +60,7 @@ export function consoleCreateRequestReport(
     human: {
       summary: `Interrupted while waiting for console ${shortcode} (profile ${profile}) to start.`,
       details: [
-        "The server accepted the create request; startup is not confirmed.",
-        "The console keeps starting on the server after dh exits.",
+        "The create result is not confirmed. Check this console before retrying.",
       ],
       recoveryLabel: "Check whether it started",
     },
@@ -61,7 +68,10 @@ export function consoleCreateRequestReport(
 }
 
 /** Record server acceptance without claiming the console has finished starting. */
-export function consoleStartupAcceptedReport(shortcode: string): FailureReport {
+export function consoleStartupAcceptedReport(
+  shortcode: string,
+  profileName?: string,
+): FailureReport {
   return {
     target: shortcode,
     phase: "starting",
@@ -69,6 +79,13 @@ export function consoleStartupAcceptedReport(shortcode: string): FailureReport {
     continuation: "continues",
     progress:
       "The server accepted the create request; startup is not confirmed.",
+    human: {
+      summary: `Interrupted while waiting for console ${shortcode} (profile ${profileName ?? "environment"}) to start.`,
+      details: [
+        "The server accepted the request. The console may still be starting; exiting dh does not cancel it.",
+      ],
+      recoveryLabel: "Check whether it started",
+    },
   };
 }
 
@@ -106,6 +123,8 @@ export function consoleObservationReport(
     phase,
     outcome: "unknown",
     continuation: "continues",
+    progress:
+      state === "Unknown" ? consoleStateDetails(state).join(" ") : undefined,
     observation: {
       state,
       observedAt: new Date().toISOString(),
