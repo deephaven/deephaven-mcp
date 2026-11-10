@@ -75,6 +75,11 @@ is the profile store from `actions/auth/store.ts`; every command signs in with a
 profile. Actions for a new area, such as running queries, go in a folder beside
 `actions/auth/`, mirroring its commands in `commands/<group>/`.
 
+Console actions sequence authentication, discovery, and lifecycle work.
+Within `actions/console/`, `store.ts` owns registry reconciliation and selections,
+`settings.ts` owns validation and override merging, `enterprise.ts` adapts server
+APIs, and `reporting.ts` builds lifecycle report data.
+
 ## Adding a command
 
 Create `src/commands/<group>/<name>.ts`:

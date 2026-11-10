@@ -1,6 +1,6 @@
 import type { CommandLifecycle } from "../../cli/lifecycle.ts";
 import { runLifecycleAction } from "../../cli/lifecycle.ts";
-import { DhError, type FailureReport } from "../../errors.ts";
+import { DhError } from "../../errors.ts";
 import { BIN } from "../../version.ts";
 import { findByName } from "../auth/profile.ts";
 import { requireAuth, requireEnvironmentAuth } from "../auth/session.ts";
@@ -10,7 +10,6 @@ import {
   type ConsoleInfo,
   createEnterpriseConsole,
   deleteEnterpriseConsole,
-  type EffectiveConsoleSettings,
   findEnterpriseConsole,
   isRunning,
   listEnterpriseConsoles,
@@ -19,80 +18,34 @@ import {
   waitForConsoleDeletion,
 } from "./enterprise.ts";
 import {
+  consoleActionReport,
+  consoleCreateRequestReport,
+  consoleDeleteAcceptedReport,
+  consoleDeleteRequestReport,
+  consoleStartupReport,
+} from "./reporting.ts";
+import { type ConsoleSettings, mergeConsoleSettings } from "./settings.ts";
+import {
   type ConsoleIdentity,
   type ConsoleRegistry,
-  type ConsoleSettings,
+  clearMissingReference,
   consoleIdentity,
   EMPTY_CONSOLE_REGISTRY,
   identityKey,
+  reconcileDiscoveredConsoles,
   rememberConsole,
+  rememberConsoleSelection,
   reserveShortcode,
 } from "./store.ts";
 
 const COMMUNITY_SHARED_ID = "shared";
 
+/** A discovered console annotated with this identity's current selection. */
 export interface ConsoleListItem extends ConsoleInfo {
   inUse: boolean;
 }
 
-function report(
-  action: string,
-  target?: string,
-  profile?: string,
-): FailureReport {
-  const where = target ? ` console ${target}` : " consoles";
-  const identity = profile ? ` (profile ${profile})` : "";
-  return {
-    command: `console ${action}`,
-    target,
-    profile,
-    operation: `console ${action}`,
-    human: {
-      summary: `Interrupted while ${action}${where}${identity}.`,
-      context: `While ${action}${where}${identity}.`,
-    },
-  };
-}
-
-/** Describe cancellation while the CLI is still waiting for console startup. */
-function createConsoleStartupReport(): FailureReport {
-  return {
-    command: "console create",
-    operation: "console startup",
-    phase: "starting",
-    outcome: "unknown",
-    human: {
-      summary: "Interrupted while waiting for the console to start.",
-      details: ["The console keeps starting on the server after dh exits."],
-      recoveryLabel: "Check whether it started",
-    },
-  };
-}
-
-/** Describe a create request accepted by the server but not yet confirmed ready. */
-function createConsoleAcceptedReport(
-  shortcode: string,
-  profileName: string | undefined,
-): FailureReport {
-  const profile = profileName ?? "environment";
-  return {
-    target: shortcode,
-    profile: profileName,
-    phase: "creating",
-    outcome: "unknown",
-    continuation: "unknown",
-    recoveryCommand: [BIN, "console", "detail", shortcode],
-    human: {
-      summary: `Interrupted while waiting for console ${shortcode} (profile ${profile}) to start.`,
-      details: [
-        "The server accepted the create request; startup is not confirmed.",
-        "The console keeps starting on the server after dh exits.",
-      ],
-      recoveryLabel: "Check whether it started",
-    },
-  };
-}
-
+/** Find a saved profile by stable identity rather than its mutable display name. */
 function profileForIdentity(
   profiles: Record<string, Profile>,
   identity: ConsoleIdentity,
@@ -105,6 +58,7 @@ function profileForIdentity(
   );
 }
 
+/** Authenticate the mapped identity, enforcing any explicit profile constraint. */
 async function authForIdentity(
   store: Store,
   identity: ConsoleIdentity,
@@ -124,22 +78,32 @@ async function authForIdentity(
   }
   const selected = explicit ?? profileForIdentity(config.profiles, identity);
   if (!selected) {
-    const session = await requireEnvironmentAuth(lifecycle);
-    if (sameIdentity(identityOf(session), identity)) return session;
-    disconnectServer(session);
-    throw new DhError(
-      "usage",
-      "The current DH_SERVER identity does not match this console",
-      `Set DH_SERVER and matching credentials for ${identity.server}, or use a saved profile.`,
-    );
+    return await authEnvironmentForIdentity(identity, lifecycle);
   }
   return await requireAuth(selected[1].name, store, lifecycle);
 }
 
+/** Recover an unsaved console identity only when environment credentials match it. */
+async function authEnvironmentForIdentity(
+  identity: ConsoleIdentity,
+  lifecycle: CommandLifecycle,
+): Promise<Session> {
+  const session = await requireEnvironmentAuth(lifecycle);
+  if (sameIdentity(identityOf(session), identity)) return session;
+  disconnectServer(session);
+  throw new DhError(
+    "usage",
+    "The current DH_SERVER identity does not match this console",
+    `Set DH_SERVER and matching credentials for ${identity.server}, or use a saved profile.`,
+  );
+}
+
+/** Compare server, login user, and effective operate-as user together. */
 function sameIdentity(a: ConsoleIdentity, b: ConsoleIdentity): boolean {
   return identityKey(a) === identityKey(b);
 }
 
+/** Derive the registry owner from an authenticated session. */
 function identityOf(session: Session): ConsoleIdentity {
   return consoleIdentity({
     server: session.origin,
@@ -148,28 +112,14 @@ function identityOf(session: Session): ConsoleIdentity {
   });
 }
 
+/** Discover consoles and mark the current selection, including Community's singleton. */
 function itemsForSession(
   session: Session,
   registry: ConsoleRegistry,
 ): ConsoleListItem[] {
   const identity = identityOf(session);
   if (session.community) {
-    return [
-      {
-        id: COMMUNITY_SHARED_ID,
-        shortcode: COMMUNITY_SHARED_ID,
-        name: "Community shared console",
-        state: "Running",
-        language: null,
-        heapSizeGb: null,
-        server: session.origin,
-        engine: null,
-        jvmArgs: null,
-        environment: {},
-        autoDeleteTimeoutSeconds: null,
-        inUse: true,
-      },
-    ];
+    return [communitySharedConsole(session.origin)];
   }
   const selected = registry.selected[identityKey(identity)];
   return listEnterpriseConsoles(session).map((console) => ({
@@ -178,7 +128,26 @@ function itemsForSession(
   }));
 }
 
-async function selectOnlyRunning(
+/** Represent Community's always-selected singleton without inventing Enterprise settings. */
+function communitySharedConsole(origin: string): ConsoleListItem {
+  return {
+    id: COMMUNITY_SHARED_ID,
+    shortcode: COMMUNITY_SHARED_ID,
+    name: "Community shared console",
+    state: "Running",
+    language: null,
+    heapSizeGb: null,
+    server: origin,
+    engine: null,
+    jvmArgs: null,
+    environment: {},
+    autoDeleteTimeoutSeconds: null,
+    inUse: true,
+  };
+}
+
+/** Retain a live selection, or clear it and auto-select the sole running console. */
+async function reconcileConsoleSelection(
   store: Store,
   registry: ConsoleRegistry,
   session: Session,
@@ -190,20 +159,28 @@ async function selectOnlyRunning(
   const remembered = registry.selected[key];
   if (remembered && items.some((item) => item.id === remembered)) return items;
   if (remembered) {
-    await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (data) => {
-      delete data.selected[key];
-    });
+    await rememberConsoleSelection(store, identity, undefined);
   }
-  const running = items.filter((item) => isRunning(item.state));
-  if (running.length !== 1) return items;
-  const chosen = running[0];
+  const chosen = await rememberOnlyRunningConsole(store, identity, items);
   if (!chosen) return items;
-  await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (data) => {
-    data.selected[key] = chosen.id;
-  });
-  return items.map((item) => ({ ...item, inUse: item.id === chosen.id }));
+  return items.map((item) => ({ ...item, inUse: item.id === chosen }));
 }
 
+/** Remember the sole running console; stopped and failed consoles are not candidates. */
+export async function rememberOnlyRunningConsole(
+  store: Store,
+  identity: ConsoleIdentity,
+  consoles: ConsoleInfo[],
+): Promise<string | undefined> {
+  const running = consoles.filter((console) => isRunning(console.state));
+  if (running.length !== 1) return undefined;
+  const chosen = running[0];
+  if (!chosen) return undefined;
+  await rememberConsoleSelection(store, identity, chosen.id);
+  return chosen.id;
+}
+
+/** List consoles, refresh cached references, and resolve automatic selection. */
 export async function listConsoles(
   store: Store,
   profileFlag: string | undefined,
@@ -213,32 +190,12 @@ export async function listConsoles(
   const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
   const items = itemsForSession(session, registry);
   if (session.enterprise) {
-    const identity = identityOf(session);
-    for (const item of items) {
-      await rememberConsole(store, item.shortcode, item.id, identity);
-    }
-    const liveIds = new Set(items.map((item) => item.id));
-    await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (data) => {
-      for (const [id, identities] of Object.entries(data.fullIds)) {
-        data.fullIds[id] = identities.filter(
-          (known) =>
-            identityKey(known) !== identityKey(identity) || liveIds.has(id),
-        );
-        if (data.fullIds[id]?.length === 0) delete data.fullIds[id];
-      }
-      for (const [shortcode, id] of Object.entries(data.shortcodeIds)) {
-        if (!liveIds.has(id) && data.reservations[shortcode]) {
-          const reserved = data.reservations[shortcode];
-          if (identityKey(reserved) === identityKey(identity)) {
-            delete data.shortcodeIds[shortcode];
-          }
-        }
-      }
-    });
+    await reconcileDiscoveredConsoles(store, identityOf(session), items);
   }
-  return await selectOnlyRunning(store, registry, session, items);
+  return await reconcileConsoleSelection(store, registry, session, items);
 }
 
+/** Authenticate a console-management session, rejecting Community-only connections. */
 export async function requireEnterpriseConsole(
   store: Store,
   profileFlag: string | undefined,
@@ -254,6 +211,7 @@ export async function requireEnterpriseConsole(
   return session;
 }
 
+/** Prefer a permanent shortcode reservation over full-ID identity mappings. */
 function identitiesForTarget(
   registry: ConsoleRegistry,
   target: string,
@@ -263,6 +221,7 @@ function identitiesForTarget(
   return registry.fullIds[target] ?? [];
 }
 
+/** Resolve a mapped target before normal environment and default-profile precedence. */
 async function sessionForTarget(
   store: Store,
   target: string,
@@ -301,6 +260,7 @@ async function sessionForTarget(
   return await requireAuth(profileFlag, store, lifecycle);
 }
 
+/** Render available saved profiles for an ambiguous full-ID error. */
 async function profileNamesFor(
   store: Store,
   identities: ConsoleIdentity[],
@@ -312,6 +272,7 @@ async function profileNamesFor(
   return names.join(", ");
 }
 
+/** Resolve explicit or remembered targets, allowing stopped and failed consoles. */
 async function consoleForTarget(
   store: Store,
   target: string | undefined,
@@ -333,17 +294,11 @@ async function consoleForTarget(
   if (!chosen) {
     chosen = registry.selected[identityKey(identity)];
     if (!chosen) {
-      const running = listEnterpriseConsoles(session).filter((item) =>
-        isRunning(item.state),
+      chosen = await rememberOnlyRunningConsole(
+        store,
+        identity,
+        listEnterpriseConsoles(session),
       );
-      if (running.length === 1) {
-        chosen = running[0]?.id;
-        if (chosen) {
-          await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (data) => {
-            data.selected[identityKey(identity)] = chosen ?? "";
-          });
-        }
-      }
     }
   }
   if (!chosen) {
@@ -365,36 +320,7 @@ async function consoleForTarget(
   return { session, console };
 }
 
-async function clearMissingReference(
-  store: Store,
-  identity: ConsoleIdentity,
-  target: string,
-): Promise<void> {
-  const key = identityKey(identity);
-  await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
-    const fullId = registry.shortcodeIds[target] ?? target;
-    if (
-      registry.selected[key] === target ||
-      registry.selected[key] === fullId
-    ) {
-      delete registry.selected[key];
-    }
-    delete registry.shortcodeIds[target];
-    const matches = registry.fullIds[fullId];
-    if (matches) {
-      registry.fullIds[fullId] = matches.filter(
-        (known) => identityKey(known) !== key,
-      );
-      if (registry.fullIds[fullId]?.length === 0) {
-        delete registry.fullIds[fullId];
-      }
-    }
-    for (const [shortcode, id] of Object.entries(registry.shortcodeIds)) {
-      if (id === fullId) delete registry.shortcodeIds[shortcode];
-    }
-  });
-}
-
+/** Read details and remember mappings for future explicit-target resolution. */
 export async function detailConsole(
   store: Store,
   target: string | undefined,
@@ -416,6 +342,7 @@ export async function detailConsole(
   return console;
 }
 
+/** Select a running Enterprise console or Community's shared console. */
 export async function selectConsole(
   store: Store,
   target: string,
@@ -432,9 +359,7 @@ export async function selectConsole(
         "Community servers provide one shared console: shared.",
       );
     }
-    await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
-      registry.selected[identityKey(identity)] = COMMUNITY_SHARED_ID;
-    });
+    await rememberConsoleSelection(store, identity, COMMUNITY_SHARED_ID);
     return;
   }
   const console = findEnterpriseConsole(session, target);
@@ -452,17 +377,17 @@ export async function selectConsole(
     );
   }
   await rememberConsole(store, console.shortcode, console.id, identity);
-  await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
-    registry.selected[identityKey(identity)] = console.id;
-  });
+  await rememberConsoleSelection(store, identity, console.id);
 }
 
+/** Read global creation overrides without resolving server defaults. */
 export async function getConsoleDefaults(
   store: Store,
 ): Promise<ConsoleSettings> {
   return (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).defaults;
 }
 
+/** Patch global creation overrides, or remove all overrides when reset is requested. */
 export async function setConsoleDefaults(
   store: Store,
   patch: ConsoleSettings,
@@ -487,7 +412,7 @@ export async function createConsole(
 ): Promise<ConsoleInfo> {
   return await runLifecycleAction(
     lifecycle,
-    createConsoleStartupReport(),
+    consoleStartupReport(),
     createConsoleAction,
     store,
     profileFlag,
@@ -518,154 +443,24 @@ async function createConsoleAction(
   const identity = identityOf(session);
   const shortcode = await reserveShortcode(store, identity);
   lifecycle.setFailureReport(
-    createConsoleAcceptedReport(shortcode, session.profileName),
+    consoleCreateRequestReport(shortcode, session.profileName),
   );
   const id = await createEnterpriseConsole(
     session,
     shortcode,
     resolved,
     lifecycle,
+    base,
   );
   await rememberConsole(store, shortcode, id, identity);
   const created = await waitForConsole(session, id, lifecycle);
   if (!noUse) {
-    await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
-      registry.selected[identityKey(identity)] = id;
-    });
+    await rememberConsoleSelection(store, identity, id);
   }
   return created;
 }
 
-export function mergeConsoleSettings(
-  base: EffectiveConsoleSettings,
-  defaults: ConsoleSettings,
-  patch: ConsoleSettings,
-): EffectiveConsoleSettings {
-  const merged = structuredClone(base);
-  for (const source of [defaults, patch]) {
-    for (const [key, value] of Object.entries(source)) {
-      if (value === undefined) continue;
-      if (value === null) {
-        resetConsoleSetting(merged, base, key);
-        continue;
-      }
-      switch (key) {
-        case "language":
-          if (value !== "python" && value !== "groovy") {
-            throw new DhError(
-              "usage",
-              "Console language must be python or groovy",
-            );
-          }
-          merged.language = value;
-          break;
-        case "heapSizeGb":
-          if (
-            typeof value !== "number" ||
-            !Number.isFinite(value) ||
-            value <= 0
-          ) {
-            throw new DhError(
-              "usage",
-              "Console heap size must be a positive number",
-            );
-          }
-          merged.heapSizeGb = value;
-          break;
-        case "server":
-          if (typeof value !== "string" || !value) {
-            throw new DhError(
-              "usage",
-              "Console server must be a non-empty name",
-            );
-          }
-          merged.server = value;
-          break;
-        case "engine":
-          if (typeof value !== "string" || !value) {
-            throw new DhError(
-              "usage",
-              "Console engine must be a non-empty name",
-            );
-          }
-          merged.engine = value;
-          break;
-        case "jvmArgs":
-          if (
-            !Array.isArray(value) ||
-            !value.every((argument) => typeof argument === "string")
-          ) {
-            throw new DhError("usage", "Console JVM arguments must be strings");
-          }
-          merged.jvmArgs = value;
-          break;
-        case "environment":
-          if (!isStringRecord(value)) {
-            throw new DhError(
-              "usage",
-              "Console environment values must be strings",
-            );
-          }
-          merged.environment = value;
-          break;
-        case "autoDeleteTimeoutSeconds":
-          if (
-            typeof value !== "number" ||
-            !Number.isInteger(value) ||
-            value <= 0
-          ) {
-            throw new DhError(
-              "usage",
-              "Console auto-delete timeout must be a positive integer",
-            );
-          }
-          merged.autoDeleteTimeoutSeconds = value;
-          break;
-      }
-    }
-  }
-  return merged;
-}
-
-function resetConsoleSetting(
-  merged: EffectiveConsoleSettings,
-  base: EffectiveConsoleSettings,
-  key: string,
-): void {
-  switch (key) {
-    case "language":
-      merged.language = base.language;
-      break;
-    case "heapSizeGb":
-      merged.heapSizeGb = base.heapSizeGb;
-      break;
-    case "server":
-      merged.server = base.server;
-      break;
-    case "engine":
-      merged.engine = base.engine;
-      break;
-    case "jvmArgs":
-      merged.jvmArgs = base.jvmArgs;
-      break;
-    case "environment":
-      merged.environment = base.environment;
-      break;
-    case "autoDeleteTimeoutSeconds":
-      merged.autoDeleteTimeoutSeconds = base.autoDeleteTimeoutSeconds;
-      break;
-  }
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every((item) => typeof item === "string")
-  );
-}
-
+/** Delete a resolved console with scoped interruption and recovery reporting. */
 export async function deleteConsole(
   store: Store,
   target: string | undefined,
@@ -674,7 +469,7 @@ export async function deleteConsole(
 ): Promise<void> {
   return await runLifecycleAction(
     lifecycle,
-    report("delete", target),
+    consoleActionReport("delete", target),
     deleteConsoleAction,
     store,
     target,
@@ -683,6 +478,7 @@ export async function deleteConsole(
   );
 }
 
+/** Submit deletion, wait for disappearance, and clear stale local references. */
 async function deleteConsoleAction(
   store: Store,
   target: string | undefined,
@@ -695,32 +491,11 @@ async function deleteConsoleAction(
     profileFlag,
     lifecycle,
   );
-  lifecycle.setFailureReport({
-    target: console.shortcode,
-    profile: session.profileName,
-    phase: "deleting",
-    outcome: "unknown",
-    continuation: "unknown",
-    recoveryCommand: [BIN, "console", "detail", console.shortcode],
-  });
+  lifecycle.setFailureReport(
+    consoleDeleteRequestReport(console.shortcode, session.profileName),
+  );
   await deleteEnterpriseConsole(session, console);
-  lifecycle.setFailureReport({
-    outcome: "unknown",
-    continuation: "continues",
-    progress:
-      "The server accepted the delete request; deletion is not confirmed.",
-  });
+  lifecycle.setFailureReport(consoleDeleteAcceptedReport());
   await waitForConsoleDeletion(session, console, lifecycle);
   await clearMissingReference(store, identityOf(session), console.id);
-}
-
-export async function consoleSettingsForServer(
-  session: Session,
-  registry: ConsoleSettings,
-): Promise<EffectiveConsoleSettings> {
-  return mergeConsoleSettings(
-    (await serverDefaults(session)).settings,
-    registry,
-    {},
-  );
 }
