@@ -548,6 +548,7 @@ export async function waitForConsole(
   lifecycle: CommandLifecycle,
 ): Promise<ConsoleInfo> {
   let observed = false;
+  const discoveryDeadline = performance.now() + timeoutMs();
   for (;;) {
     lifecycle.signal.throwIfAborted();
     const console = findEnterpriseConsole(session, target);
@@ -556,6 +557,13 @@ export async function waitForConsole(
       throw new DhError(
         "console_not_found",
         `Console ${target} disappeared before startup completed`,
+      );
+    }
+    if (!console && performance.now() >= discoveryDeadline) {
+      throw new DhError(
+        "console_failed",
+        `Console ${target} was not discovered before the wait timed out`,
+        "The create outcome is unconfirmed. Check the console before retrying.",
       );
     }
     if (console) {
