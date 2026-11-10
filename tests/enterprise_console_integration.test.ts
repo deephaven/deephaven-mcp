@@ -88,14 +88,19 @@ test.skipIf(!SERVER || !USER || !PASSWORD)(
         state: "Running",
       });
     } finally {
-      for (const console of [second, first]) {
-        if (!console) continue;
-        const deletion = await run(
-          dir,
-          ["console", "delete", console.shortcode, "--force"],
-          env,
-        );
-        expect(deletion.code, deletion.stderr).toBe(0);
+      try {
+        for (const console of [second, first]) {
+          if (!console) continue;
+          const deletion = await run(
+            dir,
+            ["console", "delete", console.shortcode, "--force"],
+            env,
+          );
+          expect(deletion.code, deletion.stderr).toBe(0);
+        }
+      } finally {
+        const logout = await run(dir, ["auth", "logout", "--all"], env);
+        expect(logout.code, logout.stderr).toBe(0);
       }
     }
   },

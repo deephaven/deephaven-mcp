@@ -48,6 +48,20 @@ test("console store: reservations are globally unique and survive deletion", asy
   ).toEqual(identity("alice"));
 });
 
+test("console store: reservation skips discovered shortcodes without redirecting ownership", async () => {
+  const store = await tempStore();
+  await rememberConsole(store, "aaaaaa", "existing-id", identity("alice"));
+  const codes = ["aaaaaa", "bbbbbb"];
+  expect(
+    await reserveShortcode(
+      store,
+      identity("bob"),
+      () => codes.shift() ?? "cccccc",
+    ),
+  ).toBe("bbbbbb");
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(identitiesForTarget(registry, "aaaaaa")).toEqual([identity("alice")]);
+});
 test("console store: concurrent profiles cannot reserve the same shortcode", async () => {
   const store = await tempStore();
   const codeGenerator = (collision: string, next: string) => {

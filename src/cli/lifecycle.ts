@@ -51,7 +51,12 @@ export class CommandLifecycle {
     this.signal.throwIfAborted();
     const previous = this.#operation;
     if (!this.#reportFrozen) {
-      this.#operation = { report, startedAt: performance.now() };
+      const profile = this.failureReport.profile;
+      if (profile && report.profile === undefined) report.profile = profile;
+      this.#operation = {
+        report,
+        startedAt: performance.now(),
+      };
     }
     const result = await run();
     if (!this.#reportFrozen) this.#operation = previous;

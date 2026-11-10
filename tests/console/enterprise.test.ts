@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import type { Session } from "../../src/actions/auth/signin.ts";
 import {
   consoleInfo,
@@ -12,6 +12,7 @@ import {
 import {
   consoleCreateRequestReport,
   consoleDeleteAcceptedReport,
+  consoleDeleteRequestReport,
   consoleObservationReport,
   consoleStartupAcceptedReport,
   consoleStartupFailedReport,
@@ -36,6 +37,46 @@ const queryConstants = {
   maxDataRatio: 0.6,
   defaultSchedulingDetails: schedulingDefaults,
 };
+
+test("console recovery: saved profiles are explicit in create and delete commands", () => {
+  for (const report of [
+    consoleCreateRequestReport("abc123", "prod"),
+    consoleDeleteRequestReport("abc123", "prod"),
+  ]) {
+    expect(report.recoveryCommand).toEqual([
+      "dh",
+      "console",
+      "detail",
+      "abc123",
+      "--profile",
+      "prod",
+    ]);
+  }
+  expect(
+    consoleDeleteRequestReport("abc123", undefined).recoveryCommand,
+  ).toEqual(["dh", "console", "detail", "abc123"]);
+});
+
+test("console startup wait: initial discovery has a bounded unconfirmed outcome", async () => {
+  const lifecycle = new CommandLifecycle();
+  lifecycle.setFailureReport(consoleCreateRequestReport("abc123", "prod"));
+  const clock = spyOn(performance, "now").mockReturnValue(0);
+  const session = sessionWith({
+    getKnownConfigs: () => {
+      clock.mockReturnValue(Number.MAX_SAFE_INTEGER);
+      return [];
+    },
+  });
+  try {
+    await expect(
+      waitForConsole(session, "abc123", lifecycle),
+    ).rejects.toMatchObject({ code: "console_failed" });
+    expect(lifecycle.failureReport.outcome).toBe("unknown");
+    expect(lifecycle.failureReport.recoveryCommand).toContain("prod");
+  } finally {
+    clock.mockRestore();
+  }
+});
 
 test("console unknown state: explain uncertainty without changing the state", () => {
   const explanation =

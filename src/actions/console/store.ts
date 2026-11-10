@@ -80,7 +80,11 @@ export async function reserveShortcode(
           "Shortcode generator returned an invalid code",
         );
       }
-      if (shortcode in registry.reservations) continue;
+      if (
+        shortcode in registry.reservations ||
+        shortcode in registry.shortcodeIds
+      )
+        continue;
       registry.reservations[shortcode] = identity;
       return shortcode;
     }

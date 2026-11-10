@@ -55,7 +55,7 @@ export function consoleCreateRequestReport(
     phase: "creating",
     outcome: "unknown",
     continuation: "unknown",
-    recoveryCommand: [BIN, "console", "detail", shortcode],
+    recoveryCommand: consoleRecoveryCommand(shortcode, profileName),
     human: {
       summary: `Interrupted while waiting for console ${shortcode} (profile ${profile}) to start.`,
       details: [
@@ -99,8 +99,15 @@ export function consoleDeleteRequestReport(
     phase: "deleting",
     outcome: "unknown",
     continuation: "unknown",
-    recoveryCommand: [BIN, "console", "detail", shortcode],
+    recoveryCommand: consoleRecoveryCommand(shortcode, profile),
   };
+}
+
+/** Keep recovery on the saved profile even when the target is not yet cached. */
+function consoleRecoveryCommand(shortcode: string, profile?: string): string[] {
+  const command = [BIN, "console", "detail", shortcode];
+  if (profile) command.push("--profile", profile);
+  return command;
 }
 
 /** Record server acceptance without claiming deletion has completed. */

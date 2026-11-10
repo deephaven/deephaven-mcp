@@ -45,6 +45,28 @@ test("lifecycle: identifies a repeated termination signal", () => {
   expect(lifecycle.signal.aborted).toBe(true);
 });
 
+test("lifecycle: nested authentication retains profile but not outer operation details", async () => {
+  const lifecycle = new CommandLifecycle();
+  await expect(
+    lifecycle.runLifecycleAction(
+      { operation: "console startup", progress: "outer progress" },
+      async () => {
+        lifecycle.setFailureReport({ profile: "prod" });
+        await lifecycle.runLifecycleAction(
+          { operation: "connecting", phase: "connecting" },
+          async () => {
+            expect(lifecycle.failureReport.profile).toBe("prod");
+            expect(lifecycle.failureReport.progress).toBeUndefined();
+            lifecycle.receiveSignal("SIGINT");
+          },
+        );
+      },
+    ),
+  ).rejects.toMatchObject({ code: "cancelled" });
+  expect(lifecycle.failureReport.profile).toBe("prod");
+  expect(lifecycle.failureReport.operation).toBe("connecting");
+});
+
 test("lifecycle: actions restore their caller without leaking into prompts", async () => {
   const lifecycle = new CommandLifecycle();
   lifecycle.setFailureReport({ command: "auth login", profile: "prod" });
