@@ -104,12 +104,23 @@ export function consoleDeleteRequestReport(
 }
 
 /** Record server acceptance without claiming deletion has completed. */
-export function consoleDeleteAcceptedReport(): FailureReport {
+export function consoleDeleteAcceptedReport(
+  human?: FailureReport["human"],
+): FailureReport {
   return {
     outcome: "unknown",
     continuation: "continues",
     progress:
       "The server accepted the delete request; deletion is not confirmed.",
+    human: {
+      ...human,
+      summary:
+        human?.summary ?? "Interrupted while waiting for console deletion.",
+      details: [
+        "The server accepted the delete request; deletion may still complete after dh exits.",
+      ],
+      recoveryLabel: "Check whether it was deleted",
+    },
   };
 }
 
@@ -117,6 +128,7 @@ export function consoleDeleteAcceptedReport(): FailureReport {
 export function consoleObservationReport(
   phase: "starting" | "deleting",
   state: string,
+  human?: FailureReport["human"],
 ): FailureReport {
   return {
     phase,
@@ -129,6 +141,16 @@ export function consoleObservationReport(
       observedAt: new Date().toISOString(),
       ageSeconds: 0,
     },
+    human: {
+      ...human,
+      summary: human?.summary ?? `Interrupted while ${phase} a console.`,
+      details: [
+        phase === "deleting"
+          ? "The server accepted the delete request; deletion may still complete after dh exits."
+          : "The server accepted the request. The console may still be starting; exiting dh does not cancel it.",
+        ...consoleStateDetails(state),
+      ],
+    },
   };
 }
 
@@ -138,6 +160,12 @@ export function consoleStartupFailedReport(state: string): FailureReport {
     ...consoleObservationReport("starting", state),
     outcome: "failed",
     continuation: "stopped",
+    progress: `Console startup ended with state: ${state}.`,
+    human: {
+      summary: `Console startup ended with state: ${state}.`,
+      details: [`Console startup ended with state: ${state}.`],
+      recoveryLabel: "Inspect the console",
+    },
   };
 }
 

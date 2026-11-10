@@ -7,6 +7,7 @@ import {
   type ConsoleRegistry,
   clearMissingReference,
   EMPTY_CONSOLE_REGISTRY,
+  identitiesForTarget,
   identityKey,
   reconcileDiscoveredConsoles,
   rememberConsole,
@@ -95,12 +96,14 @@ test("console store: full IDs preserve multiple profile mappings", async () => {
     identity("alice"),
     identity("bob"),
   ]);
+  expect(identitiesForTarget(registry, "aaaaaa")).toEqual([identity("alice")]);
+  expect(identitiesForTarget(registry, "bbbbbb")).toEqual([identity("bob")]);
 });
 
 test("console store: discovery reconciles only the current identity and retains reservations", async () => {
   const store = await tempStore();
   const alice = identity("alice");
-  const bob = identity("bob");
+  const bob = { ...identity("bob"), server: "https://other.example.com" };
   await reserveShortcode(store, alice, () => "aaaaaa");
   await reserveShortcode(store, bob, () => "bbbbbb");
   await rememberConsole(store, "aaaaaa", "old-id", alice);
@@ -118,6 +121,11 @@ test("console store: discovery reconciles only the current identity and retains 
     cccccc: "live-id",
   });
   expect(registry.reservations).toEqual({ aaaaaa: alice, bbbbbb: bob });
+  expect(identitiesForTarget(registry, "cccccc")).toEqual([alice]);
+  await reconcileDiscoveredConsoles(store, alice, []);
+  const updated = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(updated.shortcodeIds).toEqual({ bbbbbb: "old-id" });
+  expect(identitiesForTarget(updated, "bbbbbb")).toEqual([bob]);
 });
 
 test("console store: missing targets clear selection and mappings, not reservations or other identities", async () => {
@@ -134,8 +142,14 @@ test("console store: missing targets clear selection and mappings, not reservati
     const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
     expect(registry.selected).toEqual({ [identityKey(bob)]: "other-id" });
     expect(registry.fullIds).toEqual({ "full-id": [bob] });
-    expect(registry.shortcodeIds).toEqual({});
+    expect(registry.shortcodeIds).toEqual({ bbbbbb: "full-id" });
     expect(registry.reservations.aaaaaa).toEqual(alice);
+    expect(identitiesForTarget(registry, "bbbbbb")).toEqual([bob]);
+    await rememberConsoleSelection(store, bob, "full-id");
+    await clearMissingReference(store, bob, "bbbbbb");
+    expect(
+      (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).selected,
+    ).toEqual({});
   }
 });
 

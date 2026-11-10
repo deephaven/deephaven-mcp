@@ -31,6 +31,7 @@ import {
   clearMissingReference,
   consoleIdentity,
   EMPTY_CONSOLE_REGISTRY,
+  identitiesForTarget,
   identityKey,
   reconcileDiscoveredConsoles,
   rememberConsole,
@@ -209,16 +210,6 @@ export async function requireEnterpriseConsole(
     );
   }
   return session;
-}
-
-/** Prefer a permanent shortcode reservation over full-ID identity mappings. */
-function identitiesForTarget(
-  registry: ConsoleRegistry,
-  target: string,
-): ConsoleIdentity[] {
-  const reserved = registry.reservations[target];
-  if (reserved) return [reserved];
-  return registry.fullIds[target] ?? [];
 }
 
 /** Resolve a mapped target before normal environment and default-profile precedence. */
@@ -518,7 +509,9 @@ async function deleteConsoleAction(
     consoleDeleteRequestReport(console.shortcode, session.profileName),
   );
   await deleteEnterpriseConsole(session, console);
-  lifecycle.setFailureReport(consoleDeleteAcceptedReport());
+  lifecycle.setFailureReport(
+    consoleDeleteAcceptedReport(lifecycle.failureReport.human),
+  );
   await waitForConsoleDeletion(session, console, lifecycle);
   await clearMissingReference(store, identityOf(session), console.id);
 }

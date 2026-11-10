@@ -129,6 +129,15 @@ function reportWithTiming(
         ),
       ),
     };
+    if (report.human) {
+      report.human = {
+        ...report.human,
+        details: [
+          ...(report.human.details ?? []),
+          `Last observed: ${report.observation.state}, ${report.observation.ageSeconds}s ago.`,
+        ],
+      };
+    }
   }
   return report;
 }

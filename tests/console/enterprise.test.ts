@@ -11,7 +11,10 @@ import {
 } from "../../src/actions/console/enterprise.ts";
 import {
   consoleCreateRequestReport,
+  consoleDeleteAcceptedReport,
   consoleObservationReport,
+  consoleStartupAcceptedReport,
+  consoleStartupFailedReport,
   consoleStartupReport,
   consoleStateDetails,
 } from "../../src/actions/console/reporting.ts";
@@ -51,6 +54,46 @@ test("console unknown state: explain uncertainty without changing the state", ()
   );
   expect(lifecycle.failureReport.progress).toBeUndefined();
   expect(lifecycle.failureReport.observation?.state).toBe("Initializing");
+});
+
+test("console reports: retain recovery context without stale continuation details", () => {
+  const lifecycle = new CommandLifecycle();
+  lifecycle.setFailureReport({
+    ...consoleStartupAcceptedReport("abc123", "prod"),
+    recoveryCommand: ["dh", "console", "detail", "abc123"],
+  });
+  lifecycle.setFailureReport(
+    consoleObservationReport(
+      "starting",
+      "Unknown",
+      lifecycle.failureReport.human,
+    ),
+  );
+  expect(lifecycle.failureReport.human?.summary).toContain(
+    "abc123 (profile prod)",
+  );
+  expect(lifecycle.failureReport.human?.details).toContain(
+    "Last observed: Unknown, 0s ago.",
+  );
+  expect(lifecycle.failureReport.human?.details).toContain(
+    consoleStateDetails("Unknown")[0],
+  );
+  lifecycle.setFailureReport(consoleStartupFailedReport("Failed"));
+  expect(lifecycle.failureReport.human?.details?.join(" ")).not.toContain(
+    "may still be starting",
+  );
+  expect(lifecycle.failureReport.recoveryCommand).toEqual([
+    "dh",
+    "console",
+    "detail",
+    "abc123",
+  ]);
+  lifecycle.setFailureReport(
+    consoleDeleteAcceptedReport(lifecycle.failureReport.human),
+  );
+  expect(lifecycle.failureReport.human?.details?.join(" ")).toContain(
+    "deletion may still complete after dh exits",
+  );
 });
 
 function sessionWith(client: Record<string, unknown>): Session {
@@ -313,6 +356,30 @@ test("console startup wait: observes a pending console until it is running", asy
     continuation: "stopped",
     progress: "The console is ready.",
   });
+});
+
+test("console startup wait: tolerate initial discovery delay but fail after disappearance", async () => {
+  let reads = 0;
+  const session = sessionWith({
+    getKnownConfigs: () => {
+      reads++;
+      return reads === 2
+        ? [query("full-id", "IC - dh CLI - abc123", "Initializing")]
+        : [];
+    },
+  });
+  const lifecycle = new CommandLifecycle();
+  await expect(
+    waitForConsole(session, "full-id", lifecycle),
+  ).rejects.toMatchObject({ code: "console_not_found" });
+  expect(reads).toBe(3);
+  expect(lifecycle.failureReport).toMatchObject({
+    outcome: "failed",
+    continuation: "stopped",
+  });
+  expect(lifecycle.failureReport.human?.details?.join(" ")).not.toContain(
+    "may still be starting",
+  );
 });
 
 test("console creation: reuse the settings snapshot without fetching metadata twice", async () => {

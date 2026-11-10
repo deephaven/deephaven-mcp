@@ -15,6 +15,7 @@ export interface ConsoleRegistry {
   reservations: Record<string, ConsoleIdentity>;
   fullIds: Record<string, ConsoleIdentity[]>;
   shortcodeIds: Record<string, string>;
+  shortcodeOwners?: Record<string, ConsoleIdentity[]>;
   selected: Record<string, string>;
   defaults: ConsoleSettings;
 }
@@ -27,6 +28,20 @@ export const EMPTY_CONSOLE_REGISTRY: ConsoleRegistry = {
   selected: {},
   defaults: {},
 };
+
+/** Resolve reserved and discovered shortcodes before interpreting a full ID. */
+export function identitiesForTarget(
+  registry: ConsoleRegistry,
+  target: string,
+): ConsoleIdentity[] {
+  const reserved = registry.reservations[target];
+  if (reserved) return [reserved];
+  const id = registry.shortcodeIds[target];
+  if (id) {
+    return registry.shortcodeOwners?.[target] ?? registry.fullIds[id] ?? [];
+  }
+  return registry.fullIds[target] ?? [];
+}
 
 const SHORTCODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const SHORTCODE_LENGTH = 6;
@@ -101,6 +116,12 @@ function rememberConsoleInRegistry(
   }
   registry.fullIds[fullId] = matches;
   registry.shortcodeIds[shortcode] = fullId;
+  registry.shortcodeOwners ??= {};
+  const owners = registry.shortcodeOwners[shortcode] ?? [];
+  if (!owners.some((owner) => identityKey(owner) === identityKey(identity))) {
+    owners.push(identity);
+  }
+  registry.shortcodeOwners[shortcode] = owners;
 }
 
 /** Reconcile one identity's discovered consoles under a single registry lock. */
@@ -120,17 +141,14 @@ export async function reconcileDiscoveredConsoles(
     }
     const liveIds = new Set(consoles.map((console) => console.id));
     const key = identityKey(identity);
+    for (const [shortcode, id] of Object.entries(registry.shortcodeIds)) {
+      if (!liveIds.has(id)) removeShortcodeOwner(registry, shortcode, identity);
+    }
     for (const [id, identities] of Object.entries(registry.fullIds)) {
       registry.fullIds[id] = identities.filter(
         (known) => identityKey(known) !== key || liveIds.has(id),
       );
       if (registry.fullIds[id]?.length === 0) delete registry.fullIds[id];
-    }
-    for (const [shortcode, id] of Object.entries(registry.shortcodeIds)) {
-      const reserved = registry.reservations[shortcode];
-      if (!liveIds.has(id) && reserved && identityKey(reserved) === key) {
-        delete registry.shortcodeIds[shortcode];
-      }
     }
   });
 }
@@ -163,7 +181,9 @@ export async function clearMissingReference(
     ) {
       delete registry.selected[key];
     }
-    delete registry.shortcodeIds[target];
+    for (const [shortcode, id] of Object.entries(registry.shortcodeIds)) {
+      if (id === fullId) removeShortcodeOwner(registry, shortcode, identity);
+    }
     const matches = registry.fullIds[fullId];
     if (matches) {
       registry.fullIds[fullId] = matches.filter(
@@ -172,12 +192,30 @@ export async function clearMissingReference(
       if (registry.fullIds[fullId]?.length === 0)
         delete registry.fullIds[fullId];
     }
-    for (const [shortcode, id] of Object.entries(registry.shortcodeIds)) {
-      if (id === fullId) delete registry.shortcodeIds[shortcode];
-    }
   });
 }
 
+/** Remove only one identity's ownership, retaining other servers' references. */
+function removeShortcodeOwner(
+  registry: ConsoleRegistry,
+  shortcode: string,
+  identity: ConsoleIdentity,
+): void {
+  const owners =
+    registry.shortcodeOwners?.[shortcode] ??
+    identitiesForTarget(registry, shortcode);
+  const remaining = owners.filter(
+    (owner) => identityKey(owner) !== identityKey(identity),
+  );
+  if (remaining.length === owners.length) return;
+  registry.shortcodeOwners ??= {};
+  if (remaining.length > 0) {
+    registry.shortcodeOwners[shortcode] = remaining;
+  } else {
+    delete registry.shortcodeOwners[shortcode];
+    delete registry.shortcodeIds[shortcode];
+  }
+}
 /** Generate a six-character candidate; reservation enforces uniqueness. */
 function randomShortcode(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(SHORTCODE_LENGTH));
