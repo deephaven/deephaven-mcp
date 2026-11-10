@@ -5,9 +5,12 @@ import { Store } from "../../src/actions/auth/store.ts";
 import type { ConsoleIdentity } from "../../src/actions/console/store.ts";
 import {
   type ConsoleRegistry,
+  clearMissingReference,
   EMPTY_CONSOLE_REGISTRY,
   identityKey,
+  reconcileDiscoveredConsoles,
   rememberConsole,
+  rememberConsoleSelection,
   reserveShortcode,
 } from "../../src/actions/console/store.ts";
 import { tempDir, WINDOWS } from "../helpers.ts";
@@ -92,6 +95,48 @@ test("console store: full IDs preserve multiple profile mappings", async () => {
     identity("alice"),
     identity("bob"),
   ]);
+});
+
+test("console store: discovery reconciles only the current identity and retains reservations", async () => {
+  const store = await tempStore();
+  const alice = identity("alice");
+  const bob = identity("bob");
+  await reserveShortcode(store, alice, () => "aaaaaa");
+  await reserveShortcode(store, bob, () => "bbbbbb");
+  await rememberConsole(store, "aaaaaa", "old-id", alice);
+  await rememberConsole(store, "bbbbbb", "old-id", bob);
+  await reconcileDiscoveredConsoles(store, alice, [
+    { shortcode: "cccccc", id: "live-id" },
+  ]);
+  await reconcileDiscoveredConsoles(store, alice, [
+    { shortcode: "cccccc", id: "live-id" },
+  ]);
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(registry.fullIds).toEqual({ "old-id": [bob], "live-id": [alice] });
+  expect(registry.shortcodeIds).toEqual({
+    bbbbbb: "old-id",
+    cccccc: "live-id",
+  });
+  expect(registry.reservations).toEqual({ aaaaaa: alice, bbbbbb: bob });
+});
+
+test("console store: missing targets clear selection and mappings, not reservations or other identities", async () => {
+  for (const target of ["aaaaaa", "full-id"]) {
+    const store = await tempStore();
+    const alice = identity("alice");
+    const bob = identity("bob");
+    await reserveShortcode(store, alice, () => "aaaaaa");
+    await rememberConsole(store, "aaaaaa", "full-id", alice);
+    await rememberConsole(store, "bbbbbb", "full-id", bob);
+    await rememberConsoleSelection(store, alice, "full-id");
+    await rememberConsoleSelection(store, bob, "other-id");
+    await clearMissingReference(store, alice, target);
+    const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+    expect(registry.selected).toEqual({ [identityKey(bob)]: "other-id" });
+    expect(registry.fullIds).toEqual({ "full-id": [bob] });
+    expect(registry.shortcodeIds).toEqual({});
+    expect(registry.reservations.aaaaaa).toEqual(alice);
+  }
 });
 
 test.skipIf(WINDOWS)(

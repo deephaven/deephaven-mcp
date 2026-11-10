@@ -4,10 +4,8 @@ import {
   requireEnterpriseConsole,
   setConsoleDefaults,
 } from "../../actions/console/actions.ts";
-import type { ConsoleSettings } from "../../actions/console/store.ts";
 import { defineCommand } from "../../cli/command.ts";
-import { DhError } from "../../errors.ts";
-import { askConsoleSettings, type ConsoleSettingOptions } from "./questions.ts";
+import { askConsoleDefaults, type ConsoleSettingOptions } from "./questions.ts";
 
 interface DefaultOptions extends ConsoleSettingOptions {
   reset?: boolean;
@@ -32,26 +30,14 @@ export const defaults = defineCommand<DefaultOptions>({
   ],
 
   async run(ctx, [settingsJson], opts) {
-    const settings = askConsoleSettings(
-      settingsJson,
-      opts,
-    ) satisfies ConsoleSettings;
-    const hasSettings =
-      settingsJson !== undefined ||
-      opts.json !== undefined ||
-      opts.language !== undefined ||
-      opts.heapSizeGb !== undefined ||
-      opts.server !== undefined ||
-      opts.engine !== undefined;
-    if (opts.reset && hasSettings) {
-      throw new DhError(
-        "usage",
-        "--reset cannot be combined with console settings",
-      );
-    }
+    const request = askConsoleDefaults(settingsJson, opts);
     await requireEnterpriseConsole(ctx.store, ctx.profileFlag, ctx.lifecycle);
-    if (opts.reset || hasSettings) {
-      await setConsoleDefaults(ctx.store, settings, Boolean(opts.reset));
+    if (request.action !== "show") {
+      await setConsoleDefaults(
+        ctx.store,
+        request.action === "update" ? request.settings : {},
+        request.action === "reset",
+      );
       return { human: "", json: {}, empty: true };
     }
     const configured = await getConsoleDefaults(ctx.store);

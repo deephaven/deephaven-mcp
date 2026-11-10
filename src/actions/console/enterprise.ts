@@ -2,7 +2,16 @@ import type { AuthenticatedEnterpriseClient } from "@deephaven-enterprise/jsapi-
 import type { CommandLifecycle } from "../../cli/lifecycle.ts";
 import { DhError, reasonOf, timeoutMs, withTimeout } from "../../errors.ts";
 import type { Session } from "../auth/signin.ts";
+import {
+  consoleDeletedReport,
+  consoleObservationReport,
+  consoleReadyReport,
+  consoleStartupAcceptedReport,
+  consoleStartupFailedReport,
+} from "./reporting.ts";
+import type { EffectiveConsoleSettings } from "./settings.ts";
 
+/** Server-reported state and settings exposed by console list and detail. */
 export interface ConsoleInfo {
   id: string;
   shortcode: string;
@@ -17,14 +26,12 @@ export interface ConsoleInfo {
   autoDeleteTimeoutSeconds: number | null;
 }
 
-export interface EffectiveConsoleSettings {
-  language: "python" | "groovy";
-  heapSizeGb: number;
-  server: string;
-  engine: string;
-  jvmArgs: string[];
-  environment: Record<string, string>;
-  autoDeleteTimeoutSeconds: number;
+/** A snapshot of available settings and derived defaults for one server. */
+export interface ConsoleServerSettings {
+  settings: EffectiveConsoleSettings;
+  servers: string[];
+  engines: string[];
+  languages: string[];
 }
 
 export const CLI_CONSOLE_PREFIX = "IC - dh CLI - ";
@@ -191,12 +198,9 @@ export function findEnterpriseConsole(
 }
 
 /** Read server capabilities and derive defaults for a new console. */
-export async function serverDefaults(session: Session): Promise<{
-  settings: EffectiveConsoleSettings;
-  servers: string[];
-  engines: string[];
-  languages: string[];
-}> {
+export async function serverDefaults(
+  session: Session,
+): Promise<ConsoleServerSettings> {
   const client = enterpriseClient(session);
   const config = await call<ServerConfig>(
     client.getServerConfigValues?.(),
@@ -210,6 +214,15 @@ export async function serverDefaults(session: Session): Promise<{
     client.getQueryConstants?.(),
     "read console defaults",
   );
+  return deriveConsoleServerSettings(config, serverList, constants);
+}
+
+/** Derive CLI defaults from raw server metadata without making network calls. */
+function deriveConsoleServerSettings(
+  config: ServerConfig,
+  serverList: ConsoleServer[],
+  constants: QueryConstants,
+): ConsoleServerSettings {
   if (!Array.isArray(serverList) || serverList.length === 0) {
     throw new DhError(
       "console_unsupported",
@@ -223,28 +236,10 @@ export async function serverDefaults(session: Session): Promise<{
     .filter((engine) => engine.protocols?.includes("Community"))
     .map((engine) => engine.name)
     .filter((name): name is string => typeof name === "string");
-  const providerNames = (config.scriptSessionProviders ?? []).map((name) =>
-    name.toLowerCase(),
+  const languages = supportedConsoleLanguages(
+    config.scriptSessionProviders ?? [],
   );
-  const languages = (["python", "groovy"] as const).filter((language) =>
-    providerNames.some((name) => name.includes(language)),
-  );
-  if (providerNames.length > 0 && languages.length === 0) {
-    throw new DhError(
-      "console_unsupported",
-      "The server has no supported console languages",
-    );
-  }
-  const engine =
-    config.defaultWorkerKind && engines.includes(config.defaultWorkerKind)
-      ? config.defaultWorkerKind
-      : engines[0];
-  if (!engine) {
-    throw new DhError(
-      "console_unsupported",
-      "The server has no console engines available",
-    );
-  }
+  const engine = defaultConsoleEngine(config.defaultWorkerKind, engines);
   if (
     typeof constants.consoleDefaultHeap !== "number" ||
     !Number.isFinite(constants.consoleDefaultHeap)
@@ -272,15 +267,47 @@ export async function serverDefaults(session: Session): Promise<{
   };
 }
 
+/** Detect supported languages, allowing older servers that omit provider metadata. */
+function supportedConsoleLanguages(
+  providers: string[],
+): ("python" | "groovy")[] {
+  const names = providers.map((name) => name.toLowerCase());
+  const languages = (["python", "groovy"] as const).filter((language) =>
+    names.some((name) => name.includes(language)),
+  );
+  if (names.length > 0 && languages.length === 0) {
+    throw new DhError(
+      "console_unsupported",
+      "The server has no supported console languages",
+    );
+  }
+  return languages;
+}
+
+/** Prefer the configured engine when it supports consoles, otherwise the first available. */
+function defaultConsoleEngine(
+  preferred: string | undefined,
+  engines: string[],
+): string {
+  if (preferred && engines.includes(preferred)) return preferred;
+  const first = engines[0];
+  if (first) return first;
+  throw new DhError(
+    "console_unsupported",
+    "The server has no console engines available",
+  );
+}
+
 /** Validate capabilities and create a CLI-owned console on Enterprise. */
 export async function createEnterpriseConsole(
   session: Session,
   shortcode: string,
   settings: EffectiveConsoleSettings,
   lifecycle: CommandLifecycle,
+  serverSettings?: ConsoleServerSettings,
 ): Promise<string> {
   const client = enterpriseClient(session);
-  const capabilities = await serverDefaults(session);
+  const capabilities = serverSettings ?? (await serverDefaults(session));
   const types = await call<Map<string, { supportsCommunity?: boolean }>>(
     client.getQueryConfigurationTypes?.(),
     "read console query types",
@@ -317,7 +344,7 @@ export async function createEnterpriseConsole(
 /** Reject settings that are not supported by this server before creating. */
 function validateConsoleSettings(
   settings: EffectiveConsoleSettings,
-  capabilities: Awaited<ReturnType<typeof serverDefaults>>,
+  capabilities: ConsoleServerSettings,
 ): void {
   if (!capabilities.servers.includes(settings.server)) {
     throw new DhError(
@@ -400,18 +427,6 @@ function consoleQuery(
   };
 }
 
-/** Report that creation was accepted but startup has not yet been confirmed. */
-function consoleStartupAcceptedReport(shortcode: string) {
-  return {
-    target: shortcode,
-    phase: "starting",
-    outcome: "unknown" as const,
-    continuation: "continues" as const,
-    progress:
-      "The server accepted the create request; startup is not confirmed.",
-  };
-}
-
 /** Submit the deletion request for a known console. */
 export async function deleteEnterpriseConsole(
   session: Session,
@@ -431,36 +446,16 @@ export async function waitForConsole(
     lifecycle.signal.throwIfAborted();
     const console = findEnterpriseConsole(session, target);
     if (console) {
-      lifecycle.setFailureReport({
-        phase: "starting",
-        outcome: "unknown",
-        continuation: "continues",
-        observation: {
-          state: console.state,
-          observedAt: new Date().toISOString(),
-          ageSeconds: 0,
-        },
-      });
+      lifecycle.setFailureReport(
+        consoleObservationReport("starting", console.state),
+      );
     }
     if (console && isRunning(console.state)) {
-      lifecycle.setFailureReport({
-        outcome: "succeeded",
-        continuation: "stopped",
-        progress: "The console is ready.",
-      });
+      lifecycle.setFailureReport(consoleReadyReport());
       return console;
     }
     if (console && isTerminal(console.state)) {
-      lifecycle.setFailureReport({
-        phase: "starting",
-        outcome: "failed",
-        continuation: "stopped",
-        observation: {
-          state: console.state,
-          observedAt: new Date().toISOString(),
-          ageSeconds: 0,
-        },
-      });
+      lifecycle.setFailureReport(consoleStartupFailedReport(console.state));
       throw new DhError(
         "console_failed",
         `Console ${target} failed to start`,
@@ -482,24 +477,12 @@ export async function waitForConsoleDeletion(
     lifecycle.signal.throwIfAborted();
     const current = findEnterpriseConsole(session, console.id);
     if (!current) {
-      lifecycle.setFailureReport({
-        phase: "deleting",
-        outcome: "succeeded",
-        continuation: "stopped",
-        progress: "The console was deleted.",
-      });
+      lifecycle.setFailureReport(consoleDeletedReport());
       return;
     }
-    lifecycle.setFailureReport({
-      phase: "deleting",
-      outcome: "unknown",
-      continuation: "continues",
-      observation: {
-        state: current.state,
-        observedAt: new Date().toISOString(),
-        ageSeconds: 0,
-      },
-    });
+    lifecycle.setFailureReport(
+      consoleObservationReport("deleting", current.state),
+    );
     await sleep(POLL_INTERVAL_MS, lifecycle.signal);
   }
 }

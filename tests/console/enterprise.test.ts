@@ -1,14 +1,17 @@
 import { expect, test } from "bun:test";
 import type { Session } from "../../src/actions/auth/signin.ts";
-import { mergeConsoleSettings } from "../../src/actions/console/actions.ts";
-import type { EffectiveConsoleSettings } from "../../src/actions/console/enterprise.ts";
 import {
   createEnterpriseConsole,
   findEnterpriseConsole,
   listEnterpriseConsoles,
   serverDefaults,
   waitForConsole,
+  waitForConsoleDeletion,
 } from "../../src/actions/console/enterprise.ts";
+import {
+  type EffectiveConsoleSettings,
+  mergeConsoleSettings,
+} from "../../src/actions/console/settings.ts";
 import { CommandLifecycle } from "../../src/cli/lifecycle.ts";
 
 function sessionWith(client: Record<string, unknown>): Session {
@@ -180,4 +183,122 @@ test("console startup wait: observes a pending console until it is running", asy
     state = "Running";
   }, 20);
   expect((await ready).id).toBe("full-id");
+  expect(lifecycle.failureReport).toMatchObject({
+    outcome: "succeeded",
+    continuation: "stopped",
+    progress: "The console is ready.",
+  });
+});
+
+test("console creation: reuse the settings snapshot without fetching metadata twice", async () => {
+  let metadataReads = 0;
+  const session = sessionWith({
+    getServerConfigValues: async () => {
+      metadataReads++;
+      return {
+        defaultWorkerKind: "python",
+        workerKinds: [{ name: "python", protocols: ["Community"] }],
+        scriptSessionProviders: ["Python"],
+      };
+    },
+    getDbServers: async () => [{ name: "Query 1" }],
+    getQueryConstants: async () => ({ consoleDefaultHeap: 4 }),
+    getQueryConfigurationTypes: async () =>
+      new Map([["InteractiveConsole", { supportsCommunity: true }]]),
+    getUserInfo: async () => ({ operateAs: "alice" }),
+    createQuery: async () => "full-id",
+  });
+  const snapshot = await serverDefaults(session);
+  const lifecycle = new CommandLifecycle();
+  expect(
+    await createEnterpriseConsole(
+      session,
+      "abc123",
+      snapshot.settings,
+      lifecycle,
+      snapshot,
+    ),
+  ).toBe("full-id");
+  expect(metadataReads).toBe(1);
+  expect(lifecycle.failureReport).toMatchObject({
+    target: "abc123",
+    phase: "starting",
+    outcome: "unknown",
+    continuation: "continues",
+  });
+  await expect(
+    createEnterpriseConsole(
+      session,
+      "abc123",
+      { ...snapshot.settings, server: "unavailable" },
+      lifecycle,
+      snapshot,
+    ),
+  ).rejects.toMatchObject({ code: "console_unsupported" });
+});
+
+test("console defaults: choose a supported engine and language when preferred values are unavailable", async () => {
+  const session = sessionWith({
+    getServerConfigValues: async () => ({
+      defaultWorkerKind: "enterprise",
+      workerKinds: [
+        { name: "enterprise", protocols: ["EnterpriseComm"] },
+        { name: "groovy", protocols: ["Community"] },
+      ],
+      scriptSessionProviders: ["Groovy"],
+    }),
+    getDbServers: async () => [{ name: "Query 1" }],
+    getQueryConstants: async () => ({ consoleDefaultHeap: 4 }),
+  });
+  expect((await serverDefaults(session)).settings).toMatchObject({
+    language: "groovy",
+    engine: "groovy",
+  });
+});
+
+test("console startup wait: terminal failures retain the observed state and return immediately", async () => {
+  const session = sessionWith({
+    getKnownConfigs: () => [query("full-id", "IC - dh CLI - abc123", "Failed")],
+  });
+  const lifecycle = new CommandLifecycle();
+  await expect(
+    waitForConsole(session, "full-id", lifecycle),
+  ).rejects.toMatchObject({
+    code: "console_failed",
+    detail: "Last state: Failed",
+  });
+  expect(lifecycle.failureReport).toMatchObject({
+    phase: "starting",
+    outcome: "failed",
+    continuation: "stopped",
+    observation: { state: "Failed", ageSeconds: 0 },
+  });
+});
+
+test("console deletion wait: disappearance confirms completion", async () => {
+  const session = sessionWith({ getKnownConfigs: () => [] });
+  const lifecycle = new CommandLifecycle();
+  await waitForConsoleDeletion(
+    session,
+    {
+      id: "full-id",
+      shortcode: "abc123",
+      name: "IC - dh CLI - abc123",
+      state: "Stopped",
+      language: null,
+      heapSizeGb: null,
+      server: null,
+      engine: null,
+      jvmArgs: null,
+      environment: {},
+      autoDeleteTimeoutSeconds: null,
+    },
+    lifecycle,
+  );
+  expect(lifecycle.failureReport).toMatchObject({
+    phase: "deleting",
+    outcome: "succeeded",
+    continuation: "stopped",
+    progress: "The console was deleted.",
+  });
 });

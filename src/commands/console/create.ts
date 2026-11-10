@@ -1,6 +1,5 @@
 import { Option } from "commander";
 import { createConsole } from "../../actions/console/actions.ts";
-import type { ConsoleSettings } from "../../actions/console/store.ts";
 import { defineCommand } from "../../cli/command.ts";
 import { askConsoleSettings, type ConsoleSettingOptions } from "./questions.ts";
 
@@ -27,10 +26,7 @@ export const create = defineCommand<CreateOptions>({
   ],
 
   async run(ctx, [settingsJson], opts) {
-    const settings = askConsoleSettings(
-      settingsJson,
-      opts,
-    ) satisfies ConsoleSettings;
+    const settings = askConsoleSettings(settingsJson, opts);
     const console = await createConsole(
       ctx.store,
       ctx.profileFlag,
