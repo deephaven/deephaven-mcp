@@ -5,7 +5,7 @@ export const use = defineCommand({
   name: "use",
   description: "Set the console in use for its profile.",
   args: [
-    { name: "<console>", description: "Console shortcode or full server ID." },
+    { name: "[console]", description: "Console shortcode or full server ID." },
   ],
 
   async run(ctx, [target = ""]) {
