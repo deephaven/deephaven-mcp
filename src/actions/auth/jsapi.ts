@@ -7,6 +7,24 @@ import type { EnterpriseDhType } from "@deephaven-enterprise/jsapi-nodejs";
 import { DhError, describe } from "../../errors.ts";
 import { isTrustedSource } from "../../net.ts";
 
+// Both servers return auth config values as key/value pairs, but the published
+// types say string[][].
+// TODO: DH-24026 will narrow EnterpriseClient's type; drop that override.
+declare module "@deephaven-enterprise/jsapi-types" {
+  interface EnterpriseClient {
+    getAuthConfigValues(): Promise<[string, string][]>;
+  }
+}
+
+// TODO: DH-24027 will narrow CoreClient's type; drop that override.
+declare module "@deephaven/jsapi-types" {
+  namespace dh {
+    interface CoreClient {
+      getAuthConfigValues(): Promise<[string, string][]>;
+    }
+  }
+}
+
 /** The Core jsapi module (`dh`), served by Community servers and Core+ workers. */
 export type CoreApi = typeof dh;
 

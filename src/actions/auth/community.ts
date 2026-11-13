@@ -49,7 +49,7 @@ export async function connectCommunity(
 ): Promise<CommunityConnection> {
   const dh = await loadCommunityApi(new URL(origin), cacheRoot, timeout);
   const client = new dh.CoreClient(origin);
-  let values: string[][];
+  let values: [string, string][];
   try {
     values = await withTimeout(client.getAuthConfigValues(), timeout, () =>
       unreachable(origin),
@@ -60,7 +60,7 @@ export async function connectCommunity(
   }
   const handlers = values
     .filter(([key]) => key === "AuthHandlers")
-    .flatMap(([, value = ""]) => value.split(","))
+    .flatMap(([, value]) => value.split(","))
     .map((h) => h.trim())
     .filter(Boolean);
   return { origin, dh, client, handlers };
