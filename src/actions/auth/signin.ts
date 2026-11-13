@@ -158,7 +158,9 @@ export async function signIn(
   if (server.community) {
     const login = request as CommunityLogin;
     await loginCommunity(server.community, login, timeout, rejected);
-    return { ...server, enterprise: undefined, user: communityUser(login) };
+    // A Community server has no Enterprise connection; leave the field out.
+    const { enterprise: _enterprise, ...community } = server;
+    return { ...community, user: communityUser(login) };
   }
   const conn = enterpriseConnection(server);
   switch (request.method) {
