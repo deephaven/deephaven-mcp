@@ -10,6 +10,7 @@ import {
   timeoutMs,
 } from "../../errors.ts";
 import { BIN } from "../../version.ts";
+import { moveCache } from "../plugins/cache.ts";
 import {
   connectEnterprise,
   DELETE_KEY_TIMEOUT_MS,
@@ -36,11 +37,13 @@ import {
 import { ensureCa, loadedCa } from "./session.ts";
 import type { Session } from "./signin.ts";
 import type {
+  Config,
   Credential,
   Credentials,
   Kind,
   Method,
   OrphanKey,
+  Profile,
   State,
   Store,
 } from "./store.ts";
@@ -100,6 +103,7 @@ export async function commitSignIn(
   save: ProfileToSave,
   makeDefault?: boolean,
   lifecycle?: CommandLifecycle,
+  into?: string,
 ): Promise<SavedSignIn> {
   const report = profileSaveReport(session.origin);
   return runLifecycleAction(
@@ -111,6 +115,7 @@ export async function commitSignIn(
     save,
     makeDefault,
     report,
+    into,
   );
 }
 
@@ -120,6 +125,7 @@ async function commitSignInAction(
   save: ProfileToSave,
   makeDefault: boolean | undefined,
   report: FailureReport,
+  into?: string,
 ): Promise<SavedSignIn> {
   // Uploaded only now, so a cancelled question never leaves a key on the server.
   let credential: Credential;
@@ -148,6 +154,7 @@ async function commitSignInAction(
         credential,
       },
       makeDefault,
+      into,
     );
   } catch (e) {
     if (key) await revokeNewKey(store, session, credential);
@@ -284,7 +291,7 @@ async function removeProfilesAction(
       next = removeProfile(now.config, id);
       delete now.credentials.credentials[id];
       const p = config.profiles[id];
-      if (p && unrevoked.includes(id)) {
+      if (p?.user !== undefined && unrevoked.includes(id)) {
         addOrphan(now.credentials, p.server, p.user, cred);
       }
     }
@@ -319,7 +326,8 @@ async function revokeKeys(
     if (!p) continue;
     const cred = state.credentials.credentials[id];
     let revoked = false;
-    if (cred?.type === "keyPair" && cred.generated) {
+    // An SSH-only profile has no user, and no key.
+    if (cred?.type === "keyPair" && cred.generated && p.user !== undefined) {
       let failure = unreachable.get(p.server);
       if (failure === undefined) {
         waiting(
@@ -392,17 +400,28 @@ export function noProfile(name: string): DhError {
 }
 
 /**
- * Saves `p`, replacing the profile with the same identity if there is one.
- * `makeDefault` undefined → only if there's no default yet.
+ * Saves `p`, replacing the profile with the same identity if there is one,
+ * or `into` (an SSH-only profile getting a sign-in: its name and default
+ * status are kept, and its server entry and caches move to `p.origin` if the
+ * sign-in resolved another). `makeDefault` undefined → only if there's no
+ * default yet.
  */
 export async function saveProfile(
   store: Store,
   p: NewProfile,
   makeDefault?: boolean,
+  into?: string,
 ): Promise<Saved> {
-  return await store.update(({ config, credentials }) => {
+  return await store.update(async ({ config, credentials }) => {
+    const target = into ? config.profiles[into] : undefined;
+    if (target && target.server !== p.origin) {
+      await rekeyServer(config, target.server, p.origin);
+    }
     // Signing in again as the same identity keeps its id, name and history.
-    const existing = findByIdentity(config, p.origin, p.user, p.operateAs);
+    const existing: [string, Profile] | undefined =
+      into && target
+        ? [into, target]
+        : findByIdentity(config, p.origin, p.user, p.operateAs);
     const id =
       existing?.[0] ??
       newProfileId(
@@ -458,6 +477,30 @@ export async function saveProfile(
       previous,
     };
   });
+}
+
+/**
+ * Moves server `from`'s entry, its profiles and its plugin caches to `to`.
+ * A saved `to` is `usage`.
+ */
+async function rekeyServer(
+  config: Config,
+  from: string,
+  to: string,
+): Promise<void> {
+  if (config.servers[to]) {
+    throw new DhError(
+      "usage",
+      `Both ${from} and ${to} are saved; log out of one first`,
+    );
+  }
+  const entry = config.servers[from];
+  if (entry) config.servers[to] = entry;
+  delete config.servers[from];
+  for (const profile of Object.values(config.profiles)) {
+    if (profile.server === from) profile.server = to;
+  }
+  await moveCache(from, to);
 }
 
 /**

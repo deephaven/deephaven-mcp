@@ -1,0 +1,317 @@
+{
+  "schema": 1,
+  "name": "ctl",
+  "description": "Manage intraday partitions and historical metadata indexes (dhctl).",
+  "tool": {
+    "path": "/usr/illumon/latest/bin/dhctl",
+    "runAs": {
+      "account": "admin",
+      "unlessFlags": ["-k", "--key", "-user", "--user"]
+    }
+  },
+  "commands": [
+    {
+      "name": "intraday",
+      "description": "Truncate, delete or rescan intraday partitions on the Data Import Servers.",
+      "commands": [
+        {
+          "name": "truncate",
+          "description": "truncate removes data at the specified partition(s) and disables further data ingestion.",
+          "argv": ["intraday", "truncate"],
+          "options": [
+            {
+              "flags": "-d, --dry-run",
+              "description": "print what actions would be performed without actually doing it"
+            },
+            {
+              "flags": "-e, --exclude-dis <arg>",
+              "description": "do not send requests to data import servers specified in an exclude parameter"
+            },
+            {
+              "flags": "-i, --include-dis <arg>",
+              "description": "send requests only to data import servers specified in an include parameter"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-part, --partitions <arg>",
+              "description": "partition to act on (all internal partitions), as namespace.tableName.columnPartition"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-s, --singlePartition <arg>",
+              "description": "single partition to act on, as namespace.tableName.internalPartition.columnPartition"
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ],
+          "source": {
+            "help": "usage: dhctl intraday truncate [-d] [-e <arg>] [-h] [-i <arg>] [-k <arg> | -user <arg>] [-part <arg>] [-pf <arg>] [-s\n       <arg>]  [-v]\n -d,--dry-run                 print what actions would be performed without actually doing it\n -e,--exclude-dis <arg>       do not send requests to data import servers specified in an exclude parameter\n -h,--help                    print help for a intraday command\n -i,--include-dis <arg>       send requests only to data import servers specified in an include parameter\n -k,--key <arg>               specify a private key file to use for authentication\n -part,--partitions <arg>     partition to act on (all internal partitions), as namespace.tableName.columnPartition\n -pf,--pwfile <arg>           specify a file containing the base64 encoded password for the user that is set with --user\n -s,--singlePartition <arg>   single partition to act on, as namespace.tableName.internalPartition.columnPartition\n -user,--user <arg>           specify a user for authentication\n -v,--verbose                 print additional logging, progress messages, and full exception text\n\ntruncate removes data at the specified partition(s) and disables further data ingestion.\nOnce truncated, partitions may be deleted with the delete action, and then new data can be ingested."
+          }
+        },
+        {
+          "name": "delete",
+          "description": "delete completely removes the directories for the specified partition(s), clearing the way for new data to be ingested.",
+          "argv": ["intraday", "delete"],
+          "options": [
+            {
+              "flags": "-d, --dry-run",
+              "description": "print what actions would be performed without actually doing it"
+            },
+            {
+              "flags": "-e, --exclude-dis <arg>",
+              "description": "do not send requests to data import servers specified in an exclude parameter"
+            },
+            {
+              "flags": "-i, --include-dis <arg>",
+              "description": "send requests only to data import servers specified in an include parameter"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-part, --partitions <arg>",
+              "description": "partition to act on (all internal partitions), as namespace.tableName.columnPartition"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-s, --singlePartition <arg>",
+              "description": "single partition to act on, as namespace.tableName.internalPartition.columnPartition"
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ],
+          "source": {
+            "help": "usage: dhctl intraday delete [-d] [-e <arg>] [-h] [-i <arg>] [-k <arg> | -user <arg>] [-part <arg>] [-pf <arg>] [-s\n       <arg>]  [-v]\n -d,--dry-run                 print what actions would be performed without actually doing it\n -e,--exclude-dis <arg>       do not send requests to data import servers specified in an exclude parameter\n -h,--help                    print help for a intraday command\n -i,--include-dis <arg>       send requests only to data import servers specified in an include parameter\n -k,--key <arg>               specify a private key file to use for authentication\n -part,--partitions <arg>     partition to act on (all internal partitions), as namespace.tableName.columnPartition\n -pf,--pwfile <arg>           specify a file containing the base64 encoded password for the user that is set with --user\n -s,--singlePartition <arg>   single partition to act on, as namespace.tableName.internalPartition.columnPartition\n -user,--user <arg>           specify a user for authentication\n -v,--verbose                 print additional logging, progress messages, and full exception text\n\ndelete completely removes the directories for the specified partition(s), clearing the way for new data to be ingested.\nThe partitions must have been previously truncated with the truncate action"
+          }
+        },
+        {
+          "name": "rescan",
+          "description": "Have each Data Import Server rescan its intraday locations for new directories.",
+          "argv": ["intraday", "rescan"],
+          "options": [
+            {
+              "flags": "-e, --exclude-dis <arg>",
+              "description": "do not send requests to data import servers specified in an exclude parameter"
+            },
+            {
+              "flags": "-i, --include-dis <arg>",
+              "description": "send requests only to data import servers specified in an include parameter"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "table to act on, as namespace.tableName or namespace.tableName.namespaceSet (System or User). If omitted, all intraday tables will be scanned."
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ],
+          "source": {
+            "help": "usage: dhctl intraday rescan [-e <arg>] [-h] [-i <arg>] [-k <arg> | -user <arg>] [-pf <arg>] [-t <arg>]  [-v]\n -e,--exclude-dis <arg>   do not send requests to data import servers specified in an exclude parameter\n -h,--help                print help for a intraday command\n -i,--include-dis <arg>   send requests only to data import servers specified in an include parameter\n -k,--key <arg>           specify a private key file to use for authentication\n -pf,--pwfile <arg>       specify a file containing the base64 encoded password for the user that is set with --user\n -t,--table-name <arg>    table to act on, as namespace.tableName or namespace.tableName.namespaceSet (System or User).\n                          If omitted, all intraday tables will be scanned.\n -user,--user <arg>       specify a user for authentication\n -v,--verbose             print additional logging, progress messages, and full exception text"
+          }
+        }
+      ]
+    },
+    {
+      "name": "metadata",
+      "description": "List, validate or rebuild historical metadata indexes (.tlmi files).",
+      "commands": [
+        {
+          "name": "list",
+          "description": "Lists all of the metadata snapshots in the specified namespaces and tables.",
+          "argv": ["metadata", "list"],
+          "options": [
+            {
+              "flags": "-e, --partition-filter <arg>",
+              "description": "A filter expression to select which column partitions to validate. The Partition column is always `Partition`"
+            },
+            {
+              "flags": "-f, --file <arg>",
+              "description": "A file to write the list output to. Optional. Defaults to stdout"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-p, --partitions <arg>",
+              "description": "The Column partition or partitions to validate."
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName or Namespace format. A wildcard '*' may be used to select all tables in all system namespaces.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ],
+          "source": {
+            "help": "usage: dhctl metadata list [-e <arg>] [-f <arg>] [-h] [-k <arg> | -user <arg>] [-p <arg>] [-pf <arg>] -t <arg>  [-v]\nLists all of the metadata snapshots in the specified namespaces and tables.\n\nOptions are as follows:\n -e,--partition-filter <arg>   A filter expression to select which column partitions to validate.\n                               The Partition column is always `Partition`\n -f,--file <arg>               A file to write the list output to. Optional. Defaults to stdout\n -h,--help                     print help for a metadata command\n -k,--key <arg>                specify a private key file to use for authentication\n -p,--partitions <arg>         The Column partition or partitions to validate.\n                               \n -pf,--pwfile <arg>            specify a file containing the base64 encoded password for the user that is set with\n                               --user\n -t,--table-name <arg>         The table or tables to act upon in Namespace.TableName or Namespace format.\n                               A wildcard '*' may be used to select all tables in all system namespaces.\n -user,--user <arg>            specify a user for authentication\n -v,--verbose                  print additional logging, progress messages, and full exception text\n\nExamples:\nList the metadata for every table in all system namespaces into /tmp/locationData.csv. The '*' should be\n    quoted to avoid shell file globbing.\n    dhctl metadata list --table-name '*' --file /tmp/LocationData.csv\nList all locations in Namespace1 and the table Namespace2.MyTable to stdout\n    dhctl metadata list --table-name Namespace1 Namespace2.MyTable\nList all locations with a partition of `2023-06-15` or `2023-07-16` in Namespace1 and the table Namespace2.MyTable to\nstdout\n    dhctl metadata list --table-name Namespace1 Namespace2.MyTable --partitions 2023-06-15 2023-07-15"
+          }
+        },
+        {
+          "name": "validate",
+          "description": "Validates that each metadata snapshot present for the specified namespaces and tables matches the actual state present at each location and generates a report.",
+          "argv": ["metadata", "validate"],
+          "options": [
+            {
+              "flags": "-e, --partition-filter <arg>",
+              "description": "A filter expression to select which column partitions to validate. The Partition column is always `Partition`"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-p, --partitions <arg>",
+              "description": "The Column partition or partitions to validate."
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName or Namespace format. A wildcard '*' may be used to select all tables in all system namespaces.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ],
+          "source": {
+            "help": "usage: dhctl metadata validate [-e <arg>] [-h] [-k <arg> | -user <arg>] [-p <arg>] [-pf <arg>] -t <arg>  [-v]\nValidates that each metadata snapshot present for the specified namespaces and tables\nmatches the actual state present at each location and generates a report.\n\nOptions are as follows:\n -e,--partition-filter <arg>   A filter expression to select which column partitions to validate.\n                               The Partition column is always `Partition`\n -h,--help                     print help for a metadata command\n -k,--key <arg>                specify a private key file to use for authentication\n -p,--partitions <arg>         The Column partition or partitions to validate.\n                               \n -pf,--pwfile <arg>            specify a file containing the base64 encoded password for the user that is set with\n                               --user\n -t,--table-name <arg>         The table or tables to act upon in Namespace.TableName or Namespace format.\n                               A wildcard '*' may be used to select all tables in all system namespaces.\n -user,--user <arg>            specify a user for authentication\n -v,--verbose                  print additional logging, progress messages, and full exception text\n\nExamples:\nValidate the metadata for every table in all system namespaces. The '*' should be quoted to avoid\n    shell file globbing.\n    dhctl metadata validate --table-name '*'\nValidate all locations in Namespace1 and the table Namespace2.MyTable with verbose details\n    dhctl metadata validate --verbose --table-name Namespace1 Namespace2.MyTable\nValidate locations with a partition value greater than `2023-06-15` in the table Namespace2.MyTable with verbose details\n    dhctl metadata validate --verbose --table-name Namespace1 Namespace2.MyTable --partition-filter \"Partition >\n`2023-06-15`\""
+          }
+        },
+        {
+          "name": "update",
+          "description": "Updates the entire metadata index for the specified namespaces and tables.",
+          "argv": ["metadata", "update"],
+          "options": [
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName or Namespace format. A wildcard '*' may be used to select all tables in all system namespaces.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ],
+          "source": {
+            "help": "usage: dhctl metadata update [-h] [-k <arg> | -user <arg>] [-pf <arg>] -t <arg>  [-v]\nUpdates the entire metadata index for the specified namespaces and tables.\n\nOptions are as follows:\n -h,--help               print help for a metadata command\n -k,--key <arg>          specify a private key file to use for authentication\n -pf,--pwfile <arg>      specify a file containing the base64 encoded password for the user that is set with --user\n -t,--table-name <arg>   The table or tables to act upon in Namespace.TableName or Namespace format.\n                         A wildcard '*' may be used to select all tables in all system namespaces.\n -user,--user <arg>      specify a user for authentication\n -v,--verbose            print additional logging, progress messages, and full exception text\n\nExample:\nUpdate the metadata for the MarketUs namespace\n    dhctl metadata update --table-name MarketUs"
+          }
+        }
+      ]
+    },
+    {
+      "name": "logger",
+      "description": "Generate binary loggers for tables.",
+      "commands": [
+        {
+          "name": "generate",
+          "description": "Generates a binary logger for the provided tables.",
+          "argv": ["logger", "generate"],
+          "options": [
+            {
+              "flags": "-d, --directory <arg>",
+              "description": "Generate loggers into the specified directory."
+            },
+            {
+              "flags": "--interface-validation <arg>",
+              "description": "The interface validation mode. Valid values: [IF_PRESENT,FORCE,SKIP]"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName format.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ],
+          "source": {
+            "help": "usage: dhctl logger generate [-d <arg>] [-h] [--interface-validation <arg>] [-k <arg> | -user <arg>] [-pf <arg>] -t\n       <arg>  [-v]\nGenerates a binary logger for the provided tables.\n\nOptions are as follows:\n -d,--directory <arg>              Generate loggers into the specified directory.\n -h,--help                         print help for a logger command\n    --interface-validation <arg>   The interface validation mode. Valid values: [IF_PRESENT,FORCE,SKIP]\n -k,--key <arg>                    specify a private key file to use for authentication\n -pf,--pwfile <arg>                specify a file containing the base64 encoded password for the user that is set with\n                                   --user\n -t,--table-name <arg>             The table or tables to act upon in Namespace.TableName format.\n -user,--user <arg>                specify a user for authentication\n -v,--verbose                      print additional logging, progress messages, and full exception text\n\nExample:\nGenerate a binary logger for the DbInternal.PersistentQueryStateLog table into the ./sources directory:\n    dhctl logger generate --table-name DbInternal.PersistentQueryStateLog --directory ./sources"
+          }
+        }
+      ]
+    }
+  ],
+  "source": {
+    "createdFrom": "dhctl --help, with descriptions edited by hand"
+  }
+}

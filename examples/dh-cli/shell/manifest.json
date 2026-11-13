@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "channel": "shell",
+  "revision": "sha256:76168e8ac4dd447e2de08216101e2b6fa114f26820027d3152885ee0b5e4de81",
+  "cluster": {
+    "kind": "enterprise",
+    "version": "2026.01.261102164822g2f6a8ebf11"
+  },
+  "plugins": [
+    {
+      "name": "ctl",
+      "kind": "shell",
+      "description": "Manage intraday partitions and historical metadata indexes (dhctl).",
+      "nouns": [
+        "ctl"
+      ],
+      "spec": "ctl.json",
+      "digest": "sha256:882c3b7242355be283930ca1b81753c5dd5ff07fbe974bfd7ee9277fba534e35",
+      "dh": ">=3.0.0"
+    },
+    {
+      "name": "deephaven",
+      "kind": "shell",
+      "description": "Control a Deephaven node: its lifecycle, its cluster membership, and its material.",
+      "nouns": [
+        "service",
+        "node",
+        "etcd",
+        "keys",
+        "units",
+        "coreplus",
+        "tls"
+      ],
+      "spec": "deephaven.json",
+      "digest": "sha256:ff33f1abd6d21a58dcb504041094e57fb349b41f4d676fe3dd9eb340a33e0676",
+      "dh": ">=3.0.0"
+    }
+  ]
+}

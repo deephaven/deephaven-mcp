@@ -75,20 +75,20 @@ export function assertTrusted(url: URL): void {
   );
 }
 
-/** Downloads `url` to `dest`. `optional`: a 404 writes an empty file instead of failing. */
-async function download(
+/**
+ * `GET url`, following redirects by hand so every hop must pass
+ * `assertTrusted`. `signal` bounds the whole request, body included.
+ */
+export async function fetchTrusted(
   url: URL,
-  dest: string,
-  timeout: number,
-  optional = false,
-): Promise<void> {
-  const signal = AbortSignal.timeout(timeout);
-  let res: Response;
-  // Redirects are followed by hand so every hop must pass `assertTrusted`.
+  signal: AbortSignal,
+  headers: Record<string, string> = {},
+): Promise<{ res: Response; url: URL }> {
   for (let hop = 0; ; hop++) {
     assertTrusted(url);
+    let res: Response;
     try {
-      res = await fetch(url, { signal, redirect: "manual" });
+      res = await fetch(url, { signal, headers, redirect: "manual" });
     } catch (e) {
       throw new DhError(
         "server_unreachable",
@@ -97,13 +97,25 @@ async function download(
       );
     }
     const location = res.headers.get("location");
-    if (res.status < 300 || res.status >= 400 || !location) break;
+    if (res.status < 300 || res.status >= 400 || !location) {
+      return { res, url };
+    }
     await res.body?.cancel();
     if (hop === MAX_REDIRECTS) {
       throw new DhError("server_unsupported", `Too many redirects for ${url}`);
     }
     url = new URL(location, url);
   }
+}
+
+/** Downloads `url` to `dest`. `optional`: a 404 writes an empty file instead of failing. */
+async function download(
+  start: URL,
+  dest: string,
+  timeout: number,
+  optional = false,
+): Promise<void> {
+  const { res, url } = await fetchTrusted(start, AbortSignal.timeout(timeout));
   if (optional && res.status === 404) {
     await res.body?.cancel();
     await writeFile(dest, "");

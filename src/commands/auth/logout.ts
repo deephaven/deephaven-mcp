@@ -5,6 +5,8 @@ import {
   trustCasToRevoke,
 } from "../../actions/auth/flows.ts";
 import { sortedProfiles } from "../../actions/auth/profile.ts";
+import { serverSsh } from "../../actions/plugins/settings.ts";
+import { closeSshMasters } from "../../actions/plugins/ssh.ts";
 import { type Context, defineCommand, type Output } from "../../cli/command.ts";
 import { note } from "../../output.ts";
 import { BIN } from "../../version.ts";
@@ -54,6 +56,7 @@ export const logout = defineCommand<LogoutOptions>({
       ctx.lifecycle,
     );
     for (const warning of done.warnings) note(warning);
+    await closeUnusedConnections(ctx, done);
     for (const resaved of done.resaved) {
       note(
         `! Kept ${resaved}: it was signed in again during logout.\n  Run \`${BIN} auth logout ${resaved}\` again.`,
@@ -76,6 +79,27 @@ function logoutCommand(ctx: Context, names: string[] | undefined): string[] {
     // `--`: names may start with `-`.
     ...(names ? ["--", ...names] : ["--all"]),
   ];
+}
+
+/** Closes SSH connections to the servers of removed profiles that no profile uses any more. */
+async function closeUnusedConnections(
+  ctx: Context,
+  done: Removed,
+): Promise<void> {
+  const config = (await ctx.store.read()).config;
+  const servers = new Set(done.removed.map((r) => r.server));
+  for (const server of servers) {
+    const used = Object.values(config.profiles).some(
+      (p) => p.server === server,
+    );
+    if (used || !config.servers[server]?.ssh) continue;
+    const plugins = Object.values(config.servers[server]?.plugins ?? {});
+    const hosts = new Set([
+      ...serverSsh(config, server).hosts,
+      ...plugins.flatMap((p) => p.sshHosts ?? []),
+    ]);
+    await closeSshMasters([...hosts]);
+  }
 }
 
 function removedOutput(done: Removed, skipped: string[]): Output {

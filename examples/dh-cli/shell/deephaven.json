@@ -1,0 +1,587 @@
+{
+  "schema": 1,
+  "name": "deephaven",
+  "description": "Control a Deephaven node: its lifecycle, its cluster membership, and its material.",
+  "tool": {
+    "path": "/opt/deephaven/current/bin/deephaven",
+    "runAs": {
+      "account": "admin"
+    }
+  },
+  "nouns": [
+    {
+      "name": "service",
+      "description": "Start, stop and inspect this node's Deephaven services.",
+      "commands": [
+        {
+          "name": "start",
+          "description": "Start the node, or one service, and wait until it is ready",
+          "argv": [
+            "start"
+          ],
+          "options": [
+            {
+              "flags": "--no-wait",
+              "description": "Return once the services are asked to start, without"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "stop",
+          "description": "Stop the node, or one service. etcd keeps running unless named.",
+          "argv": [
+            "stop"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "restart",
+          "description": "Restart the node, or one service, and wait until it is ready",
+          "argv": [
+            "restart"
+          ],
+          "options": [
+            {
+              "flags": "--no-wait",
+              "description": "Return once the services are asked to start, without"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "description": "Show status of every Deephaven unit, or of one service",
+          "argv": [
+            "status"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "logs",
+          "description": "Follow the journal of the node, or of one service",
+          "argv": [
+            "logs"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "node",
+      "description": "This node's place in the cluster: its identities, joining, and its prerequisites.",
+      "commands": [
+        {
+          "name": "create",
+          "description": "Create a node's identities and write its join token",
+          "argv": [
+            "node",
+            "create"
+          ],
+          "options": [
+            {
+              "flags": "--cluster-name <name>",
+              "description": ""
+            },
+            {
+              "flags": "--etcd-credentials <file>",
+              "description": ""
+            },
+            {
+              "flags": "--name <name>",
+              "description": "The node's name: its identity in the cluster, which 'join"
+            },
+            {
+              "flags": "--out <file>",
+              "description": "Where to write the join token; '-' writes it to standard"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List the nodes of the cluster",
+          "argv": [
+            "node",
+            "list"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "revoke",
+          "description": "Delete a node's identities and the login keys it registered",
+          "argv": [
+            "node",
+            "revoke"
+          ],
+          "options": [
+            {
+              "flags": "--etcd-credentials <file>",
+              "description": ""
+            },
+            {
+              "flags": "--name <name>",
+              "description": "The node's name"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "join",
+          "description": "Join this node to an existing cluster",
+          "argv": [
+            "join"
+          ],
+          "options": [
+            {
+              "flags": "--name <name>",
+              "description": ""
+            },
+            {
+              "flags": "--ca-file <file>",
+              "description": "The CA bundle to trust. Omit it to rely on the"
+            },
+            {
+              "flags": "--cert <file>",
+              "description": "This node's TLS certificate (default <certdir>/cert."
+            },
+            {
+              "flags": "--classes <a>",
+              "description": "The server classes this node's dispatcher serves"
+            },
+            {
+              "flags": "--hostname <fqdn>",
+              "description": "The DNS name other nodes and clients reach this"
+            },
+            {
+              "flags": "--key <file>",
+              "description": "The private key of the certificate (default"
+            },
+            {
+              "flags": "--replace",
+              "description": "Join the token's cluster although this node belongs"
+            },
+            {
+              "flags": "--token <token>",
+              "description": "This node's join token itself, pasted"
+            },
+            {
+              "flags": "--token-file <file>",
+              "description": "A file holding this node's join token, as"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "preflight",
+          "description": "Check this host meets the prerequisites",
+          "argv": [
+            "preflight"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "etcd",
+      "description": "Run, bootstrap and inspect the configuration store",
+      "commands": [
+        {
+          "name": "start",
+          "description": "Run etcd as a container on this node",
+          "argv": [
+            "etcd",
+            "start"
+          ],
+          "options": [
+            {
+              "flags": "--cacert <file>",
+              "description": "CA certificate for an external TLS cluster"
+            },
+            {
+              "flags": "--endpoints <urls>",
+              "description": "Comma-separated client URLs (default: this node)"
+            },
+            {
+              "flags": "--external",
+              "description": "Do not manage a container; the etcd already exists"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "stop",
+          "description": "Stop the etcd container",
+          "argv": [
+            "etcd",
+            "stop"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "description": "Report container and cluster health",
+          "argv": [
+            "etcd",
+            "status"
+          ],
+          "options": [
+            {
+              "flags": "--cacert <file>",
+              "description": "CA certificate for an external TLS cluster"
+            },
+            {
+              "flags": "--endpoints <urls>",
+              "description": "Comma-separated client URLs (default: this node)"
+            },
+            {
+              "flags": "--external",
+              "description": "Do not manage a container; the etcd already exists"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "tls",
+          "description": "Generate a CA and server/peer certificates for this node's etcd",
+          "argv": [
+            "etcd",
+            "tls"
+          ],
+          "options": [
+            {
+              "flags": "--san <name>",
+              "description": "An additional name or address the server certificate"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "bootstrap",
+          "description": "Enable authentication and create the roles",
+          "argv": [
+            "etcd",
+            "bootstrap"
+          ],
+          "options": [
+            {
+              "flags": "--cacert <file>",
+              "description": "CA certificate for an external TLS cluster"
+            },
+            {
+              "flags": "--endpoints <urls>",
+              "description": "Comma-separated client URLs (default: this node)"
+            },
+            {
+              "flags": "--etcd-credentials <file>",
+              "description": ""
+            },
+            {
+              "flags": "--external",
+              "description": "Do not manage a container; the etcd already exists"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "ctl",
+          "description": "Run etcdctl against this cluster as the administrative credentials given",
+          "argv": [
+            "etcd",
+            "ctl"
+          ],
+          "options": [
+            {
+              "flags": "--cacert <file>",
+              "description": "CA certificate for an external TLS cluster"
+            },
+            {
+              "flags": "--endpoints <urls>",
+              "description": "Comma-separated client URLs (default: this node)"
+            },
+            {
+              "flags": "--etcd-credentials <file>",
+              "description": ""
+            },
+            {
+              "flags": "--external",
+              "description": "Do not manage a container; the etcd already exists"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "runtime",
+          "description": "Print the container runtime that would be used",
+          "argv": [
+            "etcd",
+            "runtime"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "keys",
+      "description": "Authentication key pairs: this node's, or one for a user",
+      "commands": [
+        {
+          "name": "generate",
+          "description": "Create this node's login key pairs under <configdir>/auth",
+          "argv": [
+            "keys",
+            "generate"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "register",
+          "description": "Register this node's public keys in the ACL store under its name",
+          "argv": [
+            "keys",
+            "register"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "new",
+          "description": "Write one key pair for <name> into the current directory: a user's login key, or with --rsa a key for encrypting secrets",
+          "argv": [
+            "keys",
+            "new"
+          ],
+          "options": [
+            {
+              "flags": "--rsa",
+              "description": "An RSA key instead, for encrypting secrets rather than"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "units",
+      "description": "Install, list or remove this node's systemd unit files",
+      "commands": [
+        {
+          "name": "install",
+          "description": "Render and enable units; the director only unless --services says otherwise",
+          "argv": [
+            "units",
+            "install"
+          ],
+          "options": [
+            {
+              "flags": "--services <\"<unit>",
+              "description": ""
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "Show available and installed units, and the installation they run",
+          "argv": [
+            "units",
+            "list"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "uninstall",
+          "description": "Stop, disable and remove every Deephaven unit except etcd",
+          "argv": [
+            "units",
+            "uninstall"
+          ],
+          "options": [
+            {
+              "flags": "--including-etcd",
+              "description": "Remove this node's etcd unit too; refused while other"
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "coreplus",
+      "description": "Install the Core+ worker distribution (install --file, list, set-default)",
+      "commands": [
+        {
+          "name": "install",
+          "description": "Install the Core+ worker distribution and build its Python environment. The first version installed becomes the default; 'set-default' switches it. Re-running is safe: what is already there is kept.",
+          "argv": [
+            "coreplus",
+            "install"
+          ],
+          "options": [
+            {
+              "flags": "--file <tarball>",
+              "description": "The Core+ tarball"
+            },
+            {
+              "flags": "--force",
+              "description": "Remove this version's distribution and venv first, so"
+            },
+            {
+              "flags": "--python <interpreter>",
+              "description": ""
+            },
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "Show installed versions and which is the default",
+          "argv": [
+            "coreplus",
+            "list"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        },
+        {
+          "name": "set-default",
+          "description": "Make an installed version the default, the one workers launch with",
+          "argv": [
+            "coreplus",
+            "set-default"
+          ],
+          "options": [
+            {
+              "flags": "-V, --version",
+              "description": "Print version information and exit."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tls",
+      "description": "Package the TLS keystore and truststore, and write the config-client bootstrap",
+      "argv": [
+        "tls"
+      ],
+      "options": [
+        {
+          "flags": "--ca-file <file>",
+          "description": "CA bundle to trust; omit to rely on the system trust"
+        },
+        {
+          "flags": "--cert <file>",
+          "description": "Certificate (default <certdir>/cert.pem)"
+        },
+        {
+          "flags": "--key <file>",
+          "description": "Private key (default <certdir>/cert.key)"
+        },
+        {
+          "flags": "--port <n>",
+          "description": "Director port for the config-client bootstrap"
+        },
+        {
+          "flags": "-V, --version",
+          "description": "Print version information and exit."
+        }
+      ]
+    }
+  ]
+}

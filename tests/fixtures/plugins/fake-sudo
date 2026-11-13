@@ -1,0 +1,17 @@
+#!/bin/sh
+# Stand-in for sudo in tests, put on PATH as `sudo`: appends its argv to
+# $FAKE_SUDO_LOG, then runs the command as this user.
+#   $FAKE_SUDO   refuse | password: fails as sudo would, with exit 1
+[ -n "$FAKE_SUDO_LOG" ] && echo "$*" >> "$FAKE_SUDO_LOG"
+while [ $# -gt 0 ]; do
+  case "$1" in
+  -n) shift ;;
+  -u) user=$2; shift 2 ;;
+  *) break ;;
+  esac
+done
+case "$FAKE_SUDO" in
+refuse) echo "Sorry, user tester is not allowed to execute '$*' as $user on host." >&2; exit 1 ;;
+password) echo "sudo: a password is required" >&2; exit 1 ;;
+esac
+exec "$@"

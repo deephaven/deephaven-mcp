@@ -5,11 +5,14 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.2",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "bun --experimental-http2-fetch src/main.ts",
     "build": "bun run scripts/build.ts",
     "release": "bun run scripts/release.ts",
-    "check": "biome check . && tsc --noEmit"
+    "check": "biome check . && tsc --noEmit && tsc --noEmit -p packages/cli-plugin && tsc --noEmit -p packages/cli-plugin-kit"
   },
   "dependencies": {
     "@deephaven-enterprise/jsapi-nodejs": "2026.1.59",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "@deephaven-enterprise/jsapi-types": "2026.1.59",
     "@deephaven/jsapi-types": "1.0.0-dev0.40.5",
     "@types/bun": "^1.4.2",
     "@types/react": "^19.2.0",

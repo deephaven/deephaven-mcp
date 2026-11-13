@@ -3,7 +3,11 @@ import { runLifecycleAction } from "../../cli/lifecycle.ts";
 import { DhError } from "../../errors.ts";
 import { BIN } from "../../version.ts";
 import { findByName } from "../auth/profile.ts";
-import { requireAuth, requireEnvironmentAuth } from "../auth/session.ts";
+import {
+  requireAuth,
+  requireEnvironmentAuth,
+  signInProfile,
+} from "../auth/session.ts";
 import { disconnectServer, type Session } from "../auth/signin.ts";
 import type { Profile, Store } from "../auth/store.ts";
 import {
@@ -71,7 +75,10 @@ async function authForIdentity(
   if (profileFlag && !explicit) {
     throw new DhError("usage", `No profile named "${profileFlag}"`);
   }
-  if (explicit && !sameIdentity(consoleIdentity(explicit[1]), identity)) {
+  if (
+    explicit &&
+    !sameIdentity(consoleIdentity(signInProfile(explicit[1])), identity)
+  ) {
     throw new DhError(
       "usage",
       `Console belongs to a different profile than "${profileFlag}"`,
@@ -227,9 +234,8 @@ async function sessionForTarget(
     if (!selected) {
       throw new DhError("usage", `No profile named "${profileFlag}"`);
     }
-    candidates = candidates.filter((identity) =>
-      sameIdentity(identity, consoleIdentity(selected[1])),
-    );
+    const owner = consoleIdentity(signInProfile(selected[1]));
+    candidates = candidates.filter((identity) => sameIdentity(identity, owner));
     if (candidates.length === 0) {
       throw new DhError(
         "usage",

@@ -1,0 +1,57 @@
+#!/bin/sh
+# Stand-in for ssh in tests, put first on PATH as `ssh`. It runs the remote
+# command on this machine, so quoting, stdin, stdout, stderr and exit codes are
+# real.
+#   -G <host>               prints a config with controlmaster $FAKE_SSH_CONTROLMASTER (default false)
+#   $FAKE_SSH_LOG           every other run appends its argv there, one JSON array per line
+#   $FAKE_SSH_FAIL          auth | hostkey | dns: fails as ssh would, with exit 255
+#   $FAKE_SSH_ROOT          the remote command's /etc/ is read under this directory
+if [ "$1" = "-G" ]; then
+  printf 'hostname %s\nuser tester\nport 22\ncontrolmaster %s\n' "$2" "${FAKE_SSH_CONTROLMASTER:-false}"
+  exit 0
+fi
+
+json() {
+  V="$1" awk 'BEGIN {
+    s = ENVIRON["V"]; o = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\") o = o "\\\\"
+      else if (c == "\"") o = o "\\\""
+      else if (c == "\n") o = o "\\n"
+      else if (c == "\t") o = o "\\t"
+      else if (c == "\r") o = o "\\r"
+      else o = o c
+    }
+    printf "\"%s\"", o
+  }'
+}
+
+if [ -n "$FAKE_SSH_LOG" ]; then
+  line="" sep=""
+  for a in "$@"; do
+    line="$line$sep$(json "$a")"
+    sep=","
+  done
+  printf '[%s]\n' "$line" >> "$FAKE_SSH_LOG"
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --) shift; break ;;
+  -o) shift 2 ;;
+  *) shift ;;
+  esac
+done
+host=$1
+cmd=$2
+
+case "$FAKE_SSH_FAIL" in
+auth) echo "Permission denied (publickey)." >&2; exit 255 ;;
+hostkey) echo "Host key verification failed." >&2; exit 255 ;;
+dns) echo "ssh: Could not resolve hostname $host: Name or service not known" >&2; exit 255 ;;
+esac
+if [ -n "$FAKE_SSH_ROOT" ]; then
+  cmd=$(printf '%s' "$cmd" | sed "s#/etc/#$FAKE_SSH_ROOT/etc/#g")
+fi
+exec sh -c "$cmd"

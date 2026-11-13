@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!!**/dist", "!plans", "!tests/fixtures"]
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!plans",
+      "!tests/fixtures",
+      "!examples/dh-cli"
+    ]
   },
   "formatter": {
     "enabled": true,

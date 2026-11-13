@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stand-in for id in tests, put on PATH as `id`: `id -un` prints $FAKE_ID_USER (default tester).
+if [ "$1" = "-un" ]; then echo "${FAKE_ID_USER:-tester}"; exit 0; fi
+exec /usr/bin/id "$@"

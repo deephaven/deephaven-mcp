@@ -18,7 +18,15 @@
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true
+    "noImplicitOverride": true,
+
+    // The plugin SDK from source, for the example plugins (tsc and esbuild both read this).
+    "paths": {
+      "@deephaven/cli-plugin": ["./packages/cli-plugin/src/index.ts"],
+      "@deephaven/cli-plugin/enterprise": [
+        "./packages/cli-plugin/src/enterprise.ts"
+      ]
+    }
   },
-  "include": ["src", "scripts", "tests"]
+  "include": ["src", "scripts", "tests", "examples/dh-cli-src"]
 }

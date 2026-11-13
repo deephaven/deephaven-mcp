@@ -34,6 +34,7 @@ import type {
   ServerEntry,
   State,
 } from "../../actions/auth/store.ts";
+import { serverSsh } from "../../actions/plugins/settings.ts";
 import { readSecret, type Secret } from "../../cli/secret.ts";
 import { DhError } from "../../errors.ts";
 import { note } from "../../output.ts";
@@ -80,7 +81,10 @@ export async function askLoginTarget(
   if (profileName) {
     const found = findByName(config, profileName);
     if (!found) throw noProfile(profileName);
-    return { server: found[1].server, profile: found[0], rerun: [] };
+    // An SSH-only profile's sign-in may be through another address than FRONTEND_HOST.
+    const server =
+      found[1].method === "ssh" && serverArg ? serverArg : found[1].server;
+    return { server, profile: found[0], rerun: [] };
   }
   if (serverArg) return { server: serverArg, rerun: [] };
 
@@ -177,7 +181,8 @@ function serverHint(s: ServerEntry): string {
 /** What profile `id` (if given) already says about its sign-in, so login doesn't ask again. */
 export function priorSignIn(state: State, id: string | undefined): PriorSignIn {
   const p = id ? state.config.profiles[id] : undefined;
-  if (!id || !p) return {};
+  // An SSH-only profile has no sign-in to repeat.
+  if (!id || !p || p.method === "ssh") return {};
   const cred = state.credentials.credentials[id];
   return {
     method: p.method,
@@ -338,6 +343,9 @@ export async function askSignInCredentials(
       };
     }
 
+    case "ssh":
+      throw new DhError("internal", "SSH access isn't a server sign-in method");
+
     case "custom": {
       const handler = chosen.handler;
       if (!handler) throw new DhError("usage", "Input needed: pass --handler");
@@ -455,6 +463,67 @@ export async function askMakeDefault(
   return ui.interactive
     ? await ui.confirm("Make this the default?", false, "--default")
     : false;
+}
+
+/**
+ * The SSH host for `--method ssh`: asked, defaulting to the typed address's
+ * hostname; without a terminal, that hostname.
+ */
+export async function askSshLoginHosts(
+  ui: Prompter,
+  typed: string,
+): Promise<string[]> {
+  const url = new URL(typed.includes("://") ? typed : `https://${typed}`);
+  const fallback = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (!ui.interactive) return [fallback];
+  const answer = await ui.text(
+    `SSH host (${fallback})`,
+    "--ssh-host",
+    fallback,
+  );
+  return [answer.trim() || fallback];
+}
+
+/**
+ * Whether to add the sign-in to `name`, the SSH-only profile on the server
+ * being signed in to: asked in a terminal (default yes); without one, no
+ * (a new profile).
+ */
+export async function askAddSignIn(
+  ui: Prompter,
+  name: string,
+): Promise<boolean> {
+  if (!ui.interactive) return false;
+  return await ui.confirm(
+    `Add a sign-in to profile "${name}"?`,
+    true,
+    "--profile",
+  );
+}
+
+/**
+ * Whether to set up SSH for the server's admin tools (`shell`, the names
+ * its `js` manifest lists): `--plugins`, else asked once in a terminal. Not
+ * asked without such tools, or once answered (`ssh.enabled` set).
+ */
+export async function askSshSetup(
+  ui: Prompter,
+  config: Config,
+  origin: string,
+  shell: { name: string }[],
+  flag: "ssh" | "none" | undefined,
+): Promise<"ssh" | "none" | undefined> {
+  if (flag) return flag;
+  const answered = config.servers[origin]?.ssh?.enabled !== undefined;
+  if (shell.length === 0 || answered || !ui.interactive) return undefined;
+  const names = shell.map((p) => p.name).join(", ");
+  const host = serverSsh(config, origin).defaultHost;
+  const yes = await ui.confirm(
+    `This server also has admin tools over SSH (${names}). Set up SSH to ${host}?`,
+    true,
+    "--plugins",
+  );
+  return yes ? "ssh" : "none";
 }
 
 // ── logout, use ─────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ is organized and the rules for adding commands, see
 ```sh
 bun run dev              # run from source (never auto-updates)
 bun run build            # compile for this platform -> dist/ (--all for every target)
+bun run build --target linux-x64   # cross-compile for one target; repeat --target for more
 bun test                 # unit and CLI tests, plus an install from a fake GitHub that proves dh updates itself
 bun run check            # Biome format + lint, and tsc type-check
 ```

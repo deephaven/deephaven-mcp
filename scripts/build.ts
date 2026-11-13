@@ -100,10 +100,30 @@ export async function build(
   await writeFile(join(outDir, "SHA256SUMS"), sums);
 }
 
+/** `[outDir] [--all | --target <target>...]`; no target flags means this platform. */
+function parseArgs(args: string[]): { dir?: string; targets: string[] } {
+  const chosen: string[] = [];
+  let dir: string | undefined;
+  let all = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--all") all = true;
+    else if (arg === "--target") chosen.push(args[++i] ?? "");
+    else dir = arg;
+  }
+  for (const target of chosen) {
+    if (!TARGETS.includes(target)) {
+      throw new Error(
+        `unknown --target "${target}"; one of ${TARGETS.join(", ")}`,
+      );
+    }
+  }
+  if (all) return { dir, targets: TARGETS };
+  return { dir, targets: chosen.length > 0 ? chosen : [PLATFORM] };
+}
+
 if (import.meta.main) {
-  const args = process.argv.slice(2);
-  const targets = args.includes("--all") ? TARGETS : [PLATFORM];
-  const dir = args.find((arg) => arg !== "--all");
+  const { dir, targets } = parseArgs(process.argv.slice(2));
   const outDir = resolve(dir ?? join(ROOT, "dist"));
   await build(outDir, { targets });
   console.log(`built v${pkg.version} for ${targets.join(", ")} in ${outDir}`);

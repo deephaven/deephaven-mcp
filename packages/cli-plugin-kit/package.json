@@ -1,0 +1,27 @@
+{
+  "name": "@deephaven/cli-plugin-kit",
+  "version": "0.1.0",
+  "description": "Build and scaffold plugins for the dh CLI.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deephaven/deephaven-mcp.git",
+    "directory": "packages/cli-plugin-kit"
+  },
+  "type": "module",
+  "bin": {
+    "cli-plugin-kit": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli.js"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "semver": "^7.8.5"
+  }
+}

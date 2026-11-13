@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stand-in for crcat, for `cli-plugin-kit scaffold` tests: it has no --help and takes
+# every argument as a checkpoint record file, so `crcat --help` prints an error
+# and no usage. The two lines are real crcat output; the exit code is a guess. Every invocation is appended to $FAKE_LOG.
+[ -n "$FAKE_LOG" ] && echo "$*" >> "$FAKE_LOG"
+echo "Reading checkpoint record from $1:"
+echo "   Failed to read checkpoint record from $1"
+exit 1

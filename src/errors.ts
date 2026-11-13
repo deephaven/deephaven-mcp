@@ -56,6 +56,45 @@ export const ERROR_CODES = {
     exit: 5,
     description: "Server rejected the console operation",
   },
+  ssh_host_unknown: {
+    exit: 5,
+    description: "SSH host key unknown or changed",
+  },
+  ssh_auth_failed: { exit: 4, description: "SSH login to the server failed" },
+  remote_unreachable: {
+    exit: 5,
+    description: "SSH couldn't reach the server",
+  },
+  plugin_invalid: {
+    exit: 2,
+    description: "Plugin is invalid, or one of its nouns is taken",
+  },
+  plugin_unavailable: {
+    exit: 2,
+    description:
+      "Plugin was removed from the server, or needs another dh version",
+  },
+  tool_not_found: {
+    exit: 6,
+    description: "Plugin's tool isn't at its path",
+  },
+  plugin_failed: {
+    exit: 6,
+    description: "A plugin's code failed; the message is its error",
+  },
+  not_found: { exit: 2, description: "What the command names doesn't exist" },
+  conflict: {
+    exit: 2,
+    description: "The command conflicts with the current state",
+  },
+  permission_denied: {
+    exit: 4,
+    description: "The server refused: no permission",
+  },
+  tool_failed: {
+    exit: 6,
+    description: "Plugin's tool exited non-zero; -o json adds toolExit",
+  },
 } as const;
 
 /** A key of {@link ERROR_CODES}. */
@@ -99,12 +138,13 @@ export class DhError extends Error {
   /** The message without `detail`. */
   readonly headline: string;
 
-  /** `detail`: the underlying reason, from {@link reasonOf}; appended to the message. */
+  /** `detail`: the underlying reason, from {@link reasonOf}; appended to the message. `fields`: added to the `-o json` error. */
   constructor(
     readonly code: ErrorCode,
     message: string,
     readonly hint?: string,
     readonly detail?: string,
+    readonly fields?: Record<string, unknown>,
   ) {
     super(detail ? `${message}: ${detail}` : message);
     this.name = "DhError";
@@ -189,6 +229,7 @@ export function cleanupError(failures: unknown[], primary?: DhError): DhError {
     primary.headline,
     primary.hint,
     primary.detail,
+    primary.fields,
   );
   error.cleanupDetail = detail;
   return error;

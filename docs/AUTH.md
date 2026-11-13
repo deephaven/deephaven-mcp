@@ -155,6 +155,29 @@ menu: log in to another server, log in as a different user, sign in again with a
 profile, switch the default profile (as `dh auth use` does), remove one, or
 cancel.
 
+### SSH-only profiles
+
+An admin with SSH to a cluster's nodes but no Deephaven account, or whose web
+server is down, can still use the cluster's admin tools (`dh ctl …`):
+
+```sh
+dh auth login dhe.example.com --method ssh --ssh-host infra-1
+```
+
+`dh` connects over SSH, reads the cluster's address from the node
+(`/etc/deephaven/FRONTEND_HOST` and `FRONTEND_PORT`), copies the node's
+plugins, and saves a profile named `<host>:ssh` with no sign-in. Without
+those files, give the full URL, e.g. `https://dhe.example.com:8000`. In a
+terminal, `dh auth login` offers this when the web server can't be reached.
+
+- `--ssh-host` (repeatable): the SSH destinations; default: the server's
+  hostname. `--ssh-bundle <path>`: where the plugins are on the nodes;
+  default: `/usr/illumon/latest/dh-cli`. `--name`: the profile's name.
+- Commands that sign in fail with `auth_required`; the cluster's TypeScript
+  plugins aren't available. `dh plugin list` names them.
+- `dh auth login --profile <host>:ssh` adds a sign-in to the profile, keeping
+  its name and SSH settings.
+
 ### Where profiles are stored
 
 | Path                                | Contents                                        |
@@ -220,6 +243,7 @@ $ dh auth login --no-prompt
 | Password, key, token            | `--password-*`, `--psk-*`, `--token-*`                     |
 | `Use alice@example.com?` (SSO)  | `--expect-user alice@example.com`                          |
 | `Make this the default?`        | `--default` / `--no-default` (without either: not default) |
+| `This server also has admin tools over SSH (…). Set up SSH to <host>?` | `--plugins ssh` / `--plugins none` (without either: not asked, nothing saved) |
 | Migrate an old config?          | `--yes` (without it: skipped)                              |
 | Which profile (`use`, `logout`) | the `profile` argument, or `logout --all`                  |
 
