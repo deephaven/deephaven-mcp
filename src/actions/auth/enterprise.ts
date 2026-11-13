@@ -1,16 +1,21 @@
 import { hostname } from "node:os";
 import { NodeHttp2gRPCTransport } from "@deephaven/jsapi-nodejs";
 import {
+  type AuthenticatedEnterpriseClient,
   type Base64PublicKey,
   createPasswordCredentials,
   deletePublicKeys,
+  type EnterpriseClient,
   generateBase64KeyPair,
   type KeyPairCredentials,
   type KeyPairType,
   loginClientWithKeyPair,
+  loginClientWithPassword,
+  type OperateAsUsername,
+  type UnauthenticatedEnterpriseClient,
   type Username,
   uploadPublicKey,
-} from "@deephaven-enterprise/auth-nodejs";
+} from "@deephaven-enterprise/jsapi-nodejs";
 import {
   DhError,
   describe,
@@ -21,7 +26,7 @@ import {
 } from "../../errors.ts";
 import { err, note } from "../../output.ts";
 import { BIN } from "../../version.ts";
-import { type Api, loadEnterpriseApi } from "./jsapi.ts";
+import { type EnterpriseApi, loadEnterpriseApi } from "./jsapi.ts";
 import type { KeyPair } from "./keyfile.ts";
 
 const SAML_CLASS = "authentication.client.customlogin.class.SAMLAuth";
@@ -29,14 +34,28 @@ const SAML_URL = "authentication.client.samlauth.login.url";
 const SAML_NAME = "authentication.client.samlauth.provider.name";
 const PASSWORDS = "authentication.passwordsEnabled";
 
-/** A connected Enterprise client; signed in once a login call succeeds. */
-export interface EnterpriseConnection {
+/**
+ * A connected Enterprise client. `Client` records whether it's signed in:
+ * the login functions take an {@link UnauthenticatedEnterpriseConnection} and
+ * return an {@link AuthenticatedEnterpriseConnection}.
+ */
+export interface EnterpriseConnection<
+  Client extends EnterpriseClient = EnterpriseClient,
+> {
   origin: string;
   /** The server's irisapi module. */
-  dhe: Api;
+  dhe: EnterpriseApi;
   /** Its `Client`. */
-  client: Api;
+  client: Client;
 }
+
+/** Connected, not signed in yet. */
+export type UnauthenticatedEnterpriseConnection =
+  EnterpriseConnection<UnauthenticatedEnterpriseClient>;
+
+/** Signed in. */
+export type AuthenticatedEnterpriseConnection =
+  EnterpriseConnection<AuthenticatedEnterpriseClient>;
 
 /** The sign-in options an Enterprise server advertises. */
 export interface EnterpriseAuthConfig {
@@ -57,15 +76,17 @@ export async function connectEnterprise(
   cacheRoot: string,
   timeout: number,
   downloadTimeout = timeout,
-): Promise<EnterpriseConnection> {
+): Promise<UnauthenticatedEnterpriseConnection> {
   const dhe = await loadEnterpriseApi(
     new URL(origin),
     cacheRoot,
     downloadTimeout,
   );
+  // TODO: DH-24026 will add a signal to createEnterpriseClient; use it and drop
+  // this cast and the hand-rolled connect wait.
   const client = new dhe.Client(new URL(origin).href, {
     transportFactory: NodeHttp2gRPCTransport.factory,
-  });
+  }) as UnauthenticatedEnterpriseClient;
   const connected = Promise.withResolvers<void>();
   const off = client.addEventListener(dhe.Client.EVENT_CONNECT, () =>
     connected.resolve(),
@@ -120,17 +141,21 @@ function samlConfig(
 }
 
 /**
- * Runs `login` with a timeout. A rejection throws `rejected`; a timeout throws
- * `server_unreachable`. Closes `conn` on failure.
+ * Runs `login` with a timeout and returns the signed-in connection. A
+ * rejection throws `rejected`; a timeout throws `server_unreachable`. Closes
+ * `conn` on failure.
  */
 async function guardedLogin(
-  conn: EnterpriseConnection,
-  login: () => Promise<unknown>,
+  conn: UnauthenticatedEnterpriseConnection,
+  login: () => Promise<AuthenticatedEnterpriseClient>,
   timeout: number,
   rejected: Rejected,
-): Promise<void> {
+): Promise<AuthenticatedEnterpriseConnection> {
   try {
-    await withTimeout(login(), timeout, () => unreachable(conn.origin));
+    const client = await withTimeout(login(), timeout, () =>
+      unreachable(conn.origin),
+    );
+    return { ...conn, client };
   } catch (e) {
     disconnect(conn);
     if (e instanceof DhError) throw e;
@@ -145,20 +170,22 @@ async function guardedLogin(
 
 /** `operateAs` defaults to `username`. A rejection throws `rejected` (`auth_failed` or `auth_expired`). */
 export function loginPassword(
-  conn: EnterpriseConnection,
+  conn: UnauthenticatedEnterpriseConnection,
   username: string,
   password: string,
   operateAs: string | undefined,
   timeout: number,
   rejected: Rejected,
-): Promise<void> {
+): Promise<AuthenticatedEnterpriseConnection> {
+  // TODO: DH-24026 will add operateAs to createPasswordCredentials; use it and
+  // drop this cast.
   const credentials = {
     ...createPasswordCredentials(username, password),
-    operateAs: operateAs ?? username,
+    operateAs: (operateAs ?? username) as OperateAsUsername,
   };
   return guardedLogin(
     conn,
-    () => conn.client.login(credentials),
+    () => loginClientWithPassword(conn.client, credentials),
     timeout,
     rejected,
   );
@@ -166,13 +193,15 @@ export function loginPassword(
 
 /** Signs in with a key pair. A rejection throws `rejected` (`auth_failed` or `auth_expired`). */
 export function loginKey(
-  conn: EnterpriseConnection,
+  conn: UnauthenticatedEnterpriseConnection,
   username: string,
   keyPair: KeyPair,
   operateAs: string | undefined,
   timeout: number,
   rejected: Rejected,
-): Promise<void> {
+): Promise<AuthenticatedEnterpriseConnection> {
+  // TODO: DH-24026 will add createKeyPairCredentials; use it and drop the
+  // KeyPairCredentials cast.
   return guardedLogin(
     conn,
     () =>
@@ -198,17 +227,22 @@ const SAML_MIN_HOLD_MS = 5_000;
  * also retry other slow failures.
  */
 export async function loginSaml(
-  first: EnterpriseConnection,
-  reconnect: () => Promise<EnterpriseConnection>,
+  first: UnauthenticatedEnterpriseConnection,
+  reconnect: () => Promise<UnauthenticatedEnterpriseConnection>,
   nonce: string,
-): Promise<EnterpriseConnection> {
+): Promise<AuthenticatedEnterpriseConnection> {
+  // TODO: DH-24026 will add loginClientWithExternal, which does this retry loop
+  // (onRetry for the notice); use it and drop the cast below.
   let conn = first;
   let showedRetryNotice = false;
   for (;;) {
     const started = Date.now();
     try {
       await conn.client.login({ type: "saml", token: nonce });
-      return conn;
+      return {
+        ...conn,
+        client: conn.client as unknown as AuthenticatedEnterpriseClient,
+      };
     } catch (e) {
       disconnect(conn);
       if (e instanceof DhError || Date.now() - started < SAML_MIN_HOLD_MS) {
@@ -235,7 +269,7 @@ export async function loginSaml(
 
 /** Who `conn` is signed in as; how SSO learns the user name. Closes `conn` on failure. */
 export async function userName(
-  conn: EnterpriseConnection,
+  conn: AuthenticatedEnterpriseConnection,
   timeout: number,
 ): Promise<string> {
   try {
@@ -257,7 +291,9 @@ export interface LabeledKey extends KeyPair {
 }
 
 /** Where key uploads go; reported when they fail. */
-async function aclWriter(conn: EnterpriseConnection): Promise<string> {
+async function aclWriter(
+  conn: AuthenticatedEnterpriseConnection,
+): Promise<string> {
   try {
     const { dbAclWriterHost, dbAclWriterPort } = await withTimeout<{
       dbAclWriterHost: string;
@@ -297,7 +333,7 @@ export function newKey(): LabeledKey {
 
 /** Uploads `keyPair`'s public key for `username`. */
 export async function uploadKey(
-  conn: EnterpriseConnection,
+  conn: AuthenticatedEnterpriseConnection,
   username: string,
   keyPair: LabeledKey,
 ): Promise<void> {
@@ -341,7 +377,7 @@ export const DELETE_KEY_TIMEOUT_MS = 5_000;
 
 /** Deletes exactly this public key for `username`; other keys are untouched. */
 export async function deleteKey(
-  conn: EnterpriseConnection,
+  conn: AuthenticatedEnterpriseConnection,
   username: string,
   keyPair: KeyPair,
 ): Promise<void> {

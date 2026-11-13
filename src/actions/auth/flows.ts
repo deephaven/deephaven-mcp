@@ -5,9 +5,9 @@ import {
   DELETE_KEY_TIMEOUT_MS,
   deleteKey,
   disconnect as disconnectEnterprise,
-  type EnterpriseConnection,
   loginKey,
   newKey,
+  type UnauthenticatedEnterpriseConnection,
   uploadKey,
 } from "./enterprise.ts";
 import type { KeyPair } from "./keyfile.ts";
@@ -437,7 +437,7 @@ export async function authorizeComputer(
     ),
   );
 
-  let check: EnterpriseConnection | undefined;
+  let check: UnauthenticatedEnterpriseConnection | undefined;
   try {
     await uploadKey(conn, session.user, key);
     // An uploaded key can still be refused at login (e.g. a server ACL), so try it.
@@ -491,8 +491,15 @@ export async function revokeOwnKey(
   const conn = await connectEnterprise(origin, cacheRoot, timeout, timeoutMs());
   try {
     const keyPair = keyPairOf(cred);
-    await loginKey(conn, user, keyPair, operateAs, timeout, "auth_expired");
-    await deleteKey(conn, user, keyPair);
+    const signedIn = await loginKey(
+      conn,
+      user,
+      keyPair,
+      operateAs,
+      timeout,
+      "auth_expired",
+    );
+    await deleteKey(signedIn, user, keyPair);
     return true;
   } finally {
     disconnectEnterprise(conn);

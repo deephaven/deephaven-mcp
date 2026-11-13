@@ -5,7 +5,7 @@
     "": {
       "name": "dh",
       "dependencies": {
-        "@deephaven-enterprise/auth-nodejs": "2026.1.59",
+        "@deephaven-enterprise/jsapi-nodejs": "2026.1.59",
         "@deephaven/jsapi-nodejs": "^1.29.0",
         "commander": "^15.0.0",
         "ink": "^7.1.1",
@@ -14,6 +14,7 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.5.15",
+        "@deephaven/jsapi-types": "1.0.0-dev0.40.5",
         "@types/bun": "^1.4.2",
         "@types/react": "^19.2.0",
         "@types/semver": "^7.8.0",
@@ -47,15 +48,25 @@
 
     "@deephaven-enterprise/client-utils": ["@deephaven-enterprise/client-utils@2026.1.59", "", { "dependencies": { "@deephaven-enterprise/jsapi-types": "2026.1.59", "@deephaven/jsapi-types": "1.0.0-dev0.40.5", "@deephaven/log": "^1.8.0", "@deephaven/utils": "^1.29.0" } }, "sha512-5+KVlxtb+w9xz61HJrR3XcSsaf1N1/uI0HtoISiBtXtx1laN2bZQSvhT8h4rqKJNCh6YnNIiyrumfS8jIAXo6g=="],
 
+    "@deephaven-enterprise/jsapi-manager": ["@deephaven-enterprise/jsapi-manager@2026.1.59", "", { "dependencies": { "@deephaven-enterprise/client-utils": "2026.1.59", "@deephaven-enterprise/jsapi-types": "2026.1.59", "@deephaven-enterprise/query-utils": "2026.1.59", "@deephaven/jsapi-types": "1.0.0-dev0.40.5", "@deephaven/log": "^1.8.0", "@deephaven/utils": "^1.29.0", "@internationalized/date": "^3.12.2" } }, "sha512-mvDmbAFCw5JUXB90v2MMIV2JFceS4nf04oJPCjiqfjgJadM8lBO5gnwHN5/qbyXthuIrlhnZUm1PGDEEAYjV1w=="],
+
+    "@deephaven-enterprise/jsapi-nodejs": ["@deephaven-enterprise/jsapi-nodejs@2026.1.59", "", { "dependencies": { "@deephaven-enterprise/auth-nodejs": "2026.1.59", "@deephaven-enterprise/client-utils": "2026.1.59", "@deephaven-enterprise/jsapi-manager": "2026.1.59", "@deephaven-enterprise/jsapi-types": "2026.1.59", "@deephaven-enterprise/query-utils": "2026.1.59", "@deephaven/jsapi-nodejs": "^1.29.0", "@deephaven/jsapi-types": "1.0.0-dev0.40.5", "@deephaven/utils": "^1.29.0" } }, "sha512-AdLFYJxNtUX2NmIXOuM8xhO9T6CvRlsET5tUW00HZhv6V3DsQaTmx9LrrBp5dbdpCPzaagkWLYPjHwWj2H75DA=="],
+
     "@deephaven-enterprise/jsapi-types": ["@deephaven-enterprise/jsapi-types@2026.1.59", "", { "dependencies": { "@deephaven/jsapi-types": "1.0.0-dev0.40.5" } }, "sha512-qYN7nNZcuuj1p346GCnf+tVQPIR5FyimgqXNFgPK0wtM759Px4qpK8YLHiVR00CjQIqiX1zBT52q2+gULxe11g=="],
+
+    "@deephaven-enterprise/query-utils": ["@deephaven-enterprise/query-utils@2026.1.59", "", { "dependencies": { "@deephaven-enterprise/client-utils": "2026.1.59", "@deephaven-enterprise/jsapi-types": "2026.1.59", "@deephaven/jsapi-types": "1.0.0-dev0.40.5", "@deephaven/log": "^1.8.0", "@deephaven/utils": "^1.29.0", "@internationalized/date": "^3.12.2", "nanoid": "^5.1.6", "shell-quote": "^1.8.4" } }, "sha512-fQRnMFuUGgmKxllLWtu08pwLSucIUZSaWmTBFgnUwG2YXTRYlsIoxE5XZ645ioAFe6IBqCww0m70pFOlEjIuxw=="],
 
     "@deephaven/jsapi-nodejs": ["@deephaven/jsapi-nodejs@1.29.0", "", { "dependencies": { "@deephaven/jsapi-types": "^1.0.0-dev0.40.4", "@deephaven/log": "^1.8.0", "@deephaven/utils": "^1.29.0", "ws": "^8.18.0" } }, "sha512-35gQzax9bnc/0Y22eF8jY25KD4TQ23uv92cN60z8gl0z8djhqSsgTFaEOnZ8iGy9IqnC+xSzwCVWlVdKmHWfCQ=="],
 
-    "@deephaven/jsapi-types": ["@deephaven/jsapi-types@1.0.0-dev0.40.9", "", {}, "sha512-NwMxFmNCnRV4/2+MdN/8vUGiEtXFgL1K/+iXTKKvi+Brje5JHOSCn2miCKR9tAn0LNb/UdmJq+DSIZqvz8cU/Q=="],
+    "@deephaven/jsapi-types": ["@deephaven/jsapi-types@1.0.0-dev0.40.5", "", {}, "sha512-ysRBewjXwt/Agops1edt9olw9oY2ShL8ySE1fyqNBCnL6iwQ1KIFmN2FZVnu8QGChJG106jGvm7w3wA7YIwiXg=="],
 
     "@deephaven/log": ["@deephaven/log@1.8.0", "", { "dependencies": { "event-target-shim": "^6.0.2", "jszip": "^3.10.1", "safe-stable-stringify": "^2.5.0" } }, "sha512-gzp6/7qW4W8Re+DLSaG33KEQJ30OrrNq3cNQA8fUeXQrabSNOIsyeVOaerQ/57c4zWhWVKamplax0LIYRsmDiw=="],
 
     "@deephaven/utils": ["@deephaven/utils@1.29.0", "", { "dependencies": { "@deephaven/log": "^1.8.0", "nanoid": "^5.0.7" } }, "sha512-Pnn+HI06jBQGI4y7AgR40Mnklia+FgGXRLC6tUQTnorZzd6eJP3HEGJFpWMoroFArnatROXpRf9NKnde907Vbg=="],
+
+    "@internationalized/date": ["@internationalized/date@3.12.4", "", { "dependencies": { "@swc/helpers": "^0.5.0" } }, "sha512-M1dEn4c1U1HsSlaVR8upZtSqvXrTkHDfv18H01uCSJyjVLDxnBR38v/fMxecmlwXKR4i9HeZcmgQAPE6A+aGJQ=="],
+
+    "@swc/helpers": ["@swc/helpers@0.5.24", "", {}, "sha512-6tcXo4kA8HgGO7AVmawB57RYi/piBPYVHVcO6dXjX+SZw8GoHmi262sp4v2Ha2kNP9Cx84qei27yT+fjS1lxgg=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
@@ -227,9 +238,7 @@
 
     "yoga-layout": ["yoga-layout@3.2.1", "", {}, "sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ=="],
 
-    "@deephaven-enterprise/client-utils/@deephaven/jsapi-types": ["@deephaven/jsapi-types@1.0.0-dev0.40.5", "", {}, "sha512-ysRBewjXwt/Agops1edt9olw9oY2ShL8ySE1fyqNBCnL6iwQ1KIFmN2FZVnu8QGChJG106jGvm7w3wA7YIwiXg=="],
-
-    "@deephaven-enterprise/jsapi-types/@deephaven/jsapi-types": ["@deephaven/jsapi-types@1.0.0-dev0.40.5", "", {}, "sha512-ysRBewjXwt/Agops1edt9olw9oY2ShL8ySE1fyqNBCnL6iwQ1KIFmN2FZVnu8QGChJG106jGvm7w3wA7YIwiXg=="],
+    "@deephaven/jsapi-nodejs/@deephaven/jsapi-types": ["@deephaven/jsapi-types@1.0.0-dev0.40.9", "", {}, "sha512-NwMxFmNCnRV4/2+MdN/8vUGiEtXFgL1K/+iXTKKvi+Brje5JHOSCn2miCKR9tAn0LNb/UdmJq+DSIZqvz8cU/Q=="],
 
     "@deephaven/jsapi-nodejs/ws": ["ws@8.22.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg=="],
 

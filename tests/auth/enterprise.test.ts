@@ -1,20 +1,35 @@
 import { expect, jest, mock, spyOn, test } from "bun:test";
+import type {
+  AuthenticatedEnterpriseClient,
+  UnauthenticatedEnterpriseClient,
+} from "@deephaven-enterprise/jsapi-nodejs";
 import {
-  type EnterpriseConnection,
   loginSaml,
+  type UnauthenticatedEnterpriseConnection,
 } from "../../src/actions/auth/enterprise.ts";
+import type { EnterpriseApi } from "../../src/actions/auth/jsapi.ts";
 import { DhError } from "../../src/errors.ts";
 import * as output from "../../src/output.ts";
 
 type SamlCredentials = { type: "saml"; token: string };
 
+/** `client` once signed in; the same object, branded as loginSaml returns it. */
+function signedIn(
+  client: UnauthenticatedEnterpriseClient,
+): AuthenticatedEnterpriseClient {
+  return client as unknown as AuthenticatedEnterpriseClient;
+}
+
 function connection(login: (credentials: SamlCredentials) => Promise<void>) {
   const call = mock(login);
   const disconnect = mock(() => {});
-  const conn: EnterpriseConnection = {
+  const conn: UnauthenticatedEnterpriseConnection = {
     origin: "https://example.test",
-    dhe: {},
-    client: { login: call, disconnect },
+    dhe: {} as EnterpriseApi,
+    client: {
+      login: call,
+      disconnect,
+    } as unknown as UnauthenticatedEnterpriseClient,
   };
   return { conn, call, disconnect };
 }
@@ -24,9 +39,11 @@ test("loginSaml: a pending sign-in has no overall timeout", async () => {
   const pending = Promise.withResolvers<void>();
   try {
     const first = connection(() => pending.promise);
-    const reconnect = mock(async (): Promise<EnterpriseConnection> => {
-      throw new Error("Unexpected reconnect");
-    });
+    const reconnect = mock(
+      async (): Promise<UnauthenticatedEnterpriseConnection> => {
+        throw new Error("Unexpected reconnect");
+      },
+    );
     let settled = false;
     const attempt = loginSaml(first.conn, reconnect, "nonce");
     const observed = attempt.then(
@@ -44,7 +61,7 @@ test("loginSaml: a pending sign-in has no overall timeout", async () => {
     expect(settled).toBe(false);
 
     pending.resolve();
-    expect(await attempt).toBe(first.conn);
+    expect((await attempt).client).toBe(signedIn(first.conn.client));
     await observed;
     expect(first.call.mock.calls).toEqual([[{ type: "saml", token: "nonce" }]]);
     expect(first.disconnect).not.toHaveBeenCalled();
@@ -75,8 +92,8 @@ test("loginSaml: retries server wait-limit rejections beyond five minutes", asyn
       return next.conn;
     });
 
-    expect(await loginSaml(first.conn, reconnect, "same-nonce")).toBe(
-      success.conn,
+    expect((await loginSaml(first.conn, reconnect, "same-nonce")).client).toBe(
+      signedIn(success.conn.client),
     );
     expect(Date.now()).toBe(360_000);
     expect(reconnect).toHaveBeenCalledTimes(6);
@@ -114,7 +131,7 @@ for (const [elapsed, retry] of [
       const attempt = loginSaml(first.conn, reconnect, "nonce");
 
       if (retry) {
-        expect(await attempt).toBe(next.conn);
+        expect((await attempt).client).toBe(signedIn(next.conn.client));
         expect(notice).toHaveBeenCalledTimes(1);
         expect(reconnect).toHaveBeenCalledTimes(1);
         expect(next.call.mock.calls).toEqual([
@@ -144,9 +161,11 @@ test("loginSaml: a DhError remains final even after a long hold", async () => {
       jest.advanceTimersByTime(60_000);
       throw failure;
     });
-    const reconnect = mock(async (): Promise<EnterpriseConnection> => {
-      throw new Error("Unexpected reconnect");
-    });
+    const reconnect = mock(
+      async (): Promise<UnauthenticatedEnterpriseConnection> => {
+        throw new Error("Unexpected reconnect");
+      },
+    );
 
     await expect(loginSaml(first.conn, reconnect, "nonce")).rejects.toBe(
       failure,
@@ -167,9 +186,11 @@ test("loginSaml: a failed reconnect is reported", async () => {
       throw new Error("Server wait ended");
     });
     const failure = new DhError("server_unreachable", "Connection lost");
-    const reconnect = mock(async (): Promise<EnterpriseConnection> => {
-      throw failure;
-    });
+    const reconnect = mock(
+      async (): Promise<UnauthenticatedEnterpriseConnection> => {
+        throw failure;
+      },
+    );
 
     await expect(loginSaml(first.conn, reconnect, "nonce")).rejects.toBe(
       failure,

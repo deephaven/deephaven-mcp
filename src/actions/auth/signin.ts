@@ -15,6 +15,7 @@ import {
   loginCommunity,
 } from "./community.ts";
 import {
+  type AuthenticatedEnterpriseConnection,
   connectEnterprise,
   disconnect as disconnectEnterprise,
   type EnterpriseAuthConfig,
@@ -23,6 +24,7 @@ import {
   loginKey,
   loginPassword,
   loginSaml,
+  type UnauthenticatedEnterpriseConnection,
   userName,
 } from "./enterprise.ts";
 import type { KeyPair } from "./keyfile.ts";
@@ -38,12 +40,13 @@ export interface Server {
   kind: Kind;
   /** Where the server's client library is cached. */
   cacheRoot: string;
-  enterprise?: EnterpriseConnection;
+  enterprise?: UnauthenticatedEnterpriseConnection;
   community?: CommunityConnection;
 }
 
 /** A signed-in server. */
-export interface Session extends Server {
+export interface Session extends Omit<Server, "enterprise"> {
+  enterprise?: AuthenticatedEnterpriseConnection;
   user: string;
   /** Enterprise user being acted as, if not `user`. */
   operateAs?: string;
@@ -155,35 +158,37 @@ export async function signIn(
   if (server.community) {
     const login = request as CommunityLogin;
     await loginCommunity(server.community, login, timeout, rejected);
-    return { ...server, user: communityUser(login) };
+    // A Community server has no Enterprise connection; leave the field out.
+    const { enterprise: _enterprise, ...community } = server;
+    return { ...community, user: communityUser(login) };
   }
   const conn = enterpriseConnection(server);
   switch (request.method) {
     case "private-key":
-      await loginKey(
-        conn,
-        request.username,
-        request.keyPair,
-        request.operateAs,
-        timeout,
-        rejected,
-      );
       return {
         ...server,
+        enterprise: await loginKey(
+          conn,
+          request.username,
+          request.keyPair,
+          request.operateAs,
+          timeout,
+          rejected,
+        ),
         user: request.username,
         operateAs: request.operateAs,
       };
     case "password":
-      await loginPassword(
-        conn,
-        request.username,
-        request.password,
-        request.operateAs,
-        timeout,
-        rejected,
-      );
       return {
         ...server,
+        enterprise: await loginPassword(
+          conn,
+          request.username,
+          request.password,
+          request.operateAs,
+          timeout,
+          rejected,
+        ),
         user: request.username,
         operateAs: request.operateAs,
       };
@@ -208,9 +213,9 @@ export async function signIn(
 /** Opens the SSO page and waits for the browser sign-in; returns the signed-in connection. */
 async function waitForSaml(
   server: Server,
-  conn: EnterpriseConnection,
+  conn: UnauthenticatedEnterpriseConnection,
   request: SignInRequest & { method: "saml" },
-): Promise<EnterpriseConnection> {
+): Promise<AuthenticatedEnterpriseConnection> {
   const nonce = samlNonce();
   const url = signInUrl(request.saml.loginUrl, nonce);
   if (request.browser) {
@@ -230,7 +235,9 @@ async function waitForSaml(
 }
 
 /** `server`'s Enterprise connection; an `internal` error for a Community server. */
-function enterpriseConnection(server: Server): EnterpriseConnection {
+function enterpriseConnection(
+  server: Server,
+): UnauthenticatedEnterpriseConnection {
   if (!server.enterprise) {
     throw new DhError("internal", `${server.origin} is not Enterprise`);
   }
@@ -238,7 +245,10 @@ function enterpriseConnection(server: Server): EnterpriseConnection {
 }
 
 /** Safe to call more than once, and on a server whose sign-in failed. */
-export function disconnectServer(server: Server): void {
+export function disconnectServer(server: {
+  enterprise?: EnterpriseConnection;
+  community?: CommunityConnection;
+}): void {
   if (server.enterprise) disconnectEnterprise(server.enterprise);
   if (server.community) disconnectCommunity(server.community.client);
 }
