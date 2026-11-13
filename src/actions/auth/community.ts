@@ -5,7 +5,7 @@ import {
   serverUnreachable as unreachable,
   withTimeout,
 } from "../../errors.ts";
-import { type CommunityApi, loadCommunityApi } from "./jsapi.ts";
+import { type CoreApi, loadCommunityApi } from "./jsapi.ts";
 import type { Method } from "./store.ts";
 
 export const ANONYMOUS_HANDLER =
@@ -17,7 +17,7 @@ export const PSK_HANDLER =
 export interface CommunityConnection {
   origin: string;
   /** The server's jsapi module. */
-  dh: CommunityApi;
+  dh: CoreApi;
   /** Its `CoreClient`. */
   client: dh.CoreClient;
   /** Auth handler classes the server offers. */
@@ -129,7 +129,7 @@ export async function loginCommunity(
 }
 
 /** `login` in the shape the jsapi's `CoreClient.login` takes; `dh` is the server's jsapi module. */
-function loginCredentials(dh: CommunityApi, login: CommunityLogin): object {
+function loginCredentials(dh: CoreApi, login: CommunityLogin): object {
   switch (login.method) {
     case "anonymous":
       return { type: dh.CoreClient.LOGIN_TYPE_ANONYMOUS };

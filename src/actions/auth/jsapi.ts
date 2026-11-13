@@ -7,8 +7,8 @@ import type { EnterpriseDhType } from "@deephaven-enterprise/jsapi-nodejs";
 import { DhError, describe } from "../../errors.ts";
 import { isTrustedSource } from "../../net.ts";
 
-/** The Community jsapi module (`dh`). */
-export type CommunityApi = typeof dh;
+/** The Core jsapi module (`dh`), served by Community servers and Core+ workers. */
+export type CoreApi = typeof dh;
 
 /** The Enterprise jsapi module (`iris`). */
 export type EnterpriseApi = EnterpriseDhType;
@@ -160,7 +160,7 @@ export async function loadCommunityApi(
   origin: URL,
   cacheRoot: string,
   timeout: number,
-): Promise<CommunityApi> {
+): Promise<CoreApi> {
   assertTrusted(origin);
   const dir = await originDir(cacheRoot, origin);
   await download(
