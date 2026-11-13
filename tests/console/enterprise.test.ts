@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import type { QueryInfo } from "@deephaven-enterprise/jsapi-nodejs";
 import type { Session } from "../../src/actions/auth/signin.ts";
 import {
   consoleInfo,
@@ -157,7 +158,8 @@ function query(
   name: string,
   state: string,
   type = "InteractiveConsole",
-) {
+): QueryInfo {
+  // Only the fields the console code reads are set.
   return {
     serial,
     name,
@@ -173,7 +175,7 @@ function query(
     typeSpecificFields: {
       TerminationDelay: { type: "long", value: "600000" },
     },
-  };
+  } as unknown as QueryInfo;
 }
 
 test("console defaults: reads server-supported defaults", async () => {
@@ -292,8 +294,10 @@ test("console defaults: null resets to server values and command settings overri
 });
 
 test("console detail: idle timeout is independent of initialization timeout", () => {
-  const config = query("full-id", "IC - dh CLI - abc123", "Running");
-  config.timeout = 20_000;
+  const config = {
+    ...query("full-id", "IC - dh CLI - abc123", "Running"),
+    timeout: 20_000,
+  };
   expect(consoleInfo(config).autoDeleteTimeoutSeconds).toBe(600);
   expect(
     consoleInfo({ ...config, typeSpecificFields: null })

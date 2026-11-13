@@ -1,4 +1,13 @@
-import type { AuthenticatedEnterpriseClient } from "@deephaven-enterprise/jsapi-nodejs";
+import type {
+  AuthenticatedEnterpriseClient,
+  ConsoleServerAddress,
+  PlainEditableQueryInfo,
+  QueryConfigurationType,
+  QueryConstants,
+  QueryInfo,
+  ServerConfigValues,
+  UserInfo,
+} from "@deephaven-enterprise/jsapi-nodejs";
 import type { CommandLifecycle } from "../../cli/lifecycle.ts";
 import { DhError, reasonOf, timeoutMs, withTimeout } from "../../errors.ts";
 import type { Session } from "../auth/signin.ts";
@@ -44,43 +53,6 @@ const STARTUP_TIMEOUT_MS = 600_000;
 const TEMPORARY_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 1_000;
 
-interface ApiQuery {
-  name?: string;
-  serial?: string | null;
-  type?: string;
-  status?: string;
-  designated?: { status?: string | null; shortCauses?: string | null } | null;
-  replicas?: { status?: string | null; shortCauses?: string | null }[];
-  scriptLanguage?: string | null;
-  heapSize?: number;
-  dbServerName?: string;
-  workerKind?: string;
-  jvmArgs?: string | null;
-  jvmArguments?: string[];
-  envVars?: string | null;
-  envVarEntries?: string[];
-  timeout?: number;
-  typeSpecificFields?: Record<string, { type: string; value: unknown }> | null;
-}
-
-interface ServerConfig {
-  defaultWorkerKind?: string;
-  jvmProfileDefault?: string;
-  workerKinds?: { name: string; protocols?: string[] }[];
-  scriptSessionProviders?: string[];
-}
-
-interface ConsoleServer {
-  name: string;
-}
-
-interface QueryConstants {
-  consoleDefaultHeap?: number;
-  minDataRatio?: number;
-  maxDataRatio?: number;
-  defaultSchedulingDetails?: readonly string[];
-}
-
 interface EnvironmentVariables {
   entries: string[];
   text: string;
@@ -100,9 +72,9 @@ function enterpriseClient(session: Session): AuthenticatedEnterpriseClient {
 }
 
 /** Read the server's known queries and keep only consoles created by this CLI. */
-function queries(session: Session): ApiQuery[] {
+function queries(session: Session): QueryInfo[] {
   const client = enterpriseClient(session);
-  const values: ApiQuery[] | undefined = client.getKnownConfigs?.();
+  const values: QueryInfo[] | undefined = client.getKnownConfigs?.();
   if (!Array.isArray(values)) {
     throw new DhError("console_unsupported", "The server cannot list consoles");
   }
@@ -110,7 +82,7 @@ function queries(session: Session): ApiQuery[] {
 }
 
 /** Check the type, name, and stable ID used to identify a CLI-created console. */
-function isCliConsole(query: ApiQuery): boolean {
+function isCliConsole(query: QueryInfo): boolean {
   return (
     query.type === QUERY_TYPE &&
     typeof query.name === "string" &&
@@ -143,7 +115,7 @@ export function isTerminal(state: string): boolean {
 }
 
 /** Resolve the most useful status exposed by the query API. */
-export function consoleState(query: ApiQuery): string {
+export function consoleState(query: QueryInfo): string {
   return (
     query.designated?.status ??
     query.replicas?.[0]?.status ??
@@ -153,7 +125,7 @@ export function consoleState(query: ApiQuery): string {
 }
 
 /** Convert an Enterprise query into the stable console shape used by actions. */
-export function consoleInfo(query: ApiQuery): ConsoleInfo {
+export function consoleInfo(query: QueryInfo): ConsoleInfo {
   const name = query.name ?? "";
   return {
     id: query.serial ?? "",
@@ -171,7 +143,7 @@ export function consoleInfo(query: ApiQuery): ConsoleInfo {
 }
 
 /** Read the idle grace period; query.timeout instead controls initialization. */
-function autoDeleteTimeoutOf(query: ApiQuery): number | null {
+function autoDeleteTimeoutOf(query: QueryInfo): number | null {
   const field = query.typeSpecificFields?.TerminationDelay;
   if (!field) return null;
   const milliseconds = Number(field.value);
@@ -190,7 +162,7 @@ function autoDeleteTimeoutOf(query: ApiQuery): number | null {
 }
 
 /** Read environment variables from either supported Enterprise API shape. */
-function environmentOf(query: ApiQuery): Record<string, string> {
+function environmentOf(query: QueryInfo): Record<string, string> {
   const entries = query.envVarEntries ?? [];
   const environment: Record<string, string> = {};
   for (let i = 0; i + 1 < entries.length; i += 2) {
@@ -229,11 +201,11 @@ export async function serverDefaults(
   session: Session,
 ): Promise<ConsoleServerSettings> {
   const client = enterpriseClient(session);
-  const config = await call<ServerConfig>(
+  const config = await call<ServerConfigValues>(
     client.getServerConfigValues?.(),
     "read console server settings",
   );
-  const serverList = await call<ConsoleServer[]>(
+  const serverList = await call<ConsoleServerAddress[]>(
     client.getDbServers?.(),
     "list console servers",
   );
@@ -257,8 +229,8 @@ export async function serverDefaults(
 
 /** Derive CLI defaults from raw server metadata without making network calls. */
 function deriveConsoleServerSettings(
-  config: ServerConfig,
-  serverList: ConsoleServer[],
+  config: ServerConfigValues,
+  serverList: ConsoleServerAddress[],
   constants: QueryConstants,
   queue: string,
 ): ConsoleServerSettings {
@@ -400,7 +372,7 @@ export async function createEnterpriseConsole(
 ): Promise<string> {
   const client = enterpriseClient(session);
   const capabilities = serverSettings ?? (await serverDefaults(session));
-  const types = await call<Map<string, { supportsCommunity?: boolean }>>(
+  const types = await call<Map<string, QueryConfigurationType>>(
     client.getQueryConfigurationTypes?.(),
     "read console query types",
   );
@@ -413,7 +385,7 @@ export async function createEnterpriseConsole(
   }
   validateConsoleSettings(settings, capabilities);
   const name = `${CLI_CONSOLE_PREFIX}${shortcode}`;
-  const userInfo = await call<{ operateAs?: string }>(
+  const userInfo = await call<UserInfo>(
     client.getUserInfo?.(),
     "read console owner",
   );
@@ -489,7 +461,7 @@ function consoleQuery(
   dataMemoryRatio: number,
   jvmProfile: string,
   scheduling: string[],
-) {
+): PlainEditableQueryInfo {
   return {
     additionalMemory: 0,
     adminGroups: [],

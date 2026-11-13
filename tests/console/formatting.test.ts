@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
+import type { QueryInfo } from "@deephaven-enterprise/jsapi-nodejs";
 import { consoleInfo } from "../../src/actions/console/enterprise.ts";
 import {
   consoleHeading,
@@ -11,7 +12,7 @@ test("console formatting: preserve heading, selection, and explanation indentati
   const console = consoleInfo({
     name: "IC - dh CLI - abc123",
     serial: "123",
-  });
+  } as unknown as QueryInfo);
   const explanation =
     "    No worker state is available. Startup may be pending; the reason is not confirmed.";
   expect(stripVTControlCharacters(consoleHeading(console))).toBe(
