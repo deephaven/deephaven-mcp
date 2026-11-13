@@ -1,0 +1,55 @@
+#!/bin/sh
+# Stand-in for a Cobra (Go) CLI, for `cli-plugin-kit scaffold` tests. Help text
+# follows Cobra's default template (written from it, not captured). Every
+# invocation is appended to $FAKE_LOG. `wipe` is careless: it ignores --help
+# and "runs", so tests can check when the generator would run it.
+[ -n "$FAKE_LOG" ] && echo "$*" >> "$FAKE_LOG"
+root() {
+  cat <<'HELP'
+App manages things.
+
+Usage:
+  app [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  db          Manage the database
+  help        Help about any command
+  serve       Run the HTTP server
+  wipe        Delete all data
+
+Flags:
+  -h, --help   help for app
+
+Use "app [command] --help" for more information about a command.
+HELP
+}
+db() {
+  cat <<'HELP'
+Manage the database.
+
+Usage:
+  app db [command]
+
+Available Commands:
+  migrate     Run pending migrations
+  reset       Drop and recreate the database
+
+Flags:
+  -h, --help   help for db
+HELP
+}
+leaf() {
+  printf 'Usage:\n  app %s [flags]\n\nFlags:\n  -h, --help   help for %s\n' "$1" "$1"
+}
+case "$*" in
+"--help"|"help") root ;;
+"help db"|"db --help") db ;;
+"help serve"|"serve --help") leaf serve ;;
+"help completion"|"completion --help") leaf completion ;;
+"help wipe") leaf wipe ;;
+"db migrate --help") leaf "db migrate" ;;
+"db reset --help") leaf "db reset" ;;
+wipe*) echo "wiped everything" ;;
+*) echo "Error: unknown command \"$1\" for \"app\"" >&2; exit 1 ;;
+esac

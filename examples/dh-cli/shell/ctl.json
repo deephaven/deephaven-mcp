@@ -1,0 +1,319 @@
+{
+  "schema": 1,
+  "name": "ctl",
+  "description": "Manage intraday partitions and historical metadata indexes (dhctl).",
+  "tool": {
+    "path": "/usr/illumon/latest/bin/dhctl",
+    "runAs": {
+      "account": "admin",
+      "unlessFlags": [
+        "-k",
+        "--key",
+        "-user",
+        "--user"
+      ]
+    }
+  },
+  "commands": [
+    {
+      "name": "intraday",
+      "description": "Truncate, delete or rescan intraday partitions on the Data Import Servers.",
+      "commands": [
+        {
+          "name": "truncate",
+          "description": "truncate removes data at the specified partition(s) and disables further data ingestion.",
+          "argv": [
+            "intraday",
+            "truncate"
+          ],
+          "options": [
+            {
+              "flags": "-d, --dry-run",
+              "description": "print what actions would be performed without actually doing it"
+            },
+            {
+              "flags": "-e, --exclude-dis <arg>",
+              "description": "do not send requests to data import servers specified in an exclude parameter"
+            },
+            {
+              "flags": "-i, --include-dis <arg>",
+              "description": "send requests only to data import servers specified in an include parameter"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-part, --partitions <arg>",
+              "description": "partition to act on (all internal partitions), as namespace.tableName.columnPartition"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-s, --singlePartition <arg>",
+              "description": "single partition to act on, as namespace.tableName.internalPartition.columnPartition"
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "delete completely removes the directories for the specified partition(s), clearing the way for new data to be ingested.",
+          "argv": [
+            "intraday",
+            "delete"
+          ],
+          "options": [
+            {
+              "flags": "-d, --dry-run",
+              "description": "print what actions would be performed without actually doing it"
+            },
+            {
+              "flags": "-e, --exclude-dis <arg>",
+              "description": "do not send requests to data import servers specified in an exclude parameter"
+            },
+            {
+              "flags": "-i, --include-dis <arg>",
+              "description": "send requests only to data import servers specified in an include parameter"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-part, --partitions <arg>",
+              "description": "partition to act on (all internal partitions), as namespace.tableName.columnPartition"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-s, --singlePartition <arg>",
+              "description": "single partition to act on, as namespace.tableName.internalPartition.columnPartition"
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ]
+        },
+        {
+          "name": "rescan",
+          "description": "Have each Data Import Server rescan its intraday locations for new directories.",
+          "argv": [
+            "intraday",
+            "rescan"
+          ],
+          "options": [
+            {
+              "flags": "-e, --exclude-dis <arg>",
+              "description": "do not send requests to data import servers specified in an exclude parameter"
+            },
+            {
+              "flags": "-i, --include-dis <arg>",
+              "description": "send requests only to data import servers specified in an include parameter"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "table to act on, as namespace.tableName or namespace.tableName.namespaceSet (System or User). If omitted, all intraday tables will be scanned."
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "metadata",
+      "description": "List, validate or rebuild historical metadata indexes (.tlmi files).",
+      "commands": [
+        {
+          "name": "list",
+          "description": "Lists all of the metadata snapshots in the specified namespaces and tables.",
+          "argv": [
+            "metadata",
+            "list"
+          ],
+          "options": [
+            {
+              "flags": "-e, --partition-filter <arg>",
+              "description": "A filter expression to select which column partitions to validate. The Partition column is always `Partition`"
+            },
+            {
+              "flags": "-f, --file <arg>",
+              "description": "A file to write the list output to. Optional. Defaults to stdout"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-p, --partitions <arg>",
+              "description": "The Column partition or partitions to validate."
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName or Namespace format. A wildcard '*' may be used to select all tables in all system namespaces.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ]
+        },
+        {
+          "name": "validate",
+          "description": "Validates that each metadata snapshot present for the specified namespaces and tables matches the actual state present at each location and generates a report.",
+          "argv": [
+            "metadata",
+            "validate"
+          ],
+          "options": [
+            {
+              "flags": "-e, --partition-filter <arg>",
+              "description": "A filter expression to select which column partitions to validate. The Partition column is always `Partition`"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-p, --partitions <arg>",
+              "description": "The Column partition or partitions to validate."
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName or Namespace format. A wildcard '*' may be used to select all tables in all system namespaces.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "description": "Updates the entire metadata index for the specified namespaces and tables.",
+          "argv": [
+            "metadata",
+            "update"
+          ],
+          "options": [
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName or Namespace format. A wildcard '*' may be used to select all tables in all system namespaces.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logger",
+      "description": "Generate binary loggers for tables.",
+      "commands": [
+        {
+          "name": "generate",
+          "description": "Generates a binary logger for the provided tables.",
+          "argv": [
+            "logger",
+            "generate"
+          ],
+          "options": [
+            {
+              "flags": "-d, --directory <arg>",
+              "description": "Generate loggers into the specified directory."
+            },
+            {
+              "flags": "--interface-validation <arg>",
+              "description": "The interface validation mode. Valid values: [IF_PRESENT,FORCE,SKIP]"
+            },
+            {
+              "flags": "-k, --key <arg>",
+              "description": "specify a private key file to use for authentication"
+            },
+            {
+              "flags": "-pf, --pwfile <arg>",
+              "description": "specify a file containing the base64 encoded password for the user that is set with --user"
+            },
+            {
+              "flags": "-t, --table-name <arg>",
+              "description": "The table or tables to act upon in Namespace.TableName format.",
+              "required": true
+            },
+            {
+              "flags": "-user, --user <arg>",
+              "description": "specify a user for authentication"
+            },
+            {
+              "flags": "-v, --verbose",
+              "description": "print additional logging, progress messages, and full exception text"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

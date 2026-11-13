@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "channel": "js",
+  "revision": "sha256:09cc17cb6c9d4d6f002f6604548cbe857f537676d1577a6562f76bdfd2a93774",
+  "cluster": {
+    "kind": "enterprise",
+    "version": "2026.01.261102164822g2f6a8ebf11"
+  },
+  "plugins": [
+    {
+      "name": "dbserver",
+      "kind": "js",
+      "description": "List the cluster's query and merge servers.",
+      "nouns": [
+        "dbserver"
+      ],
+      "spec": "dbserver/plugin.json",
+      "module": "dbserver/index.js",
+      "digest": "sha256:ca42f4b79219d07e7d610182e1cbaa05c96f97db5d3f522c6730b629b6c6fb5e",
+      "dh": ">=3.0.0",
+      "api": 1
+    }
+  ],
+  "shell": [
+    {
+      "name": "ctl",
+      "description": "Manage intraday partitions and historical metadata indexes (dhctl).",
+      "nouns": [
+        "ctl"
+      ]
+    },
+    {
+      "name": "deephaven",
+      "description": "Control a Deephaven node: its lifecycle, its cluster membership, and its material.",
+      "nouns": [
+        "service",
+        "node",
+        "etcd",
+        "keys",
+        "units",
+        "coreplus",
+        "tls"
+      ]
+    }
+  ]
+}

@@ -13,7 +13,11 @@ import { withFileLock } from "./lock.ts";
 
 /** Which Deephaven product a server is. */
 export type Kind = "enterprise" | "community";
-/** How a profile signs in. `saml`, `password` and `private-key` are Enterprise; the rest are Community. */
+/**
+ * How a profile signs in. `saml`, `password` and `private-key` are
+ * Enterprise; `ssh` is SSH access only, with no sign-in; the rest are
+ * Community.
+ */
 export type Method =
   | "saml"
   | "password"
@@ -21,7 +25,8 @@ export type Method =
   | "psk"
   | "basic"
   | "anonymous"
-  | "custom";
+  | "custom"
+  | "ssh";
 
 /** What's known about a server, keyed by origin in {@link Config.servers}. */
 export interface ServerEntry {
@@ -30,6 +35,35 @@ export interface ServerEntry {
   caCert?: string;
   /** The legacy config entry it was first migrated from. */
   importedFrom?: string;
+  /** SSH access to the cluster's nodes: where `shell` plugins are discovered and run. */
+  ssh?: ServerSsh;
+  /** Per-plugin overrides of `ssh`, by plugin name. */
+  plugins?: Record<string, ServerPluginSettings>;
+}
+
+/** A server's SSH settings, shared by every profile on it. */
+export interface ServerSsh {
+  /** `shell` plugins are discovered and run only when true; false records a declined offer. */
+  enabled?: boolean;
+  /** SSH destinations, each passed to `ssh` as given. Unset: the server URL's hostname. */
+  hosts?: string[];
+  /** One of `hosts`, where runs go without `--ssh-host`. Unset, or not listed: the first. */
+  defaultHost?: string;
+  /** The bundle's path on the nodes; `shell/` is under it. Unset: `/usr/illumon/latest/dh-cli`. */
+  bundle?: string;
+}
+
+/** One server's overrides for one plugin, shared by every profile on that server. */
+export interface ServerPluginSettings {
+  /** The SSH destinations the plugin runs on instead of the server's `ssh.hosts`. */
+  sshHosts?: string[];
+  /** One of `sshHosts`, where runs go without `--ssh-host`. Unset, or not listed: the first. */
+  defaultSshHost?: string;
+  /**
+   * The one SSH destination, as older builds wrote it. Read as `sshHosts:
+   * [host]` when `sshHosts` is unset; removed on the next write to the entry.
+   */
+  host?: string;
 }
 
 /** One saved identity on one server. Its credential is stored separately, under the same id. */
@@ -38,7 +72,8 @@ export interface Profile {
   name: string;
   /** The server's origin, a key of {@link Config.servers}. */
   server: string;
-  user: string;
+  /** Unset for an SSH-only profile (`method: "ssh"`). */
+  user?: string;
   method: Method;
   /** Enterprise user to act as, if not `user`. */
   operateAs?: string;
@@ -78,6 +113,14 @@ export interface Config {
   servers: Record<string, ServerEntry>;
   /** By profile id. */
   profiles: Record<string, Profile>;
+  /** This machine's settings for `shell` plugins from a local bundle, by plugin name. */
+  plugins?: Record<string, PluginSettings>;
+}
+
+/** This machine's settings for one plugin. */
+export interface PluginSettings {
+  /** Replaces the spec's `tool.path` on this machine; local runs only. */
+  path?: string;
 }
 
 /** `credentials.json`: owner-only. */
@@ -178,6 +221,7 @@ export class Store {
     return await withFileLock(lock, LOCK_WAIT_MS, async () => {
       const state = await this.read();
       const value = await fn(state);
+      dropRemovedSettings(state.config);
       await writeAtomic(this.configPath, state.config, 0o644);
       await writeAtomic(this.credentialsPath, state.credentials, 0o600);
       return value;
@@ -205,6 +249,12 @@ export class Store {
       await writeAtomic(this.consoleDataPath, data, 0o600);
       return result;
     });
+  }
+
+  /** `fn` under the lock {@link update} takes, for other files in the config directory. */
+  async withLock<T>(fn: () => Promise<T>): Promise<T> {
+    await this.makeDir(false);
+    return await withFileLock(join(this.dir, "config.lock"), LOCK_WAIT_MS, fn);
   }
 
   /** Owner-only directory, re-securing an existing one. Call once per command, before writing. */
@@ -239,6 +289,37 @@ export class Store {
         `Run: chmod 600 ${path}`,
       );
     }
+  }
+}
+
+/**
+ * Removes plugin settings older builds wrote and nothing reads any more:
+ * `exec`, `prefix`, version pins and the declined SSH offer.
+ */
+function dropRemovedSettings(config: Config): void {
+  const removed = [
+    "exec",
+    "prefix",
+    "version",
+    "detected",
+    "realPath",
+    "checkedAt",
+  ];
+  const clean = (settings: Record<string, Record<string, unknown>>) => {
+    for (const [name, s] of Object.entries(settings)) {
+      for (const key of removed) delete s[key];
+      if (Object.keys(s).length === 0) delete settings[name];
+    }
+  };
+  delete (config as { sshOfferDeclined?: unknown }).sshOfferDeclined;
+  if (config.plugins) {
+    clean(config.plugins as Record<string, Record<string, unknown>>);
+    if (Object.keys(config.plugins).length === 0) delete config.plugins;
+  }
+  for (const server of Object.values(config.servers)) {
+    if (!server.plugins) continue;
+    clean(server.plugins as Record<string, Record<string, unknown>>);
+    if (Object.keys(server.plugins).length === 0) delete server.plugins;
   }
 }
 

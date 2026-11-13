@@ -40,7 +40,7 @@ test.each(
     try {
       const root = new Command("dh");
       for (const option of GLOBAL_OPTIONS) root.addOption(option);
-      registerCommand(root, rootCommand, new CommandLifecycle());
+      registerCommand(root, rootCommand(), new CommandLifecycle());
       await expect(root.parseAsync(argv, { from: "user" })).rejects.toBe(stop);
       expect(requireAuth).toHaveBeenCalledTimes(1);
       expect(requireAuth.mock.calls[0]?.[0]).toBe(expected);

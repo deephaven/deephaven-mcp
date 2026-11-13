@@ -1,11 +1,29 @@
 import { writeSync } from "node:fs";
 import { styleText } from "node:util";
 import { Command, CommanderError, Help } from "commander";
-import { commandPath, GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
+import { type Discovery, discoverPlugins } from "./actions/plugins/discover.ts";
+import { refreshPlugins } from "./actions/plugins/refresh.ts";
+import {
+  type ActiveProfile,
+  activeProfile,
+  readConfigQuietly,
+} from "./actions/plugins/settings.ts";
+import {
+  type CommandSpec,
+  commandAt,
+  commandPath,
+  GLOBAL_OPTIONS,
+  pluginExecOf,
+  registerCommand,
+} from "./cli/command.ts";
 import { CommandLifecycle } from "./cli/lifecycle.ts";
+import { routePluginArgs, startupArgs } from "./cli/plugin-args.ts";
 import { runWithLifecycle } from "./cli/run.ts";
+import { pluginGroup } from "./commands/plugin/index.ts";
+import { jsCommands } from "./commands/plugin/js.ts";
+import { pluginCommands } from "./commands/plugin/tool.ts";
 import { rootCommand } from "./commands/root.ts";
-import { commandUsageError } from "./errors.ts";
+import { commandUsageError, reasonOf } from "./errors.ts";
 import { err, reportError, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
 import { BIN, VERSION } from "./version.ts";
@@ -35,20 +53,47 @@ function outputFlagValue(
   return undefined;
 }
 
-/** The deepest command `args` name, e.g. `auth status` in `dh auth status extra`. */
-function commandIn(args: string[]): Command {
-  let cmd = root;
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i] ?? "";
-    if (a === "--") break;
-    // The global flags that take a value; the value isn't a command.
-    if (a === "--profile" || a === "-o" || a === "--output") i++;
-    if (a.startsWith("-")) continue;
-    const sub = cmd.commands.find((c) => c.name() === a);
-    if (!sub) break;
-    cmd = sub;
+/**
+ * The command tree `build` makes, plus `dh plugin` and each plugin's nouns,
+ * from what startup discovers (the local bundle and the caches; no network).
+ * Never fails: what can't be read is reported by `dh plugin list`.
+ */
+async function withPlugins(
+  build: (found?: Discovery) => CommandSpec<never>,
+  args: string[],
+): Promise<CommandSpec<never>> {
+  const builtins = [...(build().commands ?? []).map((c) => c.name), "plugin"];
+  const config = await readConfigQuietly();
+  let active: ActiveProfile | undefined;
+  try {
+    active = activeProfile(config, startupArgs(args).profile);
+  } catch {
+    // An unknown --profile: the default's plugins, so the command reports it.
+    active = activeProfile(config, undefined);
   }
-  return cmd;
+  let found: Discovery;
+  try {
+    found = await discoverPlugins(config, active, builtins);
+  } catch (e) {
+    const reason = `can't read plugins: ${reasonOf(e) ?? "unknown error"}`;
+    found = {
+      sources: [],
+      noSource: [{ channel: "shell", reason }],
+      plugins: [],
+      builtins,
+    };
+  }
+  const spec = build(found);
+  return {
+    ...spec,
+    commands: [
+      ...(spec.commands ?? []),
+      pluginGroup(found),
+      ...found.plugins.flatMap((p) =>
+        p.channel === "js" ? jsCommands(p) : pluginCommands(p),
+      ),
+    ],
+  };
 }
 
 const root = new Command()
@@ -62,6 +107,21 @@ const root = new Command()
     styleOptionTerm: blue,
     styleSubcommandTerm: blue,
     styleArgumentTerm: blue,
+    // A plugin's commands take only `-o` of the global flags (and their own
+    // -h); over SSH, `--profile`, `--ssh-host` (hidden elsewhere) and
+    // `--no-prompt` too.
+    visibleGlobalOptions(cmd) {
+      const all = Help.prototype.visibleGlobalOptions.call(this, cmd);
+      const exec = pluginExecOf(cmd);
+      if (!exec) return all;
+      const shown =
+        exec === "ssh"
+          ? ["--output", "--profile", "--ssh-host", "--no-prompt"]
+          : ["--output"];
+      return shown.flatMap((long) =>
+        GLOBAL_OPTIONS.filter((o) => o.long === long),
+      );
+    },
     // Show the version under "Usage:"; it matters because the CLI updates itself.
     formatHelp(cmd, helper) {
       const [usage = "", ...rest] = Help.prototype.formatHelp
@@ -81,20 +141,21 @@ const root = new Command()
   .exitOverride();
 for (const option of GLOBAL_OPTIONS) root.addOption(option);
 // After the settings above, so subcommands inherit them.
+const args = process.argv.slice(2);
 const lifecycle = new CommandLifecycle();
-registerCommand(root, rootCommand, lifecycle);
+registerCommand(root, await withPlugins(rootCommand, args), lifecycle);
 
-setFormat(formatFromArgs(process.argv.slice(2)));
+setFormat(formatFromArgs(args));
 let code = 0;
 try {
   await runWithLifecycle(lifecycle, async () => {
     try {
-      await root.parseAsync();
+      await root.parseAsync(routePluginArgs(root, args), { from: "user" });
     } catch (error) {
       if (error instanceof CommanderError && error.exitCode !== 0) {
         throw commandUsageError(
           error.message,
-          commandPath(commandIn(process.argv.slice(2))),
+          commandPath(commandAt(root, args).cmd),
         );
       }
       throw error;
@@ -107,11 +168,17 @@ try {
     ...lifecycle.failureReport,
     command:
       lifecycle.failureReport.command ??
-      commandPath(commandIn(process.argv.slice(2)), false),
+      commandPath(commandAt(root, args).cmd, false),
   });
 }
 
+// Not after a cancel: the user wants out.
 if (code !== 3) {
+  try {
+    await refreshPlugins(commandAt(root, args).cmd, startupArgs(args).profile);
+  } catch (e) {
+    if (process.env.DH_DEBUG) err(`${BIN}: plugin check failed: ${e}`);
+  }
   try {
     await autoUpdate();
   } catch (e) {

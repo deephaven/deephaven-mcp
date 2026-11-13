@@ -360,7 +360,7 @@ test("trustAndResolveServer: interrupted discovery reports only the safe address
 });
 
 test("signInFor: a saved key logs in with its key type, not the credential's tag", async () => {
-  const profile: Profile = {
+  const profile: Profile & { user: string } = {
     name: "dhe.example.com:alice",
     server: "https://dhe.example.com",
     user: "alice",

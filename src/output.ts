@@ -25,6 +25,13 @@ export function err(text: string): void {
   writeSync(2, `${text}\n`);
 }
 
+/** Bytes as they are, e.g. a remote tool's stderr passed through. */
+export function errBytes(bytes: Uint8Array): void {
+  for (let at = 0; at < bytes.length; ) {
+    at += writeSync(2, bytes, at, bytes.length - at);
+  }
+}
+
 /** Progress and notices; never mixed into JSON stdout. */
 export function note(text: string): void {
   if (isJson()) err(styled(text, process.stderr));
@@ -96,6 +103,7 @@ export function reportError(e: unknown, report: FailureReport = {}): number {
         ...(error.detail ? { detail: error.detail } : {}),
         ...(error.hint ? { hint: error.hint } : {}),
         ...(error.cleanupDetail ? { cleanupDetail: error.cleanupDetail } : {}),
+        ...error.fields,
         ...fields,
       }),
     );

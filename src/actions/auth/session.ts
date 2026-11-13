@@ -97,30 +97,42 @@ export async function ensureCa(
     const theirs = await readFile(existing, "utf8").catch(() => "");
     await writeFile(bundle, `${theirs}\n${pem}`);
   }
+  const args = command ?? process.argv.slice(2);
+  const code = await runSelf(
+    [...args, ...extraArgs],
+    { NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
+    lifecycle,
+  );
+  if (dir) await rm(dir, { recursive: true, force: true });
+  process.exit(code);
+}
+
+/**
+ * Runs `dh` again with `args` and `env` added to this process's, stdio
+ * inherited; resolves to its exit code.
+ */
+export async function runSelf(
+  args: string[],
+  env: Record<string, string>,
+  lifecycle?: CommandLifecycle,
+): Promise<number> {
   // Compiled: argv[1] is a virtual path to skip, and runtime flags are built in.
   const runtime = STANDALONE
     ? []
     : [...process.execArgv, process.argv[1] ?? ""];
-  const args = command ?? process.argv.slice(2);
-  const proc = Bun.spawn(
-    [process.execPath, ...runtime, ...args, ...extraArgs],
-    {
-      env: { ...process.env, NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
-      stdio: ["inherit", "inherit", "inherit"],
-      // Avoid delivering terminal signals both directly and via the parent.
-      detached: process.platform !== "win32",
-    },
-  );
+  const proc = Bun.spawn([process.execPath, ...runtime, ...args], {
+    env: { ...process.env, ...env },
+    stdio: ["inherit", "inherit", "inherit"],
+    // Avoid delivering terminal signals both directly and via the parent.
+    detached: process.platform !== "win32",
+  });
   // The child owns cancellation; the parent forwards signals and waits for cleanup.
   const stopForwarding = forwardSignalsToChild(proc, lifecycle);
-  let code: number;
   try {
-    code = await proc.exited;
-    if (dir) await rm(dir, { recursive: true, force: true });
+    return await proc.exited;
   } finally {
     stopForwarding();
   }
-  process.exit(code);
 }
 
 const KIND_LABEL: Record<Kind, string> = {
@@ -217,7 +229,7 @@ async function savedKeyPair(cred: Credential): Promise<KeyPair | undefined> {
 
 /** How a saved profile signs in. */
 export async function signInRequestFor(
-  profile: Profile,
+  profile: Profile & { user: string },
   kind: Kind,
   cred: Credential,
 ): Promise<SignInRequest> {
@@ -341,11 +353,12 @@ async function profileSession(
     target: displayServerAddress(profile.server),
     profile: profile.name,
   });
+  const signed = signInProfile(profile);
   const server = state.config.servers[profile.server];
   const cred = state.credentials.credentials[id] ?? { type: "none" };
   await ensureCa(server?.caCert, [], undefined, lifecycle);
   const kind = server?.kind ?? "community";
-  const request = await signInRequestFor(profile, kind, cred);
+  const request = await signInRequestFor(signed, kind, cred);
   try {
     const session = await connectAndSignIn(
       profile.server,
@@ -412,4 +425,16 @@ export async function requireEnvironmentAuth(
     );
   }
   return await envSession(server, lifecycle);
+}
+
+/** `profile`, which must have a sign-in: an SSH-only one is `auth_required`. */
+export function signInProfile(profile: Profile): Profile & { user: string } {
+  if (profile.user === undefined || profile.method === "ssh") {
+    throw new DhError(
+      "auth_required",
+      `Profile "${profile.name}" has SSH access only`,
+      `To sign in: \`${BIN} auth login --profile ${profile.name}\``,
+    );
+  }
+  return { ...profile, user: profile.user };
 }

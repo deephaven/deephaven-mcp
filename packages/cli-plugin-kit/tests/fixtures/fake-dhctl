@@ -1,0 +1,59 @@
+#!/bin/sh
+# Stand-in for dhctl's --help, for `cli-plugin-kit scaffold` tests. The top level,
+# `intraday`, `metadata`, `logger`, `intraday rescan`, `metadata list` and
+# `metadata validate` reproduce real dhctl output; the other leaves are made up.
+# Every invocation is appended to $FAKE_LOG.
+[ -n "$FAKE_LOG" ] && echo "$*" >> "$FAKE_LOG"
+case "$*" in
+"--help")
+  echo "Usage: dhctl [intraday|metadata|logger] [truncate|delete|rescan|help|list|validate|update|generate] [arguments]" ;;
+"intraday --help")
+  echo "Usage: dhctl intraday [truncate|delete|rescan|help] [arguments]"
+  echo "For action specific help, specify an action and --help." ;;
+"metadata --help")
+  echo "Action failed: Usage: dhctl metadata [list|validate|update] [arguments]" >&2
+  echo "For action specific help, specify an action and --help." >&2
+  echo "" >&2
+  echo "Error: action '--help' is not valid for metadata" >&2
+  exit 1 ;;
+"logger --help")
+  echo "Action failed: Usage: dhctl logger [generate] [arguments]" >&2
+  echo "For action specific help, specify an action and --help." >&2
+  echo "" >&2
+  echo "Error: action '--help' is not valid for logger" >&2
+  exit 1 ;;
+"metadata validate --help")
+  cat <<'HELP'
+usage: dhctl metadata validate [-e <arg>] [-h] [-k <arg> | -user <arg>] [-p <arg>] [-pf <arg>] -t <arg>  [-v]
+Validates that each metadata snapshot present for the specified namespaces and tables
+matches the actual state present at each location and generates a report.
+
+Options are as follows:
+ -t,--table-name <arg>         The table or tables to act upon in Namespace.TableName or Namespace format.
+HELP
+  ;;
+"intraday rescan --help")
+  cat <<'HELP'
+usage: dhctl intraday rescan [-e <arg>] [-h] [-i <arg>] [-k <arg> | -user <arg>] [-pf <arg>] [-t <arg>]  [-v]
+ -e,--exclude-dis <arg>   do not send requests to data import servers specified in an exclude parameter
+ -h,--help                print help for a intraday command
+ -k,--key <arg>           specify a private key file to use for authentication
+ -t,--table-name <arg>    table to act on, as namespace.tableName or namespace.tableName.namespaceSet (System or User).
+                          If omitted, all intraday tables will be scanned.
+ -user,--user <arg>       specify a user for authentication
+HELP
+  ;;
+"metadata list --help")
+  cat <<'HELP'
+usage: dhctl metadata list [-e <arg>] [-f <arg>] [-h] [-k <arg> | -user <arg>] [-p <arg>] [-pf <arg>] -t <arg>  [-v]
+Lists all of the metadata snapshots in the specified namespaces and tables.
+
+Options are as follows:
+ -t,--table-name <arg>         The table or tables to act upon in Namespace.TableName or Namespace format.
+HELP
+  ;;
+*)
+  set -- $*
+  echo "usage: dhctl $1 $2 [-h] [-t <arg>]"
+  echo " -h,--help   print help" ;;
+esac
