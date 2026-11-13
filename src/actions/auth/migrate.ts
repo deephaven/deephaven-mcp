@@ -4,6 +4,10 @@
  */
 
 import { resolve } from "node:path";
+import {
+  type CommandLifecycle,
+  runLifecycleAction,
+} from "../../cli/lifecycle.ts";
 import { DhError, describe } from "../../errors.ts";
 import { BIN } from "../../version.ts";
 import {
@@ -27,6 +31,7 @@ import {
   resolveSecret,
   type SecretRef,
 } from "./legacy.ts";
+import { profileMigrationReport } from "./reporting.ts";
 import { loadedCa } from "./session.ts";
 import {
   connectServer,
@@ -237,6 +242,27 @@ export async function migrateLegacyEntry(
   legacyPath: string,
   item: LegacyItem,
   waiting: (what: string) => void,
+  lifecycle?: CommandLifecycle,
+): Promise<Migrated> {
+  const report = profileMigrationReport(item.origin);
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    migrateLegacyEntryAction,
+    store,
+    legacyPath,
+    item,
+    waiting,
+    lifecycle,
+  );
+}
+
+async function migrateLegacyEntryAction(
+  store: Store,
+  legacyPath: string,
+  item: LegacyItem,
+  waiting: (what: string) => void,
+  lifecycle?: CommandLifecycle,
 ): Promise<Migrated> {
   try {
     if (item.caCert && loadedCa() !== item.caCert) {
@@ -255,7 +281,13 @@ export async function migrateLegacyEntry(
     let saved: Pick<SavedSignIn, "name" | "warnings">;
     if (entry.verify) {
       waiting(entry.waiting);
-      saved = await signInAndSave(store, item, entry.request, toSave);
+      saved = await signInAndSave(
+        store,
+        item,
+        entry.request,
+        toSave,
+        lifecycle,
+      );
     } else {
       saved = await saveUnverified(store, item, entry.request, toSave);
     }
@@ -267,7 +299,13 @@ export async function migrateLegacyEntry(
       warnings: saved.warnings,
     };
   } catch (e) {
-    return { item, detail: migrationFailure(item, e), ok: false, warnings: [] };
+    lifecycle?.signal.throwIfAborted();
+    return {
+      item,
+      detail: migrationFailure(item, e),
+      ok: false,
+      warnings: [],
+    };
   }
 }
 
@@ -296,12 +334,19 @@ async function signInAndSave(
   item: LegacyItem,
   request: SignInRequest,
   toSave: ProfileToSave,
+  lifecycle?: CommandLifecycle,
 ): Promise<SavedSignIn> {
-  const server = await connectServer(item.origin, item.kind, store.cacheDir);
+  const server = await connectServer(
+    item.origin,
+    item.kind,
+    store.cacheDir,
+    lifecycle,
+  );
   try {
-    const session = await signIn(server, request);
+    const session = await signIn(server, request, "auth_failed", lifecycle);
     try {
-      return await commitSignIn(store, session, toSave);
+      lifecycle?.onCleanup(() => disconnectServer(session));
+      return await commitSignIn(store, session, toSave, undefined, lifecycle);
     } finally {
       disconnectServer(session);
     }

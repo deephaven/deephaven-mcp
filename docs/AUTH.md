@@ -246,17 +246,16 @@ errors go to stderr.
 
 ### Errors and exit codes
 
-When the server or a library gives a reason, the message ends with it, e.g.
-`… rejected the credentials: Login failed, verify credentials.` It's one line of
-at most 200 characters, in both human and JSON output.
-
-With `-o json`, an error is one line of JSON on stderr:
+With `-o json`, errors are one JSON line on stderr. An underlying reason, when
+available, appears in `detail` (up to 200 characters):
 
 ```json
 {
+  "type": "error",
   "error": "You're not logged in to a Deephaven server.",
   "code": "auth_required",
   "exit": 4,
+  "command": "auth status",
   "hint": "Run `dh auth login` to get started."
 }
 ```
@@ -341,8 +340,6 @@ prints what it's waiting on for each server:
 
 - `--ca-cert <file>` trusts that CA for the server, and `dh` remembers it with
   the server. `DH_CA_CERT` does the same for environment-only sign-in.
-- When a CA certificate requires `dh` to re-run, it forwards SIGINT (Ctrl-C)
-  and SIGTERM to the re-run process.
 - `HTTPS_PROXY` and `NO_PROXY` apply to finding the server and downloading its
   client library. The connection to the server itself doesn't use a proxy.
 

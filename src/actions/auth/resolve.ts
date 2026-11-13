@@ -64,8 +64,15 @@ async function answers(url: URL, signal: AbortSignal): Promise<boolean> {
 }
 
 /** Which kind of Deephaven server `origin` is, by the files it serves; null if neither. */
-async function detect(origin: URL, timeoutMs: number): Promise<Kind | null> {
-  const signal = AbortSignal.timeout(timeoutMs);
+async function detect(
+  origin: URL,
+  timeoutMs: number,
+  parentSignal?: AbortSignal,
+): Promise<Kind | null> {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = parentSignal
+    ? AbortSignal.any([timeoutSignal, parentSignal])
+    : timeoutSignal;
   const probe = (path: string) => answers(new URL(path, origin), signal);
   const [dhe, dhc] = await Promise.allSettled([
     probe("/iris/connection.json"),
@@ -83,12 +90,13 @@ async function detect(origin: URL, timeoutMs: number): Promise<Kind | null> {
 export async function resolveServer(
   input: string,
   timeoutMs = PROBE_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<ResolvedServer> {
   const urls = candidates(input);
   const errors: string[] = [];
   const kinds = await Promise.all(
     urls.map((url) =>
-      detect(url, timeoutMs).catch((e) => {
+      detect(url, timeoutMs, signal).catch((e) => {
         errors.push(`${url.origin}: ${describe(e)}`);
         return null;
       }),

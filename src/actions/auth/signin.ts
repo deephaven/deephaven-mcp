@@ -3,6 +3,10 @@
  * server kind or method. Nothing here asks the user anything.
  */
 
+import {
+  type CommandLifecycle,
+  runLifecycleAction,
+} from "../../cli/lifecycle.ts";
 import { DhError, timeoutMs } from "../../errors.ts";
 import { note } from "../../output.ts";
 import {
@@ -28,6 +32,7 @@ import {
   userName,
 } from "./enterprise.ts";
 import type { KeyPair } from "./keyfile.ts";
+import { authActionReport } from "./reporting.ts";
 import { openBrowser, samlNonce, signInUrl } from "./saml.ts";
 import type { Kind, Method } from "./store.ts";
 
@@ -91,21 +96,51 @@ export async function connectServer(
   origin: string,
   kind: Kind,
   cacheRoot: string,
+  lifecycle?: CommandLifecycle,
+): Promise<Server> {
+  const report = authActionReport("connecting", origin);
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    connectServerAction,
+    origin,
+    kind,
+    cacheRoot,
+    lifecycle,
+  );
+}
+
+async function connectServerAction(
+  origin: string,
+  kind: Kind,
+  cacheRoot: string,
+  lifecycle?: CommandLifecycle,
 ): Promise<Server> {
   const timeout = timeoutMs();
-  return kind === "enterprise"
-    ? {
-        origin,
-        kind,
-        cacheRoot,
-        enterprise: await connectEnterprise(origin, cacheRoot, timeout),
-      }
-    : {
-        origin,
-        kind,
-        cacheRoot,
-        community: await connectCommunity(origin, cacheRoot, timeout),
-      };
+  const server: Server =
+    kind === "enterprise"
+      ? {
+          origin,
+          kind,
+          cacheRoot,
+          enterprise: await connectEnterprise(origin, cacheRoot, timeout),
+        }
+      : {
+          origin,
+          kind,
+          cacheRoot,
+          community: await connectCommunity(origin, cacheRoot, timeout),
+        };
+  if (lifecycle) {
+    try {
+      lifecycle.signal.throwIfAborted();
+      lifecycle.onCleanup(() => disconnectServer(server));
+    } catch (error) {
+      disconnectServer(server);
+      throw error;
+    }
+  }
+  return server;
 }
 
 const COMMUNITY_LABELS: Partial<Record<Method, string>> = {
@@ -115,7 +150,15 @@ const COMMUNITY_LABELS: Partial<Record<Method, string>> = {
 };
 
 /** What the server advertises. Enterprise key login always works but isn't advertised. */
-export async function offeredMethods(server: Server): Promise<OfferedMethod[]> {
+export async function offeredMethods(
+  server: Server,
+  lifecycle?: CommandLifecycle,
+): Promise<OfferedMethod[]> {
+  const report = authActionReport("reading sign-in methods", server.origin);
+  return runLifecycleAction(lifecycle, report, offeredMethodsAction, server);
+}
+
+async function offeredMethodsAction(server: Server): Promise<OfferedMethod[]> {
   if (server.community) {
     return communityMethods(server.community.handlers).map((o) => ({
       method: o.method,
@@ -153,6 +196,27 @@ export async function signIn(
   server: Server,
   request: SignInRequest,
   rejected: "auth_failed" | "auth_expired" = "auth_failed",
+  lifecycle?: CommandLifecycle,
+): Promise<Session> {
+  const report = authActionReport(
+    request.method === "saml" ? "waiting for SSO sign-in" : "signing in",
+    server.origin,
+  );
+  report.phase = "signing_in";
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    signInAction,
+    server,
+    request,
+    rejected,
+  );
+}
+
+async function signInAction(
+  server: Server,
+  request: SignInRequest,
+  rejected: "auth_failed" | "auth_expired",
 ): Promise<Session> {
   const timeout = timeoutMs();
   if (server.community) {

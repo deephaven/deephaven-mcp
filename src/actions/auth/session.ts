@@ -1,6 +1,11 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  type CommandLifecycle,
+  forwardSignalsToChild,
+  runLifecycleAction,
+} from "../../cli/lifecycle.ts";
 import { DhError, isErrno, reasonOf } from "../../errors.ts";
 import { note } from "../../output.ts";
 import { BIN, STANDALONE } from "../../version.ts";
@@ -8,6 +13,7 @@ import type { CommunityMethod } from "./community.ts";
 import { keyPairOf } from "./flows.ts";
 import { type KeyPair, readKeyFile } from "./keyfile.ts";
 import { findByName } from "./profile.ts";
+import { authActionReport } from "./reporting.ts";
 import {
   candidates,
   type ResolvedServer,
@@ -37,10 +43,12 @@ async function connectAndSignIn(
   request: SignInRequest,
   cacheRoot: string,
   rejected: "auth_failed" | "auth_expired",
+  lifecycle?: CommandLifecycle,
 ): Promise<Session> {
-  const server = await connectServer(origin, kind, cacheRoot);
+  const server = await connectServer(origin, kind, cacheRoot, lifecycle);
   try {
-    return await signIn(server, request, rejected);
+    const session = await signIn(server, request, rejected, lifecycle);
+    return session;
   } catch (e) {
     disconnectServer(server);
     throw e;
@@ -64,6 +72,7 @@ export async function ensureCa(
   caCert: string | undefined,
   extraArgs: string[] = [],
   command?: string[],
+  lifecycle?: CommandLifecycle,
 ): Promise<void> {
   if (!caCert || loadedCa() === caCert) return;
   let pem: string;
@@ -99,17 +108,14 @@ export async function ensureCa(
       stdio: ["inherit", "inherit", "inherit"],
     },
   );
-  const forwardInterrupt = () => proc.kill("SIGINT");
-  const forwardTermination = () => proc.kill("SIGTERM");
-  process.on("SIGINT", forwardInterrupt);
-  process.on("SIGTERM", forwardTermination);
+  // The child owns cancellation; the parent forwards signals and waits for cleanup.
+  const stopForwarding = forwardSignalsToChild(proc, lifecycle);
   let code: number;
   try {
     code = await proc.exited;
     if (dir) await rm(dir, { recursive: true, force: true });
   } finally {
-    process.off("SIGINT", forwardInterrupt);
-    process.off("SIGTERM", forwardTermination);
+    stopForwarding();
   }
   process.exit(code);
 }
@@ -128,6 +134,27 @@ export async function trustAndResolveServer(
   servers: Config["servers"],
   caCert: string | undefined,
   rerun: string[],
+  lifecycle?: CommandLifecycle,
+): Promise<ResolvedServer> {
+  const report = authActionReport("finding the server", input);
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    trustAndResolveServerAction,
+    input,
+    servers,
+    caCert,
+    rerun,
+    lifecycle,
+  );
+}
+
+async function trustAndResolveServerAction(
+  input: string,
+  servers: Config["servers"],
+  caCert: string | undefined,
+  rerun: string[],
+  lifecycle?: CommandLifecycle,
 ): Promise<ResolvedServer> {
   // A saved origin is exact; anything else expands in discovery order.
   const exact = input in servers;
@@ -137,12 +164,16 @@ export async function trustAndResolveServer(
         .map((u) => u.origin)
         .find((o) => o in servers);
   const known = knownOrigin ? servers[knownOrigin] : undefined;
-  await ensureCa(caCert ?? known?.caCert, rerun);
+  await ensureCa(caCert ?? known?.caCert, rerun, undefined, lifecycle);
   // A new CA is checked by probing.
   if (knownOrigin && known && !caCert) {
     return { origin: knownOrigin, kind: known.kind };
   }
-  const found = await resolveServer(exact ? withPort(input) : input);
+  const found = await resolveServer(
+    exact ? withPort(input) : input,
+    undefined,
+    lifecycle?.signal,
+  );
   note(`✔ ${found.origin} (${KIND_LABEL[found.kind]})`);
   return found;
 }
@@ -207,7 +238,11 @@ export async function signInRequestFor(
 }
 
 /** `DH_SERVER` + `DH_*` credentials; never touches the config directory. */
-async function envSession(server: string): Promise<Session> {
+async function envSession(
+  server: string,
+  lifecycle?: CommandLifecycle,
+): Promise<Session> {
+  lifecycle?.setFailureReport({ target: server });
   const secrets = [
     "DH_PASSWORD",
     "DH_PSK",
@@ -217,14 +252,28 @@ async function envSession(server: string): Promise<Session> {
   if (secrets.length > 1) {
     throw new DhError("usage", `Set only one of ${secrets.join(", ")}`);
   }
-  await ensureCa(env("DH_CA_CERT"));
-  const { origin, kind } = await resolveServer(server);
+  await ensureCa(env("DH_CA_CERT"), [], undefined, lifecycle);
+  const { origin, kind } = await runLifecycleAction(
+    lifecycle,
+    authActionReport("finding the server", server),
+    resolveServer,
+    server,
+    undefined,
+    lifecycle?.signal,
+  );
   const request =
     kind === "enterprise"
       ? await enterpriseRequestFromEnv()
       : communityRequestFromEnv();
   // The jsapi loader makes this run's own owner-only folder inside it.
-  return await connectAndSignIn(origin, kind, request, tmpdir(), "auth_failed");
+  return await connectAndSignIn(
+    origin,
+    kind,
+    request,
+    tmpdir(),
+    "auth_failed",
+    lifecycle,
+  );
 }
 
 /** An env var's value; empty counts as unset. */
@@ -281,12 +330,17 @@ async function profileSession(
   store: Store,
   state: State,
   id: string,
+  lifecycle?: CommandLifecycle,
 ): Promise<Session> {
   const profile = state.config.profiles[id];
   if (!profile) throw new DhError("internal", `No profile ${id}`);
+  lifecycle?.setFailureReport({
+    target: profile.server,
+    profile: profile.name,
+  });
   const server = state.config.servers[profile.server];
   const cred = state.credentials.credentials[id] ?? { type: "none" };
-  await ensureCa(server?.caCert);
+  await ensureCa(server?.caCert, [], undefined, lifecycle);
   const kind = server?.kind ?? "community";
   const request = await signInRequestFor(profile, kind, cred);
   try {
@@ -296,6 +350,7 @@ async function profileSession(
       request,
       store.cacheDir,
       "auth_expired",
+      lifecycle,
     );
     return { ...session, profileName: profile.name };
   } catch (e) {
@@ -315,10 +370,11 @@ async function profileSession(
 export async function requireAuth(
   profileFlag?: string,
   store = new Store(),
+  lifecycle?: CommandLifecycle,
 ): Promise<Session> {
   const name = profileFlag ?? process.env.DH_PROFILE;
   const envServer = process.env.DH_SERVER;
-  if (!name && envServer) return await envSession(envServer);
+  if (!name && envServer) return await envSession(envServer, lifecycle);
   const state = await store.read();
   const id = name
     ? findByName(state.config, name)?.[0]
@@ -337,5 +393,5 @@ export async function requireAuth(
       `Run \`${BIN} auth login\` to get started.`,
     );
   }
-  return await profileSession(store, state, id);
+  return await profileSession(store, state, id, lifecycle);
 }

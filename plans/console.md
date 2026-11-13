@@ -98,8 +98,9 @@ relay it to the user, from the report alone. The agent decides whether to
 retry, inspect, change input, or report back, using `code`, `outcome`, and its
 own attempt history. `outcome: unknown` → establish the result before retrying.
 
-Human and JSON reports carry the same fields; optional fields appear when
-applicable. `observation` is `null` until the first observation.
+Follow the shared [failure-reporting rules](../docs/ARCHITECTURE.md#failure-reporting);
+the examples illustrate information, not a fixed format.
+`observation` is `null` until the first observation.
 
 | Fields | Content |
 | --- | --- |
@@ -176,8 +177,8 @@ Auth, credential, network, and internal errors use their existing codes and exit
 
 ## Done when
 
-- [ ] (PR 1) Cleanup runs once, reports failures, and stops within 2 s.
-- [ ] (PR 2) SIGINT and SIGTERM report, release resources, and exit within 2 s
+- [x] (PR 1) Cleanup runs once, reports failures, and stops within 2 s.
+- [x] (PR 2) SIGINT and SIGTERM report, release resources, and exit within 2 s
       with code 3; second Ctrl-C exits immediately. CA child re-runs forward
       signals. Report fields, `error`/`detail` split, and recovery
       arguments with spaces and shell metacharacters are tested; empty success

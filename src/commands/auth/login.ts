@@ -124,12 +124,18 @@ export const login = defineCommand<LoginOptions>({
       state.config.servers,
       opts.caCert,
       target.rerun,
+      ctx.lifecycle,
     );
 
-    const server = await connectServer(origin, kind, ctx.store.cacheDir);
+    const server = await connectServer(
+      origin,
+      kind,
+      ctx.store.cacheDir,
+      ctx.lifecycle,
+    );
     try {
       // Sign in, then confirm the account before anything is saved.
-      const methods = await offeredMethods(server);
+      const methods = await offeredMethods(server, ctx.lifecycle);
       const method = await askSignInMethod(ctx.ui, kind, methods, prior, opts);
       const { request, toSave } = await askSignInCredentials(
         ctx.ui,
@@ -137,8 +143,14 @@ export const login = defineCommand<LoginOptions>({
         prior,
         opts,
       );
-      const session = await signIn(server, request);
+      const session = await signIn(
+        server,
+        request,
+        "auth_failed",
+        ctx.lifecycle,
+      );
       try {
+        ctx.lifecycle.onCleanup(() => disconnectServer(session));
         note(
           request.method === "anonymous"
             ? "✔ Signed in anonymously"
@@ -160,6 +172,7 @@ export const login = defineCommand<LoginOptions>({
           session,
           { ...toSave, caCert },
           makeDefault,
+          ctx.lifecycle,
         );
         if (saved.key) note(`✔ Authorized this computer (key "${saved.key}")`);
         for (const warning of saved.warnings) note(warning);

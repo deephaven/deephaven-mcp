@@ -1,4 +1,14 @@
-import { DhError, describe, reasonOf, timeoutMs } from "../../errors.ts";
+import {
+  type CommandLifecycle,
+  runLifecycleAction,
+} from "../../cli/lifecycle.ts";
+import {
+  DhError,
+  describe,
+  type FailureReport,
+  reasonOf,
+  timeoutMs,
+} from "../../errors.ts";
 import { BIN } from "../../version.ts";
 import {
   connectEnterprise,
@@ -18,6 +28,11 @@ import {
   newProfileId,
   removeProfile,
 } from "./profile.ts";
+import {
+  oldKeyCleanupReport,
+  profileRemovalReport,
+  profileSaveReport,
+} from "./reporting.ts";
 import { ensureCa, loadedCa } from "./session.ts";
 import type { Session } from "./signin.ts";
 import type {
@@ -84,6 +99,27 @@ export async function commitSignIn(
   session: Session,
   save: ProfileToSave,
   makeDefault?: boolean,
+  lifecycle?: CommandLifecycle,
+): Promise<SavedSignIn> {
+  const report = profileSaveReport(session.origin);
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    commitSignInAction,
+    store,
+    session,
+    save,
+    makeDefault,
+    report,
+  );
+}
+
+async function commitSignInAction(
+  store: Store,
+  session: Session,
+  save: ProfileToSave,
+  makeDefault: boolean | undefined,
+  report: FailureReport,
 ): Promise<SavedSignIn> {
   // Uploaded only now, so a cancelled question never leaves a key on the server.
   let credential: Credential;
@@ -118,6 +154,7 @@ export async function commitSignIn(
     throw e;
   }
 
+  Object.assign(report, oldKeyCleanupReport(saved.name));
   const warnings = await deleteObsoleteKeys(store, session, saved.previous);
   return { ...saved, key, warnings };
 }
@@ -162,6 +199,7 @@ export async function trustCasToRevoke(
   state: State,
   ids: string[],
   rerun: string[],
+  lifecycle?: CommandLifecycle,
 ): Promise<{ ids: string[]; skipped: string[] }> {
   const { config, credentials } = state;
   const caOf = (id: string) => {
@@ -172,7 +210,7 @@ export async function trustCasToRevoke(
       : undefined;
   };
   const cas = new Set(ids.map(caOf).filter((ca) => ca !== undefined));
-  if (cas.size === 1) await ensureCa([...cas][0], [], rerun);
+  if (cas.size === 1) await ensureCa([...cas][0], [], rerun, lifecycle);
   const trusted = loadedCa();
   const skipped = ids.filter((id) => {
     const ca = caOf(id);
@@ -199,6 +237,25 @@ export interface Removed {
  * `waiting` is told what each server call waits on, before it starts.
  */
 export async function removeProfiles(
+  store: Store,
+  state: State,
+  ids: string[],
+  waiting: (what: string) => void,
+  lifecycle?: CommandLifecycle,
+): Promise<Removed> {
+  const report = profileRemovalReport();
+  return runLifecycleAction(
+    lifecycle,
+    report,
+    removeProfilesAction,
+    store,
+    state,
+    ids,
+    waiting,
+  );
+}
+
+async function removeProfilesAction(
   store: Store,
   state: State,
   ids: string[],

@@ -108,6 +108,7 @@ async function migrateAndReport(
       note(
         `  … ${item.name}: ${what} (gives up after ${seconds}s if unreachable)`,
       ),
+    ctx.lifecycle,
   );
   note(
     outcome.ok
