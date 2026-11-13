@@ -231,14 +231,14 @@ export async function loginSaml(
   reconnect: () => Promise<UnauthenticatedEnterpriseConnection>,
   nonce: string,
 ): Promise<AuthenticatedEnterpriseConnection> {
+  // TODO: DH-24026 will add loginClientWithExternal, which does this retry loop
+  // (onRetry for the notice); use it and drop the cast below.
   let conn = first;
   let showedRetryNotice = false;
   for (;;) {
     const started = Date.now();
     try {
       await conn.client.login({ type: "saml", token: nonce });
-      // TODO: DH-24026 will add loginClientWithExternal; use it and drop this
-      // cast.
       return {
         ...conn,
         client: conn.client as unknown as AuthenticatedEnterpriseClient,
