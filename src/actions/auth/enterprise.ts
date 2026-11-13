@@ -82,7 +82,8 @@ export async function connectEnterprise(
     cacheRoot,
     downloadTimeout,
   );
-  // A new client is connected but not signed in.
+  // TODO: DH-24026 will add a signal to createEnterpriseClient; use it and drop
+  // this cast and the hand-rolled connect wait.
   const client = new dhe.Client(new URL(origin).href, {
     transportFactory: NodeHttp2gRPCTransport.factory,
   }) as UnauthenticatedEnterpriseClient;
@@ -176,6 +177,8 @@ export function loginPassword(
   timeout: number,
   rejected: Rejected,
 ): Promise<AuthenticatedEnterpriseConnection> {
+  // TODO: DH-24026 will add operateAs to createPasswordCredentials; use it and
+  // drop this cast.
   const credentials = {
     ...createPasswordCredentials(username, password),
     operateAs: (operateAs ?? username) as OperateAsUsername,
@@ -197,6 +200,8 @@ export function loginKey(
   timeout: number,
   rejected: Rejected,
 ): Promise<AuthenticatedEnterpriseConnection> {
+  // TODO: DH-24026 will add createKeyPairCredentials; use it and drop the
+  // KeyPairCredentials cast.
   return guardedLogin(
     conn,
     () =>
@@ -232,7 +237,8 @@ export async function loginSaml(
     const started = Date.now();
     try {
       await conn.client.login({ type: "saml", token: nonce });
-      // The published login utilities have no SAML login to brand it for us.
+      // TODO: DH-24026 will add loginClientWithExternal; use it and drop this
+      // cast.
       return {
         ...conn,
         client: conn.client as unknown as AuthenticatedEnterpriseClient,
