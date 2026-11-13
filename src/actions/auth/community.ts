@@ -1,10 +1,11 @@
+import type { dh } from "@deephaven/jsapi-types";
 import {
   DhError,
   reasonOf,
   serverUnreachable as unreachable,
   withTimeout,
 } from "../../errors.ts";
-import { type Api, loadCommunityApi } from "./jsapi.ts";
+import { type CommunityApi, loadCommunityApi } from "./jsapi.ts";
 import type { Method } from "./store.ts";
 
 export const ANONYMOUS_HANDLER =
@@ -16,9 +17,9 @@ export const PSK_HANDLER =
 export interface CommunityConnection {
   origin: string;
   /** The server's jsapi module. */
-  dh: Api;
+  dh: CommunityApi;
   /** Its `CoreClient`. */
-  client: Api;
+  client: dh.CoreClient;
   /** Auth handler classes the server offers. */
   handlers: string[];
 }
@@ -48,7 +49,7 @@ export async function connectCommunity(
 ): Promise<CommunityConnection> {
   const dh = await loadCommunityApi(new URL(origin), cacheRoot, timeout);
   const client = new dh.CoreClient(origin);
-  let values: [string, string][];
+  let values: string[][];
   try {
     values = await withTimeout(client.getAuthConfigValues(), timeout, () =>
       unreachable(origin),
@@ -59,7 +60,7 @@ export async function connectCommunity(
   }
   const handlers = values
     .filter(([key]) => key === "AuthHandlers")
-    .flatMap(([, value]) => value.split(","))
+    .flatMap(([, value = ""]) => value.split(","))
     .map((h) => h.trim())
     .filter(Boolean);
   return { origin, dh, client, handlers };
@@ -128,7 +129,7 @@ export async function loginCommunity(
 }
 
 /** `login` in the shape the jsapi's `CoreClient.login` takes; `dh` is the server's jsapi module. */
-function loginCredentials(dh: Api, login: CommunityLogin): object {
+function loginCredentials(dh: CommunityApi, login: CommunityLogin): object {
   switch (login.method) {
     case "anonymous":
       return { type: dh.CoreClient.LOGIN_TYPE_ANONYMOUS };
@@ -146,7 +147,7 @@ function loginCredentials(dh: Api, login: CommunityLogin): object {
 }
 
 /** The jsapi's `disconnect()` throws after a failed login. */
-export function disconnect(client: Api): void {
+export function disconnect(client: dh.CoreClient): void {
   try {
     client.disconnect();
   } catch {

@@ -2,12 +2,16 @@ import { rmSync, writeSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { dh } from "@deephaven/jsapi-types";
+import type { EnterpriseDhType } from "@deephaven-enterprise/jsapi-nodejs";
 import { DhError, describe } from "../../errors.ts";
 import { isTrustedSource } from "../../net.ts";
 
-/** A value from the server's untyped client code. */
-// biome-ignore lint/suspicious/noExplicitAny: the jsapi is untyped.
-export type Api = any;
+/** The Community jsapi module (`dh`). */
+export type CommunityApi = typeof dh;
+
+/** The Enterprise jsapi module (`iris`). */
+export type EnterpriseApi = EnterpriseDhType;
 
 const MAX_REDIRECTS = 5;
 
@@ -156,7 +160,7 @@ export async function loadCommunityApi(
   origin: URL,
   cacheRoot: string,
   timeout: number,
-): Promise<Api> {
+): Promise<CommunityApi> {
   assertTrusted(origin);
   const dir = await originDir(cacheRoot, origin);
   await download(
@@ -177,14 +181,14 @@ export async function loadCommunityApi(
   return mod.default ?? mod;
 }
 
-const enterpriseApis = new Map<string, Api>();
+const enterpriseApis = new Map<string, EnterpriseApi>();
 
 /** Downloads and imports the Enterprise jsapi (`iris`) from `origin`. */
 export async function loadEnterpriseApi(
   origin: URL,
   cacheRoot: string,
   timeout: number,
-): Promise<Api> {
+): Promise<EnterpriseApi> {
   // The script sets a global once per import, so a later server's would shadow this one's.
   const loaded = enterpriseApis.get(origin.origin);
   if (loaded) return loaded;
