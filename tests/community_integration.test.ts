@@ -48,6 +48,16 @@ test.skipIf(!PSK_URL || !PSK)(
     expect(status.code, status.stderr).toBe(0);
     expect(status.json.kind).toBe("community");
 
+    const consoles = await run(dir, ["console"], env);
+    expect(consoles.code, consoles.stderr).toBe(0);
+    expect(consoles.json).toMatchObject([
+      { id: "shared", shortcode: "shared", state: "Running" },
+    ]);
+
+    const useConsole = await run(dir, ["console", "use", "shared"], env);
+    expect(useConsole.code, useConsole.stderr).toBe(0);
+    expect(useConsole.json).toBeNull();
+
     const creds = await readFile(join(dir, "credentials.json"), "utf8");
     // The env var's name is saved, not the PSK.
     expect(creds).not.toContain(PSK);

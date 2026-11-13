@@ -36,6 +36,10 @@ export class CommandLifecycle {
 
   setFailureReport(report: FailureReport): void {
     if (this.#reportFrozen) return;
+    if (this.#operation) {
+      this.#operation.report = { ...this.#operation.report, ...report };
+      return;
+    }
     this.#failureReport = { ...this.#failureReport, ...report };
   }
 
@@ -47,7 +51,12 @@ export class CommandLifecycle {
     this.signal.throwIfAborted();
     const previous = this.#operation;
     if (!this.#reportFrozen) {
-      this.#operation = { report, startedAt: performance.now() };
+      const profile = this.failureReport.profile;
+      if (profile && report.profile === undefined) report.profile = profile;
+      this.#operation = {
+        report,
+        startedAt: performance.now(),
+      };
     }
     const result = await run();
     if (!this.#reportFrozen) this.#operation = previous;
@@ -125,6 +134,15 @@ function reportWithTiming(
         ),
       ),
     };
+    if (report.human) {
+      report.human = {
+        ...report.human,
+        details: [
+          ...(report.human.details ?? []),
+          `Last observed: ${report.observation.state}, ${report.observation.ageSeconds}s ago.`,
+        ],
+      };
+    }
   }
   return report;
 }
