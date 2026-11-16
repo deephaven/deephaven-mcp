@@ -919,6 +919,7 @@ directory. To try the real channels, put a bundle on a node and set
    exclusion, `packageCliPlugins`); it needs the DHE team's review.
    Served from `Webapi.cliPlugins` on a BHS (2026-11-16): no login, and no
    `ETag` (`cache-control: no-cache`), so `dh` compares the `revision` body.
+   Changed files there are served without a restart.
    Whether the files packed into the web app jar get `ETag`s is unchecked.
    Serving with no login matches `/iriside/js-plugins/` (confirmed
    2026-11-06).

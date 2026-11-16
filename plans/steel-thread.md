@@ -305,6 +305,9 @@ Done in Iris `1bb468d616` (not pushed). Decisions made there:
 Found on the BHS (2026.01.261109171517g1bb468d616, one node):
 - `/iriside/cli-plugins/revision` is served with no login and no `ETag`
   (`cache-control: no-cache`), so `dh` compares the `revision` body.
+- Files changed in the `Webapi.cliPlugins` directory are served at once,
+  without restarting the web API: replacing `js/` made the next
+  `dh dbserver list` fetch the new revision and run the new code.
 - `getDbServers()` gives groups as host `Group`, port `0`, type `GROUP`
   (`AutoQuery`, `AutoMerge`), beside the `DISPATCHER`s.
 - `/etc/deephaven/FRONTEND_HOST` (`bmingles-f1.int.illumon.com`) and
