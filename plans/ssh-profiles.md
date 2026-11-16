@@ -185,8 +185,9 @@ then `--method ssh`).
 ## Open questions
 
 1. Confirm on a real DHE install that `/etc/deephaven/FRONTEND_HOST` and
-   `FRONTEND_PORT` exist on every node and are world-readable (the docs
-   assistant says so; not checked), and whether `https` is always right.
+   `FRONTEND_PORT` exist on every node and are world-readable, and whether
+   `https` is always right. On a one-node BHS (2026-11-16) both exist and an
+   SSH user can read them; multi-node installs are unchecked.
 2. Should `--method ssh` be in the interactive method picker when the web
    server *is* reachable (an admin who wants SSH only)? Proposed: no;
    `--method ssh` covers it.

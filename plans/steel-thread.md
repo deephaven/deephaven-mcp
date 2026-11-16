@@ -5,7 +5,8 @@ Build the design in [cluster-plugins.md](cluster-plugins.md) and
 TypeScript plugin (`dh dbserver list`) and a shell plugin (`dh ctl …`) served
 by a real DHE server (a BHS deployed by Jenkins from an Iris branch).
 
-Status: phases 1–3 done (Iris `1bb468d616`); phase 4 (BHS demo) next. The
+Status: phases 1–3 done (Iris `1bb468d616`); phase 4's demo works on a BHS
+(2026-11-16); its design-doc update is next. The
 branch is now on `v3_console_2`, where actions live under `src/actions/`, so
 the plugin code is in `src/actions/plugins/` (paths below that name
 `src/plugins/` are as they were then). Read this file, then cluster-plugins.md
@@ -301,6 +302,19 @@ Done in Iris `1bb468d616` (not pushed). Decisions made there:
    `ETag`s.
 6. Update the design doc with the real files and paths.
 
+Found on the BHS (2026.01.261109171517g1bb468d616, one node):
+- `/iriside/cli-plugins/revision` is served with no login and no `ETag`
+  (`cache-control: no-cache`), so `dh` compares the `revision` body.
+- `getDbServers()` gives groups as host `Group`, port `0`, type `GROUP`
+  (`AutoQuery`, `AutoMerge`), beside the `DISPATCHER`s.
+- `/etc/deephaven/FRONTEND_HOST` (`bmingles-f1.int.illumon.com`) and
+  `FRONTEND_PORT` (`8123`) exist and are readable by an SSH user.
+- `ctl` ran `dhctl` as `irisadmin` through `sudo -n` over SSH. `cluster.cnf`
+  has `DH_ADMIN_USER="irisadmin"` (the default), so whether `dh` could read
+  it unprivileged isn't shown.
+- New OpenSSH clients print a post-quantum warning on each `ssh` run; it's
+  ssh's own stderr, which `dh` passes through.
+
 ### 5. Stage B (after the team vets the design)
 
 Publish prereleases of `@deephaven/cli-plugin` and `@deephaven/cli-plugin-kit`
@@ -317,7 +331,9 @@ redeploy with `Webapi.cliPlugins` unset.
 - [x] Phase 3: an offline Iris build packs `iriside/cli-plugins/manifest.json`
       into the web app and `dh-cli/shell/manifest.json` into the install tar
       with `-PcliPluginKit`; without it, the build passes and packs nothing.
-- [ ] Phase 4: the demo commands work against the BHS.
+- [x] Phase 4: the demo commands work against the BHS (`bmingles-f1`,
+      2026-11-16). `dh auth login` found `dbserver`, offered SSH for `ctl`
+      and set it up in the same run, so `dh plugin ssh enable` wasn't needed.
 
 ## Open questions
 
