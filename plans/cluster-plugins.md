@@ -541,8 +541,8 @@ export default definePlugin({
         kind: "rows",
         fields: {
           name: { type: "string", description: "Server name." },
-          host: { type: "string", description: "Host; Group for a group." },
-          port: { type: "number", description: "Dispatcher port." },
+          host: { type: "string", description: "Host; null for a group." },
+          port: { type: "number", description: "Port; null for a group." },
           type: { type: "string", description: "DISPATCHER or GROUP." },
           class: { type: "string", description: "Server class." },
         },
@@ -553,7 +553,10 @@ export default definePlugin({
         const wanted = (ctx.options.class as string | undefined)?.toLowerCase();
         return servers
           .filter((s) => !wanted || s.serverClass.toLowerCase() === wanted)
-          .map((s) => ({ name: s.name, host: s.host, port: s.port, type: s.type, class: s.serverClass }));
+          .map((s) => {
+            const group = s.type === "GROUP";              // a group's host and port are placeholders
+            return { name: s.name, host: group ? null : s.host, port: group ? null : s.port, type: s.type, class: s.serverClass };
+          });
       },
     },
   },
