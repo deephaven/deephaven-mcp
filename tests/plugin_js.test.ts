@@ -242,8 +242,9 @@ describe.skipIf(WINDOWS)("js plugins", () => {
     expect(JSON.parse(json.stdout)).toEqual(
       SERVERS.map((s) => ({
         name: s.name,
-        host: s.host,
-        port: s.port,
+        // A group's host and port are placeholders.
+        host: s.type === "GROUP" ? null : s.host,
+        port: s.type === "GROUP" ? null : s.port,
         type: s.type,
         class: s.serverClass,
       })),
@@ -257,9 +258,10 @@ describe.skipIf(WINDOWS)("js plugins", () => {
     ]);
     const human = await dh(["dbserver", "list"]);
     expect(human.stdout.split("\n")[0]).toBe(
-      "NAME  HOST   PORT  TYPE        CLASS",
+      "NAME  HOST  PORT  TYPE        CLASS",
     );
-    expect(human.stdout).toContain("m1    h2     2     DISPATCHER  Merge");
+    expect(human.stdout).toContain("m1    h2    2     DISPATCHER  Merge");
+    expect(human.stdout).toContain("g                 GROUP       Query");
     const merge = await dh([
       "dbserver",
       "list",

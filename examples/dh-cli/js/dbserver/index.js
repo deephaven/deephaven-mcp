@@ -27,8 +27,8 @@ var index_default = definePlugin({
         kind: "rows",
         fields: {
           name: { type: "string", description: "Server name." },
-          host: { type: "string", description: "Host; Group for a group." },
-          port: { type: "number", description: "Dispatcher port." },
+          host: { type: "string", description: "Host; null for a group." },
+          port: { type: "number", description: "Port; null for a group." },
           type: { type: "string", description: "DISPATCHER or GROUP." },
           class: { type: "string", description: "Server class." }
         }
@@ -39,8 +39,9 @@ var index_default = definePlugin({
         const wanted = ctx.options.class?.toLowerCase();
         return servers.filter((s) => !wanted || s.serverClass.toLowerCase() === wanted).map((s) => ({
           name: s.name,
-          host: s.host,
-          port: s.port,
+          // A group"s are placeholders (host "Group", port 0).
+          host: s.type === "GROUP" ? null : s.host,
+          port: s.type === "GROUP" ? null : s.port,
           type: s.type,
           class: s.serverClass
         }));

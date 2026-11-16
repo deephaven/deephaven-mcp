@@ -25,11 +25,11 @@
           },
           "host": {
             "type": "string",
-            "description": "Host; Group for a group."
+            "description": "Host; null for a group."
           },
           "port": {
             "type": "number",
-            "description": "Dispatcher port."
+            "description": "Port; null for a group."
           },
           "type": {
             "type": "string",
