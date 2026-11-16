@@ -565,7 +565,8 @@ The example's API facts, from the iris source (`web/client-api/.../IrisClient.ja
 `GROUP` (the `ServerTypeEnum` without `STE_`); `serverClass` comes from each
 server's `iris.db.<n>.class` property (`Query` and `Merge` in practice, any
 string allowed), so `--class` has no fixed choices and compares ignoring
-case; `getDbServers()` returns every server in the controller's
+case. Groups come back with host `Group` and port `0` (confirmed on a BHS,
+2026-11-16). `getDbServers()` returns every server in the controller's
 configuration, with no group check (`getConsoleServers()` is the one limited
 to servers the user may start consoles on). `getDbServersForType(type)`
 takes a persistent query's configuration type, not a server type. `pq` and
@@ -915,8 +916,10 @@ directory. To try the real channels, put a bundle on a node and set
 
 1. **Serving `js/`.** The serving side is drafted (Iris branch
    `DH-23907_cli-plugins`: `Webapi.cliPlugins`, the redirect-filter
-   exclusion, `packageCliPlugins`); it needs the DHE team's review. Check whether the web app's packed files get
-   `ETag`s; without them, `dh` compares the `revision` body instead.
+   exclusion, `packageCliPlugins`); it needs the DHE team's review.
+   Served from `Webapi.cliPlugins` on a BHS (2026-11-16): no login, and no
+   `ETag` (`cache-control: no-cache`), so `dh` compares the `revision` body.
+   Whether the files packed into the web app jar get `ETag`s is unchecked.
    Serving with no login matches `/iriside/js-plugins/` (confirmed
    2026-11-06).
 2. **`shell/` in the install.** Confirm that the release can install
