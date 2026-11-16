@@ -5,8 +5,8 @@ Build the design in [cluster-plugins.md](cluster-plugins.md) and
 TypeScript plugin (`dh dbserver list`) and a shell plugin (`dh ctl …`) served
 by a real DHE server (a BHS deployed by Jenkins from an Iris branch).
 
-Status: phases 1–3 done (Iris `1bb468d616`); phase 4's demo works on a BHS
-(2026-11-16); its design-doc update is next. The
+Status: phases 1–4 done (demo on a BHS and the team design doc updated,
+2026-11-16); phase 5 (publish the packages) waits on the team vetting it. The
 branch is now on `v3_console_2`, where actions live under `src/actions/`, so
 the plugin code is in `src/actions/plugins/` (paths below that name
 `src/plugins/` are as they were then). Read this file, then cluster-plugins.md
