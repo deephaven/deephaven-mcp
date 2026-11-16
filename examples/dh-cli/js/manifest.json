@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "channel": "js",
-  "revision": "sha256:09cc17cb6c9d4d6f002f6604548cbe857f537676d1577a6562f76bdfd2a93774",
+  "revision": "sha256:f36e5e913a354680d0ec24dedf73d9fab22043873b2717658978b450d5988ff6",
   "cluster": {
     "kind": "enterprise",
     "version": "2026.01.261102164822g2f6a8ebf11"
@@ -16,7 +16,7 @@
       ],
       "spec": "dbserver/plugin.json",
       "module": "dbserver/index.js",
-      "digest": "sha256:ca42f4b79219d07e7d610182e1cbaa05c96f97db5d3f522c6730b629b6c6fb5e",
+      "digest": "sha256:824498ca4d247998e19e6d35e5686bbae48e4ce7766b6cebfdca72e06a0e954c",
       "dh": ">=3.0.0",
       "api": 1
     }
