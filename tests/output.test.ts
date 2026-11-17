@@ -144,6 +144,37 @@ test("external waits include context and show elapsed time only from five second
   }
 });
 
+test("auth reports omit URL credentials and data in human and JSON failures", async () => {
+  for (const format of ["human", "json"]) {
+    for (const code of ["cancelled", "server_unreachable"]) {
+      const output = await runOutput(
+        format,
+        `process.exitCode = reportError(
+          new DhError(${JSON.stringify(code)}, "Server unavailable"),
+          authActionReport("finding the server", "https://alice:password@example.com:8123/path?token=secret#fragment"),
+        );`,
+      );
+      expect(output.stderr).not.toMatch(
+        /alice|password|path|token|secret|fragment/,
+      );
+      expect(output.stderr).toContain("https://example.com:8123");
+      if (format === "json") {
+        expect(JSON.parse(output.stderr).target).toBe(
+          "https://example.com:8123",
+        );
+      }
+    }
+    const invalid = await runOutput(
+      format,
+      `reportError(new DhError("cancelled", "Interrupted"),
+        authActionReport("finding the server", "https://alice:password@[broken/?token=secret"));`,
+    );
+    expect(invalid.stderr).not.toMatch(/alice|password|token|secret|broken/);
+    if (format === "json")
+      expect(JSON.parse(invalid.stderr).target).toBeUndefined();
+  }
+});
+
 test("operation facts and actionable guidance render consistently in human and JSON reports", async () => {
   const report = {
     command: "console create",

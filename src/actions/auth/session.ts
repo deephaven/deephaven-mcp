@@ -16,6 +16,7 @@ import { findByName } from "./profile.ts";
 import { authActionReport } from "./reporting.ts";
 import {
   candidates,
+  displayServerAddress,
   type ResolvedServer,
   resolveServer,
   withPort,
@@ -244,7 +245,7 @@ async function envSession(
   server: string,
   lifecycle?: CommandLifecycle,
 ): Promise<Session> {
-  lifecycle?.setFailureReport({ target: server });
+  lifecycle?.setFailureReport({ target: displayServerAddress(server) });
   const secrets = [
     "DH_PASSWORD",
     "DH_PSK",
@@ -337,7 +338,7 @@ async function profileSession(
   const profile = state.config.profiles[id];
   if (!profile) throw new DhError("internal", `No profile ${id}`);
   lifecycle?.setFailureReport({
-    target: profile.server,
+    target: displayServerAddress(profile.server),
     profile: profile.name,
   });
   const server = state.config.servers[profile.server];

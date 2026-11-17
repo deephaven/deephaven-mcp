@@ -57,6 +57,10 @@ to http.
 If nothing answers, the error lists every address tried. Check the address, your
 VPN, and whether the server is up.
 
+Server discovery errors and authentication failure-report targets omit URL
+credentials, paths, queries, and fragments. Other user-supplied values and
+third-party error messages are not guaranteed to be secret-free.
+
 ## Enterprise
 
 | Method            | Flags                                      | What `dh` saves                                      |
@@ -105,6 +109,8 @@ username both use the same profile.
 
 The printed sign-in URL contains a one-time authentication secret. Treat it as
 sensitive, including when capturing or sharing terminal output.
+
+Press Ctrl-C to stop waiting for SSO; the CLI closes its server connections.
 
 Browsers often sign you in again with whatever account they already have a
 session for. To use a different account, pick it in your identity provider's
@@ -251,6 +257,8 @@ errors go to stderr.
 
 With `-o json`, errors are one JSON line on stderr. An underlying reason, when
 available, appears in `detail` (up to 200 characters):
+
+`dh agents -o json` lists the required and optional error fields.
 
 ```json
 {

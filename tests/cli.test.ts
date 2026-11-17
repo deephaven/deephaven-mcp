@@ -678,10 +678,40 @@ test("cli: agents summarizes, and lists every command and error code as JSON", a
   expect(summary.code).toBe(0);
   expect(summary.stdout).toContain(`${BIN} auth login [server]`);
   expect(summary.stdout).toContain("auth_required");
+  expect(summary.stdout).toContain("Required: type, error, code, exit");
+  expect(summary.stdout).toContain(
+    "Optional: command, detail, hint, cleanupDetail",
+  );
+  expect(summary.stdout).toContain("observation, recoveryCommand");
 
   const res = await run(["agents", "-o", "json"]);
   expect(res.code).toBe(0);
   const manifest = JSON.parse(res.stdout);
+  const requiredFields = ["type", "error", "code", "exit"];
+  const optionalFields = [
+    "command",
+    "detail",
+    "hint",
+    "cleanupDetail",
+    "target",
+    "profile",
+    "operation",
+    "phase",
+    "elapsedSeconds",
+    "progress",
+    "outcome",
+    "continuation",
+    "retryWarning",
+    "observation",
+    "recoveryCommand",
+  ];
+  expect(manifest.errorFormat).toEqual({
+    stream: "stderr",
+    when: "-o json",
+    fields: [...requiredFields, ...optionalFields],
+    requiredFields,
+    optionalFields,
+  });
   const auth = manifest.commands.find(
     (c: { command: string }) => c.command === `${BIN} auth`,
   );
@@ -831,6 +861,58 @@ test("cli: environment-only auth", async () => {
   expect(JSON.parse(unreachable.stderr).code).toBe("server_unreachable");
   // Environment-only auth must not touch the config directory.
   expect(await stat(configDir).catch(() => null)).toBeNull();
+});
+
+test("cli: server diagnostics omit credential-bearing address components", async () => {
+  const { run, configDir } = await setup();
+  const address =
+    "https://alice:password@example.com:8123/path?token=secret#fragment";
+  for (const format of ["human", "json"]) {
+    const args = format === "json" ? ["-o", "json"] : [];
+    const conflict = await run(["auth", "status", ...args], {
+      DH_SERVER: address,
+      DH_PSK: "one",
+      DH_PASSWORD: "two",
+    });
+    expect(conflict.code).toBe(2);
+    expect(conflict.stderr).not.toMatch(
+      /alice|password@example|token=secret|fragment|\/path/,
+    );
+    if (format === "json") {
+      expect(JSON.parse(conflict.stderr).target).toBe(
+        "https://example.com:8123",
+      );
+    }
+    const invalid = await run([
+      "auth",
+      "login",
+      "https://alice:password@[broken/?token=secret#fragment",
+      "--no-prompt",
+      ...args,
+    ]);
+    expect(invalid.code).toBe(2);
+    expect(invalid.stderr).toContain("Not a server address");
+    expect(invalid.stderr).not.toMatch(
+      /alice|password|token|secret|fragment|broken/,
+    );
+  }
+  await seed(configDir, {
+    profiles: {
+      p_a: {
+        name: "a",
+        server: address,
+        user: "psk",
+        method: "psk",
+        createdAt: "",
+      },
+    },
+  });
+  const profile = await run(["auth", "status", "-o", "json"]);
+  expect(profile.code).toBe(4);
+  expect(JSON.parse(profile.stderr).target).toBe("https://example.com:8123");
+  expect(profile.stderr).not.toMatch(
+    /alice|password|token|secret|fragment|\/path/,
+  );
 });
 
 test("cli: reaches an HTTP/2-only server, also after the --ca-cert re-run", async () => {

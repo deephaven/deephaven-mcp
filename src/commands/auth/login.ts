@@ -150,7 +150,6 @@ export const login = defineCommand<LoginOptions>({
         ctx.lifecycle,
       );
       try {
-        ctx.lifecycle.onCleanup(() => disconnectServer(session));
         note(
           request.method === "anonymous"
             ? "✔ Signed in anonymously"

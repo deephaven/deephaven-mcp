@@ -210,6 +210,7 @@ export async function signIn(
     server,
     request,
     rejected,
+    lifecycle,
   );
 }
 
@@ -217,6 +218,7 @@ async function signInAction(
   server: Server,
   request: SignInRequest,
   rejected: "auth_failed" | "auth_expired",
+  lifecycle?: CommandLifecycle,
 ): Promise<Session> {
   const timeout = timeoutMs();
   if (server.community) {
@@ -257,7 +259,8 @@ async function signInAction(
         operateAs: request.operateAs,
       };
     case "saml": {
-      const signedIn = await waitForSaml(server, conn, request);
+      const signedIn = await waitForSaml(server, conn, request, lifecycle);
+      lifecycle?.signal.throwIfAborted();
       // SSO signs in as the user; operate-as applies to the key made next, whose login checks it.
       return {
         ...server,
@@ -279,6 +282,7 @@ async function waitForSaml(
   server: Server,
   conn: UnauthenticatedEnterpriseConnection,
   request: SignInRequest & { method: "saml" },
+  lifecycle?: CommandLifecycle,
 ): Promise<AuthenticatedEnterpriseConnection> {
   const nonce = samlNonce();
   const url = signInUrl(request.saml.loginUrl, nonce);
@@ -291,11 +295,23 @@ async function waitForSaml(
     note(`Sign in at:\n  ${url}`);
   }
   note("Waiting for sign-in…\n  Ctrl-C to cancel");
-  return await loginSaml(
-    conn,
-    () => connectEnterprise(server.origin, server.cacheRoot, timeoutMs()),
-    nonce,
+  lifecycle?.signal.throwIfAborted();
+  return await loginSaml(conn, () => reconnectSaml(server, lifecycle), nonce);
+}
+
+/** Opens a replacement SSO connection and registers it for lifecycle cleanup. */
+async function reconnectSaml(
+  server: Server,
+  lifecycle?: CommandLifecycle,
+): Promise<UnauthenticatedEnterpriseConnection> {
+  lifecycle?.signal.throwIfAborted();
+  const replacement = await connectServerAction(
+    server.origin,
+    "enterprise",
+    server.cacheRoot,
+    lifecycle,
   );
+  return enterpriseConnection(replacement);
 }
 
 /** `server`'s Enterprise connection; an `internal` error for a Community server. */

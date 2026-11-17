@@ -369,7 +369,6 @@ async function signInAndSave(
   try {
     const session = await signIn(server, request, "auth_failed", lifecycle);
     try {
-      lifecycle?.onCleanup(() => disconnectServer(session));
       return await commitSignIn(store, session, toSave, undefined, lifecycle);
     } finally {
       disconnectServer(session);

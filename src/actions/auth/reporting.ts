@@ -1,15 +1,17 @@
 import type { FailureReport, HumanFailure } from "../../errors.ts";
 import { BIN } from "../../version.ts";
+import { displayServerAddress } from "./resolve.ts";
 
 /** Builds plain report data at the action that knows what is happening. */
 export function authActionReport(
   action: string,
   target?: string,
 ): FailureReport & { human: HumanFailure } {
-  const where = target ? ` at ${target}` : "";
+  const address = target ? displayServerAddress(target) : undefined;
+  const where = address ? ` at ${address}` : "";
   return {
     operation: action,
-    target,
+    target: address,
     human: {
       summary: `Cancelled while ${action}${where}.`,
       context: `While ${action}${where}.`,

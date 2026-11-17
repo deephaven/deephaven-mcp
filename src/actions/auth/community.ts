@@ -115,9 +115,10 @@ export async function loginCommunity(
   let failureReason: string | undefined;
   let removeListener: (() => void) | undefined;
   let finished = false;
-  const onFailure = (event: { detail?: unknown }) => {
+  const onFailure = (event: dh.Event<unknown>) => {
     if (event.detail != null) failureReason ??= reasonOf(event.detail);
   };
+  /** Sets up diagnostics before login, unless the timeout already ended the attempt. */
   async function signInWithDiagnostics(): Promise<void> {
     const events = await client.getAsIdeConnection();
     if (finished) return;

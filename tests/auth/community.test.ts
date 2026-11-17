@@ -36,6 +36,7 @@ test("Community login captures requestfailed after an empty disconnect rejection
     (fail) =>
       new Promise((_, reject) => {
         reject({ type: "disconnect", detail: null });
+        fail(null);
         fail("Failed to connect: Error: Authentication details invalid");
         fail("Failed to connect: Error: UNAUTHENTICATED");
       }),

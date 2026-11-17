@@ -19,6 +19,21 @@ const DEFAULT_PORTS: Record<string, string> = {
   "http:": "80",
 };
 
+/** A server address suitable for diagnostics, without credentials or URL data. */
+export function displayServerAddress(input: string): string | undefined {
+  const text = input.trim();
+  const hasScheme = SCHEME.test(text);
+  try {
+    const url = new URL(hasScheme ? text : `https://${text}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (hasScheme) return url.origin;
+    const typed = new URL(`dh://${text}`);
+    return typed.port ? `${url.hostname}:${typed.port}` : url.host;
+  } catch {
+    return undefined;
+  }
+}
+
 /** `origin` with its port spelled out, so {@link candidates} tries only it. */
 export function withPort(origin: string): string {
   const url = new URL(origin);
@@ -33,16 +48,19 @@ export function candidates(input: string): URL[] {
   try {
     url = new URL(hasScheme ? text : `https://${text}`);
   } catch {
-    throw new DhError("usage", `Not a server address: ${input}`);
+    throw new DhError("usage", "Not a server address");
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new DhError("usage", `Unsupported scheme: ${url.protocol}`);
   }
   if (!hasScheme && isLocal(url)) url.protocol = "http:";
   // http(s) URLs drop a default port (`:443`, `:80`); a custom scheme keeps it.
-  const typed = new URL(
-    hasScheme ? text.replace(SCHEME, "dh://") : `dh://${text}`,
-  );
+  let typed: URL;
+  try {
+    typed = new URL(hasScheme ? text.replace(SCHEME, "dh://") : `dh://${text}`);
+  } catch {
+    throw new DhError("usage", "Not a server address");
+  }
   if (typed.port) {
     // Reapplied: the scheme switch above loses a port that was https's default.
     url.port = typed.port;
@@ -106,9 +124,10 @@ export async function resolveServer(
   const url = urls[i];
   const kind = kinds[i];
   if (url && kind) return { origin: url.origin, kind };
+  const address = displayServerAddress(input);
   throw new DhError(
     "server_unreachable",
-    `No Deephaven server found at ${input}`,
+    `No Deephaven server found${address ? ` at ${address}` : ""}`,
     errors.length === urls.length && urls.length === 1
       ? errors[0]
       : `Tried:${urls.map((u) => `\n  ${u.origin}`).join("")}`,
