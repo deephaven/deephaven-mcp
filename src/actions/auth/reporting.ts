@@ -45,10 +45,14 @@ export function profileMigrationReport(origin: string): FailureReport {
   );
 }
 
-export function oldKeyCleanupReport(profile: string): FailureReport {
+export function oldKeyCleanupReport(
+  profile: string,
+  origin: string,
+): FailureReport {
   const report = profileChangeReport(
     `cleaning up old keys for profile ${profile}`,
     ["The profile was saved; old-key cleanup may be incomplete."],
+    origin,
   );
   return {
     ...report,

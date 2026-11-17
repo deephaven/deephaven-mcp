@@ -103,6 +103,9 @@ username both use the same profile.
    - `--expect-user <user>` checks the account without asking. A different
      account fails with `auth_failed` and nothing is saved.
 
+The printed sign-in URL contains a one-time authentication secret. Treat it as
+sensitive, including when capturing or sharing terminal output.
+
 Browsers often sign you in again with whatever account they already have a
 session for. To use a different account, pick it in your identity provider's
 account chooser, or sign out of the identity provider first.

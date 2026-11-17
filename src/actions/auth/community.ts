@@ -112,17 +112,21 @@ export async function loginCommunity(
   const { client, origin } = conn;
   // CoreClient can reject with an empty disconnect event before requestfailed
   // supplies the reason on its underlying connection in the same event turn.
-  const events = await client.getAsIdeConnection();
   let failureReason: string | undefined;
+  let removeListener: (() => void) | undefined;
+  let finished = false;
   const onFailure = (event: { detail?: unknown }) => {
     if (event.detail != null) failureReason ??= reasonOf(event.detail);
   };
-  const removeListener = events.addEventListener("requestfailed", onFailure);
+  async function signInWithDiagnostics(): Promise<void> {
+    const events = await client.getAsIdeConnection();
+    if (finished) return;
+    removeListener = events.addEventListener("requestfailed", onFailure);
+    await client.login(loginCredentials(conn.dh, login));
+  }
   try {
-    await withTimeout(
-      client.login(loginCredentials(conn.dh, login)),
-      timeout,
-      () => unreachable(origin),
+    await withTimeout(signInWithDiagnostics(), timeout, () =>
+      unreachable(origin),
     );
   } catch (e) {
     const detail = failureReason ?? communityLoginReason(e);
@@ -135,7 +139,8 @@ export async function loginCommunity(
       detail,
     );
   } finally {
-    removeListener();
+    finished = true;
+    removeListener?.();
   }
 }
 

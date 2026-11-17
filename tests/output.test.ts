@@ -15,6 +15,8 @@ async function runOutput(format: string, operation: string) {
     import { result, reportError, setFormat } from ${JSON.stringify(outputUrl)};
     import { DhError, cleanupError } from ${JSON.stringify(errorsUrl)};
     import { authActionReport, profileSaveReport, profileRemovalReport, profileMigrationReport } from ${JSON.stringify(new URL("../src/actions/auth/reporting.ts", import.meta.url).href)};
+    import { reportMigrationProgress } from ${JSON.stringify(new URL("../src/actions/auth/migrate.ts", import.meta.url).href)};
+    import { CommandLifecycle } from ${JSON.stringify(new URL("../src/cli/lifecycle.ts", import.meta.url).href)};
     setFormat(${JSON.stringify(format)});
     ${operation}
   `;
@@ -204,6 +206,38 @@ test("operation facts and actionable guidance render consistently in human and J
           "",
         ].join("\n"),
       );
+    }
+  }
+});
+
+test("nested migration cancellation retains saved progress and recovery", async () => {
+  for (const format of ["human", "json"]) {
+    const output = await runOutput(
+      format,
+      `const lifecycle = new CommandLifecycle();
+      reportMigrationProgress(lifecycle, 1);
+      try {
+        await lifecycle.runLifecycleAction(
+          authActionReport("connecting", "https://example.com"),
+          async () => lifecycle.receiveSignal("SIGINT"),
+        );
+      } catch (error) {
+        process.exitCode = reportError(error, lifecycle.failureReport);
+      }`,
+    );
+    expect(output.code).toBe(3);
+    if (format === "json") {
+      expect(JSON.parse(output.stderr)).toMatchObject({
+        operation: "connecting",
+        progress: "Migrated 1 profile.",
+        recoveryCommand: ["dh", "auth"],
+      });
+    } else {
+      expect(output.stderr).toContain(
+        "Cancelled while connecting at https://example.com.",
+      );
+      expect(output.stderr).toContain("Migrated 1 profile.");
+      expect(output.stderr).toContain("Check profiles: dh auth");
     }
   }
 });

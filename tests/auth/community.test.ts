@@ -96,6 +96,7 @@ test("Community login removes its diagnostic listener on success and timeout", a
     const { conn, remove } = connection(async () => {
       if (timeout) await new Promise(() => {});
     });
+
     const attempt = loginCommunity(
       conn,
       { method: "anonymous" },
@@ -113,4 +114,38 @@ test("Community login removes its diagnostic listener on success and timeout", a
     }
     expect(remove).toHaveBeenCalledTimes(1);
   }
+});
+
+test("Community login bounds diagnostic acquisition and ignores late completion", async () => {
+  const { conn, remove } = connection(async () => {});
+  const pending =
+    Promise.withResolvers<
+      Awaited<ReturnType<typeof conn.client.getAsIdeConnection>>
+    >();
+  const events = await conn.client.getAsIdeConnection();
+  const getEvents = mock(() => pending.promise);
+  const login = mock(async () => {});
+  conn.client.getAsIdeConnection = getEvents;
+  conn.client.login = login;
+  await expect(
+    loginCommunity(conn, { method: "anonymous" }, 5, "auth_failed"),
+  ).rejects.toMatchObject({ code: "server_unreachable" });
+  expect(conn.client.disconnect).toHaveBeenCalledTimes(1);
+  pending.resolve(events);
+  await Promise.resolve();
+  expect(events.addEventListener).not.toHaveBeenCalled();
+  expect(login).not.toHaveBeenCalled();
+  expect(remove).not.toHaveBeenCalled();
+});
+
+test("Community login normalizes diagnostic acquisition failures", async () => {
+  const { conn, remove } = connection(async () => {});
+  conn.client.getAsIdeConnection = mock(async () => {
+    throw new Error("setup failed");
+  });
+  await expect(
+    loginCommunity(conn, { method: "anonymous" }, 100, "auth_expired"),
+  ).rejects.toMatchObject({ code: "auth_expired", detail: "setup failed" });
+  expect(conn.client.disconnect).toHaveBeenCalledTimes(1);
+  expect(remove).not.toHaveBeenCalled();
 });

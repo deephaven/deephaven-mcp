@@ -1,9 +1,53 @@
 import { expect, spyOn, test } from "bun:test";
 import {
+  clearMigrationProgress,
+  reportMigrationProgress,
+} from "../../src/actions/auth/migrate.ts";
+import {
   CommandLifecycle,
   runLifecycleAction,
 } from "../../src/cli/lifecycle.ts";
 import type { FailureReport } from "../../src/errors.ts";
+
+test("migration progress stays with nested work and clears after success", async () => {
+  const lifecycle = new CommandLifecycle();
+  lifecycle.setFailureReport({ command: "auth migrate" });
+  reportMigrationProgress(lifecycle, 2);
+  await lifecycle.runLifecycleAction(
+    {
+      progress: "Profile saved.",
+      human: { summary: "Cancelled.", details: ["Cleanup incomplete."] },
+    },
+    async () => {
+      expect(lifecycle.failureReport).toMatchObject({
+        progress: "Migrated 2 profiles. Profile saved.",
+        recoveryCommand: ["dh", "auth"],
+        human: {
+          details: ["Migrated 2 profiles.", "Cleanup incomplete."],
+        },
+      });
+    },
+  );
+  await lifecycle.runLifecycleAction(
+    {
+      progress: undefined,
+      recoveryCommand: undefined,
+      human: { summary: "Cancelled during authorization." },
+    },
+    async () => {
+      expect(lifecycle.failureReport).toMatchObject({
+        progress: "Migrated 2 profiles.",
+        recoveryCommand: ["dh", "auth"],
+        human: { details: ["Migrated 2 profiles."] },
+      });
+    },
+  );
+  clearMigrationProgress(lifecycle);
+  expect(lifecycle.failureReport).toMatchObject({ command: "auth migrate" });
+  expect(lifecycle.failureReport.progress).toBeUndefined();
+  expect(lifecycle.failureReport.human).toBeUndefined();
+  expect(lifecycle.failureReport.recoveryCommand).toBeUndefined();
+});
 
 test("lifecycle: cleanup runs once in reverse order and collects failures", async () => {
   const lifecycle = new CommandLifecycle();

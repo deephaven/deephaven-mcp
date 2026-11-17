@@ -116,16 +116,6 @@ export function reasonOf(reason: unknown): string | undefined {
   return !text || text.startsWith("[object ") ? undefined : text;
 }
 
-/** A cancellation error carrying the abort reason as detail when it is useful. */
-export function cancellationError(reason?: unknown): DhError {
-  return new DhError(
-    "cancelled",
-    "Cancelled",
-    undefined,
-    reason === undefined ? undefined : reasonOf(reason),
-  );
-}
-
 export function interruptedError(reason?: unknown): DhError {
   if (reason instanceof DhError && reason.code === "cancelled") return reason;
   return new DhError(

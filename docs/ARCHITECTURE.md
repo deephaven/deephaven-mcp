@@ -122,6 +122,8 @@ Pass it to actions that need it, or just its signal to request helpers; never
 use a global lifecycle. [cli/run.ts](../src/cli/run.ts) handles signals and cleanup.
 Acquisition actions register connection cleanup before returning, and close
 connections immediately if cancellation or cleanup prevents registration.
+On Unix, CA re-runs use a separate process group; the parent forwards signals
+so terminal and directly delivered interrupts reach the child only once.
 
 `Output.human` is for people and `Output.json` for `-o json`. In JSON mode,
 stdout carries only the result and everything else goes to stderr.
@@ -139,6 +141,10 @@ and `detail` print that way already.
 
 Write coherent prose for the operation, not a field dump. These rules select
 information, not wording or line order. Avoid repetition and sensitive payloads.
+Never include CLI-generated authentication secrets in diagnostic reports.
+The SSO sign-in link is an intentional exception for completing sign-in; it
+contains a one-time secret and should be handled as sensitive.
+Third-party error details and user-supplied values are not guaranteed secret-free.
 
 | Information | Include when | Example |
 | --- | --- | --- |

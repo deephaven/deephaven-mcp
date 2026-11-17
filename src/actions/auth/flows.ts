@@ -29,6 +29,7 @@ import {
   removeProfile,
 } from "./profile.ts";
 import {
+  authActionReport,
   oldKeyCleanupReport,
   profileRemovalReport,
   profileSaveReport,
@@ -102,6 +103,23 @@ export async function commitSignIn(
   lifecycle?: CommandLifecycle,
 ): Promise<SavedSignIn> {
   const report = profileSaveReport(session.origin);
+  if (save.credential === "new-key") {
+    const authorization = authActionReport(
+      "authorizing this computer",
+      session.origin,
+    );
+    Object.assign(report, authorization, {
+      human: {
+        ...authorization.human,
+        details: [
+          "The profile has not been saved; key authorization may be incomplete.",
+        ],
+      },
+      progress: "Sign-in completed; profile not saved.",
+      outcome: "unknown",
+      recoveryCommand: undefined,
+    });
+  }
   return runLifecycleAction(
     lifecycle,
     report,
@@ -132,6 +150,9 @@ async function commitSignInAction(
     credential = save.credential;
   }
 
+  Object.assign(report, profileSaveReport(session.origin), {
+    progress: undefined,
+  });
   let saved: Saved;
   try {
     saved = await saveProfile(
@@ -154,7 +175,7 @@ async function commitSignInAction(
     throw e;
   }
 
-  Object.assign(report, oldKeyCleanupReport(saved.name));
+  Object.assign(report, oldKeyCleanupReport(saved.name, session.origin));
   const warnings = await deleteObsoleteKeys(store, session, saved.previous);
   return { ...saved, key, warnings };
 }

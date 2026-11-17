@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import {
-  cancellationError,
   cleanupError,
   commandUsageError,
   DhError,
@@ -35,13 +34,13 @@ test("DhError: the detail follows the message", () => {
   expect(new DhError("usage", "plain").message).toBe("plain");
 });
 
-test("cancellationError: preserves a useful abort reason as detail", () => {
-  expect(cancellationError(new Error("SIGTERM")).detail).toBe("SIGTERM");
-  expect(cancellationError().message).toBe("Cancelled");
-});
-
 test("interruptedError: retains cancellation errors and formats other reasons", () => {
-  const cancellation = cancellationError("SIGTERM");
+  const cancellation = new DhError(
+    "cancelled",
+    "Cancelled",
+    undefined,
+    "SIGTERM",
+  );
   expect(interruptedError(cancellation)).toBe(cancellation);
   expect(interruptedError("Interrupted by SIGINT")).toMatchObject({
     code: "cancelled",

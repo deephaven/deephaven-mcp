@@ -106,6 +106,8 @@ export async function ensureCa(
     {
       env: { ...process.env, NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
       stdio: ["inherit", "inherit", "inherit"],
+      // Avoid delivering terminal signals both directly and via the parent.
+      detached: process.platform !== "win32",
     },
   );
   // The child owns cancellation; the parent forwards signals and waits for cleanup.

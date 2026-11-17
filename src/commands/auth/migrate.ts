@@ -1,9 +1,11 @@
 import { Option } from "commander";
 import { findLegacy, type LegacyItem } from "../../actions/auth/legacy.ts";
 import {
+  clearMigrationProgress,
   type Migrated,
   migrateLegacyEntry,
   recordMigration,
+  reportMigrationProgress,
   splitMigrated,
 } from "../../actions/auth/migrate.ts";
 import type { State } from "../../actions/auth/store.ts";
@@ -79,8 +81,11 @@ export async function migrateLegacy(
   for (const n of legacy.notImported) note(`  – ${n}: not used, not migrated`);
 
   const outcomes: Migrated[] = [];
+  let migrated = 0;
   for (const item of chosen) {
-    outcomes.push(await migrateAndReport(ctx, legacy.path, item));
+    const outcome = await migrateAndReport(ctx, legacy.path, item);
+    outcomes.push(outcome);
+    if (outcome.ok) reportMigrationProgress(ctx.lifecycle, ++migrated);
   }
   const failed = outcomes.filter((o) => !o.ok).length;
   if (failed) {
@@ -90,6 +95,7 @@ export async function migrateLegacy(
   }
 
   await recordMigration(ctx.store, legacy, chosen, outcomes);
+  clearMigrationProgress(ctx.lifecycle);
   return { migrated: outcomes.length - failed, failed };
 }
 

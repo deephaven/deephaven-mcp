@@ -53,6 +53,30 @@ export interface Migrated {
   warnings: string[];
 }
 
+export function reportMigrationProgress(
+  lifecycle: CommandLifecycle,
+  migrated: number,
+): void {
+  const progress = `Migrated ${migrated} profile${migrated === 1 ? "" : "s"}.`;
+  lifecycle.setFailureReport({
+    progress,
+    recoveryCommand: [BIN, "auth"],
+    human: {
+      summary: "Cancelled during migration.",
+      details: [progress],
+      recoveryLabel: "Check profiles",
+    },
+  });
+}
+
+export function clearMigrationProgress(lifecycle: CommandLifecycle): void {
+  lifecycle.setFailureReport({
+    progress: undefined,
+    recoveryCommand: undefined,
+    human: undefined,
+  });
+}
+
 /** Which config file and entry a profile came from; `#` separates the two. */
 export function importedFrom(path: string, item: LegacyItem): string {
   return `dhcli:${path}#${item.source}`;

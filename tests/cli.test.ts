@@ -64,7 +64,7 @@ async function waitForSso(stream: ReadableStream<Uint8Array>) {
       const { done, value } = await reader.read();
       if (done) throw new Error(`CLI exited before SSO: ${text}`);
       text += decoder.decode(value, { stream: true });
-      const pid = /SSO_TEST_PID=(\d+)\n/.exec(text)?.[1];
+      const pid = /SSO_TEST_PID=(\d+)\r?\n/.exec(text)?.[1];
       if (pid) {
         return {
           pid: Number(pid),
@@ -291,6 +291,7 @@ test.skipIf(WINDOWS)(
               if (format === "json") {
                 expect(progress.output).toContain("Waiting for sign-in");
                 expect(progress.output).toContain("Ctrl-C to cancel");
+                expect(progress.output).toContain("key=");
               }
               expect(progress.output).not.toContain("--timeout");
               expect(ssoPid === proc.pid).toBe(!ca);
@@ -320,6 +321,16 @@ test.skipIf(WINDOWS)(
                   .split("\n")
                   .find((line) => line.startsWith('{"type":"error"'));
                 expect(reportLine).toBeDefined();
+                const signInLink = progress.output.match(
+                  /Sign in at:\s+(https?:\/\/\S+)/,
+                )?.[1];
+                expect(signInLink).toBeDefined();
+                const nonce = new URL(signInLink ?? "").searchParams.get("key");
+                expect(nonce).toBeTruthy();
+                expect(reportLine).not.toContain(nonce ?? "");
+                expect(reportLine).not.toContain(
+                  encodeURIComponent(nonce ?? ""),
+                );
                 expect(JSON.parse(reportLine ?? "")).toMatchObject({
                   type: "error",
                   error: "Interrupted",
@@ -358,12 +369,225 @@ test.skipIf(WINDOWS)(
           }
         }
       }
+      if (process.platform === "darwin" && Bun.which("python3")) {
+        const terminal = `
+import os, pty, select, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[1], sys.argv[1:])
+while True:
+    ready, _, _ = select.select([fd, 0], [], [])
+    if fd in ready:
+        try:
+            data = os.read(fd, 4096)
+        except OSError:
+            break
+        if not data:
+            break
+        os.write(1, data)
+    if 0 in ready:
+        data = os.read(0, 4096)
+        if data:
+            os.write(fd, data)
+_, status = os.waitpid(pid, 0)
+sys.exit(os.waitstatus_to_exitcode(status))
+`;
+        const proc = Bun.spawn(
+          [
+            "python3",
+            "-c",
+            terminal,
+            ...CLI,
+            "auth",
+            "login",
+            `http://127.0.0.1:${server.port}`,
+            "--method",
+            "saml",
+            "--no-browser",
+            "--no-prompt",
+            "-o",
+            "json",
+            "--ca-cert",
+            TEST_CA,
+          ],
+          {
+            env: {
+              ...process.env,
+              DH_CONFIG_DIR: configDir,
+              DH_AI_DATA_DIR: join(tmp, "legacy"),
+              DH_AUTO_UPDATE: "off",
+              DH_PROFILE: "",
+              DH_SERVER: "",
+              DH_LOADED_CA_CERT: "",
+              NODE_EXTRA_CA_CERTS: TEST_CA,
+              TMPDIR: tmp,
+            },
+            stdin: "pipe",
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        let ssoPid: number | undefined;
+        let parentPid: number | undefined;
+        try {
+          const progress = await within(waitForSso(proc.stdout), 5_000);
+          ssoPid = progress.pid;
+          parentPid = Number(
+            Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(ssoPid)])
+              .stdout.toString()
+              .trim(),
+          );
+          expect(parentPid).toBeGreaterThan(1);
+          const stopped = (pid: number) =>
+            Bun.spawnSync(["ps", "-o", "state=", "-p", String(pid)])
+              .stdout.toString()
+              .trim()
+              .startsWith("T");
+          const waitForState = async (wantStopped: boolean) => {
+            const deadline = Date.now() + 3_000;
+            while (
+              stopped(parentPid ?? 0) !== wantStopped ||
+              stopped(ssoPid ?? 0) !== wantStopped
+            ) {
+              if (Date.now() >= deadline)
+                throw new Error(
+                  `Timed out waiting for job-control state: parent=${stopped(parentPid ?? 0)}, child=${stopped(ssoPid ?? 0)}, expected=${wantStopped}`,
+                );
+              await Bun.sleep(10);
+            }
+          };
+          process.kill(parentPid, "SIGTSTP");
+          await waitForState(true);
+          process.kill(parentPid, "SIGCONT");
+          await waitForState(false);
+          proc.stdin.write("\x03");
+          proc.stdin.flush();
+          expect(await within(proc.exited, 3_000)).toBe(3);
+          const reportText = await progress.readRemaining();
+          const reportLine = reportText
+            .split(/\r?\n/)
+            .find((line) => line.includes('{"type":"error"'));
+          expect(reportLine).toBeDefined();
+          expect(
+            JSON.parse((reportLine ?? "").slice(reportLine?.indexOf("{"))),
+          ).toMatchObject({
+            code: "cancelled",
+            detail: "Interrupted by SIGINT",
+            operation: "waiting for SSO sign-in",
+          });
+          expect(isRunning(ssoPid)).toBe(false);
+          expect(
+            (await readdir(tmp)).filter((name) =>
+              name.startsWith(`${BIN}-ca-`),
+            ),
+          ).toHaveLength(0);
+        } finally {
+          if (proc.exitCode === null) proc.kill("SIGKILL");
+          await proc.exited;
+          if (parentPid !== undefined && isRunning(parentPid))
+            stopProcess(parentPid);
+          if (ssoPid !== undefined && isRunning(ssoPid)) stopProcess(ssoPid);
+        }
+      }
     } finally {
       await server.stop(true);
       await rm(tmp, { recursive: true, force: true });
     }
   },
   15_000,
+);
+
+test.skipIf(WINDOWS)(
+  "cli: interrupted migration reports earlier saved profiles",
+  async () => {
+    const { tmp, configDir } = await setup();
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        if (new URL(req.url).pathname === "/irisapi/irisapi.nocache.js") {
+          return new Response(`
+            globalThis.iris = { Client: class {
+              static EVENT_CONNECT = "connect";
+              addEventListener() {
+                process.stderr.write("SSO_TEST_PID=" + process.pid + "\\n");
+                return () => {};
+              }
+              disconnect() {}
+            }};
+          `);
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    const legacy = join(tmp, "legacy.json");
+    await writeFile(
+      legacy,
+      JSON.stringify({
+        community: {
+          sessions: {
+            first: {
+              host: "localhost",
+              auth_type: "PSK",
+              auth_token_env_var: "DH_TEST_MIGRATION_MISSING",
+            },
+          },
+        },
+        enterprise: {
+          systems: {
+            second: {
+              connection_json_url: `http://127.0.0.1:${server.port}`,
+              auth_type: "password",
+              username: "alice",
+              password: "test",
+            },
+          },
+        },
+      }),
+    );
+    const proc = Bun.spawn(
+      [...CLI, "auth", "migrate", "--from", legacy, "--yes", "-o", "json"],
+      {
+        env: {
+          ...process.env,
+          DH_CONFIG_DIR: configDir,
+          DH_AUTO_UPDATE: "off",
+          DH_PROFILE: "",
+          DH_SERVER: "",
+          DH_TEST_MIGRATION_MISSING: "",
+        },
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "pipe",
+      },
+    );
+    try {
+      const progress = await within(waitForSso(proc.stderr), 5_000);
+      proc.kill("SIGINT");
+      expect(await within(proc.exited, 3_000)).toBe(3);
+      const reportText = await progress.readRemaining();
+      const reportLine = reportText
+        .split("\n")
+        .find((line) => line.startsWith('{"type":"error"'));
+      expect(reportLine).toBeDefined();
+      expect(JSON.parse(reportLine ?? "")).toMatchObject({
+        code: "cancelled",
+        operation: "connecting",
+        progress: "Migrated 1 profile.",
+        recoveryCommand: [BIN, "auth"],
+      });
+      const config = JSON.parse(
+        await readFile(join(configDir, "config.json"), "utf8"),
+      );
+      expect(Object.keys(config.profiles)).toHaveLength(1);
+    } finally {
+      if (proc.exitCode === null) proc.kill("SIGKILL");
+      await proc.exited;
+      await server.stop(true);
+      await rm(tmp, { recursive: true, force: true });
+    }
+  },
+  10_000,
 );
 
 test("cli: -o follows commander: the last one wins, and nothing after --", async () => {

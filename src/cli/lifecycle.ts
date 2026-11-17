@@ -1,4 +1,4 @@
-import { type FailureReport, interruptedError } from "../errors.ts";
+import { type FailureReport, interruptedError, isErrno } from "../errors.ts";
 
 export type Cleanup = () => void | Promise<void>;
 
@@ -109,11 +109,28 @@ function reportWithTiming(
 ): FailureReport {
   const report = { ...current };
   if (operation) {
+    const details = current.human?.details;
+    const progress = current.progress;
     Object.assign(report, operation.report, {
       elapsedSeconds: Math.floor(
         (performance.now() - operation.startedAt) / 1000,
       ),
     });
+    if (details?.length && report.human) {
+      report.human = {
+        ...report.human,
+        details: [...details, ...(report.human.details ?? [])],
+        recoveryLabel:
+          report.human.recoveryLabel ?? current.human?.recoveryLabel,
+      };
+    }
+    if (progress) {
+      report.progress = operation.report.progress
+        ? `${progress} ${operation.report.progress}`
+        : progress;
+    }
+    if (current.recoveryCommand && !operation.report.recoveryCommand)
+      report.recoveryCommand = current.recoveryCommand;
   }
   if (report.observation) {
     report.observation = {
@@ -171,15 +188,44 @@ async function runCleanupsBeforeDeadline(
 
 /** Forward interruption signals to the child and return a function to stop forwarding. */
 export function forwardSignalsToChild(
-  child: Pick<Bun.Subprocess, "kill">,
+  child: Pick<Bun.Subprocess, "kill" | "pid">,
   lifecycle?: CommandLifecycle,
 ): () => void {
   const forwardSignal = (signal: NodeJS.Signals) => {
     child.kill(signal);
   };
+  const forwardHangup = () => forwardSignal("SIGHUP");
+  const signalJob = (signal: "SIGSTOP" | "SIGCONT") => {
+    try {
+      process.kill(child.pid, signal);
+      return true;
+    } catch (error) {
+      if (isErrno(error, "ESRCH")) return false;
+      throw error;
+    }
+  };
+  const suspend = () => {
+    if (signalJob("SIGSTOP")) process.kill(process.pid, "SIGSTOP");
+  };
+  const resume = () => signalJob("SIGCONT");
+  if (process.platform !== "win32") {
+    process.on("SIGHUP", forwardHangup);
+    process.on("SIGTSTP", suspend);
+    process.on("SIGCONT", resume);
+  }
+  const stopJobSignals = () => {
+    if (process.platform !== "win32") {
+      process.off("SIGHUP", forwardHangup);
+      process.off("SIGTSTP", suspend);
+      process.off("SIGCONT", resume);
+    }
+  };
   if (lifecycle) {
     lifecycle.setSignalDelegate(forwardSignal);
-    return () => lifecycle.setSignalDelegate(undefined);
+    return () => {
+      lifecycle.setSignalDelegate(undefined);
+      stopJobSignals();
+    };
   }
   const forwardInterrupt = () => forwardSignal("SIGINT");
   const forwardTermination = () => forwardSignal("SIGTERM");
@@ -188,6 +234,7 @@ export function forwardSignalsToChild(
   return () => {
     process.off("SIGINT", forwardInterrupt);
     process.off("SIGTERM", forwardTermination);
+    stopJobSignals();
   };
 }
 
