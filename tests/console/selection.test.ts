@@ -216,18 +216,19 @@ test("console routing: environment-only targets must match the authenticated ide
   }
 });
 
-test("console selection: listing preserves a choice made after its registry snapshot", async () => {
-  class InterleavedStore extends Store {
-    afterSnapshot?: () => Promise<void>;
+class InterleavedStore extends Store {
+  afterSnapshot?: () => Promise<void>;
 
-    override async readConsoleData<T extends object>(empty: T): Promise<T> {
-      const data = await super.readConsoleData(empty);
-      const afterSnapshot = this.afterSnapshot;
-      this.afterSnapshot = undefined;
-      if (afterSnapshot) await afterSnapshot();
-      return data;
-    }
+  override async readConsoleData<T extends object>(empty: T): Promise<T> {
+    const data = await super.readConsoleData(empty);
+    const afterSnapshot = this.afterSnapshot;
+    this.afterSnapshot = undefined;
+    if (afterSnapshot) await afterSnapshot();
+    return data;
   }
+}
+
+test("console selection: listing preserves a choice made after its registry snapshot", async () => {
   const store = new InterleavedStore(
     join(await tempDir("dh-console-race-"), "cli"),
   );
@@ -258,6 +259,48 @@ test("console selection: listing preserves a choice made after its registry snap
         identityKey(identity)
       ],
     ).toBe("second-id");
+  } finally {
+    login.mockRestore();
+  }
+});
+
+test("console routing: stale listing preserves a concurrent create's full-ID profile mapping", async () => {
+  const store = new InterleavedStore(
+    join(await tempDir("dh-console-create-race-"), "cli"),
+  );
+  await saveProfile(store, "owner", identity);
+  await saveProfile(store, "unrelated-default", {
+    ...identity,
+    server: "https://other.example.com",
+  });
+  const listing = sessionFixture(identity, []);
+  const created = sessionFixture(identity);
+  store.afterSnapshot = async () => {
+    await rememberConsole(store, "abc123", "full-id", identity);
+    await rememberConsoleSelection(store, identity, "full-id");
+  };
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(listing.session);
+  try {
+    expect(await listConsoles(store, "owner", new CommandLifecycle())).toEqual(
+      [],
+    );
+    const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+    expect(registry.fullIds["full-id"]).toEqual([identity]);
+    expect(registry.shortcodeFullIds?.abc123).toEqual({
+      [identityKey(identity)]: "full-id",
+    });
+    expect(registry.selected[identityKey(identity)]).toBe("full-id");
+    login.mockClear();
+    login.mockResolvedValue(created.session);
+    expect(
+      (await detailConsole(store, "full-id", undefined, new CommandLifecycle()))
+        .id,
+    ).toBe("full-id");
+    expect(login).toHaveBeenCalledWith(
+      "owner",
+      store,
+      expect.any(CommandLifecycle),
+    );
   } finally {
     login.mockRestore();
   }

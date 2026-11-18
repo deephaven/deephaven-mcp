@@ -122,12 +122,15 @@ test("console store: discovery reconciles only the current identity and retains 
   await reserveShortcode(store, bob, () => "bbbbbb");
   await rememberConsole(store, "aaaaaa", "old-id", alice);
   await rememberConsole(store, "bbbbbb", "old-id", bob);
-  await reconcileDiscoveredConsoles(store, alice, [
-    { shortcode: "cccccc", id: "live-id" },
-  ]);
-  await reconcileDiscoveredConsoles(store, alice, [
-    { shortcode: "cccccc", id: "live-id" },
-  ]);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const snapshot = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+    await reconcileDiscoveredConsoles(
+      store,
+      alice,
+      [{ shortcode: "cccccc", id: "live-id" }],
+      snapshot,
+    );
+  }
   const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
   expect(registry.fullIds).toEqual({ "old-id": [bob], "live-id": [alice] });
   expect(registry.shortcodeIds).toEqual({
@@ -136,7 +139,7 @@ test("console store: discovery reconciles only the current identity and retains 
   });
   expect(registry.reservations).toEqual({ aaaaaa: alice, bbbbbb: bob });
   expect(identitiesForTarget(registry, "cccccc")).toEqual([alice]);
-  await reconcileDiscoveredConsoles(store, alice, []);
+  await reconcileDiscoveredConsoles(store, alice, [], registry);
   const updated = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
   expect(updated.shortcodeIds).toEqual({ bbbbbb: "old-id" });
   expect(identitiesForTarget(updated, "bbbbbb")).toEqual([bob]);
@@ -191,9 +194,12 @@ test("console store: colliding shortcodes retain each identity's full ID during 
     await rememberConsoleSelection(store, bob, "bob-id");
     const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
     expect(identitiesForTarget(registry, "shared")).toEqual([alice, bob]);
-    await reconcileDiscoveredConsoles(store, alice, [
-      { shortcode: "shared", id: "alice-id" },
-    ]);
+    await reconcileDiscoveredConsoles(
+      store,
+      alice,
+      [{ shortcode: "shared", id: "alice-id" }],
+      registry,
+    );
     expect(
       identitiesForTarget(
         await store.readConsoleData(EMPTY_CONSOLE_REGISTRY),
@@ -226,6 +232,7 @@ test("console store: legacy shortcode owners migrate without losing either ident
     registry.shortcodeIds.shared = "legacy-id";
     registry.fullIds["legacy-id"] = [alice];
   });
+
   await rememberConsole(store, "shared", "new-id", bob);
   expect(
     identitiesForTarget(
@@ -238,5 +245,30 @@ test("console store: legacy shortcode owners migrate without losing either ident
   expect(registry.fullIds).toEqual({ "new-id": [bob] });
   expect(registry.shortcodeFullIds?.shared).toEqual({
     [identityKey(bob)]: "new-id",
+  });
+});
+
+test("console store: stale discovery prunes only unchanged identity references", async () => {
+  const store = await tempStore();
+  const alice = identity("alice");
+  const bob = identity("bob");
+  await rememberConsole(store, "oldold", "old-id", alice);
+  await rememberConsole(store, "shared", "shared-old-id", alice);
+  const snapshot = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  await rememberConsole(store, "newnew", "new-id", alice);
+  await rememberConsole(store, "shared", "shared-new-id", alice);
+  await rememberConsole(store, "oldold", "old-id", bob);
+  await reconcileDiscoveredConsoles(store, alice, [], snapshot);
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(registry.fullIds).toEqual({
+    "old-id": [bob],
+    "new-id": [alice],
+    "shared-new-id": [alice],
+  });
+  expect(identitiesForTarget(registry, "oldold")).toEqual([bob]);
+  expect(identitiesForTarget(registry, "newnew")).toEqual([alice]);
+  expect(identitiesForTarget(registry, "shared")).toEqual([alice]);
+  expect(registry.shortcodeFullIds?.shared).toEqual({
+    [identityKey(alice)]: "shared-new-id",
   });
 });

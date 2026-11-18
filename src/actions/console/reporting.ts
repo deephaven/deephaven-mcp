@@ -181,6 +181,11 @@ export function consoleReadyReport(): FailureReport {
     outcome: "succeeded",
     continuation: "stopped",
     progress: "The console is ready.",
+    human: {
+      summary: "The console is ready.",
+      details: [],
+      recoveryLabel: "Inspect the console",
+    },
   };
 }
 
@@ -191,5 +196,10 @@ export function consoleDeletedReport(): FailureReport {
     outcome: "succeeded",
     continuation: "stopped",
     progress: "The console was deleted.",
+    human: {
+      summary: "The console was deleted.",
+      details: [],
+      recoveryLabel: "Check console status",
+    },
   };
 }

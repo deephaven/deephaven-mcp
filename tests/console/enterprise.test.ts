@@ -23,8 +23,10 @@ import {
 import {
   consoleCreateRequestReport,
   consoleDeleteAcceptedReport,
+  consoleDeletedReport,
   consoleDeleteRequestReport,
   consoleObservationReport,
+  consoleReadyReport,
   consoleStartupAcceptedReport,
   consoleStartupFailedReport,
   consoleStartupReport,
@@ -146,6 +148,47 @@ test("console reports: retain recovery context without stale continuation detail
   expect(lifecycle.failureReport.human?.details?.join(" ")).toContain(
     "deletion may still complete after dh exits",
   );
+});
+
+test("console completion reports: replace pending human wording before local persistence", async () => {
+  for (const completion of [consoleReadyReport(), consoleDeletedReport()]) {
+    for (const interrupted of [false, true]) {
+      const lifecycle = new CommandLifecycle();
+      const persist = lifecycle.runLifecycleAction(
+        consoleStartupReport(),
+        async () => {
+          lifecycle.setFailureReport(
+            consoleCreateRequestReport("abc123", "prod"),
+          );
+          lifecycle.setFailureReport(
+            consoleStartupAcceptedReport("abc123", "prod"),
+          );
+          lifecycle.setFailureReport(
+            consoleDeleteAcceptedReport(lifecycle.failureReport.human),
+          );
+          lifecycle.setFailureReport(completion);
+          if (interrupted) {
+            lifecycle.receiveSignal("SIGINT");
+            lifecycle.signal.throwIfAborted();
+          }
+          throw new Error("Local registry write failed");
+        },
+      );
+      await expect(persist).rejects.toBeDefined();
+      expect(lifecycle.failureReport).toMatchObject({
+        outcome: "succeeded",
+        continuation: "stopped",
+        human: {
+          summary: completion.progress,
+          details: [],
+        },
+      });
+      const human = JSON.stringify(lifecycle.failureReport.human);
+      expect(human).not.toContain("may still");
+      expect(human).not.toContain("not confirmed");
+      expect(human).not.toContain("Interrupted while");
+    }
+  }
 });
 
 type ConsoleClientMock = Pick<

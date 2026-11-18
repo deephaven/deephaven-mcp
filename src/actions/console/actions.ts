@@ -186,7 +186,12 @@ export async function listConsoles(
   const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
   const items = itemsForSession(session, registry);
   if (session.enterprise) {
-    await reconcileDiscoveredConsoles(store, identityOf(session), items);
+    await reconcileDiscoveredConsoles(
+      store,
+      identityOf(session),
+      items,
+      registry,
+    );
   }
   if (session.community) return items;
   const identity = identityOf(session);

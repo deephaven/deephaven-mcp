@@ -161,14 +161,19 @@ function rememberConsoleInRegistry(
   registry.shortcodeOwners[shortcode] = owners;
 }
 
-/** Reconcile one identity's discovered consoles under a single registry lock. */
+/** Prune only references unchanged since discovery began, preserving concurrent writes. */
 export async function reconcileDiscoveredConsoles(
   store: Store,
   identity: ConsoleIdentity,
   consoles: { id: string; shortcode: string }[],
+  snapshot: ConsoleRegistry,
 ): Promise<void> {
   await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
+    const key = identityKey(identity);
     for (const console of consoles) {
+      const currentId = fullIdsForShortcode(registry, console.shortcode)[key];
+      const previousId = fullIdsForShortcode(snapshot, console.shortcode)[key];
+      if (currentId !== previousId) continue;
       rememberConsoleInRegistry(
         registry,
         console.shortcode,
@@ -180,14 +185,22 @@ export async function reconcileDiscoveredConsoles(
     const liveShortcodes = new Set(
       consoles.map((console) => console.shortcode),
     );
-    const key = identityKey(identity);
-    for (const shortcode of Object.keys(registry.shortcodeIds)) {
-      if (!liveShortcodes.has(shortcode))
+    for (const shortcode of Object.keys(snapshot.shortcodeIds)) {
+      const previousId = fullIdsForShortcode(snapshot, shortcode)[key];
+      if (
+        previousId !== undefined &&
+        fullIdsForShortcode(registry, shortcode)[key] === previousId &&
+        !liveShortcodes.has(shortcode)
+      )
         removeShortcodeOwner(registry, shortcode, identity);
     }
     for (const [id, identities] of Object.entries(registry.fullIds)) {
+      const wasKnown = snapshot.fullIds[id]?.some(
+        (known) => identityKey(known) === key,
+      );
+      if (!wasKnown || liveIds.has(id)) continue;
       registry.fullIds[id] = identities.filter(
-        (known) => identityKey(known) !== key || liveIds.has(id),
+        (known) => identityKey(known) !== key,
       );
       if (registry.fullIds[id].length === 0) delete registry.fullIds[id];
     }
