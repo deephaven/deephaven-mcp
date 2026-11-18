@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { Command } from "commander";
 import * as auth from "../../src/actions/auth/session.ts";
+import type { Session } from "../../src/actions/auth/signin.ts";
 import { Store } from "../../src/actions/auth/store.ts";
 import {
   createConsole,
@@ -18,7 +19,8 @@ import { tempDir } from "../helpers.ts";
 test("Community console errors name the operation without startup retry advice", async () => {
   const store = new Store(join(await tempDir("dh-community-errors-"), "cli"));
   const lifecycle = new CommandLifecycle();
-  const login = spyOn(auth, "requireAuth").mockResolvedValue({
+  // These operations reject Community sessions before using the client.
+  const session = {
     origin: "http://localhost:10000",
     kind: "community",
     cacheRoot: "/tmp/dh-test",
@@ -29,7 +31,8 @@ test("Community console errors name the operation without startup retry advice",
       client: {},
       handlers: [],
     },
-  });
+  } as unknown as Session;
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
   try {
     await expect(
       detailConsole(store, undefined, undefined, lifecycle),
@@ -66,7 +69,8 @@ test("Community console errors name the operation without startup retry advice",
 
 test("console delete: no selected or running console fails before confirmation", async () => {
   const store = new Store(join(await tempDir("dh-console-delete-"), "cli"));
-  const login = spyOn(auth, "requireAuth").mockResolvedValue({
+  // Only query discovery is needed to exercise a missing selection.
+  const session = {
     origin: "https://dhe.example.com",
     kind: "enterprise",
     cacheRoot: "/tmp/dh-test",
@@ -76,7 +80,8 @@ test("console delete: no selected or running console fails before confirmation",
       dhe: {},
       client: { getKnownConfigs: () => [] },
     },
-  });
+  } as unknown as Session;
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
   const ui = { ...lazyPrompter(false) };
   const confirm = spyOn(ui, "confirm");
   const lifecycle = new CommandLifecycle();

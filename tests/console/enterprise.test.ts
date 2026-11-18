@@ -138,6 +138,7 @@ test("console reports: retain recovery context without stale continuation detail
 });
 
 function sessionWith(client: Record<string, unknown>): Session {
+  // Only the Enterprise API members exercised by each test are mocked.
   return {
     origin: "https://dhe.example.com",
     kind: "enterprise",
@@ -148,7 +149,7 @@ function sessionWith(client: Record<string, unknown>): Session {
       dhe: {},
       client,
     },
-  };
+  } as unknown as Session;
 }
 
 function query(

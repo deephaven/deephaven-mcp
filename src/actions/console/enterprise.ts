@@ -1,6 +1,5 @@
 import type { CommandLifecycle } from "../../cli/lifecycle.ts";
 import { DhError, reasonOf, timeoutMs, withTimeout } from "../../errors.ts";
-import type { Api } from "../auth/jsapi.ts";
 import type { Session } from "../auth/signin.ts";
 import {
   consoleDeletedReport,
@@ -78,7 +77,7 @@ interface QueryConstants {
   consoleDefaultHeap?: number;
   minDataRatio?: number;
   maxDataRatio?: number;
-  defaultSchedulingDetails?: string[];
+  defaultSchedulingDetails?: readonly string[];
 }
 
 interface EnvironmentVariables {
@@ -89,7 +88,7 @@ interface EnvironmentVariables {
 /**
  * Return the Enterprise API client for a session, rejecting Community sessions.
  */
-function enterpriseClient(session: Session): Api {
+function enterpriseClient(session: Session): AuthenticatedEnterpriseClient {
   if (!session.enterprise) {
     throw new DhError(
       "console_unsupported",
@@ -333,7 +332,7 @@ function deriveConsoleServerSettings(
 
 /** Retain required scheduler initialization fields while selecting temporary-console lifecycle. */
 function temporaryConsoleScheduling(
-  defaults: string[] | undefined,
+  defaults: readonly string[] | undefined,
   queue: string,
 ): string[] {
   if (
@@ -674,3 +673,5 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     if (signal.aborted) onAbort();
   });
 }
+
+import type { AuthenticatedEnterpriseClient } from "@deephaven-enterprise/jsapi-nodejs";
