@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { Store } from "../../src/actions/auth/store.ts";
 import { rememberOnlyRunningConsole } from "../../src/actions/console/actions.ts";
-import { consoleInfo } from "../../src/actions/console/enterprise.ts";
+import type { ConsoleInfo } from "../../src/actions/console/enterprise.ts";
 import {
   EMPTY_CONSOLE_REGISTRY,
   identityKey,
@@ -15,11 +15,27 @@ const identity = {
   operateAs: "alice",
 };
 
+function consoleFixture(id: string, state: string): ConsoleInfo {
+  return {
+    id,
+    shortcode: "abc123",
+    name: "IC - dh CLI - abc123",
+    state,
+    language: "Python",
+    heapSizeGb: 1,
+    server: "Query 1",
+    engine: "DeephavenCommunity",
+    jvmArgs: "",
+    environment: {},
+    autoDeleteTimeoutSeconds: 600,
+  };
+}
+
 test("console selection: auto-select only one running console and persist its full ID", async () => {
   const store = new Store(join(await tempDir("dh-console-selection-"), "cli"));
   const consoles = [
-    consoleInfo({ serial: "running-id", status: "Connected" }),
-    consoleInfo({ serial: "stopped-id", status: "Stopped" }),
+    consoleFixture("running-id", "Connected"),
+    consoleFixture("stopped-id", "Stopped"),
   ];
   expect(await rememberOnlyRunningConsole(store, identity, consoles)).toBe(
     "running-id",
@@ -33,10 +49,10 @@ test("console selection: no automatic choice for zero or multiple running consol
   const store = new Store(join(await tempDir("dh-console-selection-"), "cli"));
   for (const consoles of [
     [],
-    [consoleInfo({ serial: "failed-id", status: "Failed" })],
+    [consoleFixture("failed-id", "Failed")],
     [
-      consoleInfo({ serial: "first-id", status: "Running" }),
-      consoleInfo({ serial: "second-id", status: "Running" }),
+      consoleFixture("first-id", "Running"),
+      consoleFixture("second-id", "Running"),
     ],
   ]) {
     expect(

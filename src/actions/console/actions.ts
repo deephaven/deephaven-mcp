@@ -10,6 +10,7 @@ import {
   type ConsoleInfo,
   createEnterpriseConsole,
   deleteEnterpriseConsole,
+  type EnterpriseConsoleInfo,
   findEnterpriseConsole,
   isRunning,
   listEnterpriseConsoles,
@@ -270,7 +271,7 @@ async function consoleForTarget(
   profileFlag: string | undefined,
   lifecycle: CommandLifecycle,
   operation: "detail" | "delete" = "detail",
-): Promise<{ session: Session; console: ConsoleInfo }> {
+): Promise<{ session: Session; console: EnterpriseConsoleInfo }> {
   const session = target
     ? await sessionForTarget(store, target, profileFlag, lifecycle)
     : await requireAuth(profileFlag, store, lifecycle);
@@ -320,7 +321,7 @@ export async function detailConsole(
   target: string | undefined,
   profileFlag: string | undefined,
   lifecycle: CommandLifecycle,
-): Promise<ConsoleInfo> {
+): Promise<EnterpriseConsoleInfo> {
   const { session, console } = await consoleForTarget(
     store,
     target,

@@ -152,7 +152,7 @@ export async function reconcileDiscoveredConsoles(
       registry.fullIds[id] = identities.filter(
         (known) => identityKey(known) !== key || liveIds.has(id),
       );
-      if (registry.fullIds[id]?.length === 0) delete registry.fullIds[id];
+      if (registry.fullIds[id].length === 0) delete registry.fullIds[id];
     }
   });
 }
@@ -193,7 +193,7 @@ export async function clearMissingReference(
       registry.fullIds[fullId] = matches.filter(
         (known) => identityKey(known) !== key,
       );
-      if (registry.fullIds[fullId]?.length === 0)
+      if (registry.fullIds[fullId].length === 0)
         delete registry.fullIds[fullId];
     }
   });
@@ -223,8 +223,7 @@ function removeShortcodeOwner(
 /** Generate a six-character candidate; reservation enforces uniqueness. */
 function randomShortcode(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(SHORTCODE_LENGTH));
-  return Array.from(
-    bytes,
-    (byte) => SHORTCODE_ALPHABET[byte % SHORTCODE_ALPHABET.length] ?? "a",
+  return Array.from(bytes, (byte) =>
+    SHORTCODE_ALPHABET.charAt(byte % SHORTCODE_ALPHABET.length),
   ).join("");
 }

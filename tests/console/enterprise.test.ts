@@ -1,4 +1,14 @@
 import { expect, spyOn, test } from "bun:test";
+import type { AuthenticatedEnterpriseClient } from "@deephaven-enterprise/jsapi-nodejs";
+import type {
+  ConsoleServerAddress,
+  PlainEditableQueryInfo,
+  QueryConfigurationType,
+  QueryConstants,
+  ReplicaStatus,
+  ServerConfigValues,
+  UserInfo,
+} from "@deephaven-enterprise/jsapi-types";
 import type { Session } from "../../src/actions/auth/signin.ts";
 import {
   consoleInfo,
@@ -137,7 +147,40 @@ test("console reports: retain recovery context without stale continuation detail
   );
 });
 
-function sessionWith(client: Record<string, unknown>): Session {
+type ConsoleClientMock = Pick<
+  AuthenticatedEnterpriseClient,
+  "getTemporaryQueueNames"
+> & {
+  getQueryConfigurationTypes(): Promise<
+    Map<string, Pick<QueryConfigurationType, "supportsCommunity">>
+  >;
+  getKnownConfigs(): Parameters<typeof consoleInfo>[0][];
+  getServerConfigValues(): Promise<
+    Pick<
+      ServerConfigValues,
+      "jvmProfileDefault" | "defaultWorkerKind" | "scriptSessionProviders"
+    > & {
+      workerKinds: Pick<
+        ServerConfigValues["workerKinds"][number],
+        "name" | "protocols"
+      >[];
+    }
+  >;
+  getDbServers(): Promise<Pick<ConsoleServerAddress, "name">[]>;
+  getQueryConstants(): Promise<
+    Pick<
+      QueryConstants,
+      | "consoleDefaultHeap"
+      | "minDataRatio"
+      | "maxDataRatio"
+      | "defaultSchedulingDetails"
+    >
+  >;
+  getUserInfo(): Promise<Pick<UserInfo, "operateAs">>;
+  createQuery(config: PlainEditableQueryInfo): Promise<string>;
+};
+
+function sessionWith(client: Partial<ConsoleClientMock>): Session {
   // Only the Enterprise API members exercised by each test are mocked.
   return {
     origin: "https://dhe.example.com",
@@ -157,17 +200,21 @@ function query(
   name: string,
   state: string,
   type = "InteractiveConsole",
-) {
+): Parameters<typeof consoleInfo>[0] & {
+  timeout: number;
+  designated: ReplicaStatus;
+} {
   return {
     serial,
     name,
     type,
-    designated: { status: state },
+    designated: { status: state } as ReplicaStatus,
+    replicas: [],
     scriptLanguage: "Python",
     heapSize: 4,
     dbServerName: "Query 1",
     workerKind: "python",
-    jvmArgs: "-Dtest=true",
+    jvmArguments: ["-Dtest=true"],
     envVarEntries: ["TEST", "value"],
     timeout: 600_000,
     typeSpecificFields: {
@@ -181,6 +228,7 @@ test("console defaults: reads server-supported defaults", async () => {
     getServerConfigValues: async () => ({
       jvmProfileDefault: "default",
       defaultWorkerKind: "python",
+      scriptSessionProviders: ["Python"],
       workerKinds: [
         { name: "enterprise", protocols: ["EnterpriseComm"] },
         { name: "python", protocols: ["Community"] },
@@ -202,17 +250,36 @@ test("console defaults: reads server-supported defaults", async () => {
 });
 
 test("console defaults: reject missing or invalid required server metadata before creation", async () => {
-  const validClient = {
+  const validClient: Partial<ConsoleClientMock> = {
     getServerConfigValues: async () => ({
       jvmProfileDefault: "Default",
+      defaultWorkerKind: "community",
+      scriptSessionProviders: ["Python"],
       workerKinds: [{ name: "community", protocols: ["Community"] }],
     }),
     getDbServers: async () => [{ name: "Query 1" }],
     getQueryConstants: async () => queryConstants,
     getTemporaryQueueNames: async () => ["DefaultTemporaryQueue"],
   };
-  for (const override of [
+  const overrides: Partial<ConsoleClientMock>[] = [
     { getTemporaryQueueNames: async () => [] },
+    { getDbServers: async () => [] },
+    {
+      getServerConfigValues: async () => ({
+        jvmProfileDefault: "Default",
+        defaultWorkerKind: "community",
+        scriptSessionProviders: [],
+        workerKinds: [{ name: "community", protocols: ["Community"] }],
+      }),
+    },
+    {
+      getServerConfigValues: async () => ({
+        jvmProfileDefault: "Default",
+        defaultWorkerKind: "community",
+        scriptSessionProviders: ["Python"],
+        workerKinds: [],
+      }),
+    },
     {
       getQueryConstants: async () => ({ ...queryConstants, minDataRatio: -1 }),
     },
@@ -226,17 +293,15 @@ test("console defaults: reject missing or invalid required server metadata befor
       }),
     },
     {
-      getQueryConstants: async () => ({
-        ...queryConstants,
-        defaultSchedulingDetails: undefined,
-      }),
-    },
-    {
       getServerConfigValues: async () => ({
+        jvmProfileDefault: "",
+        defaultWorkerKind: "community",
+        scriptSessionProviders: ["Python"],
         workerKinds: [{ name: "community", protocols: ["Community"] }],
       }),
     },
-  ]) {
+  ];
+  for (const override of overrides) {
     await expect(
       serverDefaults(sessionWith({ ...validClient, ...override })),
     ).rejects.toMatchObject({ code: "console_unsupported" });
@@ -266,6 +331,49 @@ test("console discovery filters CLI InteractiveConsole queries and uses stable s
   });
   expect(findEnterpriseConsole(session, "abc123")?.id).toBe("full-id");
   expect(findEnterpriseConsole(session, "full-id")?.shortcode).toBe("abc123");
+});
+
+test("console detail: use current API fields and preserve unavailable worker status", () => {
+  const config = query("full-id", "IC - dh CLI - abc123", "Running");
+  Object.defineProperties(config, {
+    status: {
+      get: () => {
+        throw new Error("Deprecated status read");
+      },
+    },
+    jvmArgs: {
+      get: () => {
+        throw new Error("Deprecated JVM arguments read");
+      },
+    },
+    envVars: {
+      get: () => {
+        throw new Error("Deprecated environment read");
+      },
+    },
+  });
+  expect(consoleInfo(config)).toMatchObject({
+    state: "Running",
+    jvmArgs: "-Dtest=true",
+    environment: { TEST: "value" },
+  });
+  expect(consoleInfo({ ...config, designated: undefined }).state).toBe(
+    "Unknown",
+  );
+  expect(
+    consoleInfo({
+      ...config,
+      designated: undefined,
+      replicas: [config.designated],
+    }).state,
+  ).toBe("Running");
+  expect(
+    consoleInfo({
+      ...config,
+      designated: { ...config.designated, status: null },
+      replicas: [],
+    }).state,
+  ).toBe("Unknown");
 });
 
 test("console defaults: null resets to server values and command settings override defaults", () => {
@@ -324,6 +432,7 @@ test("console creation: sends an InteractiveConsole query with seconds converted
     getServerConfigValues: async () => ({
       jvmProfileDefault: "default",
       defaultWorkerKind: "python",
+      scriptSessionProviders: ["Python", "Groovy"],
       workerKinds: [{ name: "python", protocols: ["Community"] }],
     }),
     getDbServers: async () => [{ name: "Query 1" }],
@@ -356,12 +465,14 @@ test("console creation: sends an InteractiveConsole query with seconds converted
     restartUsers: 1,
     jvmArguments: ["-Danswer=42"],
     envVarEntries: ["MODE", "test"],
-    envVars: "MODE=test",
     timeout: 600_000,
     typeSpecificFields: {
       TerminationDelay: { type: "long", value: "120000" },
     },
   });
+  expect(created).not.toHaveProperty("envVars");
+  expect(created).not.toHaveProperty("jvmArgs");
+  expect(created).not.toHaveProperty("extraClasspaths");
   const scheduling = created?.scheduling;
   expect(Array.isArray(scheduling)).toBe(true);
   if (!Array.isArray(scheduling)) throw new Error("Missing scheduling payload");

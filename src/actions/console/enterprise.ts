@@ -1,3 +1,11 @@
+import type { AuthenticatedEnterpriseClient } from "@deephaven-enterprise/jsapi-nodejs";
+import type {
+  ConsoleServerAddress,
+  PlainEditableQueryInfo,
+  QueryConstants,
+  QueryInfo,
+  ServerConfigValues,
+} from "@deephaven-enterprise/jsapi-types";
 import type { CommandLifecycle } from "../../cli/lifecycle.ts";
 import { DhError, reasonOf, timeoutMs, withTimeout } from "../../errors.ts";
 import type { Session } from "../auth/signin.ts";
@@ -25,6 +33,14 @@ export interface ConsoleInfo {
   autoDeleteTimeoutSeconds: number | null;
 }
 
+/** Enterprise settings are available; only Community's shared console omits them. */
+export interface EnterpriseConsoleInfo extends ConsoleInfo {
+  heapSizeGb: number;
+  server: string;
+  engine: string;
+  jvmArgs: string;
+}
+
 /** A snapshot of available settings and derived defaults for one server. */
 export interface ConsoleServerSettings {
   settings: EffectiveConsoleSettings;
@@ -43,47 +59,21 @@ const STARTUP_TIMEOUT_MS = 600_000;
 const TEMPORARY_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 1_000;
 
-interface ApiQuery {
-  name?: string;
-  serial?: string | null;
-  type?: string;
-  status?: string;
-  designated?: { status?: string | null; shortCauses?: string | null } | null;
-  replicas?: { status?: string | null; shortCauses?: string | null }[];
-  scriptLanguage?: string | null;
-  heapSize?: number;
-  dbServerName?: string;
-  workerKind?: string;
-  jvmArgs?: string | null;
-  jvmArguments?: string[];
-  envVars?: string | null;
-  envVarEntries?: string[];
-  timeout?: number;
-  typeSpecificFields?: Record<string, { type: string; value: unknown }> | null;
-}
-
-interface ServerConfig {
-  defaultWorkerKind?: string;
-  jvmProfileDefault?: string;
-  workerKinds?: { name: string; protocols?: string[] }[];
-  scriptSessionProviders?: string[];
-}
-
-interface ConsoleServer {
-  name: string;
-}
-
-interface QueryConstants {
-  consoleDefaultHeap?: number;
-  minDataRatio?: number;
-  maxDataRatio?: number;
-  defaultSchedulingDetails?: readonly string[];
-}
-
-interface EnvironmentVariables {
-  entries: string[];
-  text: string;
-}
+type ConsoleQuery = Pick<
+  QueryInfo,
+  | "name"
+  | "serial"
+  | "type"
+  | "designated"
+  | "replicas"
+  | "scriptLanguage"
+  | "heapSize"
+  | "dbServerName"
+  | "workerKind"
+  | "jvmArguments"
+  | "envVarEntries"
+  | "typeSpecificFields"
+>;
 
 /**
  * Return the Enterprise API client for a session, rejecting Community sessions.
@@ -99,23 +89,15 @@ function enterpriseClient(session: Session): AuthenticatedEnterpriseClient {
 }
 
 /** Read the server's known queries and keep only consoles created by this CLI. */
-function queries(session: Session): ApiQuery[] {
+function queries(session: Session): QueryInfo[] {
   const client = enterpriseClient(session);
-  const values: ApiQuery[] | undefined = client.getKnownConfigs?.();
-  if (!Array.isArray(values)) {
-    throw new DhError("console_unsupported", "The server cannot list consoles");
-  }
-  return values.filter(isCliConsole);
+  return client.getKnownConfigs().filter(isCliConsole);
 }
 
-/** Check the type, name, and stable ID used to identify a CLI-created console. */
-function isCliConsole(query: ApiQuery): boolean {
+/** Identify CLI-created consoles by their query type and reserved name. */
+function isCliConsole(query: QueryInfo): boolean {
   return (
-    query.type === QUERY_TYPE &&
-    typeof query.name === "string" &&
-    /^IC - dh CLI - [a-z0-9]{6}$/.test(query.name) &&
-    typeof query.serial === "string" &&
-    query.serial.length > 0
+    query.type === QUERY_TYPE && /^IC - dh CLI - [a-z0-9]{6}$/.test(query.name)
   );
 }
 
@@ -142,35 +124,32 @@ export function isTerminal(state: string): boolean {
 }
 
 /** Resolve the most useful status exposed by the query API. */
-export function consoleState(query: ApiQuery): string {
-  return (
-    query.designated?.status ??
-    query.replicas?.[0]?.status ??
-    query.status ??
-    "Unknown"
-  );
+export function consoleState(
+  query: Pick<QueryInfo, "designated" | "replicas">,
+): string {
+  return query.designated?.status ?? query.replicas[0]?.status ?? "Unknown";
 }
 
 /** Convert an Enterprise query into the stable console shape used by actions. */
-export function consoleInfo(query: ApiQuery): ConsoleInfo {
-  const name = query.name ?? "";
+export function consoleInfo(query: ConsoleQuery): EnterpriseConsoleInfo {
+  const name = query.name;
   return {
-    id: query.serial ?? "",
+    id: query.serial,
     shortcode: shortcodeFromName(name),
     name,
     state: consoleState(query),
-    language: query.scriptLanguage ?? null,
-    heapSizeGb: query.heapSize ?? null,
-    server: query.dbServerName ?? null,
-    engine: query.workerKind ?? null,
-    jvmArgs: query.jvmArgs ?? query.jvmArguments?.join(" ") ?? null,
+    language: query.scriptLanguage,
+    heapSizeGb: query.heapSize,
+    server: query.dbServerName,
+    engine: query.workerKind,
+    jvmArgs: query.jvmArguments.join(" "),
     environment: environmentOf(query),
     autoDeleteTimeoutSeconds: autoDeleteTimeoutOf(query),
   };
 }
 
 /** Read the idle grace period; query.timeout instead controls initialization. */
-function autoDeleteTimeoutOf(query: ApiQuery): number | null {
+function autoDeleteTimeoutOf(query: ConsoleQuery): number | null {
   const field = query.typeSpecificFields?.TerminationDelay;
   if (!field) return null;
   const milliseconds = Number(field.value);
@@ -188,25 +167,22 @@ function autoDeleteTimeoutOf(query: ApiQuery): number | null {
   return milliseconds / 1000;
 }
 
-/** Read environment variables from either supported Enterprise API shape. */
-function environmentOf(query: ApiQuery): Record<string, string> {
-  const entries = query.envVarEntries ?? [];
+/** Decode the API's alternating environment variable names and values. */
+function environmentOf(query: ConsoleQuery): Record<string, string> {
+  const entries = query.envVarEntries;
   const environment: Record<string, string> = {};
   for (let i = 0; i + 1 < entries.length; i += 2) {
     const key = entries[i];
     const value = entries[i + 1];
     if (key !== undefined && value !== undefined) environment[key] = value;
   }
-  if (Object.keys(environment).length > 0 || !query.envVars) return environment;
-  for (const line of query.envVars.split(/\r?\n/)) {
-    const at = line.indexOf("=");
-    if (at > 0) environment[line.slice(0, at)] = line.slice(at + 1);
-  }
   return environment;
 }
 
 /** List the CLI-owned InteractiveConsole queries on a server. */
-export function listEnterpriseConsoles(session: Session): ConsoleInfo[] {
+export function listEnterpriseConsoles(
+  session: Session,
+): EnterpriseConsoleInfo[] {
   return queries(session).map(consoleInfo);
 }
 
@@ -214,7 +190,7 @@ export function listEnterpriseConsoles(session: Session): ConsoleInfo[] {
 export function findEnterpriseConsole(
   session: Session,
   target: string,
-): ConsoleInfo | undefined {
+): EnterpriseConsoleInfo | undefined {
   const found = queries(session).find(
     (query) =>
       query.serial === target ||
@@ -228,20 +204,17 @@ export async function serverDefaults(
   session: Session,
 ): Promise<ConsoleServerSettings> {
   const client = enterpriseClient(session);
-  const config = await call<ServerConfig>(
-    client.getServerConfigValues?.(),
+  const config = await call(
+    client.getServerConfigValues(),
     "read console server settings",
   );
-  const serverList = await call<ConsoleServer[]>(
-    client.getDbServers?.(),
-    "list console servers",
-  );
-  const constants = await call<QueryConstants>(
-    client.getQueryConstants?.(),
+  const serverList = await call(client.getDbServers(), "list console servers");
+  const constants = await call(
+    client.getQueryConstants(),
     "read console defaults",
   );
-  const queues = await call<string[]>(
-    client.getTemporaryQueueNames?.(),
+  const queues = await call(
+    client.getTemporaryQueueNames(),
     "list temporary console queues",
   );
   const queue = queues[0];
@@ -256,27 +229,30 @@ export async function serverDefaults(
 
 /** Derive CLI defaults from raw server metadata without making network calls. */
 function deriveConsoleServerSettings(
-  config: ServerConfig,
-  serverList: ConsoleServer[],
+  config: ServerConfigValues,
+  serverList: ConsoleServerAddress[],
   constants: QueryConstants,
   queue: string,
 ): ConsoleServerSettings {
-  if (!Array.isArray(serverList) || serverList.length === 0) {
+  const firstServer = serverList[0];
+  if (!firstServer) {
     throw new DhError(
       "console_unsupported",
       "The server has no console servers available",
     );
   }
-  const servers = serverList
-    .map((server) => server.name)
-    .filter((name): name is string => typeof name === "string");
-  const engines = (config.workerKinds ?? [])
-    .filter((engine) => engine.protocols?.includes("Community"))
-    .map((engine) => engine.name)
-    .filter((name): name is string => typeof name === "string");
-  const languages = supportedConsoleLanguages(
-    config.scriptSessionProviders ?? [],
-  );
+  const servers = serverList.map((server) => server.name);
+  const engines = config.workerKinds
+    .filter((engine) => engine.protocols.includes("Community"))
+    .map((engine) => engine.name);
+  const languages = supportedConsoleLanguages(config.scriptSessionProviders);
+  const [firstLanguage] = languages;
+  if (!firstLanguage) {
+    throw new DhError(
+      "console_unsupported",
+      "The server has no supported console languages",
+    );
+  }
   const engine = defaultConsoleEngine(config.defaultWorkerKind, engines);
   if (!config.jvmProfileDefault) {
     throw new DhError(
@@ -284,18 +260,13 @@ function deriveConsoleServerSettings(
       "The server did not provide a default console JVM profile",
     );
   }
-  if (
-    typeof constants.consoleDefaultHeap !== "number" ||
-    !Number.isFinite(constants.consoleDefaultHeap)
-  ) {
+  if (!Number.isFinite(constants.consoleDefaultHeap)) {
     throw new DhError(
       "console_unsupported",
       "The server did not provide a console heap default",
     );
   }
   if (
-    typeof constants.minDataRatio !== "number" ||
-    typeof constants.maxDataRatio !== "number" ||
     !Number.isFinite(constants.minDataRatio) ||
     !Number.isFinite(constants.maxDataRatio) ||
     constants.minDataRatio < 0 ||
@@ -314,11 +285,9 @@ function deriveConsoleServerSettings(
       queue,
     ),
     settings: {
-      language: languages.includes("python")
-        ? "python"
-        : (languages[0] ?? "python"),
+      language: languages.includes("python") ? "python" : firstLanguage,
       heapSizeGb: constants.consoleDefaultHeap,
-      server: servers[0] ?? "",
+      server: firstServer.name,
       engine,
       jvmArgs: [],
       environment: {},
@@ -332,18 +301,9 @@ function deriveConsoleServerSettings(
 
 /** Retain required scheduler initialization fields while selecting temporary-console lifecycle. */
 function temporaryConsoleScheduling(
-  defaults: readonly string[] | undefined,
+  defaults: readonly string[],
   queue: string,
 ): string[] {
-  if (
-    !Array.isArray(defaults) ||
-    !defaults.every((entry) => typeof entry === "string")
-  ) {
-    throw new DhError(
-      "console_unsupported",
-      "The server did not provide default console scheduling details",
-    );
-  }
   return [
     "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerTemporary",
     ...defaults.filter(
@@ -358,7 +318,7 @@ function temporaryConsoleScheduling(
   ];
 }
 
-/** Detect supported languages, allowing older servers that omit provider metadata. */
+/** Detect console languages from the server's script-session providers. */
 function supportedConsoleLanguages(
   providers: string[],
 ): ("python" | "groovy")[] {
@@ -366,20 +326,11 @@ function supportedConsoleLanguages(
   const languages = (["python", "groovy"] as const).filter((language) =>
     names.some((name) => name.includes(language)),
   );
-  if (names.length > 0 && languages.length === 0) {
-    throw new DhError(
-      "console_unsupported",
-      "The server has no supported console languages",
-    );
-  }
   return languages;
 }
 
 /** Prefer the configured engine when it supports consoles, otherwise the first available. */
-function defaultConsoleEngine(
-  preferred: string | undefined,
-  engines: string[],
-): string {
+function defaultConsoleEngine(preferred: string, engines: string[]): string {
   if (preferred && engines.includes(preferred)) return preferred;
   const first = engines[0];
   if (first) return first;
@@ -399,8 +350,8 @@ export async function createEnterpriseConsole(
 ): Promise<string> {
   const client = enterpriseClient(session);
   const capabilities = serverSettings ?? (await serverDefaults(session));
-  const types = await call<Map<string, { supportsCommunity?: boolean }>>(
-    client.getQueryConfigurationTypes?.(),
+  const types = await call(
+    client.getQueryConfigurationTypes(),
     "read console query types",
   );
   const consoleType = types.get(QUERY_TYPE);
@@ -412,18 +363,13 @@ export async function createEnterpriseConsole(
   }
   validateConsoleSettings(settings, capabilities);
   const name = `${CLI_CONSOLE_PREFIX}${shortcode}`;
-  const userInfo = await call<{ operateAs?: string }>(
-    client.getUserInfo?.(),
-    "read console owner",
-  );
-  const environment = serializeEnvironment(settings.environment);
-  const serial = await call<string>(
-    client.createQuery?.(
+  const userInfo = await call(client.getUserInfo(), "read console owner");
+  const serial = await call(
+    client.createQuery(
       consoleQuery(
         name,
-        userInfo.operateAs ?? session.operateAs ?? session.user,
+        userInfo.operateAs,
         settings,
-        environment,
         capabilities.dataMemoryRatio,
         capabilities.jvmProfile,
         capabilities.scheduling,
@@ -456,10 +402,7 @@ function validateConsoleSettings(
       `Available engines: ${capabilities.engines.join(", ")}`,
     );
   }
-  if (
-    capabilities.languages.length > 0 &&
-    !capabilities.languages.includes(settings.language)
-  ) {
+  if (!capabilities.languages.includes(settings.language)) {
     throw new DhError(
       "console_unsupported",
       `Console language "${settings.language}" is not available`,
@@ -468,27 +411,15 @@ function validateConsoleSettings(
   }
 }
 
-/** Build the parallel list and line-based forms accepted by the API. */
-function serializeEnvironment(
-  environment: Record<string, string>,
-): EnvironmentVariables {
-  const entries = Object.entries(environment);
-  return {
-    entries: entries.flat(),
-    text: entries.map(([key, value]) => `${key}=${value}`).join("\n"),
-  };
-}
-
 /** Build the full query payload, keeping server-specific defaults in one place. */
 function consoleQuery(
   name: string,
   owner: string,
   settings: EffectiveConsoleSettings,
-  environment: EnvironmentVariables,
   dataMemoryRatio: number,
   jvmProfile: string,
   scheduling: string[],
-) {
+): PlainEditableQueryInfo {
   return {
     additionalMemory: 0,
     adminGroups: [],
@@ -499,11 +430,9 @@ function consoleQuery(
     dbServerName: settings.server,
     enabled: true,
     enableGcLogs: false,
-    envVarEntries: environment.entries,
-    envVars: environment.text,
+    envVarEntries: Object.entries(settings.environment).flat(),
     genericWorkerControl: null,
     heapSize: settings.heapSizeGb,
-    jvmArgs: settings.jvmArgs.join(" "),
     jvmArguments: settings.jvmArgs,
     jvmProfile,
     kubernetesControl: null,
@@ -537,7 +466,7 @@ export async function deleteEnterpriseConsole(
   console: ConsoleInfo,
 ): Promise<void> {
   const client = enterpriseClient(session);
-  await call<void>(client.deleteQueries?.([console.id]), "delete console");
+  await call(client.deleteQueries([console.id]), "delete console");
 }
 
 /** Poll until a console is running, fails, or the invocation is cancelled. */
@@ -545,7 +474,7 @@ export async function waitForConsole(
   session: Session,
   target: string,
   lifecycle: CommandLifecycle,
-): Promise<ConsoleInfo> {
+): Promise<EnterpriseConsoleInfo> {
   let observed = false;
   const discoveryDeadline = performance.now() + timeoutMs();
   for (;;) {
@@ -617,13 +546,7 @@ export async function waitForConsoleDeletion(
 }
 
 /** Apply a timeout and translate API failures into console-specific errors. */
-async function call<T>(
-  value: Promise<T> | undefined,
-  operation: string,
-): Promise<T> {
-  if (!value) {
-    throw new DhError("console_unsupported", `The server cannot ${operation}`);
-  }
+async function call<T>(value: Promise<T>, operation: string): Promise<T> {
   try {
     return await withTimeout(
       value,
@@ -673,5 +596,3 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     if (signal.aborted) onAbort();
   });
 }
-
-import type { AuthenticatedEnterpriseClient } from "@deephaven-enterprise/jsapi-nodejs";

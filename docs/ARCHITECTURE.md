@@ -185,6 +185,10 @@ and cleanup failures; don't repeat these in operation prose.
 
 ## Keeping functions readable
 
+Use published JS API types and non-deprecated properties. Preserve their
+nullability; do not invent optional fields or compatibility fallbacks.
+Keep partial API mocks checked against the members their tests exercise.
+
 A function's doc comment says what it does, and its body should show how without
 reading the functions it calls. When a function gets long, split it into named
 steps; when a step can't be split usefully, give it a one-line comment saying
