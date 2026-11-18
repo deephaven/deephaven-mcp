@@ -1,11 +1,51 @@
 import { expect, test } from "bun:test";
 import {
   candidates,
+  displayServerAddress,
   resolveServer,
   withPort,
 } from "../../src/actions/auth/resolve.ts";
 
 const origins = (input: string) => candidates(input).map((u) => u.origin);
+
+test("displayServerAddress: only a supported address and port are retained", () => {
+  for (const [input, expected] of [
+    [
+      "https://alice:password@example.com:8123/path?token=secret#fragment",
+      "https://example.com:8123",
+    ],
+    [
+      "alice:password@example.com:8123/path?token=secret#fragment",
+      "example.com:8123",
+    ],
+    ["localhost:10000/path", "localhost:10000"],
+    ["localhost:443/path", "localhost:443"],
+    ["http://[::1]:10000/path", "http://[::1]:10000"],
+    ["[::1]:8123", "[::1]:8123"],
+    ["ftp://alice:password@example.com/path", undefined],
+    ["https://alice:password@[broken/?token=secret", undefined],
+    ["", undefined],
+  ] as const) {
+    expect(displayServerAddress(input)).toBe(expected);
+  }
+});
+
+test("candidates: malformed addresses do not appear in errors", () => {
+  for (const address of [
+    "https://alice:password@[broken/?token=secret#fragment",
+    "https://alice:password@example.com\\path?token=secret",
+  ]) {
+    try {
+      candidates(address);
+      throw new Error("expected invalid address to fail");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "usage",
+        message: "Not a server address",
+      });
+    }
+  }
+});
 
 test("candidates: bare host tries https ports", () => {
   expect(origins("dhe.example.com")).toEqual([
@@ -99,6 +139,22 @@ test("resolveServer: a non-Deephaven server is server_unreachable", async () => 
     await expect(
       resolveServer(`127.0.0.1:${other.port}`),
     ).rejects.toMatchObject({ code: "server_unreachable" });
+  } finally {
+    await other.stop(true);
+  }
+});
+
+test("resolveServer: failure reports exclude URL credentials and data", async () => {
+  const other = fakeServer([]);
+  try {
+    await expect(
+      resolveServer(
+        `http://alice:password@127.0.0.1:${other.port}/path?token=secret#fragment`,
+      ),
+    ).rejects.toMatchObject({
+      code: "server_unreachable",
+      headline: `No Deephaven server found at http://127.0.0.1:${other.port}`,
+    });
   } finally {
     await other.stop(true);
   }

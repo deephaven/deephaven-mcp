@@ -110,22 +110,52 @@ export async function loginCommunity(
   rejected: "auth_failed" | "auth_expired",
 ): Promise<void> {
   const { client, origin } = conn;
+  // CoreClient can reject with an empty disconnect event before requestfailed
+  // supplies the reason on its underlying connection in the same event turn.
+  let failureReason: string | undefined;
+  let removeListener: (() => void) | undefined;
+  let finished = false;
+  const onFailure = (event: dh.Event<unknown>) => {
+    if (event.detail != null) failureReason ??= reasonOf(event.detail);
+  };
+  /** Sets up diagnostics before login, unless the timeout already ended the attempt. */
+  async function signInWithDiagnostics(): Promise<void> {
+    const events = await client.getAsIdeConnection();
+    if (finished) return;
+    removeListener = events.addEventListener("requestfailed", onFailure);
+    await client.login(loginCredentials(conn.dh, login));
+  }
   try {
-    await withTimeout(
-      client.login(loginCredentials(conn.dh, login)),
-      timeout,
-      () => unreachable(origin),
+    await withTimeout(signInWithDiagnostics(), timeout, () =>
+      unreachable(origin),
     );
   } catch (e) {
+    const detail = failureReason ?? communityLoginReason(e);
     disconnect(client);
     if (e instanceof DhError) throw e;
     throw new DhError(
       rejected,
       `${origin} rejected the credentials`,
       undefined,
-      reasonOf(e),
+      detail,
     );
+  } finally {
+    finished = true;
+    removeListener?.();
   }
+}
+
+function communityLoginReason(reason: unknown): string | undefined {
+  if (typeof reason === "object" && reason !== null && "type" in reason) {
+    if (reason.type === "disconnect") {
+      if ("detail" in reason && reason.detail != null) {
+        const detail = reasonOf(reason.detail);
+        if (detail) return detail;
+      }
+      return "Connection closed during sign-in; the client supplied no failure reason.";
+    }
+  }
+  return reasonOf(reason);
 }
 
 /** `login` in the shape the jsapi's `CoreClient.login` takes; `dh` is the server's jsapi module. */

@@ -57,6 +57,10 @@ to http.
 If nothing answers, the error lists every address tried. Check the address, your
 VPN, and whether the server is up.
 
+Server discovery errors and authentication failure-report targets omit URL
+credentials, paths, queries, and fragments. Other user-supplied values and
+third-party error messages are not guaranteed to be secret-free.
+
 ## Enterprise
 
 | Method            | Flags                                      | What `dh` saves                                      |
@@ -102,6 +106,11 @@ username both use the same profile.
      saved.
    - `--expect-user <user>` checks the account without asking. A different
      account fails with `auth_failed` and nothing is saved.
+
+The printed sign-in URL contains a one-time authentication secret. Treat it as
+sensitive, including when capturing or sharing terminal output.
+
+Press Ctrl-C to stop waiting for SSO; the CLI closes its server connections.
 
 Browsers often sign you in again with whatever account they already have a
 session for. To use a different account, pick it in your identity provider's
@@ -246,17 +255,18 @@ errors go to stderr.
 
 ### Errors and exit codes
 
-When the server or a library gives a reason, the message ends with it, e.g.
-`… rejected the credentials: Login failed, verify credentials.` It's one line of
-at most 200 characters, in both human and JSON output.
+With `-o json`, errors are one JSON line on stderr. An underlying reason, when
+available, appears in `detail` (up to 200 characters):
 
-With `-o json`, an error is one line of JSON on stderr:
+`dh agents -o json` lists the required and optional error fields.
 
 ```json
 {
+  "type": "error",
   "error": "You're not logged in to a Deephaven server.",
   "code": "auth_required",
   "exit": 4,
+  "command": "auth status",
   "hint": "Run `dh auth login` to get started."
 }
 ```
@@ -341,8 +351,6 @@ prints what it's waiting on for each server:
 
 - `--ca-cert <file>` trusts that CA for the server, and `dh` remembers it with
   the server. `DH_CA_CERT` does the same for environment-only sign-in.
-- When a CA certificate requires `dh` to re-run, it forwards SIGINT (Ctrl-C)
-  and SIGTERM to the re-run process.
 - `HTTPS_PROXY` and `NO_PROXY` apply to finding the server and downloading its
   client library. The connection to the server itself doesn't use a proxy.
 

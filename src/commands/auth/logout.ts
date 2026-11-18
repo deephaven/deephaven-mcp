@@ -38,6 +38,7 @@ export const logout = defineCommand<LogoutOptions>({
       state,
       chosen,
       logoutCommand(ctx, chosen.length === 1 ? chosen.map(nameOf) : undefined),
+      ctx.lifecycle,
     );
     for (const id of skipped) {
       note(
@@ -45,8 +46,12 @@ export const logout = defineCommand<LogoutOptions>({
       );
     }
 
-    const done = await removeProfiles(ctx.store, state, ids, (what) =>
-      note(`… ${what}`),
+    const done = await removeProfiles(
+      ctx.store,
+      state,
+      ids,
+      (what) => note(`… ${what}`),
+      ctx.lifecycle,
     );
     for (const warning of done.warnings) note(warning);
     for (const resaved of done.resaved) {

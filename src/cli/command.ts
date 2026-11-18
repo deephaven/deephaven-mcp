@@ -1,11 +1,16 @@
 import { type Command, Option } from "commander";
 import { Store } from "../actions/auth/store.ts";
-import { DhError } from "../errors.ts";
+import { commandUsageError, type DhError } from "../errors.ts";
 import { result, setFormat } from "../output.ts";
 import { lazyPrompter, type Prompter } from "../ui/prompt.ts";
+import type { CommandLifecycle } from "./lifecycle.ts";
 
 /** What every command gets, built once from the global flags. */
 export interface Context {
+  /** Cancellation and cleanup for this command invocation. */
+  lifecycle: CommandLifecycle;
+  /** The command's cancellation signal. */
+  signal: AbortSignal;
   /** The config directory: profiles and credentials. */
   store: Store;
   /** Questions for the user; without a terminal or with --no-prompt, they fail naming the flag. */
@@ -28,6 +33,8 @@ export interface Output {
   human: string | string[];
   /** Printed as one JSON value with `-o json`. */
   json: unknown;
+  /** The command succeeded without a result to print. */
+  empty?: boolean;
   /** A partial failure: reported after the result, and sets the exit status. */
   error?: DhError;
 }
@@ -87,13 +94,18 @@ interface GlobalOptions {
 }
 
 /** Builds the {@link Context} from `cmd`'s parsed global flags, and sets the output format. */
-function contextFromFlags(cmd: Command): Context {
+function contextFromFlags(cmd: Command, lifecycle: CommandLifecycle): Context {
   const g = cmd.optsWithGlobals() as GlobalOptions;
   const noPrompt = g.prompt === false || g.input === false;
   setFormat(g.output ?? "human");
   let cli = cmd;
   while (cli.parent) cli = cli.parent;
+  lifecycle.setFailureReport({
+    command: commandPath(cmd, false),
+  });
   return {
+    lifecycle,
+    signal: lifecycle.signal,
     store: new Store(),
     ui: lazyPrompter(!noPrompt),
     json: g.output === "json",
@@ -108,6 +120,7 @@ function contextFromFlags(cmd: Command): Context {
 export function registerCommand(
   cmd: Command,
   spec: CommandSpec<never>,
+  lifecycle: CommandLifecycle,
 ): Command {
   cmd.description(spec.description);
   for (const a of spec.args ?? []) cmd.argument(a.name, a.description);
@@ -118,30 +131,29 @@ export function registerCommand(
     const self = params.at(-1) as Command;
     const extra = self.args[spec.args?.length ?? 0];
     if (extra !== undefined) {
-      throw new DhError(
-        "usage",
+      throw commandUsageError(
         `Unknown command or extra argument "${extra}"`,
-        `Run \`${commandPath(self)} --help\` for usage.`,
+        commandPath(self),
       );
     }
     const out = await spec.run(
-      contextFromFlags(self),
+      contextFromFlags(self, lifecycle),
       self.processedArgs as (string | undefined)[],
       self.opts() as never,
     );
-    result(() => out.human, out.json);
+    result(() => out.human, out.json, out.empty);
     if (out.error) throw out.error;
   });
   // `command()` (not addCommand) so subcommands inherit the root's settings.
   for (const child of spec.commands ?? []) {
-    registerCommand(cmd.command(child.name), child);
+    registerCommand(cmd.command(child.name), child, lifecycle);
   }
   return cmd;
 }
 
 /** `cmd` as typed, e.g. `dh auth status`. */
-export function commandPath(cmd: Command): string {
+export function commandPath(cmd: Command, includeRoot = true): string {
   const names: string[] = [];
   for (let c: Command | null = cmd; c; c = c.parent) names.unshift(c.name());
-  return names.join(" ");
+  return names.slice(includeRoot ? 0 : 1).join(" ");
 }

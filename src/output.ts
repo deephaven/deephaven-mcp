@@ -1,6 +1,6 @@
 import { writeSync } from "node:fs";
 import { styleText } from "node:util";
-import { DhError, ERROR_CODES } from "./errors.ts";
+import { asDhError, type DhError, type FailureReport } from "./errors.ts";
 
 /** `-o human` (default) or `-o json`. */
 export type Format = "human" | "json";
@@ -62,7 +62,12 @@ function styled(text: string, stream: NodeJS.WriteStream): string {
 }
 
 /** Prints a command's result: `json` with `-o json`, else the lines from `human`. */
-export function result(human: () => string | string[], json: unknown): void {
+export function result(
+  human: () => string | string[],
+  json: unknown,
+  empty = false,
+): void {
+  if (empty) return;
   if (isJson()) {
     out(JSON.stringify(json));
     return;
@@ -74,29 +79,73 @@ export function result(human: () => string | string[], json: unknown): void {
 }
 
 /** Prints `e` and returns the process exit code. */
-export function reportError(e: unknown): number {
-  const message = e instanceof Error ? e.message : String(e);
-  const error = e instanceof DhError ? e : new DhError("internal", message);
+export function reportError(e: unknown, report: FailureReport = {}): number {
+  const error = asDhError(e);
   if (error.code === "internal" && process.env.DH_DEBUG && e instanceof Error) {
     err(e.stack ?? e.message);
   }
   if (isJson()) {
+    const { command, human: _human, ...fields } = report;
     err(
       JSON.stringify({
-        error: error.message,
+        type: "error",
+        error: error.headline,
         code: error.code,
         exit: error.exit,
+        ...(command ? { command } : {}),
+        ...(error.detail ? { detail: error.detail } : {}),
         ...(error.hint ? { hint: error.hint } : {}),
+        ...(error.cleanupDetail ? { cleanupDetail: error.cleanupDetail } : {}),
+        ...fields,
       }),
     );
   } else {
-    // The reason and the hint each go on their own indented lines.
-    const below = [error.detail, error.hint]
-      .flatMap((text) => text?.split("\n") ?? [])
-      .map((line) => `  ${line}`);
-    for (const line of [`✖ ${error.headline}`, ...below]) {
-      err(styled(line, process.stderr));
+    const presentation = report.human;
+    const headline =
+      error.code === "cancelled" &&
+      /^(Cancelled|Interrupted)\.?$/.test(error.headline)
+        ? "Cancelled."
+        : error.headline;
+    err(
+      styled(
+        `✖ ${error.code === "cancelled" ? (presentation?.summary ?? headline) : headline}`,
+        process.stderr,
+      ),
+    );
+    const lines = [...(presentation ? (presentation.details ?? []) : [])];
+    if (presentation && error.code !== "cancelled" && presentation.context) {
+      lines.unshift(presentation.context);
+    }
+    if (presentation && (report.elapsedSeconds ?? 0) >= 5) {
+      lines.push(`Waited ${report.elapsedSeconds}s.`);
+    }
+    if (error.detail && !isSignalDetail(error)) {
+      lines.push(error.detail);
+    }
+    if (error.hint) lines.push(error.hint);
+    if (report.recoveryCommand) {
+      lines.push(
+        `${presentation?.recoveryLabel ?? "Follow up"}: ${report.recoveryCommand.map(quoteShellArg).join(" ")}`,
+      );
+    }
+    if (error.cleanupDetail)
+      lines.push(`Cleanup failed: ${error.cleanupDetail}`);
+    for (const line of lines.flatMap((text) => text.split("\n"))) {
+      err(styled(`  ${line}`, process.stderr));
     }
   }
-  return ERROR_CODES[error.code].exit;
+  return error.exit;
+}
+
+function isSignalDetail(error: DhError): boolean {
+  return (
+    error.code === "cancelled" &&
+    /^Interrupted by SIG(INT|TERM)$/.test(error.detail ?? "")
+  );
+}
+
+function quoteShellArg(arg: string): string {
+  if (/^[A-Za-z0-9_./:-]+$/.test(arg)) return arg;
+  if (process.platform === "win32") return `'${arg.replaceAll("'", "''")}'`;
+  return `'${arg.replaceAll("'", "'\\''")}'`;
 }

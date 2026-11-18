@@ -18,6 +18,25 @@ const describeOption = (o: Option) => ({
   description: o.description,
 });
 
+const requiredErrorFields = ["type", "error", "code", "exit"];
+const optionalErrorFields = [
+  "command",
+  "detail",
+  "hint",
+  "cleanupDetail",
+  "target",
+  "profile",
+  "operation",
+  "phase",
+  "elapsedSeconds",
+  "progress",
+  "outcome",
+  "continuation",
+  "retryWarning",
+  "observation",
+  "recoveryCommand",
+];
+
 /** `cmd` and its subcommands as data; `path` is the parent command names. */
 function describeCommand(cmd: Command, path: string[]): Described {
   return {
@@ -69,7 +88,9 @@ export const agents = defineCommand({
       errorFormat: {
         stream: "stderr",
         when: "-o json",
-        fields: ["error", "code", "exit", "hint"],
+        fields: [...requiredErrorFields, ...optionalErrorFields],
+        requiredFields: requiredErrorFields,
+        optionalFields: optionalErrorFields,
       },
     };
     const commands = usageLines(manifest.commands);
@@ -82,7 +103,10 @@ export const agents = defineCommand({
         "Commands:",
         ...commands.map(([usage, text]) => `  ${usage.padEnd(width)}  ${text}`),
         "",
-        "Errors (exit code; with -o json, stderr is {error, code, exit, hint}):",
+        "Errors (exit code; -o json writes an error object to stderr):",
+        `  Required: ${requiredErrorFields.join(", ")}`,
+        `  Optional: ${optionalErrorFields.slice(0, 8).join(", ")},`,
+        `    ${optionalErrorFields.slice(8).join(", ")}`,
         ...manifest.errors.map(
           (e) => `  ${e.code.padEnd(codeWidth)}  ${e.exit}  ${e.description}`,
         ),
