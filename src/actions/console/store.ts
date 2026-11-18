@@ -16,6 +16,8 @@ export interface ConsoleRegistry {
   fullIds: Record<string, ConsoleIdentity[]>;
   shortcodeIds: Record<string, string>;
   shortcodeOwners?: Record<string, ConsoleIdentity[]>;
+  /** Per-owner IDs; absent in registries written before collision support. */
+  shortcodeFullIds?: Record<string, Record<string, string>>;
   selected: Record<string, string>;
   defaults: ConsoleSettings;
 }
@@ -34,13 +36,40 @@ export function identitiesForTarget(
   registry: ConsoleRegistry,
   target: string,
 ): ConsoleIdentity[] {
+  const owners = ownersForShortcode(registry, target);
   const reserved = registry.reservations[target];
-  if (reserved) return [reserved];
-  const id = registry.shortcodeIds[target];
-  if (id) {
-    return registry.shortcodeOwners?.[target] ?? registry.fullIds[id] ?? [];
+  if (reserved) {
+    return [
+      reserved,
+      ...owners.filter((owner) => identityKey(owner) !== identityKey(reserved)),
+    ];
   }
-  return registry.fullIds[target] ?? [];
+  return target in registry.shortcodeIds
+    ? owners
+    : (registry.fullIds[target] ?? []);
+}
+
+/** Read discovered owners, including registries that predate explicit ownership. */
+function ownersForShortcode(
+  registry: ConsoleRegistry,
+  shortcode: string,
+): ConsoleIdentity[] {
+  const id = registry.shortcodeIds[shortcode];
+  if (!id) return [];
+  return registry.shortcodeOwners?.[shortcode] ?? registry.fullIds[id] ?? [];
+}
+
+/** Read identity-specific IDs, upgrading the legacy single-ID shape on write. */
+function fullIdsForShortcode(
+  registry: ConsoleRegistry,
+  shortcode: string,
+): Record<string, string> {
+  const stored = registry.shortcodeFullIds?.[shortcode];
+  if (stored) return stored;
+  const id = registry.shortcodeIds[shortcode];
+  if (!id) return {};
+  const owners = ownersForShortcode(registry, shortcode);
+  return Object.fromEntries(owners.map((owner) => [identityKey(owner), id]));
 }
 
 const SHORTCODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -114,6 +143,11 @@ function rememberConsoleInRegistry(
   fullId: string,
   identity: ConsoleIdentity,
 ): void {
+  const owners = [...ownersForShortcode(registry, shortcode)];
+  const ids = fullIdsForShortcode(registry, shortcode);
+  ids[identityKey(identity)] = fullId;
+  registry.shortcodeFullIds ??= {};
+  registry.shortcodeFullIds[shortcode] = ids;
   const matches = registry.fullIds[fullId] ?? [];
   if (!matches.some((known) => identityKey(known) === identityKey(identity))) {
     matches.push(identity);
@@ -121,7 +155,6 @@ function rememberConsoleInRegistry(
   registry.fullIds[fullId] = matches;
   registry.shortcodeIds[shortcode] = fullId;
   registry.shortcodeOwners ??= {};
-  const owners = registry.shortcodeOwners[shortcode] ?? [];
   if (!owners.some((owner) => identityKey(owner) === identityKey(identity))) {
     owners.push(identity);
   }
@@ -144,9 +177,13 @@ export async function reconcileDiscoveredConsoles(
       );
     }
     const liveIds = new Set(consoles.map((console) => console.id));
+    const liveShortcodes = new Set(
+      consoles.map((console) => console.shortcode),
+    );
     const key = identityKey(identity);
-    for (const [shortcode, id] of Object.entries(registry.shortcodeIds)) {
-      if (!liveIds.has(id)) removeShortcodeOwner(registry, shortcode, identity);
+    for (const shortcode of Object.keys(registry.shortcodeIds)) {
+      if (!liveShortcodes.has(shortcode))
+        removeShortcodeOwner(registry, shortcode, identity);
     }
     for (const [id, identities] of Object.entries(registry.fullIds)) {
       registry.fullIds[id] = identities.filter(
@@ -178,15 +215,16 @@ export async function clearMissingReference(
 ): Promise<void> {
   const key = identityKey(identity);
   await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
-    const fullId = registry.shortcodeIds[target] ?? target;
+    const fullId = fullIdsForShortcode(registry, target)[key] ?? target;
     if (
       registry.selected[key] === target ||
       registry.selected[key] === fullId
     ) {
       delete registry.selected[key];
     }
-    for (const [shortcode, id] of Object.entries(registry.shortcodeIds)) {
-      if (id === fullId) removeShortcodeOwner(registry, shortcode, identity);
+    for (const shortcode of Object.keys(registry.shortcodeIds)) {
+      if (fullIdsForShortcode(registry, shortcode)[key] === fullId)
+        removeShortcodeOwner(registry, shortcode, identity);
     }
     const matches = registry.fullIds[fullId];
     if (matches) {
@@ -205,19 +243,24 @@ function removeShortcodeOwner(
   shortcode: string,
   identity: ConsoleIdentity,
 ): void {
-  const owners =
-    registry.shortcodeOwners?.[shortcode] ??
-    identitiesForTarget(registry, shortcode);
+  const owners = ownersForShortcode(registry, shortcode);
   const remaining = owners.filter(
     (owner) => identityKey(owner) !== identityKey(identity),
   );
   if (remaining.length === owners.length) return;
+  const ids = fullIdsForShortcode(registry, shortcode);
+  delete ids[identityKey(identity)];
   registry.shortcodeOwners ??= {};
   if (remaining.length > 0) {
     registry.shortcodeOwners[shortcode] = remaining;
+    registry.shortcodeFullIds ??= {};
+    registry.shortcodeFullIds[shortcode] = ids;
+    const remainingId = Object.values(ids)[0];
+    if (remainingId) registry.shortcodeIds[shortcode] = remainingId;
   } else {
     delete registry.shortcodeOwners[shortcode];
     delete registry.shortcodeIds[shortcode];
+    if (registry.shortcodeFullIds) delete registry.shortcodeFullIds[shortcode];
   }
 }
 /** Generate a six-character candidate; reservation enforces uniqueness. */

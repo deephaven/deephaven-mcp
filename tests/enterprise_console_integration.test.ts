@@ -89,15 +89,21 @@ test.skipIf(!SERVER || !USER || !PASSWORD)(
       });
     } finally {
       try {
+        const failures: unknown[] = [];
         for (const console of [second, first]) {
           if (!console) continue;
-          const deletion = await run(
-            dir,
-            ["console", "delete", console.shortcode, "--force"],
-            env,
-          );
-          expect(deletion.code, deletion.stderr).toBe(0);
+          try {
+            const deletion = await run(
+              dir,
+              ["console", "delete", console.shortcode, "--force"],
+              env,
+            );
+            expect(deletion.code, deletion.stderr).toBe(0);
+          } catch (error) {
+            failures.push(error);
+          }
         }
+        expect(failures, "Console cleanup failures").toEqual([]);
       } finally {
         const logout = await run(dir, ["auth", "logout", "--all"], env);
         expect(logout.code, logout.stderr).toBe(0);

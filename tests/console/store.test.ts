@@ -179,3 +179,64 @@ test.skipIf(WINDOWS)(
     ).rejects.toMatchObject({ code: "credential_unavailable" });
   },
 );
+
+test("console store: colliding shortcodes retain each identity's full ID during cleanup", async () => {
+  for (const clearById of [false, true]) {
+    const store = await tempStore();
+    const alice = identity("alice");
+    const bob = { ...identity("bob"), server: "https://other.example.com" };
+    await rememberConsole(store, "shared", "alice-id", alice);
+    await rememberConsole(store, "shared", "bob-id", bob);
+    await rememberConsoleSelection(store, alice, "alice-id");
+    await rememberConsoleSelection(store, bob, "bob-id");
+    const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+    expect(identitiesForTarget(registry, "shared")).toEqual([alice, bob]);
+    await reconcileDiscoveredConsoles(store, alice, [
+      { shortcode: "shared", id: "alice-id" },
+    ]);
+    expect(
+      identitiesForTarget(
+        await store.readConsoleData(EMPTY_CONSOLE_REGISTRY),
+        "shared",
+      ),
+    ).toEqual([alice, bob]);
+    await clearMissingReference(
+      store,
+      alice,
+      clearById ? "alice-id" : "shared",
+    );
+    const updated = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+    expect(updated.fullIds).toEqual({ "bob-id": [bob] });
+    expect(updated.selected).toEqual({ [identityKey(bob)]: "bob-id" });
+    expect(updated.shortcodeIds.shared).toBe("bob-id");
+    expect(identitiesForTarget(updated, "shared")).toEqual([bob]);
+    await clearMissingReference(store, bob, "shared");
+    const empty = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+    expect(empty.fullIds).toEqual({});
+    expect(empty.selected).toEqual({});
+    expect(empty.shortcodeIds).toEqual({});
+  }
+});
+
+test("console store: legacy shortcode owners migrate without losing either identity", async () => {
+  const store = await tempStore();
+  const alice = identity("alice");
+  const bob = identity("bob");
+  await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
+    registry.shortcodeIds.shared = "legacy-id";
+    registry.fullIds["legacy-id"] = [alice];
+  });
+  await rememberConsole(store, "shared", "new-id", bob);
+  expect(
+    identitiesForTarget(
+      await store.readConsoleData(EMPTY_CONSOLE_REGISTRY),
+      "shared",
+    ),
+  ).toEqual([alice, bob]);
+  await clearMissingReference(store, alice, "shared");
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(registry.fullIds).toEqual({ "new-id": [bob] });
+  expect(registry.shortcodeFullIds?.shared).toEqual({
+    [identityKey(bob)]: "new-id",
+  });
+});

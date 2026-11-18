@@ -10,6 +10,7 @@ import type { CommandLifecycle } from "../../cli/lifecycle.ts";
 import { DhError, reasonOf, timeoutMs, withTimeout } from "../../errors.ts";
 import type { Session } from "../auth/signin.ts";
 import {
+  consoleCreateRequestReport,
   consoleDeletedReport,
   consoleObservationReport,
   consoleReadyReport,
@@ -364,6 +365,10 @@ export async function createEnterpriseConsole(
   validateConsoleSettings(settings, capabilities);
   const name = `${CLI_CONSOLE_PREFIX}${shortcode}`;
   const userInfo = await call(client.getUserInfo(), "read console owner");
+  lifecycle.signal.throwIfAborted();
+  lifecycle.setFailureReport(
+    consoleCreateRequestReport(shortcode, session.profileName),
+  );
   const serial = await call(
     client.createQuery(
       consoleQuery(

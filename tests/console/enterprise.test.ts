@@ -11,6 +11,7 @@ import type {
 } from "@deephaven-enterprise/jsapi-types";
 import type { Session } from "../../src/actions/auth/signin.ts";
 import {
+  type ConsoleServerSettings,
   consoleInfo,
   createEnterpriseConsole,
   findEnterpriseConsole,
@@ -595,9 +596,6 @@ test("console creation: reuse the settings snapshot without fetching metadata tw
   const rejectedLifecycle = new CommandLifecycle();
   await expect(
     rejectedLifecycle.runLifecycleAction(consoleStartupReport(), async () => {
-      rejectedLifecycle.setFailureReport(
-        consoleCreateRequestReport("def456", "test-profile"),
-      );
       return await createEnterpriseConsole(
         rejectedSession,
         "def456",
@@ -618,6 +616,69 @@ test("console creation: reuse the settings snapshot without fetching metadata tw
     },
   });
   expect(rejectedLifecycle.failureReport.progress).toBeUndefined();
+});
+
+test("console creation: preflight failures and cancellation never submit a request", async () => {
+  const capabilities: ConsoleServerSettings = {
+    settings: {
+      language: "python",
+      heapSizeGb: 4,
+      server: "Query 1",
+      engine: "python",
+      jvmArgs: [],
+      environment: {},
+      autoDeleteTimeoutSeconds: 600,
+    },
+    dataMemoryRatio: 0.1,
+    jvmProfile: "Default",
+    scheduling: [],
+    servers: ["Query 1"],
+    engines: ["python"],
+    languages: ["python"],
+  };
+  for (const stage of [
+    "query types",
+    "settings",
+    "owner",
+    "cancel types",
+    "cancel owner",
+  ]) {
+    const lifecycle = new CommandLifecycle();
+    let creates = 0;
+    const session = sessionWith({
+      getQueryConfigurationTypes: async () => {
+        if (stage === "query types") throw new Error("Cannot read query types");
+        if (stage === "cancel types") lifecycle.receiveSignal("SIGINT");
+        return new Map([["InteractiveConsole", { supportsCommunity: true }]]);
+      },
+      getUserInfo: async () => {
+        if (stage === "owner") throw new Error("Cannot read owner");
+        if (stage === "cancel owner") lifecycle.receiveSignal("SIGINT");
+        return { operateAs: "alice" };
+      },
+      createQuery: async () => {
+        creates++;
+        return "unexpected-id";
+      },
+    });
+    await expect(
+      lifecycle.runLifecycleAction(consoleStartupReport(), () =>
+        createEnterpriseConsole(
+          session,
+          "abc123",
+          stage === "settings"
+            ? { ...capabilities.settings, server: "missing" }
+            : capabilities.settings,
+          lifecycle,
+          capabilities,
+        ),
+      ),
+    ).rejects.toBeDefined();
+    expect(creates).toBe(0);
+    expect(lifecycle.failureReport.outcome).toBe("not_started");
+    expect(lifecycle.failureReport.recoveryCommand).toBeUndefined();
+    expect(lifecycle.failureReport.human?.details).toBeUndefined();
+  }
 });
 
 test("console defaults: choose a supported engine and language when preferred values are unavailable", async () => {

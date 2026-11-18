@@ -20,7 +20,6 @@ import {
 } from "./enterprise.ts";
 import {
   consoleActionReport,
-  consoleCreateRequestReport,
   consoleDeleteAcceptedReport,
   consoleDeleteRequestReport,
   consoleStartupReport,
@@ -148,24 +147,24 @@ function communitySharedConsole(origin: string): ConsoleListItem {
   };
 }
 
-/** Retain a live selection, or clear it and auto-select the sole running console. */
+/** Reconcile the current selection under lock without replacing a newer choice. */
 async function reconcileConsoleSelection(
   store: Store,
-  registry: ConsoleRegistry,
-  session: Session,
-  items: ConsoleListItem[],
-): Promise<ConsoleListItem[]> {
-  if (session.community) return items;
-  const identity = identityOf(session);
+  identity: ConsoleIdentity,
+  consoles: ConsoleInfo[],
+  expected: string | undefined,
+): Promise<string | undefined> {
   const key = identityKey(identity);
-  const remembered = registry.selected[key];
-  if (remembered && items.some((item) => item.id === remembered)) return items;
-  if (remembered) {
-    await rememberConsoleSelection(store, identity, undefined);
-  }
-  const chosen = await rememberOnlyRunningConsole(store, identity, items);
-  if (!chosen) return items;
-  return items.map((item) => ({ ...item, inUse: item.id === chosen }));
+  return await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
+    const current = registry.selected[key];
+    if (current !== expected) return current;
+    if (consoles.some((console) => console.id === current)) return current;
+    const running = consoles.filter((console) => isRunning(console.state));
+    const chosen = running.length === 1 ? running[0] : undefined;
+    if (chosen) registry.selected[key] = chosen.id;
+    else delete registry.selected[key];
+    return chosen?.id;
+  });
 }
 
 /** Remember the sole running console; stopped and failed consoles are not candidates. */
@@ -174,12 +173,7 @@ export async function rememberOnlyRunningConsole(
   identity: ConsoleIdentity,
   consoles: ConsoleInfo[],
 ): Promise<string | undefined> {
-  const running = consoles.filter((console) => isRunning(console.state));
-  if (running.length !== 1) return undefined;
-  const chosen = running[0];
-  if (!chosen) return undefined;
-  await rememberConsoleSelection(store, identity, chosen.id);
-  return chosen.id;
+  return await reconcileConsoleSelection(store, identity, consoles, undefined);
 }
 
 /** List consoles, refresh cached references, and resolve automatic selection. */
@@ -194,7 +188,15 @@ export async function listConsoles(
   if (session.enterprise) {
     await reconcileDiscoveredConsoles(store, identityOf(session), items);
   }
-  return await reconcileConsoleSelection(store, registry, session, items);
+  if (session.community) return items;
+  const identity = identityOf(session);
+  const selected = await reconcileConsoleSelection(
+    store,
+    identity,
+    items,
+    registry.selected[identityKey(identity)],
+  );
+  return items.map((item) => ({ ...item, inUse: item.id === selected }));
 }
 
 /** Authenticate a console-management session, rejecting Community-only connections. */
@@ -252,7 +254,7 @@ async function sessionForTarget(
   return await requireAuth(profileFlag, store, lifecycle);
 }
 
-/** Render available saved profiles for an ambiguous full-ID error. */
+/** Render available saved profiles for an ambiguous console target. */
 async function profileNamesFor(
   store: Store,
   identities: ConsoleIdentity[],
@@ -446,9 +448,6 @@ async function createConsoleAction(
   const resolved = mergeConsoleSettings(base.settings, stored, settings);
   const identity = identityOf(session);
   const shortcode = await reserveShortcode(store, identity);
-  lifecycle.setFailureReport(
-    consoleCreateRequestReport(shortcode, session.profileName),
-  );
   const id = await createEnterpriseConsole(
     session,
     shortcode,
@@ -506,6 +505,7 @@ async function deleteConsoleAction(
   { session, console }: { session: Session; console: ConsoleInfo },
   lifecycle: CommandLifecycle,
 ): Promise<void> {
+  lifecycle.signal.throwIfAborted();
   lifecycle.setFailureReport(
     consoleDeleteRequestReport(console.shortcode, session.profileName),
   );

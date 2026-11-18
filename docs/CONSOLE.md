@@ -45,7 +45,7 @@ all overrides.
 
 - Each profile's selection is keyed by server, login user, and operate-as user.
   Renaming a profile preserves it. A known shortcode or full ID resolves its
-  profile; use `--profile` if a full ID is ambiguous.
+  profile; use `--profile` if a shortcode or full ID is ambiguous.
 - With no saved selection, one running console is selected automatically.
   Deleted selections are cleared.
 - Community has one shared console: list with `dh console`, select with

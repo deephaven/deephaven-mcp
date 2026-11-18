@@ -34,11 +34,10 @@ export function consoleStartupReport(): FailureReport {
   return {
     command: "console create",
     operation: "console startup",
-    phase: "starting",
-    outcome: "unknown",
+    phase: "preparing",
+    outcome: "not_started",
     human: {
-      summary: "Interrupted while waiting for the console to start.",
-      recoveryLabel: "Check whether it started",
+      summary: "Interrupted while preparing to create a console.",
     },
   };
 }
