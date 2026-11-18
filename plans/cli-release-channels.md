@@ -218,6 +218,21 @@ Each CLI's channel comes from its `dh.meta`, else `release`. Channel releases ke
 - **Switch an existing install:** `dh channel` shows the current channel and whether it was saved or is the default. `dh channel use rc` saves `rc` in `dh.meta` and checks for an update right away, so the switch happens now rather than at the next daily check. `dh channel use release` switches back. This follows the CLI's noun + `use` pattern (`dh auth use <profile>`).
 - **Install metadata file:** one file next to the binary, named after it: `dh.meta` beside `dh`, `dh.exe.meta` beside `dh.exe`. No extension, so its format stays an implementation detail. It holds install-level data such as the channel and the last update-check time. The install script writes it fresh; the CLI and updater each update only their own fields, writing to a temp file and renaming it into place. An unreadable file means defaults (`release`, check now), never a failed command.
 - **A failed check is harmless.** Replacing the manifest returns 404 for a moment; the CLI just checks again next interval.
+- **Help shows a non-release channel.** Top-level help already prints `Version:` under `Usage:`. On any build other than `release`, it adds a `Channel:` line with the build's channel and config folder, for example `Channel: rc (config ~/.deephaven/cli-rc)`, or `Channel: dev` when run from source. Release builds show nothing extra.
+
+## Config per channel
+
+Each channel keeps its own config folder (profiles and credentials), so an `rc` or alpha build that changes the config format can't break a working `release` setup.
+
+| Build | Config folder |
+| --- | --- |
+| `release` | `~/.deephaven/cli` (`%APPDATA%\Deephaven\cli` on Windows), unchanged from today |
+| Any other channel | A sibling folder: `~/.deephaven/cli-rc`, `~/.deephaven/cli-alpha-bar`, … |
+| Run from source (`bun run dev`) | `~/.deephaven/cli-dev` |
+
+- **The build decides, not `dh.meta`.** The channel is baked into the binary at build time, like the version, so a channel's folder is only ever read and written by that channel's code. After `dh channel use release`, the installed `rc` binary keeps using the `rc` folder until the release binary replaces it.
+- **Each channel starts empty.** Testers sign in once per channel. A channel only manages credentials it created, so logging out on `rc` never revokes a key `release` uses.
+- **`DH_CONFIG_DIR` still overrides the folder,** as it does today.
 
 ## Versions
 
