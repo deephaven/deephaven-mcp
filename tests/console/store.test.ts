@@ -272,3 +272,22 @@ test("console store: stale discovery prunes only unchanged identity references",
     [identityKey(alice)]: "shared-new-id",
   });
 });
+
+test("console store: stale discovery does not overwrite a concurrent shortcode mapping", async () => {
+  const store = await tempStore();
+  const alice = identity("alice");
+  const snapshot = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  await rememberConsole(store, "aaaaaa", "new-id", alice);
+  await reconcileDiscoveredConsoles(
+    store,
+    alice,
+    [{ shortcode: "aaaaaa", id: "stale-id" }],
+    snapshot,
+  );
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(registry.shortcodeIds).toEqual({ aaaaaa: "new-id" });
+  expect(registry.shortcodeFullIds?.aaaaaa).toEqual({
+    [identityKey(alice)]: "new-id",
+  });
+  expect(registry.fullIds).toEqual({ "new-id": [alice] });
+});

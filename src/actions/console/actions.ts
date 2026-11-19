@@ -357,7 +357,7 @@ export async function selectConsole(
       "usage",
       "A console is required for console use",
       session.community
-        ? `Community servers provide one shared console. Run \`${BIN} console use shared\`.`
+        ? `Community servers provide one shared console. Run \`${BIN} console use ${COMMUNITY_SHARED_ID}\`.`
         : `Run \`${BIN} console\` to list consoles, then \`${BIN} console use <console>\`.`,
     );
   }
@@ -367,7 +367,7 @@ export async function selectConsole(
       throw new DhError(
         "console_not_found",
         `Console "${target}" was not found`,
-        "Community servers provide one shared console: shared.",
+        `Community servers provide one shared console: ${COMMUNITY_SHARED_ID}.`,
       );
     }
     await rememberConsoleSelection(store, identity, COMMUNITY_SHARED_ID);
