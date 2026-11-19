@@ -277,6 +277,16 @@ describe.skipIf(WINDOWS)("plugin commands", () => {
     ).toBe("You can't run tool as irisadmin; pass your own credentials: --key");
   });
 
+  test("plugin list shows a local tool's path only when it's set here or missing", async () => {
+    const { dh, tool } = await setup(() => [spec("/nowhere/tool")]);
+    const list = async () => (await dh(["plugin", "list"])).stdout;
+    expect(await list()).toContain(
+      "\n  ctl   /nowhere/tool (not installed here)\n",
+    );
+    expect((await dh(["plugin", "set", "ctl", "--path", tool])).code).toBe(0);
+    expect(await list()).toContain(`\n  ctl   ${tool}\n`);
+  });
+
   test("a missing tool is tool_not_found, exit 6", async () => {
     const { dh } = await setup(() => [spec("/nowhere/tool")]);
     const r = await dh(["ctl", "intraday", "rescan"]);
@@ -288,8 +298,9 @@ describe.skipIf(WINDOWS)("plugin commands", () => {
     const { dh, bundle, tool } = await setup((tool) => [spec(tool)]);
     const text = (await dh(["plugin", "list"])).stdout;
     expect(text).toContain(`shell: DH_PLUGIN_BUNDLE (${bundle}/shell)`);
-    expect(text).toContain("cluster 2026.01.1g0");
-    expect(text).toContain(`  ctl   local: ${tool}\n`);
+    expect(text).toContain("\n  DHE Version: 2026.01.1g0\n");
+    // The spec's path, installed: nothing beside the name.
+    expect(text).toContain("\n  ctl\n");
     const json = JSON.parse(
       (await dh(["plugin", "list", "-o", "json"])).stdout,
     );
@@ -355,7 +366,7 @@ describe.skipIf(WINDOWS)("plugin commands", () => {
     expect(state["?"] ?? state.far).toContain('"spec" must be a path inside');
     expect(state.future).toBe("unavailable: needs dh >=99");
     expect((await dh(["plugin", "list"])).stdout).toContain(
-      "  future   local  (needs dh >=99)\n",
+      "  future   (needs dh >=99)\n",
     );
     expect((await dh(["auth", "--help"])).stdout).toContain("Sign in");
     const help = (await dh(["--help"])).stdout;
