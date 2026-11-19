@@ -38,17 +38,10 @@ import {
 } from "../../src/actions/console/settings.ts";
 import { CommandLifecycle } from "../../src/cli/lifecycle.ts";
 
-const schedulingDefaults = [
-  "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
-  "StartTime=07:55:00",
-  "StopTime=23:55:00",
-  "TimeZone=America/New_York",
-];
 const queryConstants = {
   consoleDefaultHeap: 4,
   minDataRatio: 0.1,
   maxDataRatio: 0.6,
-  defaultSchedulingDetails: schedulingDefaults,
 };
 
 test("console recovery: saved profiles are explicit in create and delete commands", () => {
@@ -212,13 +205,7 @@ type ConsoleClientMock = Pick<
   >;
   getDbServers(): Promise<Pick<ConsoleServerAddress, "name">[]>;
   getQueryConstants(): Promise<
-    Pick<
-      QueryConstants,
-      | "consoleDefaultHeap"
-      | "minDataRatio"
-      | "maxDataRatio"
-      | "defaultSchedulingDetails"
-    >
+    Pick<QueryConstants, "consoleDefaultHeap" | "minDataRatio" | "maxDataRatio">
   >;
   getUserInfo(): Promise<Pick<UserInfo, "operateAs">>;
   createQuery(config: PlainEditableQueryInfo): Promise<string>;
@@ -523,9 +510,6 @@ test("console creation: sends an InteractiveConsole query with seconds converted
   expect(scheduling).toEqual(
     expect.arrayContaining([
       "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerTemporary",
-      "StartTime=07:55:00",
-      "StopTime=23:55:00",
-      "TimeZone=America/New_York",
       "TemporaryAutoDelete=true",
       "TemporaryQueueName=DefaultTemporaryQueue",
       "TemporaryExpirationTimeMillis=172800000",
@@ -550,7 +534,7 @@ test("console creation: classify only the server's authorization error wording a
     settings,
     dataMemoryRatio: 0.1,
     jvmProfile: "default",
-    scheduling: [],
+    temporaryQueueName: "DefaultTemporaryQueue",
     servers: ["Query 1"],
     engines: ["python"],
     languages: ["python"],
@@ -718,7 +702,7 @@ test("console creation: preflight failures and cancellation never submit a reque
     },
     dataMemoryRatio: 0.1,
     jvmProfile: "Default",
-    scheduling: [],
+    temporaryQueueName: "DefaultTemporaryQueue",
     servers: ["Query 1"],
     engines: ["python"],
     languages: ["python"],
