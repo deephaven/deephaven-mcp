@@ -26,15 +26,14 @@ export const remove = defineCommand<DeleteOptions>({
       ctx.lifecycle,
     );
     if (
-      !(await confirmDeleteConsole(
+      await confirmDeleteConsole(
         ctx.ui,
         resolved.console.shortcode,
         Boolean(opts.force),
-      ))
+      )
     ) {
-      return { human: "", json: {}, empty: true };
+      await deleteConsole(ctx.store, resolved, ctx.lifecycle);
     }
-    await deleteConsole(ctx.store, resolved, ctx.lifecycle);
     return { human: "", json: {}, empty: true };
   },
 });
