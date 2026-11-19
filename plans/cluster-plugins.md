@@ -354,8 +354,8 @@ costs nothing extra:
 | Local bundle                         | —                                                                                                                                    | Nothing: read at startup, so always current                                                                                                                                                     |
 
 `dh plugin sync` prints, per channel, added, changed and removed plugins, or
-`unchanged`. `dh plugin list` shows, per channel, the source, `fetchedAt`,
-`clusterVersion` and the revision.
+`unchanged`. `dh plugin list` shows, per channel, the source, the DHE version
+(`clusterVersion`), the revision and `fetchedAt`.
 
 A cluster upgrade replaces `/usr/illumon/latest/dh-cli/`, so the next
 command of either kind sees a new `revision` before it runs anything. No
@@ -827,7 +827,7 @@ directory. To try the real channels, put a bundle on a node and set
 
 | Command                                           | Does                                                                                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `dh plugin list`                                  | Per channel: the source (server, SSH host, local bundle or `DH_PLUGIN_BUNDLE`), revision, cluster version, fetched time; each plugin's kind, how it runs and its state (`ready`, `needs dh <range>`, `invalid: <reason>`); or why there are none (`SSH not enabled`, `no dh-cli bundle at <path> on <host>`, `this server provides no dh plugins`). Plugins hidden by `groups` aren't listed. The SSH line from [SSH setup](#ssh-setup) last |
+| `dh plugin list`                                  | Per channel: a line naming the source (server, SSH host, local bundle or `DH_PLUGIN_BUNDLE`), then `DHE Version:`, `Revision:` and `Fetched:` lines; then each plugin by name, with only what the channel line doesn't say: SSH hosts other than the header's (default first, starred), a local tool's path when set with `--path` or not installed, `runs as <account>`, its nouns when they aren't its name, and its state when not `ready` (`needs dh <range>`, `invalid: <reason>`); or why there are none (`SSH not enabled`, `no dh-cli bundle at <path> on <host>`, `this server provides no dh plugins`). Plugins hidden by `groups` aren't listed. The SSH line from [SSH setup](#ssh-setup) last |
 | `dh plugin sync [--profile <p>]`                  | Fetch `js/` and, if SSH is enabled, copy `shell/`, now                                                                                 |
 | `dh plugin ssh enable [--ssh-host <host>]…\|disable [--profile <p>]` | See [SSH setup](#ssh-setup). `--ssh-host` sets `ssh.hosts`                                                          |
 | `dh plugin set <name> [--ssh-host …] [--path …]` | As today, but `--ssh-host` sets the plugin's override of the server's `ssh.hosts`; no `--prefix` (see [Running as a service account](#running-as-a-service-account)), no `--exec`, nothing version-related |
