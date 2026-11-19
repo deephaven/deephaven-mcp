@@ -834,9 +834,10 @@ describe.skipIf(WINDOWS)("ssh plugins: hosts", () => {
       }),
     });
     const text = (await dh(["plugin", "list"])).stdout;
-    expect(text).toContain(`shell: over SSH from infra-1 (${ORIGIN1})`);
-    expect(text).toContain("cluster 2026.01.1g0");
-    expect(text).toContain("  ctl   ssh: dis-2*, dis-1 ");
+    expect(text).toContain(
+      "shell: over SSH from infra-1\n  DHE Version: 2026.01.1g0\n",
+    );
+    expect(text).toContain("\n  ctl   dis-2*, dis-1\n");
     const out = JSON.parse((await dh(["plugin", "list", "-o", "json"])).stdout);
     expect(shellOf(out)).toMatchObject({
       channel: "shell",
@@ -979,7 +980,10 @@ describe.skipIf(WINDOWS)("ssh plugins: runAs", () => {
       (c: { command: string }) => c.command === "dh ctl",
     );
     expect(ctl.runAs).toEqual(RUN_AS);
-    expect((await dh(["plugin", "list"])).stdout).toContain(", runs as admin");
+    // The one host is the header's, so only runAs is beside the name.
+    expect((await dh(["plugin", "list"])).stdout).toContain(
+      "\n  ctl   runs as admin\n",
+    );
     const check = JSON.parse(
       (await dh(["plugin", "check", "ctl", "-o", "json"])).stdout,
     );

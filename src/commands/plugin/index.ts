@@ -9,6 +9,7 @@ import {
   localPath,
   readConfig,
   sshSettings,
+  toolInstalled,
 } from "../../actions/plugins/settings.ts";
 import type { Context } from "../../cli/command.ts";
 import { type CommandSpec, defineCommand } from "../../cli/command.ts";
@@ -113,6 +114,7 @@ async function listPlugins(ctx: Context, found: Discovery) {
   const active = activeProfile(config, ctx.profileFlag);
   const channels = channelsOf(found, active?.profile.server ?? null);
   const plugins = found.plugins.map((p) => {
+    const tool = p.spec ? localOrRemote(p, config) : null;
     const ssh =
       p.exec === "ssh" && active
         ? sshSettings(config, active.profile, p.name)
@@ -122,7 +124,7 @@ async function listPlugins(ctx: Context, found: Discovery) {
       kind: p.channel,
       nouns: p.entry?.nouns ?? [],
       exec: p.exec,
-      tool: p.spec ? localOrRemote(p, config) : null,
+      tool,
       sshHosts: ssh ? hostsDefaultFirst(ssh) : null,
       defaultSshHost: ssh?.defaultHost ?? null,
       runAs: p.spec?.tool.runAs
@@ -135,22 +137,39 @@ async function listPlugins(ctx: Context, found: Discovery) {
       reason: p.reason ?? null,
     };
   });
+  // A local tool's path is shown only when it's set here or isn't installed.
+  const localTools = new Map(
+    await Promise.all(
+      found.plugins.map(async ({ name, exec, spec }) => {
+        if (exec !== "local" || !spec) return [name, ""] as const;
+        const path = localPath(config, spec);
+        if (!(await toolInstalled(path))) {
+          return [name, `${path} (not installed here)`] as const;
+        }
+        return [name, path === spec.tool.path ? "" : path] as const;
+      }),
+    ),
+  );
   const width = Math.max(0, ...plugins.map((p) => p.name.length));
   const human: string[] = [];
   for (const c of channels) {
-    human.push(channelLine(c));
+    human.push(...channelLines(c));
     for (const p of plugins.filter((p) => p.kind === c.channel)) {
-      const where = p.sshHosts ? `${hostsText(p)} ` : "";
-      const as = p.runAs ? `, runs as ${p.runAs.account}` : "";
-      let how: string = p.exec;
-      if (p.exec === "js") how = "js: runs in dh";
-      else if (p.tool) how = `${p.exec}: ${where}${p.tool}${as}`;
-      const state = p.state === "ready" ? "" : `  (${p.reason ?? p.state})`;
+      // Only what the channel line doesn't say: hosts other than the one the
+      // bundle came from, a local path that's set or missing, and runAs.
+      const hosts =
+        p.sshHosts && p.sshHosts.join() !== (c.sshHost ?? "")
+          ? hostsText(p)
+          : "";
+      const where = localTools.get(p.name) ?? "";
+      const as = p.runAs ? `runs as ${p.runAs.account}` : "";
+      const state = p.state === "ready" ? "" : `(${p.reason ?? p.state})`;
       const nouns =
         p.nouns.length === 0 || p.nouns.join() === p.name
           ? ""
-          : `  [${p.nouns.join(", ")}]`;
-      human.push(`  ${p.name.padEnd(width)}   ${how}${nouns}${state}`);
+          : `[${p.nouns.join(", ")}]`;
+      const rest = [hosts, where, as, nouns, state].filter(Boolean).join("  ");
+      human.push(rest ? `  ${p.name.padEnd(width)}   ${rest}` : `  ${p.name}`);
     }
   }
   // The `shell` plugins the `js` manifest names, when SSH isn't enabled to get them.
@@ -190,23 +209,30 @@ function localOrRemote(
   return p.exec === "local" ? localPath(config, p.spec) : p.spec.tool.path;
 }
 
-/** `shell: over SSH from infra-1 (https://…), cluster 2026.01…, revision sha256:1a2b3c4d, fetched …`. */
-function channelLine(c: ChannelInfo): string {
+/**
+ * `shell: over SSH from infra-1`, then `  DHE Version: …`, `  Revision: …` and
+ * `  Fetched: …` lines, as `dh auth status` lays out a profile.
+ */
+function channelLines(c: ChannelInfo): string[] {
   const from = {
     env: `DH_PLUGIN_BUNDLE (${c.dir})`,
     local: `this node (${c.dir})`,
-    ssh: `over SSH${c.sshHost ? ` from ${c.sshHost}` : ""} (${c.server})`,
+    ssh: `over SSH from ${c.sshHost ?? c.server}`,
     web: `from ${c.server}`,
   }[c.source ?? ""];
   if (c.reason || !from) {
-    return `${c.channel}: ${from ? `${from}: ` : ""}${c.reason ?? "none"}`;
+    return [`${c.channel}: ${from ? `${from}: ` : ""}${c.reason ?? "none"}`];
   }
-  const details = [
-    c.clusterVersion && `cluster ${c.clusterVersion}`,
-    c.revision && `revision ${c.revision.slice(0, "sha256:".length + 8)}`,
-    c.fetchedAt && `fetched ${c.fetchedAt}`,
-  ].filter(Boolean);
-  return `${c.channel}: ${from}${details.length > 0 ? `, ${details.join(", ")}` : ""}`;
+  return [
+    `${c.channel}: ${from}`,
+    ...(c.clusterVersion ? [`  DHE Version: ${c.clusterVersion}`] : []),
+    ...(c.revision
+      ? [`  Revision: ${c.revision.slice(0, "sha256:".length + 8)}`]
+      : []),
+    ...(c.fetchedAt
+      ? [`  Fetched: ${c.fetchedAt.replace(/\.\d+Z$/, "Z")}`]
+      : []),
+  ];
 }
 
 /** `dis-2*, dis-1`: the hosts, default first and starred when there are several. */
