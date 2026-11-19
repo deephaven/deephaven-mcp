@@ -1,4 +1,9 @@
-import type { AuthenticatedEnterpriseClient } from "@deephaven-enterprise/jsapi-nodejs";
+import {
+  type AuthenticatedEnterpriseClient,
+  createInteractiveConsoleDraftQuery,
+  isCommunityWorkerKind,
+  QueryStatus,
+} from "@deephaven-enterprise/jsapi-nodejs";
 import type {
   ConsoleServerAddress,
   PlainEditableQueryInfo,
@@ -47,7 +52,7 @@ export interface ConsoleServerSettings {
   settings: EffectiveConsoleSettings;
   dataMemoryRatio: number;
   jvmProfile: string;
-  scheduling: string[];
+  temporaryQueueName: string;
   servers: string[];
   engines: string[];
   languages: string[];
@@ -98,7 +103,9 @@ function queries(session: Session): QueryInfo[] {
 /** Identify CLI-created consoles by their query type and reserved name. */
 function isCliConsole(query: QueryInfo): boolean {
   return (
-    query.type === QUERY_TYPE && /^IC - dh CLI - [a-z0-9]{6}$/.test(query.name)
+    query.type === QUERY_TYPE &&
+    query.name.startsWith(CLI_CONSOLE_PREFIX) &&
+    /^[a-z0-9]{6}$/.test(shortcodeFromName(query.name))
   );
 }
 
@@ -109,19 +116,18 @@ export function shortcodeFromName(name: string): string {
 
 /** Whether the server reports a console state that can be used. */
 export function isRunning(state: string): boolean {
-  return ["running", "connected"].includes(state.toLowerCase());
+  return state === QueryStatus.running;
 }
 
 /** Whether the server reports a final state that prevents startup. */
 export function isTerminal(state: string): boolean {
   return [
-    "failed",
-    "error",
-    "stopped",
-    "terminated",
-    "deleted",
-    "cancelled",
-  ].includes(state.toLowerCase());
+    QueryStatus.failed,
+    QueryStatus.error,
+    QueryStatus.stopped,
+    QueryStatus.disconnected,
+    QueryStatus.completed,
+  ].includes(state);
 }
 
 /** Resolve the most useful status exposed by the query API. */
@@ -149,7 +155,7 @@ export function consoleInfo(query: ConsoleQuery): EnterpriseConsoleInfo {
   };
 }
 
-/** Read the idle grace period; query.timeout instead controls initialization. */
+/** Read the idle grace period in seconds; query.timeout instead controls initialization. */
 function autoDeleteTimeoutOf(query: ConsoleQuery): number | null {
   const field = query.typeSpecificFields?.TerminationDelay;
   if (!field) return null;
@@ -244,7 +250,7 @@ function deriveConsoleServerSettings(
   }
   const servers = serverList.map((server) => server.name);
   const engines = config.workerKinds
-    .filter((engine) => engine.protocols.includes("Community"))
+    .filter(isCommunityWorkerKind)
     .map((engine) => engine.name);
   const languages = supportedConsoleLanguages(config.scriptSessionProviders);
   const [firstLanguage] = languages;
@@ -281,10 +287,7 @@ function deriveConsoleServerSettings(
   return {
     dataMemoryRatio: constants.minDataRatio,
     jvmProfile: config.jvmProfileDefault,
-    scheduling: temporaryConsoleScheduling(
-      constants.defaultSchedulingDetails,
-      queue,
-    ),
+    temporaryQueueName: queue,
     settings: {
       language: languages.includes("python") ? "python" : firstLanguage,
       heapSizeGb: constants.consoleDefaultHeap,
@@ -298,25 +301,6 @@ function deriveConsoleServerSettings(
     engines,
     languages,
   };
-}
-
-/** Retain required scheduler initialization fields while selecting temporary-console lifecycle. */
-function temporaryConsoleScheduling(
-  defaults: readonly string[],
-  queue: string,
-): string[] {
-  return [
-    "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerTemporary",
-    ...defaults.filter(
-      (entry) =>
-        !/^(SchedulerType|AutoDelete|TemporaryAutoDelete|QueueName|TemporaryQueueName|TemporaryExpirationTimeMillis)=/.test(
-          entry,
-        ),
-    ),
-    "TemporaryAutoDelete=true",
-    `TemporaryQueueName=${queue}`,
-    `TemporaryExpirationTimeMillis=${TEMPORARY_EXPIRATION_MS}`,
-  ];
 }
 
 /** Detect console languages from the server's script-session providers. */
@@ -371,13 +355,14 @@ export async function createEnterpriseConsole(
   );
   const serial = await call(
     client.createQuery(
-      consoleQuery(
+      await consoleQuery(
+        client,
         name,
         userInfo.operateAs,
         settings,
         capabilities.dataMemoryRatio,
         capabilities.jvmProfile,
-        capabilities.scheduling,
+        capabilities.temporaryQueueName,
       ),
     ),
     "create console",
@@ -416,53 +401,41 @@ function validateConsoleSettings(
   }
 }
 
-/** Build the full query payload, keeping server-specific defaults in one place. */
-function consoleQuery(
+/** Build the query payload the same way the web UI's Code Studio does. */
+async function consoleQuery(
+  client: AuthenticatedEnterpriseClient,
   name: string,
   owner: string,
   settings: EffectiveConsoleSettings,
   dataMemoryRatio: number,
   jvmProfile: string,
-  scheduling: string[],
-): PlainEditableQueryInfo {
-  return {
-    additionalMemory: 0,
-    adminGroups: [],
-    assignmentPolicy: null,
-    assignmentPolicyParams: null,
-    classpathAdditions: [],
-    dataMemoryRatio,
-    dbServerName: settings.server,
-    enabled: true,
-    enableGcLogs: false,
-    envVarEntries: Object.entries(settings.environment).flat(),
-    genericWorkerControl: null,
-    heapSize: settings.heapSizeGb,
-    jvmArguments: settings.jvmArgs,
-    jvmProfile,
-    kubernetesControl: null,
+  temporaryQueueName: string,
+): Promise<PlainEditableQueryInfo> {
+  const draft = await createInteractiveConsoleDraftQuery(client, {
     name,
     owner,
-    pythonControl: null,
-    replicaCount: 1,
-    restartUsers: 1,
-    scheduling,
-    scriptCode: null,
+    draftOwner: owner,
+    dbServerName: settings.server,
+    engine: settings.engine,
     scriptLanguage: settings.language === "python" ? "Python" : "Groovy",
-    scriptPath: null,
-    serial: null,
-    spareCount: 0,
+    heapSize: settings.heapSizeGb,
+    jvmArguments: settings.jvmArgs,
+    envVarEntries: Object.entries(settings.environment).flat(),
+    dataMemoryRatio,
+    jvmProfile,
     timeout: STARTUP_TIMEOUT_MS,
-    type: QUERY_TYPE,
     typeSpecificFields: {
       TerminationDelay: {
         type: "long",
         value: String(settings.autoDeleteTimeoutSeconds * 1000),
       },
     },
-    viewerGroups: [],
-    workerKind: settings.engine,
-  };
+  });
+  // TODO: DH-24026 pass these as `queueName` / `expirationTimeMinutes` once
+  // createInteractiveConsoleDraftQuery accepts them.
+  draft.scheduler.temporaryQueueName = temporaryQueueName;
+  draft.scheduler.expirationTimeMillis = TEMPORARY_EXPIRATION_MS;
+  return draft.toEditableQueryInfo();
 }
 
 /** Submit the deletion request for a known console. */

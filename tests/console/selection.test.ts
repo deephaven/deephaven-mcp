@@ -50,7 +50,7 @@ function consoleFixture(id: string, state: string): ConsoleInfo {
 test("console selection: auto-select only one running console and persist its full ID", async () => {
   const store = new Store(join(await tempDir("dh-console-selection-"), "cli"));
   const consoles = [
-    consoleFixture("running-id", "Connected"),
+    consoleFixture("running-id", "Running"),
     consoleFixture("stopped-id", "Stopped"),
   ];
   expect(await rememberOnlyRunningConsole(store, identity, consoles)).toBe(
