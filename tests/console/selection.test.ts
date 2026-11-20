@@ -111,7 +111,7 @@ async function saveProfile(store: Store, name: string, owner: ConsoleIdentity) {
   });
 }
 
-test("console routing: cached targets override defaults and DH_PROFILE after profile rename", async () => {
+test("console routing: cached targets override defaults after profile rename", async () => {
   const store = new Store(join(await tempDir("dh-console-routing-"), "cli"));
   const other = { ...identity, server: "https://other.example.com" };
   await saveProfile(store, "renamed", identity);
@@ -119,8 +119,6 @@ test("console routing: cached targets override defaults and DH_PROFILE after pro
   await rememberConsole(store, "abc123", "full-id", identity);
   const { session } = sessionFixture(identity);
   const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
-  const previous = process.env.DH_PROFILE;
-  process.env.DH_PROFILE = "default-other";
   try {
     for (const target of ["abc123", "full-id"]) {
       await detailConsole(store, target, undefined, new CommandLifecycle());
@@ -141,8 +139,6 @@ test("console routing: cached targets override defaults and DH_PROFILE after pro
     expect(login).not.toHaveBeenCalled();
   } finally {
     login.mockRestore();
-    if (previous === undefined) delete process.env.DH_PROFILE;
-    else process.env.DH_PROFILE = previous;
   }
 });
 

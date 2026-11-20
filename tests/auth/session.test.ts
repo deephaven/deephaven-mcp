@@ -307,19 +307,30 @@ test("trustAndResolveServer: a saved origin is matched exactly, not in discovery
 
 test("trustAndResolveServer: interrupted discovery reports only the safe address", async () => {
   const started = Promise.withResolvers<void>();
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => {
-      started.resolve();
-      return new Promise<Response>(() => {});
-    },
-  });
+  const requestAborted = Promise.withResolvers<void>();
+  let server: ReturnType<typeof Bun.serve> | undefined;
   const lifecycle = new CommandLifecycle();
+  // Disable discovery's probe timeout so only the lifecycle signal can abort
+  // the request.
+  const timeout = spyOn(AbortSignal, "timeout").mockImplementation(
+    () => new AbortController().signal,
+  );
   try {
+    server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (req) => {
+        req.signal.addEventListener("abort", () => requestAborted.resolve(), {
+          once: true,
+        });
+        started.resolve();
+        return new Promise<Response>(() => {});
+      },
+    });
+    const { port } = server;
     const attempt = runWithLifecycle(lifecycle, () =>
       trustAndResolveServer(
-        `http://alice:password@127.0.0.1:${server.port}/path?token=secret#fragment`,
+        `http://alice:password@127.0.0.1:${port}/path?token=secret#fragment`,
         {},
         undefined,
         [],
@@ -329,17 +340,22 @@ test("trustAndResolveServer: interrupted discovery reports only the safe address
     await started.promise;
     lifecycle.receiveSignal("SIGINT");
     await expect(attempt).rejects.toMatchObject({ code: "cancelled" });
+    // The rejection alone comes from runWithLifecycle. With the probe timeout
+    // disabled, only the lifecycle signal can abort the request; if it is not
+    // wired through, this never resolves and the test times out.
+    await requestAborted.promise;
     expect(lifecycle.failureReport).toMatchObject({
-      target: `http://127.0.0.1:${server.port}`,
+      target: `http://127.0.0.1:${port}`,
       human: {
-        summary: `Cancelled while finding the server at http://127.0.0.1:${server.port}.`,
+        summary: `Cancelled while finding the server at http://127.0.0.1:${port}.`,
       },
     });
     expect(JSON.stringify(lifecycle.failureReport)).not.toMatch(
       /alice|password|token|secret|fragment|path/,
     );
   } finally {
-    await server.stop(true);
+    timeout.mockRestore();
+    await server?.stop(true);
   }
 });
 

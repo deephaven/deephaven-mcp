@@ -167,7 +167,11 @@ test("console completion reports: replace pending human wording before local per
           throw new Error("Local registry write failed");
         },
       );
-      await expect(persist).rejects.toBeDefined();
+      await expect(persist).rejects.toMatchObject(
+        interrupted
+          ? { code: "cancelled", detail: "Interrupted by SIGINT" }
+          : { message: "Local registry write failed" },
+      );
       expect(lifecycle.failureReport).toMatchObject({
         outcome: "succeeded",
         continuation: "stopped",
@@ -332,6 +336,7 @@ test("console defaults: reject missing or invalid required server metadata befor
       }),
     },
   ];
+  await expect(serverDefaults(sessionWith(validClient))).resolves.toBeDefined();
   for (const override of overrides) {
     await expect(
       serverDefaults(sessionWith({ ...validClient, ...override })),
@@ -663,13 +668,25 @@ test("console creation: preflight failures and cancellation never submit a reque
     engines: ["python"],
     languages: ["python"],
   };
-  for (const stage of [
-    "query types",
-    "settings",
-    "owner",
-    "cancel types",
-    "cancel owner",
-  ]) {
+  const expected = {
+    "query types": {
+      code: "console_failed",
+      headline: "The server could not read console query types",
+      detail: "Cannot read query types",
+    },
+    settings: {
+      code: "console_unsupported",
+      headline: 'Console server "missing" is not available',
+    },
+    owner: {
+      code: "console_failed",
+      headline: "The server could not read console owner",
+      detail: "Cannot read owner",
+    },
+    "cancel types": { code: "cancelled", detail: "Interrupted by SIGINT" },
+    "cancel owner": { code: "cancelled", detail: "Interrupted by SIGINT" },
+  } as const;
+  for (const stage of Object.keys(expected) as (keyof typeof expected)[]) {
     const lifecycle = new CommandLifecycle();
     let creates = 0;
     const session = sessionWith({
@@ -700,7 +717,7 @@ test("console creation: preflight failures and cancellation never submit a reque
           capabilities,
         ),
       ),
-    ).rejects.toBeDefined();
+    ).rejects.toMatchObject(expected[stage]);
     expect(creates).toBe(0);
     expect(lifecycle.failureReport.outcome).toBe("not_started");
     expect(lifecycle.failureReport.recoveryCommand).toBeUndefined();
