@@ -1,0 +1,46 @@
+name: Release checks
+
+# Required status checks on PRs into cli-channel/release (set in its ruleset).
+on:
+  pull_request:
+    branches: ["cli-channel/release"]
+
+permissions:
+  contents: read
+
+jobs:
+  release-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Releases come from rc or a hotfix
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$HEAD_REF" in
+            cli-channel/rc | hotfix/*) ;;
+            *)
+              echo "::error::PRs into cli-channel/release must come from cli-channel/rc or a hotfix/* branch"
+              exit 1
+              ;;
+          esac
+
+  release-contains:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # Compares diffs, not hashes, so cherry-picked fixes count as present.
+      - name: Nothing on release is missing
+        run: |
+          missing=$(git log --no-merges --cherry-pick --right-only --format='%h %s' HEAD...origin/cli-channel/release)
+          if [ -n "$missing" ]; then
+            echo "Commits on cli-channel/release missing from this branch:"
+            echo "$missing"
+            echo "::error::Merge the hotfix into v3_rewrite, then v3_rewrite into cli-channel/rc."
+            exit 1
+          fi

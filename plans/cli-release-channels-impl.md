@@ -155,11 +155,11 @@ Gotchas:
 
 ### Checklist
 
-- [ ] `CHANNEL` baked into builds; `build()` channel option
-- [ ] `scripts/release.ts` takes the version and channel from the tag
-- [ ] `scripts/publish.ts` and `package.json` scripts `next-version` and `publish`
-- [ ] `release.yml` rewritten as above
-- [ ] `release-checks.yml` with `release-source` and `release-contains`
+- [x] `CHANNEL` baked into builds; `build()` channel option
+- [x] `scripts/release.ts` takes the version and channel from the tag
+- [x] `scripts/publish.ts` and `package.json` scripts `next-version` and `publish`
+- [x] `release.yml` rewritten as above
+- [x] `release-checks.yml` with `release-source` and `release-contains`
 
 ## 3. CLI
 
