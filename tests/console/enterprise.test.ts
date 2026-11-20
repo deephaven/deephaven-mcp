@@ -536,6 +536,50 @@ test("console creation: sends an InteractiveConsole query with seconds converted
   ).toHaveLength(1);
 });
 
+test("console creation: classify only the server's authorization error wording as forbidden", async () => {
+  const settings: EffectiveConsoleSettings = {
+    language: "python",
+    heapSizeGb: 4,
+    server: "Query 1",
+    engine: "python",
+    jvmArgs: [],
+    environment: {},
+    autoDeleteTimeoutSeconds: 600,
+  };
+  const capabilities: ConsoleServerSettings = {
+    settings,
+    dataMemoryRatio: 0.1,
+    jvmProfile: "default",
+    scheduling: [],
+    servers: ["Query 1"],
+    engines: ["python"],
+    languages: ["python"],
+  };
+  for (const [detail, code] of [
+    ["alice is not authorized to add a query for bob", "console_forbidden"],
+    ["permission denied", "console_failed"],
+    ["HTTP 403", "console_failed"],
+  ] as const) {
+    const session = sessionWith({
+      getQueryConfigurationTypes: async () =>
+        new Map([["InteractiveConsole", { supportsCommunity: true }]]),
+      getUserInfo: async () => ({ operateAs: "alice" }),
+      createQuery: async () => {
+        throw new Error(detail);
+      },
+    });
+    await expect(
+      createEnterpriseConsole(
+        session,
+        "abc123",
+        settings,
+        new CommandLifecycle(),
+        capabilities,
+      ),
+    ).rejects.toMatchObject({ code });
+  }
+});
+
 test("console startup wait: observes a pending console until it is running", async () => {
   let state = "Initializing";
   const session = sessionWith({

@@ -407,8 +407,8 @@ export async function requireEnvironmentAuth(
   if (!server) {
     throw new DhError(
       "auth_required",
-      "No saved profile or DH_SERVER is available for this console",
-      `Run \`${BIN} auth login\`, or set DH_SERVER and the matching DH_* credentials.`,
+      "DH_SERVER is required for environment authentication",
+      `Set DH_SERVER and matching DH_* credentials, or sign in with \`${BIN} auth login\` and use a saved profile.`,
     );
   }
   return await envSession(server, lifecycle);

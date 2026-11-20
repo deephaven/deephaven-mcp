@@ -565,9 +565,7 @@ async function call<T>(value: Promise<T>, operation: string): Promise<T> {
   } catch (error) {
     if (error instanceof DhError) throw error;
     const detail = reasonOf(error);
-    if (
-      /forbidden|permission|not authorized|unauthorized|403/i.test(detail ?? "")
-    ) {
+    if (/not authorized/i.test(detail ?? "")) {
       throw new DhError(
         "console_forbidden",
         `The server denied permission to ${operation}`,
