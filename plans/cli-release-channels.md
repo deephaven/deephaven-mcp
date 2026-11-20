@@ -215,8 +215,9 @@ Each CLI's channel comes from its `dh.meta`, else `release`. Channel releases ke
 - **No higher-or-lower comparison.** Switching channels takes effect at the next check, even if that channel's version is lower.
 - **Install on a channel:** `curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_CHANNEL=rc sh`. The script installs that channel's latest build and saves the channel in the metadata file. `DH_CHANNEL` is read only by the install script; the CLI ignores it. Any copy of the script behaves the same; without `DH_CHANNEL` it installs `release`. An unpublished channel fails with "no channel", and an invalid name fails before anything downloads.
   - **Try a channel side by side:** install a second copy elsewhere, for example `DH_CHANNEL=rc DH_INSTALL_DIR=~/dh-rc`. It gets its own metadata file, so the main install keeps its channel.
-- **Switch an existing install:** `dh channel` shows the current channel and whether it was saved or is the default. `dh channel use rc` saves `rc` in `dh.meta` and checks for an update right away, so the switch happens now rather than at the next daily check. `dh channel use release` switches back. This follows the CLI's noun + `use` pattern (`dh auth use <profile>`).
+- **Switch an existing install:** `dh channel` shows the current channel and whether it was saved or is the default. `dh channel use rc` saves `rc` in `dh.meta` and checks for an update right away, so the switch happens now rather than at the next daily check. `dh channel use release` switches back. A channel that hasn't been published fails with `channel_not_found` and saves nothing. This follows the CLI's noun + `use` pattern (`dh auth use <profile>`).
 - **Install metadata file:** one file next to the binary, named after it: `dh.meta` beside `dh`, `dh.exe.meta` beside `dh.exe`. No extension, so its format stays an implementation detail. It holds install-level data such as the channel and the last update-check time. The install script writes it fresh; the CLI and updater each update only their own fields, writing to a temp file and renaming it into place. An unreadable file means defaults (`release`, check now), never a failed command.
+- **Dev builds never update.** A CLI run from source or built locally reports channel `dev` and never checks for updates, so it can't replace itself with a published build.
 - **A failed check is harmless.** Replacing the manifest returns 404 for a moment; the CLI just checks again next interval.
 - **Help shows a non-release channel.** Top-level help already prints `Version:` under `Usage:`. On any build other than `release`, it adds a `Channel:` line with the build's channel and config folder, for example `Channel: rc (config ~/.deephaven/cli-rc)`, or `Channel: dev` when run from source. Release builds show nothing extra.
 
@@ -265,7 +266,7 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 ### Labels and names
 
 - **A prerelease label means "the release this would become, as of when it was built".** Channels never compare versions, so a label that differs from the eventual release is harmless.
-- **Channel names match `^[a-z][a-z0-9-]*$`.** Hyphens are fine: `3.1.1-alpha-bar.0` is valid semver.
+- **Channel names match `^[a-z][a-z0-9-]*$`.** Hyphens are fine: `3.1.1-alpha-bar.0` is valid semver. `dev` is reserved for builds run from source or built locally.
 
 ## Rules
 
@@ -273,7 +274,7 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 | --- | --- |
 | Channels only move forward | Branch ruleset on `cli-channel/**`: no force-push, no deletion |
 | Who can publish | Standard repo permissions: anyone with write access can merge into a channel branch, including creating an `alpha-<id>` one |
-| `release` changes are reviewed | PR required, plus the `release` environment's approval |
+| `release` changes are reviewed | PR required, plus approval from the `cli-release` environment. Other channels publish through `cli-prerelease`, which needs no approval |
 | Releases come from `rc` or a hotfix | Required status check `release-source`: a PR into `cli-channel/release` must come from `cli-channel/rc` or a `hotfix/*` branch |
 | A release never drops released work | Required status check `release-contains` |
 | Merges into `release` keep their commits | Merge commits only (no squash or rebase) |
