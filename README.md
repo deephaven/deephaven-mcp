@@ -41,6 +41,14 @@ Each sign-in is saved as a profile, and later commands use the default one.
 Methods, profiles, scripting and CI, JSON output and error codes are covered in
 [Signing in with `dh auth`](docs/AUTH.md).
 
+## Interactive consoles
+
+Manage CLI-created Enterprise interactive consoles with `dh console`. Create
+and select one with `dh console create`, inspect it with `dh console detail`,
+or select an existing one with `dh console use`. See
+[Interactive consoles](docs/CONSOLE.md) for settings, defaults, cancellation,
+and Community support.
+
 ## Auto-update
 
 `dh` checks for a newer release at most once per `DH_UPDATE_INTERVAL` (default

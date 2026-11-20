@@ -398,3 +398,18 @@ export async function requireAuth(
   }
   return await profileSession(store, state, id, lifecycle);
 }
+
+/** Signs in with `DH_SERVER` and `DH_*` credentials, bypassing profile selection. */
+export async function requireEnvironmentAuth(
+  lifecycle?: CommandLifecycle,
+): Promise<Session> {
+  const server = process.env.DH_SERVER;
+  if (!server) {
+    throw new DhError(
+      "auth_required",
+      "DH_SERVER is required for environment authentication",
+      `Set DH_SERVER and matching DH_* credentials, or sign in with \`${BIN} auth login\` and use a saved profile.`,
+    );
+  }
+  return await envSession(server, lifecycle);
+}
