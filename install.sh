@@ -9,15 +9,17 @@ BIN=dh
 REPO_URL="${DH_INSTALL_REPO_URL:-https://github.com/deephaven/deephaven-mcp}"
 CHANNEL="${DH_CHANNEL:-release}"
 # Same rules as src/channel.ts; dev is reserved for builds run from source.
+# Letters spelled out: in bash (macOS sh), [a-z] follows the locale and matches uppercase.
+lower=abcdefghijklmnopqrstuvwxyz
 case "$CHANNEL" in
   dev)
     echo "$BIN: channel dev is reserved for builds run from source" >&2
     exit 1
     ;;
-  [a-z]*) ;;
+  ["$lower"]*) ;;
   *) CHANNEL_INVALID=1 ;;
 esac
-case "$CHANNEL" in *[!a-z0-9-]*) CHANNEL_INVALID=1 ;; esac
+case "$CHANNEL" in *[!"$lower"0123456789-]*) CHANNEL_INVALID=1 ;; esac
 if [ -n "${CHANNEL_INVALID:-}" ] || [ "${#CHANNEL}" -gt 40 ]; then
   echo "$BIN: invalid channel \"$CHANNEL\": use lowercase letters, digits and hyphens, starting with a letter" >&2
   exit 1
