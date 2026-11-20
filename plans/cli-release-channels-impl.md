@@ -284,9 +284,9 @@ Gotchas:
 
 ### Checklist
 
-- [ ] `install.sh`: `DH_CHANNEL`, channel manifest, `cli-v` versions, metadata file
-- [ ] `install.ps1`: same
-- [ ] README, DEVELOPER_GUIDE and AUTH docs updated
+- [x] `install.sh`: `DH_CHANNEL`, channel manifest, `cli-v` versions, metadata file
+- [x] `install.ps1`: same
+- [x] README, DEVELOPER_GUIDE and AUTH docs updated
 
 ## Repo setup (manual, by a repo admin)
 
@@ -307,9 +307,9 @@ Not code; record it in the DEVELOPER_GUIDE's Releasing section.
 
 ## Validation
 
-- [ ] `bun run check` passes.
+- [x] `bun run check` passes.
 - [ ] `bun test` passes on Linux, macOS and Windows (CI).
-- [ ] Next-version table (unit tests, from tag lists):
+- [x] Next-version table (unit tests, from tag lists):
 
   | Tags | `package.json` | Channel | Result |
   | --- | --- | --- | --- |
@@ -326,30 +326,30 @@ Not code; record it in the DEVELOPER_GUIDE's Releasing section.
   | any | `3.2.0-beta` | any | error |
   | any | any | `Rc`, `dev`, `-x` | error |
 
-- [ ] Tag parsing: `cli-v3.1.1-alpha-1.0` → version `3.1.1-alpha-1.0`, channel
+- [x] Tag parsing: `cli-v3.1.1-alpha-1.0` → version `3.1.1-alpha-1.0`, channel
       `alpha-1`, build `0`.
-- [ ] Notes start tag: `cli-v3.1.1` after `cli-v3.1.0` → `cli-v3.1.0`;
+- [x] Notes start tag: `cli-v3.1.1` after `cli-v3.1.0` → `cli-v3.1.0`;
       `cli-v3.1.1-rc.1` after `cli-v3.1.1-rc.0` → `cli-v3.1.1-rc.0`;
       `cli-v3.1.1-rc.0` with only `cli-v3.1.0` → `cli-v3.1.0`.
-- [ ] Updater (fake GitHub in `tests/auto_update.test.ts`):
+- [x] Updater (fake GitHub in `tests/auto_update.test.ts`):
   - Default fetch is `/releases/download/cli-channel-release/manifest.json`;
     with `dh.meta` `{"channel":"rc"}` it is `cli-channel-rc`.
   - A manifest with a **lower** version installs; an equal one doesn't.
   - An unreadable `dh.meta` behaves as `release` and is rewritten.
   - `lastUpdateCheck` throttles; `DH_UPDATE_INTERVAL=0` doesn't.
   - A `dev` build never fetches.
-- [ ] Installer (fake GitHub): default installs from `cli-channel-release` and
+- [x] Installer (fake GitHub): default installs from `cli-channel-release` and
       writes `dh.meta` `{"channel":"release"}`; `DH_CHANNEL=rc` installs the rc
       manifest's version and writes `rc`; `DH_CHANNEL=nope` fails with
       `no channel`; `DH_CHANNEL=dev` and `DH_CHANNEL=Rc` fail before any
       request; `DH_INSTALL_VERSION` works as `9.9.9` and `cli-v9.9.9`.
-- [ ] CLI (`tests/cli.test.ts`, from source so `CHANNEL` is `dev`):
+- [x] CLI (`tests/cli.test.ts`, from source so `CHANNEL` is `dev`):
   - `dh --help` contains `Channel: dev (config `.
   - `dh -o json` includes `"channel":"dev"`.
   - `dh channel` prints `release (default)`.
   - `dh channel use rc` fails with `usage` (not installed).
   - `dh agents -o json` lists `channel`, `channel use` and `channel_not_found`.
-- [ ] `configDir()` (`tests/auth/store.test.ts`): `release` → `…/cli`, `rc` →
+- [x] `configDir()` (`tests/auth/store.test.ts`): `release` → `…/cli`, `rc` →
       `…/cli-rc`, `dev` → `…/cli-dev`, `DH_CONFIG_DIR` wins.
 - [ ] End to end on a fork with the repo setup applied:
   1. Push to `cli-channel/rc` → `cli-v<x>-rc.0` released as a prerelease, not

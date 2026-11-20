@@ -174,8 +174,11 @@ cancel.
 Other accounts on the computer can't read `credentials.json`, but any program
 running as you can, including AI agents and other tools.
 
-On Windows the directory is `%APPDATA%\Deephaven\cli`. Set `DH_CONFIG_DIR` to
-use another directory.
+On Windows the directory is `%APPDATA%\Deephaven\cli`. Builds on other release
+channels use a sibling folder, so they can't break a working `release` setup:
+`cli-rc`, `cli-alpha-<id>`, and `cli-dev` when run from source. Each starts
+empty, and logging out on one never revokes another's keys. Set `DH_CONFIG_DIR`
+to use another directory.
 
 On macOS and Linux, `dh` refuses to read `credentials.json` if other users can
 read it. Fix the permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
@@ -359,7 +362,7 @@ prints what it's waiting on for each server:
 | Variable                               | Effect                                                          |
 | -------------------------------------- | --------------------------------------------------------------- |
 | `DH_PROFILE`                           | Profile to use, like `--profile`                                |
-| `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`)                   |
+| `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`; see above)        |
 | `DH_TIMEOUT`                           | Seconds to wait for connecting and non-SSO sign-in (default 30) |
 | `DH_DEBUG`                             | Show client library logs (on stderr) and internal error details |
 | `DH_SERVER`, …                         | Environment-only sign-in ([above](#environment-only-sign-in))   |
