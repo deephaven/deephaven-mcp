@@ -30,39 +30,6 @@ curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-chan
 Note that running `dh` still updates itself to its channel's build unless
 `DH_AUTO_UPDATE=off`.
 
-## Release channels
-
-Each install follows one release channel: `release` (the default), `rc`
-(release candidates), or an experimental `alpha-<id>` channel. To install on a
-channel, set `DH_CHANNEL` (read only by the install scripts):
-
-```sh
-curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_CHANNEL=rc sh
-```
-
-```powershell
-$env:DH_CHANNEL = 'rc'; irm https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.ps1 | iex
-```
-
-To try a channel side by side, install a second copy with its own
-`DH_INSTALL_DIR`. To switch an existing install:
-
-```sh
-dh channel           # the channel this install follows
-dh channel use rc    # follow rc and update to its build now
-dh channel use release
-```
-
-`dh channel use` checks the channel before saving anything: a channel with no
-published build fails with `channel_not_found`, and the install keeps its
-channel. It needs an installed `dh`, not `bun run dev`. JSON output and error
-codes are listed in [Scripts, CI and agents](docs/AUTH.md#scripts-ci-and-agents).
-
-The channel is saved in `dh.meta` (`dh.exe.meta` on Windows) next to the
-executable. Builds on channels other than `release` show a `Channel:` line in
-`dh --help` and keep their profiles in their own folder (see
-[Where profiles are stored](docs/AUTH.md#where-profiles-are-stored)).
-
 ## Signing in
 
 ```sh
@@ -82,6 +49,14 @@ and select one with `dh console create`, inspect it with `dh console detail`,
 or select an existing one with `dh console use`. See
 [Interactive consoles](docs/CONSOLE.md) for settings, defaults, cancellation,
 and Community support.
+
+## Release channels
+
+Each install follows one release channel: `release` (the default), `rc`, or an
+experimental `alpha-<id>`. Install on a channel with `DH_CHANNEL=rc` in the
+install command; switch an existing install with `dh channel use rc`. See
+[Release channels](docs/CHANNELS.md) for side-by-side installs, JSON output and
+per-channel profiles.
 
 ## Auto-update
 

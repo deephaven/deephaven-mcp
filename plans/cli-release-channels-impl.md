@@ -279,6 +279,9 @@ Gotchas:
   rewritten for channel branches, promotion, hotfixes and `package.json` bumps;
   "Testing on a fork" with `cli-channel/*` branches; remove the note about Python
   releases needing `--latest=false`.
+- `docs/CHANNELS.md` (new, like `docs/CONSOLE.md`): `dh channel` commands,
+  installing on a channel, JSON output, behavior and limits; the README links
+  to it.
 - `docs/AUTH.md`: config folder per channel (`cli`, `cli-<channel>`,
   `cli-dev`) wherever `~/.deephaven/cli` is described.
 
@@ -286,7 +289,7 @@ Gotchas:
 
 - [x] `install.sh`: `DH_CHANNEL`, channel manifest, `cli-v` versions, metadata file
 - [x] `install.ps1`: same
-- [x] README, DEVELOPER_GUIDE and AUTH docs updated
+- [x] README, CHANNELS, DEVELOPER_GUIDE and AUTH docs updated
 
 ## Repo setup (manual, by a repo admin)
 
@@ -387,5 +390,5 @@ Not code; record it in the DEVELOPER_GUIDE's Releasing section.
 - `install.sh`, `install.ps1`
 - `tests/channel.test.ts` (new)
 - `tests/auto_update.test.ts`, `tests/cli.test.ts`, `tests/auth/store.test.ts`
-- `README.md`, `docs/DEVELOPER_GUIDE.md`, `docs/AUTH.md`
+- `README.md`, `docs/CHANNELS.md` (new), `docs/DEVELOPER_GUIDE.md`, `docs/AUTH.md`
 - `plans/cli-release-channels.md`: update only if a contract here changes

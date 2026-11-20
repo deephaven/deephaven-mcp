@@ -253,14 +253,10 @@ errors go to stderr.
 | `dh auth rename`  | `{"from", "to"}`                                                           |
 | `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}`       |
 | `dh auth migrate` | `{"migrated", "failed"}`                                                   |
-| `dh channel`      | `{"channel", "source": "saved" \| "default", "build"}`                     |
-| `dh channel use`  | `{"channel", "from", "to"}`                                                |
 
 `profile` is `null` in `status` when signed in from environment variables.
-
-`channel` in `dh` and `build` in `dh channel` are the running build's channel
-(`dev` from source); `channel` in `dh channel` is the one the install follows.
-In `dh channel use`, `from` equals `to` when the install was already current.
+`channel` in `dh` is the running build's [release channel](CHANNELS.md) (`dev`
+when run from source).
 
 ### Errors and exit codes
 
@@ -284,7 +280,6 @@ available, appears in `detail` (up to 200 characters):
 | ---- | ------------------------ | ------------------------------------------------------------- | ----------------------------------------------- |
 | 1    | `internal`               | Bug in `dh`                                                   | Rerun with `DH_DEBUG=1` and report it           |
 | 2    | `usage`                  | Bad arguments, or input needed without a terminal             | Pass the flag named in the message              |
-| 2    | `channel_not_found`      | `dh channel use`: no published build on that channel          | Check the name; `dh channel use release`        |
 | 3    | `cancelled`              | You pressed Ctrl-C or declined a confirmation                 | —                                               |
 | 4    | `auth_required`          | No profile                                                    | `dh auth login`                                 |
 | 4    | `auth_failed`            | The server rejected the credentials during login              | Check the credentials and try again             |
