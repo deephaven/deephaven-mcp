@@ -67,11 +67,11 @@ falling back to the highest release tag below its `X.Y.Z`. None → omit.
 
 ### Checklist
 
-- [ ] Channel name validation, with `dev` reserved
-- [ ] Tag parse and format for release and prerelease tags
-- [ ] Next-version computation and the `next-version` script
-- [ ] Release-notes start tag
-- [ ] Unit tests (`tests/channel.test.ts`)
+- [x] Channel name validation, with `dev` reserved
+- [x] Tag parse and format for release and prerelease tags
+- [x] Next-version computation and the `next-version` script
+- [x] Release-notes start tag
+- [x] Unit tests (`tests/channel.test.ts`)
 
 ## 2. Publishing
 
