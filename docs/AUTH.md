@@ -243,18 +243,24 @@ the full manifest, with every flag, as JSON.
 With `-o json`, stdout holds exactly one JSON value. Progress messages and
 errors go to stderr.
 
-| Command           | stdout                                                               |
-| ----------------- | -------------------------------------------------------------------- |
-| `dh`              | `{"version", "default": {"profile", "server", "user"} \| null}`      |
-| `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`          |
-| `dh auth login`   | `{"profile", "server", "user", "default"}`                           |
-| `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                 |
-| `dh auth use`     | `{"default"}`                                                        |
-| `dh auth rename`  | `{"from", "to"}`                                                     |
-| `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}` |
-| `dh auth migrate` | `{"migrated", "failed"}`                                             |
+| Command           | stdout                                                                     |
+| ----------------- | -------------------------------------------------------------------------- |
+| `dh`              | `{"version", "channel", "default": {"profile", "server", "user"} \| null}` |
+| `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`                |
+| `dh auth login`   | `{"profile", "server", "user", "default"}`                                 |
+| `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                       |
+| `dh auth use`     | `{"default"}`                                                              |
+| `dh auth rename`  | `{"from", "to"}`                                                           |
+| `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}`       |
+| `dh auth migrate` | `{"migrated", "failed"}`                                                   |
+| `dh channel`      | `{"channel", "source": "saved" \| "default", "build"}`                     |
+| `dh channel use`  | `{"channel", "from", "to"}`                                                |
 
 `profile` is `null` in `status` when signed in from environment variables.
+
+`channel` in `dh` and `build` in `dh channel` are the running build's channel
+(`dev` from source); `channel` in `dh channel` is the one the install follows.
+In `dh channel use`, `from` equals `to` when the install was already current.
 
 ### Errors and exit codes
 
@@ -274,19 +280,20 @@ available, appears in `detail` (up to 200 characters):
 }
 ```
 
-| Exit | Code                     | Meaning                                                       | What to do                              |
-| ---- | ------------------------ | ------------------------------------------------------------- | --------------------------------------- |
-| 1    | `internal`               | Bug in `dh`                                                   | Rerun with `DH_DEBUG=1` and report it   |
-| 2    | `usage`                  | Bad arguments, or input needed without a terminal             | Pass the flag named in the message      |
-| 3    | `cancelled`              | You pressed Ctrl-C or declined a confirmation                 | —                                       |
-| 4    | `auth_required`          | No profile                                                    | `dh auth login`                         |
-| 4    | `auth_failed`            | The server rejected the credentials during login              | Check the credentials and try again     |
-| 4    | `auth_expired`           | The server rejected a saved profile's credentials             | `dh auth login --profile <name>`        |
-| 4    | `credential_unavailable` | The profile's env var or key file is missing                  | Set the variable or restore the file    |
-| 4    | `key_upload_failed`      | Uploading this computer's key to the Enterprise server failed | See [Enterprise](#enterprise)           |
+| Exit | Code                     | Meaning                                                       | What to do                                      |
+| ---- | ------------------------ | ------------------------------------------------------------- | ----------------------------------------------- |
+| 1    | `internal`               | Bug in `dh`                                                   | Rerun with `DH_DEBUG=1` and report it           |
+| 2    | `usage`                  | Bad arguments, or input needed without a terminal             | Pass the flag named in the message              |
+| 2    | `channel_not_found`      | `dh channel use`: no published build on that channel          | Check the name; `dh channel use release`        |
+| 3    | `cancelled`              | You pressed Ctrl-C or declined a confirmation                 | —                                               |
+| 4    | `auth_required`          | No profile                                                    | `dh auth login`                                 |
+| 4    | `auth_failed`            | The server rejected the credentials during login              | Check the credentials and try again             |
+| 4    | `auth_expired`           | The server rejected a saved profile's credentials             | `dh auth login --profile <name>`                |
+| 4    | `credential_unavailable` | The profile's env var or key file is missing                  | Set the variable or restore the file            |
+| 4    | `key_upload_failed`      | Uploading this computer's key to the Enterprise server failed | See [Enterprise](#enterprise)                   |
 | 4    | `migration_failed`       | Some legacy config entries weren't migrated                   | Fix the problems listed, then `dh auth migrate` |
-| 5    | `server_unreachable`     | Network or TLS failure, or no server at the address           | Check the address, VPN and certificates |
-| 5    | `server_unsupported`     | Not a supported Deephaven server, or unsafe to load from      | Use `https://` or a local server        |
+| 5    | `server_unreachable`     | Network or TLS failure, or no server at the address           | Check the address, VPN and certificates         |
+| 5    | `server_unsupported`     | Not a supported Deephaven server, or unsafe to load from      | Use `https://` or a local server                |
 
 ### Environment-only sign-in
 

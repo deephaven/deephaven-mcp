@@ -53,6 +53,11 @@ dh channel use rc    # follow rc and update to its build now
 dh channel use release
 ```
 
+`dh channel use` checks the channel before saving anything: a channel with no
+published build fails with `channel_not_found`, and the install keeps its
+channel. It needs an installed `dh`, not `bun run dev`. JSON output and error
+codes are listed in [Scripts, CI and agents](docs/AUTH.md#scripts-ci-and-agents).
+
 The channel is saved in `dh.meta` (`dh.exe.meta` on Windows) next to the
 executable. Builds on channels other than `release` show a `Channel:` line in
 `dh --help` and keep their profiles in their own folder (see
