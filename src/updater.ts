@@ -53,9 +53,14 @@ function assertTrusted(url: URL): void {
   throw new Error(`Refusing to update over insecure URL: ${url}`);
 }
 
-/** Fetches `url`, following redirects by hand so every hop must be trusted. */
-async function fetchOk(url: URL, timeoutMs: number): Promise<Response> {
-  const signal = AbortSignal.timeout(timeoutMs);
+/** Fetches `url`, following redirects by hand so every hop must be trusted. `cancel` aborts it early. */
+async function fetchOk(
+  url: URL,
+  timeoutMs: number,
+  cancel?: AbortSignal,
+): Promise<Response> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     assertTrusted(url);
     const res = await fetch(url, { signal, redirect: "manual" });
@@ -122,8 +127,12 @@ async function claimCheck(lastUpdateCheck: unknown): Promise<boolean> {
 }
 
 /** Fetches the manifest at `url`; throws if its version isn't valid semver. */
-export async function fetchManifest(url: URL): Promise<Manifest> {
-  const manifest = (await (await fetchOk(url, 5_000)).json()) as Manifest;
+export async function fetchManifest(
+  url: URL,
+  cancel?: AbortSignal,
+): Promise<Manifest> {
+  const res = await fetchOk(url, 5_000, cancel);
+  const manifest = (await res.json()) as Manifest;
   // Strict: rejects "3.0" and "v3.0.0" (unlike Bun.semver).
   if (typeof manifest.version !== "string" || !valid(manifest.version)) {
     throw new Error(`Invalid version in ${url}: ${manifest.version}`);
@@ -138,6 +147,7 @@ export async function fetchManifest(url: URL): Promise<Manifest> {
 export async function install(
   manifest: Manifest,
   manifestUrl: URL,
+  cancel?: AbortSignal,
 ): Promise<string | undefined> {
   if (manifest.version === VERSION) return undefined;
   const asset = manifest.binaries[PLATFORM];
@@ -145,7 +155,7 @@ export async function install(
 
   const url = new URL(asset.url, manifestUrl);
   const binary = new Uint8Array(
-    await (await fetchOk(url, 5 * 60_000)).arrayBuffer(),
+    await (await fetchOk(url, 5 * 60_000, cancel)).arrayBuffer(),
   );
   const digest = createHash("sha256").update(binary).digest("hex");
   if (digest !== asset.sha256.toLowerCase()) {

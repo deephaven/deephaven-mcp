@@ -17,7 +17,7 @@ export const use = defineCommand({
     { name: "<channel>", description: "Channel name, e.g. release or rc." },
   ],
 
-  async run(_ctx, [name]) {
+  async run(ctx, [name]) {
     const channel = name ?? "";
     const invalid = channelError(channel);
     if (invalid) {
@@ -39,8 +39,9 @@ export const use = defineCommand({
     const url = manifestUrl(channel);
     let manifest: Awaited<ReturnType<typeof fetchManifest>>;
     try {
-      manifest = await fetchManifest(url);
+      manifest = await fetchManifest(url, ctx.signal);
     } catch (e) {
+      ctx.signal.throwIfAborted();
       if (e instanceof HttpError && e.status === 404) {
         throw new DhError(
           "channel_not_found",
@@ -58,8 +59,9 @@ export const use = defineCommand({
 
     await updateMeta({ channel });
     try {
-      await install(manifest, url);
+      await install(manifest, url, ctx.signal);
     } catch (e) {
+      ctx.signal.throwIfAborted();
       throw new DhError(
         "server_unreachable",
         `Following ${channel}, but installing ${manifest.version} failed`,

@@ -13,6 +13,10 @@ export const ERROR_CODES = {
     exit: 2,
     description: "Console does not exist",
   },
+  channel_not_found: {
+    exit: 2,
+    description: "No published build on that channel",
+  },
   cancelled: { exit: 3, description: "Cancelled by the user" },
   auth_required: { exit: 4, description: "No profile" },
   auth_failed: {
@@ -38,10 +42,6 @@ export const ERROR_CODES = {
   migration_failed: {
     exit: 4,
     description: "Some legacy config entries weren't migrated",
-  },
-  channel_not_found: {
-    exit: 2,
-    description: "No published build on that channel",
   },
   server_unreachable: { exit: 5, description: "Network or TLS failure" },
   server_unsupported: {
