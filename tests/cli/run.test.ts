@@ -141,25 +141,32 @@ test("runner: interruption during a cleanup timeout remains primary", async () =
 test("command registration: separate invocations do not share lifecycles", async () => {
   const first = new CommandLifecycle();
   const second = new CommandLifecycle();
-  const seen: CommandLifecycle[] = [];
+  const seen: { lifecycle: CommandLifecycle; aborted: boolean }[] = [];
   const spec = defineCommand({
     name: "test",
     description: "Test invocation isolation",
     async run(ctx) {
-      seen.push(ctx.lifecycle);
+      seen.push({ lifecycle: ctx.lifecycle, aborted: ctx.signal.aborted });
       expect(ctx.signal).toBe(ctx.lifecycle.signal);
       return { empty: true, human: [], json: null };
     },
   });
-  for (const lifecycle of [first, second]) {
-    const root = registerCommand(new Command("test"), spec, lifecycle);
-    await runWithLifecycle(lifecycle, () =>
-      root.parseAsync([], { from: "user" }),
+  const invoke = (lifecycle: CommandLifecycle) =>
+    runWithLifecycle(lifecycle, () =>
+      registerCommand(new Command("test"), spec, lifecycle).parseAsync([], {
+        from: "user",
+      }),
     );
-  }
+
+  await invoke(first);
   first.abort();
   first.setFailureReport({ target: "first" });
-  expect(seen).toEqual([first, second]);
+  await invoke(second);
+
+  expect(seen).toHaveLength(2);
+  expect(seen[0]?.lifecycle).toBe(first);
+  expect(seen[1]?.lifecycle).toBe(second);
+  expect(seen[1]?.aborted).toBe(false);
   expect(second.signal.aborted).toBe(false);
   expect(second.failureReport.target).toBeUndefined();
 });
