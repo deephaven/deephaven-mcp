@@ -31,13 +31,16 @@ test("console settings: JSON null marks a field for reset", () => {
 });
 
 test("console settings: invalid and unknown input is rejected", () => {
-  for (const json of [
-    "not-json",
-    "[]",
-    '{"unknown":true}',
-    '{"heapSizeGb":0}',
-  ]) {
-    expect(() => askConsoleSettings(undefined, { json })).toThrow();
+  for (const [json, message] of [
+    ["not-json", "Console settings must be valid JSON"],
+    ["[]", "Console settings must be a JSON object"],
+    ['{"unknown":true}', 'Unknown console setting "unknown"'],
+    [
+      '{"heapSizeGb":0}',
+      "Console heapSizeGb must be a positive number or null",
+    ],
+  ] as const) {
+    expect(() => askConsoleSettings(undefined, { json })).toThrow(message);
   }
 });
 

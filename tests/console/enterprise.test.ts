@@ -38,17 +38,10 @@ import {
 } from "../../src/actions/console/settings.ts";
 import { CommandLifecycle } from "../../src/cli/lifecycle.ts";
 
-const schedulingDefaults = [
-  "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerDaily",
-  "StartTime=07:55:00",
-  "StopTime=23:55:00",
-  "TimeZone=America/New_York",
-];
 const queryConstants = {
   consoleDefaultHeap: 4,
   minDataRatio: 0.1,
   maxDataRatio: 0.6,
-  defaultSchedulingDetails: schedulingDefaults,
 };
 
 test("console recovery: saved profiles are explicit in create and delete commands", () => {
@@ -174,7 +167,11 @@ test("console completion reports: replace pending human wording before local per
           throw new Error("Local registry write failed");
         },
       );
-      await expect(persist).rejects.toBeDefined();
+      await expect(persist).rejects.toMatchObject(
+        interrupted
+          ? { code: "cancelled", detail: "Interrupted by SIGINT" }
+          : { message: "Local registry write failed" },
+      );
       expect(lifecycle.failureReport).toMatchObject({
         outcome: "succeeded",
         continuation: "stopped",
@@ -212,13 +209,7 @@ type ConsoleClientMock = Pick<
   >;
   getDbServers(): Promise<Pick<ConsoleServerAddress, "name">[]>;
   getQueryConstants(): Promise<
-    Pick<
-      QueryConstants,
-      | "consoleDefaultHeap"
-      | "minDataRatio"
-      | "maxDataRatio"
-      | "defaultSchedulingDetails"
-    >
+    Pick<QueryConstants, "consoleDefaultHeap" | "minDataRatio" | "maxDataRatio">
   >;
   getUserInfo(): Promise<Pick<UserInfo, "operateAs">>;
   createQuery(config: PlainEditableQueryInfo): Promise<string>;
@@ -345,6 +336,7 @@ test("console defaults: reject missing or invalid required server metadata befor
       }),
     },
   ];
+  await expect(serverDefaults(sessionWith(validClient))).resolves.toBeDefined();
   for (const override of overrides) {
     await expect(
       serverDefaults(sessionWith({ ...validClient, ...override })),
@@ -523,9 +515,6 @@ test("console creation: sends an InteractiveConsole query with seconds converted
   expect(scheduling).toEqual(
     expect.arrayContaining([
       "SchedulerType=com.illumon.iris.controller.IrisQuerySchedulerTemporary",
-      "StartTime=07:55:00",
-      "StopTime=23:55:00",
-      "TimeZone=America/New_York",
       "TemporaryAutoDelete=true",
       "TemporaryQueueName=DefaultTemporaryQueue",
       "TemporaryExpirationTimeMillis=172800000",
@@ -550,7 +539,7 @@ test("console creation: classify only the server's authorization error wording a
     settings,
     dataMemoryRatio: 0.1,
     jvmProfile: "default",
-    scheduling: [],
+    temporaryQueueName: "DefaultTemporaryQueue",
     servers: ["Query 1"],
     engines: ["python"],
     languages: ["python"],
@@ -718,18 +707,30 @@ test("console creation: preflight failures and cancellation never submit a reque
     },
     dataMemoryRatio: 0.1,
     jvmProfile: "Default",
-    scheduling: [],
+    temporaryQueueName: "DefaultTemporaryQueue",
     servers: ["Query 1"],
     engines: ["python"],
     languages: ["python"],
   };
-  for (const stage of [
-    "query types",
-    "settings",
-    "owner",
-    "cancel types",
-    "cancel owner",
-  ]) {
+  const expected = {
+    "query types": {
+      code: "console_failed",
+      headline: "The server could not read console query types",
+      detail: "Cannot read query types",
+    },
+    settings: {
+      code: "console_unsupported",
+      headline: 'Console server "missing" is not available',
+    },
+    owner: {
+      code: "console_failed",
+      headline: "The server could not read console owner",
+      detail: "Cannot read owner",
+    },
+    "cancel types": { code: "cancelled", detail: "Interrupted by SIGINT" },
+    "cancel owner": { code: "cancelled", detail: "Interrupted by SIGINT" },
+  } as const;
+  for (const stage of Object.keys(expected) as (keyof typeof expected)[]) {
     const lifecycle = new CommandLifecycle();
     let creates = 0;
     const session = sessionWith({
@@ -760,7 +761,7 @@ test("console creation: preflight failures and cancellation never submit a reque
           capabilities,
         ),
       ),
-    ).rejects.toBeDefined();
+    ).rejects.toMatchObject(expected[stage]);
     expect(creates).toBe(0);
     expect(lifecycle.failureReport.outcome).toBe("not_started");
     expect(lifecycle.failureReport.recoveryCommand).toBeUndefined();
