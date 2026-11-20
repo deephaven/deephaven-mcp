@@ -26,6 +26,7 @@ import {
 } from "./reporting.ts";
 import { type ConsoleSettings, mergeConsoleSettings } from "./settings.ts";
 import {
+  COMMUNITY_SHARED_ID,
   type ConsoleIdentity,
   type ConsoleRegistry,
   clearMissingReference,
@@ -38,8 +39,6 @@ import {
   rememberConsoleSelection,
   reserveShortcode,
 } from "./store.ts";
-
-const COMMUNITY_SHARED_ID = "shared";
 
 /** A discovered console annotated with this identity's current selection. */
 export interface ConsoleListItem extends ConsoleInfo {
@@ -227,6 +226,10 @@ async function sessionForTarget(
   profileFlag: string | undefined,
   lifecycle: CommandLifecycle,
 ): Promise<Session> {
+  // An old Enterprise reservation must not block an explicit Community profile.
+  if (target === COMMUNITY_SHARED_ID && profileFlag) {
+    return await requireAuth(profileFlag, store, lifecycle);
+  }
   const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
   let candidates = identitiesForTarget(registry, target);
   if (profileFlag && candidates.length > 0) {

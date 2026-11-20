@@ -62,6 +62,21 @@ test("console store: reservation skips discovered shortcodes without redirecting
   const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
   expect(identitiesForTarget(registry, "aaaaaa")).toEqual([identity("alice")]);
 });
+
+test("console store: Enterprise reservations skip shared", async () => {
+  const store = await tempStore();
+  const codes = ["shared"];
+  expect(
+    await reserveShortcode(
+      store,
+      identity("alice"),
+      () => codes.shift() ?? "aaaaaa",
+    ),
+  ).toBe("aaaaaa");
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(registry.reservations).toEqual({ aaaaaa: identity("alice") });
+});
+
 test("console store: concurrent profiles cannot reserve the same shortcode", async () => {
   const store = await tempStore();
   const codeGenerator = (collision: string, next: string) => {
@@ -78,13 +93,13 @@ test("console store: concurrent profiles cannot reserve the same shortcode", asy
     reserveShortcode(
       store,
       identity("alice"),
-      codeGenerator("shared", "aaaaaa"),
+      codeGenerator("common", "aaaaaa"),
     ),
-    reserveShortcode(store, identity("bob"), codeGenerator("shared", "bbbbbb")),
+    reserveShortcode(store, identity("bob"), codeGenerator("common", "bbbbbb")),
   ]);
   expect(alice).not.toBe(bob);
-  expect([alice, bob]).toContain("shared");
-  expect([alice, bob].find((code) => code !== "shared")).toMatch(
+  expect([alice, bob]).toContain("common");
+  expect([alice, bob].find((code) => code !== "common")).toMatch(
     /^(aaaaaa|bbbbbb)$/,
   );
 });

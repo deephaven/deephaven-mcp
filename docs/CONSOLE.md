@@ -49,8 +49,10 @@ all overrides.
 - With no saved selection, one running console is selected automatically.
   Deleted selections are cleared.
 - Community has one shared console: list with `dh console`, select with
-  `dh console use shared`. Details, settings, create, and delete are Enterprise
-  only.
+  `dh console use shared`. Enterprise does not assign `shared` as a new
+  shortcode. If an older Enterprise reservation conflicts, use
+  `dh console use shared --profile <community-profile>`. Details, settings,
+  create, and delete are Enterprise only.
 - Create and delete wait for server confirmation. Ctrl-C stops the CLI wait,
   not accepted server work. For an unknown outcome, inspect with
   `dh console detail <shortcode>` before retrying.

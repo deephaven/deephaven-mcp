@@ -180,6 +180,36 @@ test("console routing: ambiguous full IDs and shortcodes require a matching expl
   }
 });
 
+test("console routing: a legacy Enterprise reservation cannot block an explicit Community shared console", async () => {
+  const store = new Store(join(await tempDir("dh-console-shared-"), "cli"));
+  const community = { ...identity, server: "https://community.example.com" };
+  await saveProfile(store, "community", community);
+  await saveProfile(store, "enterprise", identity);
+  await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (registry) => {
+    registry.reservations.shared = identity;
+  });
+  const login = spyOn(auth, "requireAuth").mockResolvedValue({
+    origin: community.server,
+    kind: "community",
+    user: community.user,
+    cacheRoot: "/tmp/dh-test",
+    community: { origin: community.server } as NonNullable<
+      Session["community"]
+    >,
+  });
+  try {
+    const lifecycle = new CommandLifecycle();
+    await selectConsole(store, "shared", "community", lifecycle);
+    expect(login).toHaveBeenCalledWith("community", store, lifecycle);
+    const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+    expect(registry.selected).toEqual({
+      [identityKey(community)]: "shared",
+    });
+  } finally {
+    login.mockRestore();
+  }
+});
+
 test("console routing: environment-only targets must match the authenticated identity", async () => {
   const store = new Store(join(await tempDir("dh-console-env-"), "cli"));
   await rememberConsole(store, "abc123", "full-id", identity);

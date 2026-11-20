@@ -31,6 +31,8 @@ export const EMPTY_CONSOLE_REGISTRY: ConsoleRegistry = {
   defaults: {},
 };
 
+export const COMMUNITY_SHARED_ID = "shared";
+
 /** Resolve reserved and discovered shortcodes before interpreting a full ID. */
 export function identitiesForTarget(
   registry: ConsoleRegistry,
@@ -110,6 +112,7 @@ export async function reserveShortcode(
         );
       }
       if (
+        shortcode === COMMUNITY_SHARED_ID ||
         shortcode in registry.reservations ||
         shortcode in registry.shortcodeIds
       )
