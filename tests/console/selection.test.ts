@@ -5,24 +5,31 @@ import * as auth from "../../src/actions/auth/session.ts";
 import type { Session } from "../../src/actions/auth/signin.ts";
 import { type Profile, Store } from "../../src/actions/auth/store.ts";
 import {
+  createConsole,
+  deleteConsole,
   detailConsole,
   listConsoles,
   rememberOnlyRunningConsole,
   resolveConsoleDeletion,
   selectConsole,
+  setConsoleDefaults,
 } from "../../src/actions/console/actions.ts";
 import type {
-  ConsoleInfo,
+  ConsoleServerSettings,
   consoleInfo,
+  EnterpriseConsoleInfo,
 } from "../../src/actions/console/enterprise.ts";
+import * as enterprise from "../../src/actions/console/enterprise.ts";
 import {
   type ConsoleIdentity,
   EMPTY_CONSOLE_REGISTRY,
   identityKey,
   rememberConsole,
   rememberConsoleSelection,
+  reserveShortcode,
 } from "../../src/actions/console/store.ts";
 import { CommandLifecycle } from "../../src/cli/lifecycle.ts";
+import { DhError } from "../../src/errors.ts";
 import { tempDir } from "../helpers.ts";
 
 const identity = {
@@ -31,7 +38,7 @@ const identity = {
   operateAs: "alice",
 };
 
-function consoleFixture(id: string, state: string): ConsoleInfo {
+function consoleFixture(id: string, state: string): EnterpriseConsoleInfo {
   return {
     id,
     shortcode: "abc123",
@@ -349,4 +356,116 @@ test("console selection: no automatic choice for zero or multiple running consol
   expect(
     (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).selected,
   ).toEqual({});
+});
+
+test.each([
+  ["selects the new console", false, "new-id"],
+  ["keeps the previous selection with noUse", true, "old-id"],
+])("console create: %s", async (_label, noUse, selected) => {
+  const store = new Store(join(await tempDir("dh-console-create-"), "cli"));
+  const { session } = sessionFixture(identity, []);
+  const created = consoleFixture("new-id", "Initializing");
+  await setConsoleDefaults(store, { heapSizeGb: 8 }, false);
+  await rememberConsoleSelection(store, identity, "old-id");
+  let shortcode = "";
+  let settings: unknown;
+  let mappedBeforeWait: string | undefined;
+  const spies = [
+    spyOn(auth, "requireAuth").mockResolvedValue(session),
+    spyOn(enterprise, "serverDefaults").mockResolvedValue({
+      settings: {
+        language: "python",
+        heapSizeGb: 4,
+        server: "Query 1",
+        engine: "python",
+        jvmArgs: [],
+        environment: {},
+        autoDeleteTimeoutSeconds: 600,
+      },
+    } as unknown as ConsoleServerSettings),
+    spyOn(enterprise, "createEnterpriseConsole").mockImplementation(
+      async (_session, code, resolved) => {
+        shortcode = code;
+        settings = resolved;
+        return "new-id";
+      },
+    ),
+    spyOn(enterprise, "waitForConsole").mockImplementation(async () => {
+      // Remembered before waiting, so an interrupted startup stays addressable.
+      mappedBeforeWait = (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY))
+        .shortcodeIds[shortcode];
+      return created;
+    }),
+  ];
+  try {
+    expect(
+      await createConsole(
+        store,
+        undefined,
+        { language: "groovy" },
+        noUse,
+        new CommandLifecycle(),
+      ),
+    ).toBe(created);
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+  }
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(settings).toMatchObject({ language: "groovy", heapSizeGb: 8 });
+  expect(registry.reservations[shortcode]).toEqual(identity);
+  expect(mappedBeforeWait).toBe("new-id");
+  expect(registry.selected[identityKey(identity)]).toBe(selected);
+});
+
+/** A remembered, selected console whose deletion request the server accepts. */
+async function deletionFixture() {
+  const store = new Store(join(await tempDir("dh-console-delete-"), "cli"));
+  await reserveShortcode(store, identity, () => "abc123");
+  await rememberConsole(store, "abc123", "full-id", identity);
+  await rememberConsoleSelection(store, identity, "full-id");
+  const before = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  const resolved = {
+    session: sessionFixture(identity, []).session,
+    console: consoleFixture("full-id", "Running"),
+  };
+  const request = spyOn(
+    enterprise,
+    "deleteEnterpriseConsole",
+  ).mockResolvedValue();
+  return { store, before, resolved, request };
+}
+
+test("console delete: clears local references after the console disappears, keeping the reservation", async () => {
+  const { store, resolved, request } = await deletionFixture();
+  const wait = spyOn(enterprise, "waitForConsoleDeletion").mockResolvedValue();
+  try {
+    await deleteConsole(store, resolved, new CommandLifecycle());
+    expect(request).toHaveBeenCalledWith(resolved.session, resolved.console);
+  } finally {
+    request.mockRestore();
+    wait.mockRestore();
+  }
+  const registry = await store.readConsoleData(EMPTY_CONSOLE_REGISTRY);
+  expect(registry.selected).toEqual({});
+  expect(registry.shortcodeIds).toEqual({});
+  expect(registry.fullIds).toEqual({});
+  expect(registry.reservations).toEqual({ abc123: identity });
+});
+
+test("console delete: keeps local references when disappearance is not confirmed", async () => {
+  const { store, before, resolved, request } = await deletionFixture();
+  const failure = new DhError("console_failed", "Deletion not confirmed");
+  const wait = spyOn(enterprise, "waitForConsoleDeletion").mockRejectedValue(
+    failure,
+  );
+  try {
+    await expect(
+      deleteConsole(store, resolved, new CommandLifecycle()),
+    ).rejects.toBe(failure);
+    expect(request).toHaveBeenCalledTimes(1);
+  } finally {
+    request.mockRestore();
+    wait.mockRestore();
+  }
+  expect(await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).toEqual(before);
 });
