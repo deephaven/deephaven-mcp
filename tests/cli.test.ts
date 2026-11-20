@@ -753,6 +753,12 @@ test("cli: agents summarizes, and lists every command and error code as JSON", a
   expect(auth.commands.map((c: { command: string }) => c.command)).toContain(
     `${BIN} auth login`,
   );
+  const channel = manifest.commands.find(
+    (c: { command: string }) => c.command === `${BIN} channel`,
+  );
+  expect(channel.commands.map((c: { command: string }) => c.command)).toEqual([
+    `${BIN} channel use`,
+  ]);
   const login = auth.commands.find(
     (c: { command: string }) => c.command === `${BIN} auth login`,
   );
@@ -767,8 +773,37 @@ test("cli: agents summarizes, and lists every command and error code as JSON", a
     "credential_unavailable",
     "key_upload_failed",
     "server_unreachable",
+    "channel_not_found",
   ]) {
     expect(codes).toContain(code);
+  }
+});
+
+test("cli: from source, the build channel is dev and channels can't be switched", async () => {
+  const { run } = await setup();
+  const help = await run(["--help"]);
+  expect(help.stdout).toContain("Channel: dev (config ");
+
+  const root = JSON.parse((await run(["-o", "json"])).stdout);
+  expect(root.channel).toBe("dev");
+
+  const shown = await run(["channel"]);
+  expect(shown.code).toBe(0);
+  expect(shown.stdout).toContain("release (default)");
+  expect(shown.stdout).toContain("dev build, which never updates");
+  expect(JSON.parse((await run(["channel", "-o", "json"])).stdout)).toEqual({
+    channel: "release",
+    source: "default",
+    build: "dev",
+  });
+
+  const installed = await run(["channel", "use", "rc"]);
+  expect(installed.code).toBe(2);
+  expect(installed.stderr).toContain("needs an installed");
+  for (const name of ["dev", "Rc"]) {
+    const bad = await run(["channel", "use", name, "-o", "json"]);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain('"code":"usage"');
   }
 });
 

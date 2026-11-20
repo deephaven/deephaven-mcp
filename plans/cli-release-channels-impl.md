@@ -207,7 +207,8 @@ Gotchas:
 - `dh channel`: shows the followed channel.
   - Human: `rc (saved)` or `release (default)`. If the running build's
     `CHANNEL` differs, add a line:
-    `! Running a <CHANNEL> build; the <channel> build installs at the next update.`
+    `! Running the <CHANNEL> build; the <channel> build installs at the next update.`
+    On a `dev` build the line is `! Running a dev build, which never updates.`
   - JSON: `{ "channel": "rc", "source": "saved" | "default", "build": "<CHANNEL>" }`.
 - `dh channel use <name>`:
   1. Invalid name or `dev` → `usage` error.
@@ -233,13 +234,13 @@ Gotchas:
 
 ### Checklist
 
-- [ ] Install metadata file read/write, atomic, tolerant of bad files
-- [ ] Updater: channel URL, metadata throttle, version-differs install, no
+- [x] Install metadata file read/write, atomic, tolerant of bad files
+- [x] Updater: channel URL, metadata throttle, version-differs install, no
       updates for `dev` builds, forced check
-- [ ] `configDir()` per build channel
-- [ ] `dh channel` and `dh channel use`, `channel_not_found` error code
-- [ ] `Channel:` help line and root JSON `channel`
-- [ ] Tests updated and added (see Relevant Files)
+- [x] `configDir()` per build channel
+- [x] `dh channel` and `dh channel use`, `channel_not_found` error code
+- [x] `Channel:` help line and root JSON `channel`
+- [x] Tests updated and added (see Relevant Files)
 
 ## 4. Install scripts and docs
 

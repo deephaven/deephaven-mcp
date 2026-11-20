@@ -8,7 +8,9 @@ import {
   stat,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { RELEASE_CHANNEL } from "../../channel.ts";
 import { DhError, isErrno, reasonOf } from "../../errors.ts";
+import { CHANNEL } from "../../version.ts";
 import { withFileLock } from "./lock.ts";
 
 /** Which Deephaven product a server is. */
@@ -108,17 +110,23 @@ export interface State {
 const WINDOWS = process.platform === "win32";
 const LOCK_WAIT_MS = 10_000;
 
-/** `$DH_CONFIG_DIR`, else `~/.deephaven/cli` (`%APPDATA%\Deephaven\cli` on Windows). */
-export function configDir(): string {
+/**
+ * `$DH_CONFIG_DIR`, else `~/.deephaven/cli` (`%APPDATA%\Deephaven\cli` on
+ * Windows) for release builds and `cli-<channel>` beside it for others.
+ * `channel` is the build's; tests pass others.
+ */
+export function configDir(channel: string = CHANNEL): string {
   const override = process.env.DH_CONFIG_DIR;
   if (override) return override;
+  // Per build channel, so an rc or alpha build can't break release's config.
+  const leaf = channel === RELEASE_CHANNEL ? "cli" : `cli-${channel}`;
   if (WINDOWS) {
     const appData = process.env.APPDATA;
-    if (appData) return join(appData, "Deephaven", "cli");
+    if (appData) return join(appData, "Deephaven", leaf);
   }
   const home = WINDOWS ? process.env.USERPROFILE : process.env.HOME;
   if (!home) throw new DhError("internal", "Cannot find the home directory");
-  return join(home, ".deephaven", "cli");
+  return join(home, ".deephaven", leaf);
 }
 
 export function emptyState(): State {

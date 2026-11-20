@@ -39,6 +39,10 @@ export const ERROR_CODES = {
     exit: 4,
     description: "Some legacy config entries weren't migrated",
   },
+  channel_not_found: {
+    exit: 2,
+    description: "No published build on that channel",
+  },
   server_unreachable: { exit: 5, description: "Network or TLS failure" },
   server_unsupported: {
     exit: 5,
