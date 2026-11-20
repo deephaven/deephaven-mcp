@@ -158,11 +158,13 @@ test("command registration: separate invocations do not share lifecycles", async
       }),
     );
 
+  // Set before invoking: cleanup freezes the report, ignoring later updates.
+  first.setFailureReport({ target: "first" });
   await invoke(first);
   first.abort();
-  first.setFailureReport({ target: "first" });
   await invoke(second);
 
+  expect(first.failureReport.target).toBe("first");
   expect(seen).toHaveLength(2);
   expect(seen[0]?.lifecycle).toBe(first);
   expect(seen[1]?.lifecycle).toBe(second);
