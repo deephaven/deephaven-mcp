@@ -1,7 +1,7 @@
 /**
  * Release channel rules shared by the CLI and the release scripts: channel
  * names, `cli-v*` tags, and how CI numbers the next build. See
- * plans/cli-release-channels.md.
+ * docs/RELEASE_ARCHITECTURE.md.
  */
 import { compare, inc, valid } from "semver";
 

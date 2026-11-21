@@ -1,7 +1,7 @@
 name: Release
 
 # Pushing or merging to cli-channel/<channel> publishes a build on that channel.
-# See plans/cli-release-channels.md.
+# See docs/RELEASE_ARCHITECTURE.md.
 on:
   push:
     branches: ["cli-channel/**"]

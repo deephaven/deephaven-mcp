@@ -23,6 +23,10 @@ macOS and Windows for every pull request and push to `main`.
 
 ## How auto-update works
 
+Channels, publishing and versions are described in
+[Release architecture](RELEASE_ARCHITECTURE.md); this section covers what the
+binary does.
+
 After a run, `dh` reads its channel from `dh.meta` beside the executable (else
 `release`) and fetches that channel release's manifest, e.g.
 `https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-rc/manifest.json`
@@ -55,50 +59,20 @@ compatible.
 
 ## Releasing
 
-Releases are published from `cli-channel/<channel>` branches: every push or
-merge to one publishes the next build on that channel. The design, with
-diagrams, is in [plans/cli-release-channels.md](../plans/cli-release-channels.md).
+Every push or merge to a `cli-channel/<channel>` branch publishes the next build
+on that channel; CI computes the version. Why it works this way, and what each
+publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
 
-| Branch                   | Channel      | Fed by                                  |
-| ------------------------ | ------------ | --------------------------------------- |
-| `cli-channel/release`    | `release`    | PRs from `cli-channel/rc` or `hotfix/*` |
-| `cli-channel/rc`         | `rc`         | Merges from `v3_rewrite`                |
-| `cli-channel/alpha-<id>` | `alpha-<id>` | A feature branch, for experiments       |
-
-`.github/workflows/release.yml` runs CI, computes the version
-(`bun run next-version <channel>`), cross-compiles every target
-(`bun run release <tag>`), and publishes (`bun run publish <tag> dist`):
-
-1. A versioned release, `cli-vX.Y.Z` on `release` or
-   `cli-vX.Y.Z-<channel>.<build>` elsewhere, with the binaries, `manifest.json`,
-   `SHA256SUMS` and install scripts. Never changed afterwards.
-2. If the commit is still the branch's newest, the channel release
-   `cli-channel-<channel>`: its tag moves to the commit, its title becomes
-   `<channel> channel (currently <tag>)`, and its `manifest.json` is replaced
-   (plus `install.sh`/`install.ps1` on `release`). Installed CLIs and the install
-   scripts read only this release. Never delete it.
-
-Publishes to `release` wait for approval in the `cli-release` environment; other
-channels use `cli-prerelease`. None of these releases is marked latest, so the
-repo's `releases/latest` stays with the Python MCP releases.
-
-**Versions.** The base is the higher of the last `cli-v` release plus a patch and
-`package.json`'s `version`; channels other than `release` add
-`-<channel>.<build>`, counting from 0 for each base. For a minor or major bump,
-set `version` in `package.json` (e.g. `3.2.0`) in a PR; the next publish on every
-channel picks it up.
-
-**Promoting.** Merge `v3_rewrite` into `cli-channel/rc` to publish a release
-candidate; open a PR from `cli-channel/rc` into `cli-channel/release` to release
-it. Two required checks (`.github/workflows/release-checks.yml`) guard that PR:
-`release-source` (it must come from `cli-channel/rc` or `hotfix/*`) and
-`release-contains` (nothing already on `release` may be missing; cherry-picks
-count).
-
-**Hotfixes.** Branch `hotfix/<name>` from `cli-channel/release`, fix, and open a
-PR into `cli-channel/release`. Then merge the fix into `v3_rewrite` and
-`v3_rewrite` into `cli-channel/rc`; until then, `release-contains` fails the
-next rc PR.
+- **Release candidate:** merge `v3_rewrite` into `cli-channel/rc`.
+- **Release:** open a PR from `cli-channel/rc` into `cli-channel/release`. The
+  `release-source` and `release-contains` checks must pass, and the publish
+  waits for approval in the `cli-release` environment.
+- **Experiment:** merge a feature branch into `cli-channel/alpha-<id>`; the
+  first push creates the channel.
+- **Hotfix:** follow [Hotfixes](RELEASE_ARCHITECTURE.md#hotfixes).
+- **Minor or major bump:** set `version` in `package.json` (e.g. `3.2.0`) in a PR
+  into `v3_rewrite`; see
+  [Minor and major bumps](RELEASE_ARCHITECTURE.md#minor-and-major-bumps).
 
 To test a published channel without switching an install:
 

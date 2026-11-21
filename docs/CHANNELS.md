@@ -2,8 +2,8 @@
 
 Each install of `dh` follows one release channel and updates to that channel's
 build. `release` is the default; `rc` carries release candidates; `alpha-<id>`
-channels carry experiments. How channels are published is covered in the
-[Developer Guide](DEVELOPER_GUIDE.md#releasing).
+channels carry experiments. How channels are published is covered in
+[Release architecture](RELEASE_ARCHITECTURE.md).
 
 ## Commands
 

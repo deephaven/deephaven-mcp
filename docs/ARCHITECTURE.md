@@ -2,6 +2,8 @@
 
 How the `dh` source is organized, and the conventions for adding commands.
 Setup, tests and releases are in the [Developer Guide](DEVELOPER_GUIDE.md).
+How builds are versioned, published and auto-updated is in
+[Release architecture](RELEASE_ARCHITECTURE.md).
 
 ## Commands are questions and actions
 
@@ -68,6 +70,7 @@ flowchart LR
 | [src/commands/](../src/commands/)                                    | One file per command, plus each group's `questions.ts`                                | `cli`, actions                                 |
 | [src/actions/](../src/actions/)                                      | Actions, one folder per area; [auth/](../src/actions/auth/): sign-in, profiles, keys, the config store; [console/](../src/actions/console/): console discovery, settings and lifecycle | `errors`, `output`, `net`          |
 | [src/net.ts](../src/net.ts)                                          | Which URLs are local, and which may supply code                                       | —                                              |
+| [src/channel.ts](../src/channel.ts), [src/updater.ts](../src/updater.ts), [src/install-meta.ts](../src/install-meta.ts) | Release channels, self-update and `dh.meta`; see [Release architecture](RELEASE_ARCHITECTURE.md#where-it-lives) | `version`, `net`                               |
 
 Imports go down the table. `cli/`, `output.ts`, `errors.ts` and `ui/` are shared
 by every command and contain nothing auth-specific, except that `Context.store`
