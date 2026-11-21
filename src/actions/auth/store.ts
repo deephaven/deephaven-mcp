@@ -8,7 +8,9 @@ import {
   stat,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { RELEASE_CHANNEL } from "../../channel.ts";
 import { DhError, isErrno, reasonOf } from "../../errors.ts";
+import { CHANNEL } from "../../version.ts";
 import { withFileLock } from "./lock.ts";
 
 /** Which Deephaven product a server is. */
@@ -108,17 +110,23 @@ export interface State {
 const WINDOWS = process.platform === "win32";
 const LOCK_WAIT_MS = 10_000;
 
-/** `$DH_CONFIG_DIR`, else `~/.deephaven/cli` (`%APPDATA%\Deephaven\cli` on Windows). */
-export function configDir(): string {
+/**
+ * `$DH_CONFIG_DIR`, else `~/.deephaven/cli` (`%APPDATA%\Deephaven\cli` on
+ * Windows) for release builds and `cli-<channel>` beside it for others.
+ * `channel` is the build's; tests pass others.
+ */
+export function configDir(channel: string = CHANNEL): string {
   const override = process.env.DH_CONFIG_DIR;
   if (override) return override;
+  // Per build channel, so an rc or alpha build can't break release's config.
+  const leaf = channel === RELEASE_CHANNEL ? "cli" : `cli-${channel}`;
   if (WINDOWS) {
     const appData = process.env.APPDATA;
-    if (appData) return join(appData, "Deephaven", "cli");
+    if (appData) return join(appData, "Deephaven", leaf);
   }
   const home = WINDOWS ? process.env.USERPROFILE : process.env.HOME;
   if (!home) throw new DhError("internal", "Cannot find the home directory");
-  return join(home, ".deephaven", "cli");
+  return join(home, ".deephaven", leaf);
 }
 
 export function emptyState(): State {
@@ -148,6 +156,10 @@ export class Store {
 
   get credentialsPath(): string {
     return join(this.dir, "credentials.json");
+  }
+
+  get consoleDataPath(): string {
+    return join(this.dir, "consoles.json");
   }
 
   get cacheDir(): string {
@@ -180,6 +192,29 @@ export class Store {
     });
   }
 
+  /** Reads the owner-only console registry, or a fresh copy of `empty`. */
+  async readConsoleData<T extends object>(empty: T): Promise<T> {
+    const data = await readJson<T>(this.consoleDataPath);
+    if (!data) return structuredClone(empty);
+    await this.assertPrivatePath(this.consoleDataPath);
+    return Object.assign(structuredClone(empty), data);
+  }
+
+  /** Updates the owner-only console registry under the profile-store lock. */
+  async updateConsoleData<T extends object, R = void>(
+    empty: T,
+    fn: (data: T) => R | Promise<R>,
+  ): Promise<R> {
+    await this.makeDir(false);
+    const lock = join(this.dir, "config.lock");
+    return await withFileLock(lock, LOCK_WAIT_MS, async () => {
+      const data = await this.readConsoleData(empty);
+      const result = await fn(data);
+      await writeAtomic(this.consoleDataPath, data, 0o600);
+      return result;
+    });
+  }
+
   /** Owner-only directory, re-securing an existing one. Call once per command, before writing. */
   async ensureDir(): Promise<void> {
     await this.makeDir(true);
@@ -199,13 +234,17 @@ export class Store {
   }
 
   private async assertPrivate(): Promise<void> {
+    await this.assertPrivatePath(this.credentialsPath);
+  }
+
+  private async assertPrivatePath(path: string): Promise<void> {
     if (WINDOWS) return;
-    const { mode } = await stat(this.credentialsPath);
+    const { mode } = await stat(path);
     if ((mode & 0o077) !== 0) {
       throw new DhError(
         "credential_unavailable",
-        `${this.credentialsPath} can be read by other users`,
-        `Run: chmod 600 ${this.credentialsPath}`,
+        `${path} can be read by other users`,
+        `Run: chmod 600 ${path}`,
       );
     }
   }

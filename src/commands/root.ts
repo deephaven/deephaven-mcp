@@ -1,15 +1,17 @@
 import { styleText } from "node:util";
 import type { Profile } from "../actions/auth/store.ts";
 import { defineCommand } from "../cli/command.ts";
-import { BIN, VERSION } from "../version.ts";
+import { BIN, CHANNEL, VERSION } from "../version.ts";
 import { agents } from "./agents.ts";
 import { auth } from "./auth/index.ts";
+import { channel } from "./channel/index.ts";
+import { consoleCommand } from "./console/index.ts";
 
 /** `dh` alone: help and who's logged in. Every command is listed under `commands`. */
 export const rootCommand = defineCommand({
   name: BIN,
   description: "Deephaven command line interface.",
-  commands: [auth, agents],
+  commands: [auth, consoleCommand, channel, agents],
 
   async run(ctx) {
     let p: Profile | undefined;
@@ -34,6 +36,7 @@ export const rootCommand = defineCommand({
       ],
       json: {
         version: VERSION,
+        channel: CHANNEL,
         default: p ? { profile: p.name, server: p.server, user: p.user } : null,
       },
     };

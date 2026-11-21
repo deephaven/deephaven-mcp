@@ -2,6 +2,8 @@
 
 How the `dh` source is organized, and the conventions for adding commands.
 Setup, tests and releases are in the [Developer Guide](DEVELOPER_GUIDE.md).
+How builds are versioned, published and auto-updated is in
+[Release architecture](RELEASE_ARCHITECTURE.md).
 
 ## Commands are questions and actions
 
@@ -66,14 +68,20 @@ flowchart LR
 | [src/output.ts](../src/output.ts), [src/errors.ts](../src/errors.ts) | The only writer to stdout/stderr; `DhError` and the error codes                       | `output` imports `errors`                      |
 | [src/ui/](../src/ui/)                                                | The `Prompter` interface and its Ink implementation                                   | `errors`                                       |
 | [src/commands/](../src/commands/)                                    | One file per command, plus each group's `questions.ts`                                | `cli`, actions                                 |
-| [src/actions/](../src/actions/)                                      | Actions, one folder per area; [auth/](../src/actions/auth/): sign-in, profiles, keys, the config store | `errors`, `output`, `net`          |
+| [src/actions/](../src/actions/)                                      | Actions, one folder per area; [auth/](../src/actions/auth/): sign-in, profiles, keys, the config store; [console/](../src/actions/console/): console discovery, settings and lifecycle | `errors`, `output`, `net`          |
 | [src/net.ts](../src/net.ts)                                          | Which URLs are local, and which may supply code                                       | —                                              |
+| [src/channel.ts](../src/channel.ts), [src/updater.ts](../src/updater.ts), [src/install-meta.ts](../src/install-meta.ts) | Release channels, self-update and `dh.meta`; see [Release architecture](RELEASE_ARCHITECTURE.md#where-it-lives) | `version`, `net`                               |
 
 Imports go down the table. `cli/`, `output.ts`, `errors.ts` and `ui/` are shared
 by every command and contain nothing auth-specific, except that `Context.store`
 is the profile store from `actions/auth/store.ts`; every command signs in with a
 profile. Actions for a new area, such as running queries, go in a folder beside
 `actions/auth/`, mirroring its commands in `commands/<group>/`.
+
+Console actions sequence authentication, discovery, and lifecycle work.
+Within `actions/console/`, `store.ts` owns registry reconciliation and selections,
+`settings.ts` owns validation and override merging, `enterprise.ts` adapts server
+APIs, and `reporting.ts` builds lifecycle report data.
 
 ## Adding a command
 
@@ -179,6 +187,10 @@ there are no presentation callbacks or phase-to-message dispatchers.
 and cleanup failures; don't repeat these in operation prose.
 
 ## Keeping functions readable
+
+Use published JS API types and non-deprecated properties. Preserve their
+nullability; do not invent optional fields or compatibility fallbacks.
+Keep partial API mocks checked against the members their tests exercise.
 
 A function's doc comment says what it does, and its body should show how without
 reading the functions it calls. When a function gets long, split it into named

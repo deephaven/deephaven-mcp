@@ -174,8 +174,11 @@ cancel.
 Other accounts on the computer can't read `credentials.json`, but any program
 running as you can, including AI agents and other tools.
 
-On Windows the directory is `%APPDATA%\Deephaven\cli`. Set `DH_CONFIG_DIR` to
-use another directory.
+On Windows the directory is `%APPDATA%\Deephaven\cli`. Builds on other release
+channels use a sibling folder, so they can't break a working `release` setup:
+`cli-rc`, `cli-alpha-<id>`, and `cli-dev` when run from source. Each starts
+empty, and logging out on one never revokes another's keys. Set `DH_CONFIG_DIR`
+to use another directory.
 
 On macOS and Linux, `dh` refuses to read `credentials.json` if other users can
 read it. Fix the permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
@@ -240,18 +243,20 @@ the full manifest, with every flag, as JSON.
 With `-o json`, stdout holds exactly one JSON value. Progress messages and
 errors go to stderr.
 
-| Command           | stdout                                                               |
-| ----------------- | -------------------------------------------------------------------- |
-| `dh`              | `{"version", "default": {"profile", "server", "user"} \| null}`      |
-| `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`          |
-| `dh auth login`   | `{"profile", "server", "user", "default"}`                           |
-| `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                 |
-| `dh auth use`     | `{"default"}`                                                        |
-| `dh auth rename`  | `{"from", "to"}`                                                     |
-| `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}` |
-| `dh auth migrate` | `{"migrated", "failed"}`                                             |
+| Command           | stdout                                                                     |
+| ----------------- | -------------------------------------------------------------------------- |
+| `dh`              | `{"version", "channel", "default": {"profile", "server", "user"} \| null}` |
+| `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`                |
+| `dh auth login`   | `{"profile", "server", "user", "default"}`                                 |
+| `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                       |
+| `dh auth use`     | `{"default"}`                                                              |
+| `dh auth rename`  | `{"from", "to"}`                                                           |
+| `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}`       |
+| `dh auth migrate` | `{"migrated", "failed"}`                                                   |
 
 `profile` is `null` in `status` when signed in from environment variables.
+`channel` in `dh` is the running build's [release channel](CHANNELS.md) (`dev`
+when run from source).
 
 ### Errors and exit codes
 
@@ -271,19 +276,19 @@ available, appears in `detail` (up to 200 characters):
 }
 ```
 
-| Exit | Code                     | Meaning                                                       | What to do                              |
-| ---- | ------------------------ | ------------------------------------------------------------- | --------------------------------------- |
-| 1    | `internal`               | Bug in `dh`                                                   | Rerun with `DH_DEBUG=1` and report it   |
-| 2    | `usage`                  | Bad arguments, or input needed without a terminal             | Pass the flag named in the message      |
-| 3    | `cancelled`              | You pressed Ctrl-C or declined a confirmation                 | —                                       |
-| 4    | `auth_required`          | No profile                                                    | `dh auth login`                         |
-| 4    | `auth_failed`            | The server rejected the credentials during login              | Check the credentials and try again     |
-| 4    | `auth_expired`           | The server rejected a saved profile's credentials             | `dh auth login --profile <name>`        |
-| 4    | `credential_unavailable` | The profile's env var or key file is missing                  | Set the variable or restore the file    |
-| 4    | `key_upload_failed`      | Uploading this computer's key to the Enterprise server failed | See [Enterprise](#enterprise)           |
+| Exit | Code                     | Meaning                                                       | What to do                                      |
+| ---- | ------------------------ | ------------------------------------------------------------- | ----------------------------------------------- |
+| 1    | `internal`               | Bug in `dh`                                                   | Rerun with `DH_DEBUG=1` and report it           |
+| 2    | `usage`                  | Bad arguments, or input needed without a terminal             | Pass the flag named in the message              |
+| 3    | `cancelled`              | You pressed Ctrl-C or declined a confirmation                 | —                                               |
+| 4    | `auth_required`          | No profile                                                    | `dh auth login`                                 |
+| 4    | `auth_failed`            | The server rejected the credentials during login              | Check the credentials and try again             |
+| 4    | `auth_expired`           | The server rejected a saved profile's credentials             | `dh auth login --profile <name>`                |
+| 4    | `credential_unavailable` | The profile's env var or key file is missing                  | Set the variable or restore the file            |
+| 4    | `key_upload_failed`      | Uploading this computer's key to the Enterprise server failed | See [Enterprise](#enterprise)                   |
 | 4    | `migration_failed`       | Some legacy config entries weren't migrated                   | Fix the problems listed, then `dh auth migrate` |
-| 5    | `server_unreachable`     | Network or TLS failure, or no server at the address           | Check the address, VPN and certificates |
-| 5    | `server_unsupported`     | Not a supported Deephaven server, or unsafe to load from      | Use `https://` or a local server        |
+| 5    | `server_unreachable`     | Network or TLS failure, or no server at the address           | Check the address, VPN and certificates         |
+| 5    | `server_unsupported`     | Not a supported Deephaven server, or unsafe to load from      | Use `https://` or a local server                |
 
 ### Environment-only sign-in
 
@@ -359,7 +364,7 @@ prints what it's waiting on for each server:
 | Variable                               | Effect                                                          |
 | -------------------------------------- | --------------------------------------------------------------- |
 | `DH_PROFILE`                           | Profile to use, like `--profile`                                |
-| `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`)                   |
+| `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`; see above)        |
 | `DH_TIMEOUT`                           | Seconds to wait for connecting and non-SSO sign-in (default 30) |
 | `DH_DEBUG`                             | Show client library logs (on stderr) and internal error details |
 | `DH_SERVER`, …                         | Environment-only sign-in ([above](#environment-only-sign-in))   |
