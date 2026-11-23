@@ -1,29 +1,21 @@
-# CLI release channels: implementation
+# CLI release channels
 
-Implements the design in [Release architecture](../docs/RELEASE_ARCHITECTURE.md):
-read that first for the why. This file is the contract: names, formats and
-behavior here are exact; internal function and module names are up to the
-implementer, matching existing patterns. If every Validation item passes, the
-implementation is correct.
+Publish the CLI on release channels from `cli-channel/<channel>` branches, and
+have each install follow one channel. The design is in
+[Release architecture](../docs/RELEASE_ARCHITECTURE.md); the user-facing
+surface is in [Release channels](../docs/CHANNELS.md), the README,
+`docs/AUTH.md` and the Developer Guide. Those docs ship in PR 1 and describe
+the finished behavior: the implementation must match them, or change them in
+the same PR and say so.
 
-The user-facing docs are already written and reviewed with this plan; they
-describe the finished behavior and are part of the contract:
-[Release channels](../docs/CHANNELS.md), the README, `docs/AUTH.md` and the
-Developer Guide. The implementation must match them; if it can't, change the
-doc in the same PR and call it out.
+Names, formats and output below are exact; internal function and module names
+are up to the implementer, matching existing patterns. No CLI has shipped yet,
+so nothing needs migrating: the old `releases/latest` URL and
+`<exe>.last-update-check` file are simply replaced.
 
-Four phases, each shippable on its own and committed separately:
+## Implementation
 
-1. Channel and version rules (pure code, no I/O)
-2. Publishing: build, workflow, required checks
-3. CLI: install metadata, updater, per-channel config, `dh channel`, help line
-4. Install scripts, and a final check of the docs
-
-Repo setup (branches, rulesets, environments) is manual; see the last section.
-No CLI has shipped yet, so nothing needs migrating: the old
-`releases/latest` URL and `<exe>.last-update-check` file are simply replaced.
-
-## 1. Channel and version rules
+### 1. Channel and version rules
 
 New module (e.g. `src/channel.ts`), imported by the CLI and the scripts.
 
@@ -71,15 +63,24 @@ tags (see the workflow's `fetch-depth: 0`).
 below it; for a prerelease, the highest tag of the same channel below it,
 falling back to the highest release tag below its `X.Y.Z`. None → omit.
 
-### Checklist
+Next-version cases (from tag lists):
 
-- [ ] Channel name validation, with `dev` reserved
-- [ ] Tag parse and format for release and prerelease tags
-- [ ] Next-version computation and the `next-version` script
-- [ ] Release-notes start tag
-- [ ] Unit tests (`tests/channel.test.ts`)
+| Tags | `package.json` | Channel | Result |
+| --- | --- | --- | --- |
+| none | `3.0.0` | `release` | `3.0.0` |
+| none | `3.0.0` | `rc` | `3.0.0-rc.0` |
+| `cli-v3.1.0` | `3.1.0` | `rc` | `3.1.1-rc.0` |
+| `cli-v3.1.0`, `cli-v3.1.1-rc.0` | `3.1.0` | `rc` | `3.1.1-rc.1` |
+| `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | `alpha-bar` | `3.1.1-alpha-bar.0` |
+| `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | `release` | `3.1.1` |
+| `cli-v3.1.1` | `3.1.0` | `rc` | `3.1.2-rc.0` |
+| `cli-v3.1.1` | `3.2.0` | `rc` | `3.2.0-rc.0` |
+| `cli-v3.2.0` | `3.2.0` | `rc` | `3.2.1-rc.0` |
+| `v2.1.0`, `cli-vfoo`, `cli-v3.1.0` | `3.1.0` | `rc` | `3.1.1-rc.0` (others ignored) |
+| any | `3.2.0-beta` | any | error |
+| any | any | `Rc`, `dev`, `-x` | error |
 
-## 2. Publishing
+### 2. Publishing
 
 **Build** (`scripts/build.ts`, `src/version.ts`)
 
@@ -159,15 +160,7 @@ Gotchas:
   and fail if it is non-empty, printing the list and
   `Merge the hotfix into v3_rewrite, then v3_rewrite into cli-channel/rc.`
 
-### Checklist
-
-- [ ] `CHANNEL` baked into builds; `build()` channel option
-- [ ] `scripts/release.ts` takes the version and channel from the tag
-- [ ] `scripts/publish.ts` and `package.json` scripts `next-version` and `publish`
-- [ ] `release.yml` rewritten as above
-- [ ] `release-checks.yml` with `release-source` and `release-contains`
-
-## 3. CLI
+### 3. CLI
 
 **Install metadata file**
 
@@ -240,22 +233,15 @@ Gotchas:
   the home directory shown as `~`.
 - Root command JSON gains `"channel": "<CHANNEL>"`.
 
-### Checklist
-
-- [ ] Install metadata file read/write, atomic, tolerant of bad files
-- [ ] Updater: channel URL, metadata throttle, version-differs install, no
-      updates for `dev` builds, forced check
-- [ ] `configDir()` per build channel
-- [ ] `dh channel` and `dh channel use`, `channel_not_found` error code
-- [ ] `Channel:` help line and root JSON `channel`
-- [ ] Tests updated and added (see Relevant Files)
-
-## 4. Install scripts and docs check
+### 4. Install scripts
 
 **`install.sh` / `install.ps1`**
 
 - `DH_CHANNEL`, default `release`, validated like a channel name (`dev`
   rejected) before any download.
+  - Gotcha: macOS `sh` is bash, where `[a-z]` in a `case` pattern follows the
+    locale and matches uppercase. Spell the letters out
+    (`abcdefghijklmnopqrstuvwxyz`) so `Rc` is rejected.
 - Without `DH_INSTALL_VERSION`: fetch
   `$REPO_URL/releases/download/cli-channel-$CHANNEL/manifest.json`. 404 → exit
   non-zero with `dh: no channel <channel> at <repo>`.
@@ -276,83 +262,67 @@ Gotchas:
 - The header comments' one-liners become
   `…/releases/download/cli-channel-release/install.sh` (and `.ps1`).
 
-**Docs**
+### Repo setup
 
-Already written (see the top of this plan). Read them against the finished
-behavior: commands, output, JSON, error codes, env vars, install one-liners and
-the release steps. Fix any mismatch in the code, or in the doc if the doc is
-wrong, and note it in the PR.
+Manual, by a repo admin, before the first publish; the Developer Guide records
+it:
 
-### Checklist
+- Create `cli-channel/release` and `cli-channel/rc` from `v3_rewrite`.
+- Branch ruleset on `cli-channel/**`: block force pushes and deletion.
+- Branch ruleset on `cli-channel/release`: require a pull request, allow only
+  merge commits, require checks `release-source` and `release-contains`.
+- Tag ruleset on `cli-v*`: block updates and deletion.
+- Tag ruleset on `cli-channel-*`: block updates and deletion, with GitHub
+  Actions as the only bypass actor. Verify on a fork that the workflow can
+  still move the tag; if it can't, use a GitHub App token for that step.
+- Environments: `cli-release` (required reviewers) and `cli-prerelease` (none).
+- Delete the old `release` environment once nothing references it.
 
-- [ ] `install.sh`: `DH_CHANNEL`, channel manifest, `cli-v` versions, metadata file
-- [ ] `install.ps1`: same
-- [ ] Docs match the implementation (README, CHANNELS, DEVELOPER_GUIDE, AUTH)
+## Stack
 
-## Repo setup (manual, by a repo admin)
+| # | PR | Contents |
+| --- | --- | --- |
+| 1 | Design and surface | Release architecture, user docs, this plan |
+| 2 | Implementation | Channel rules, publishing, CLI, install scripts, tests |
 
-Not code; record it in the DEVELOPER_GUIDE's Releasing section.
+## Out of scope
 
-- [ ] Create `cli-channel/release` and `cli-channel/rc` from `v3_rewrite`.
-- [ ] Branch ruleset on `cli-channel/**`: block force pushes and deletion.
-- [ ] Branch ruleset on `cli-channel/release`: require a pull request, allow
-      only merge commits, require checks `release-source` and
-      `release-contains`.
-- [ ] Tag ruleset on `cli-v*`: block updates and deletion.
-- [ ] Tag ruleset on `cli-channel-*`: block updates and deletion, with GitHub
-      Actions as the only bypass actor. Verify on a fork that the workflow can
-      still move the tag; if it can't, use a GitHub App token for that step.
-- [ ] Environments: `cli-release` (required reviewers) and `cli-prerelease`
-      (none).
-- [ ] Delete the old `release` environment once nothing references it.
+- A pin saved in `dh.meta`; pinning is `DH_INSTALL_VERSION` plus
+  `DH_AUTO_UPDATE=off`.
+- A `dh update` command; `dh channel use <channel>` updates on demand.
+- Markdown linting for the v3 docs.
 
-## Validation
+## Done when
 
-- [ ] `bun run check` passes.
-- [ ] `bun test` passes on Linux, macOS and Windows (CI).
-- [ ] Next-version table (unit tests, from tag lists):
-
-  | Tags | `package.json` | Channel | Result |
-  | --- | --- | --- | --- |
-  | none | `3.0.0` | `release` | `3.0.0` |
-  | none | `3.0.0` | `rc` | `3.0.0-rc.0` |
-  | `cli-v3.1.0` | `3.1.0` | `rc` | `3.1.1-rc.0` |
-  | `cli-v3.1.0`, `cli-v3.1.1-rc.0` | `3.1.0` | `rc` | `3.1.1-rc.1` |
-  | `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | `alpha-bar` | `3.1.1-alpha-bar.0` |
-  | `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | `release` | `3.1.1` |
-  | `cli-v3.1.1` | `3.1.0` | `rc` | `3.1.2-rc.0` |
-  | `cli-v3.1.1` | `3.2.0` | `rc` | `3.2.0-rc.0` |
-  | `cli-v3.2.0` | `3.2.0` | `rc` | `3.2.1-rc.0` |
-  | `v2.1.0`, `cli-vfoo`, `cli-v3.1.0` | `3.1.0` | `rc` | `3.1.1-rc.0` (others ignored) |
-  | any | `3.2.0-beta` | any | error |
-  | any | any | `Rc`, `dev`, `-x` | error |
-
-- [ ] Tag parsing: `cli-v3.1.1-alpha-1.0` → version `3.1.1-alpha-1.0`, channel
-      `alpha-1`, build `0`.
-- [ ] Notes start tag: `cli-v3.1.1` after `cli-v3.1.0` → `cli-v3.1.0`;
-      `cli-v3.1.1-rc.1` after `cli-v3.1.1-rc.0` → `cli-v3.1.1-rc.0`;
-      `cli-v3.1.1-rc.0` with only `cli-v3.1.0` → `cli-v3.1.0`.
-- [ ] Updater (fake GitHub in `tests/auto_update.test.ts`):
-  - Default fetch is `/releases/download/cli-channel-release/manifest.json`;
-    with `dh.meta` `{"channel":"rc"}` it is `cli-channel-rc`.
-  - A manifest with a **lower** version installs; an equal one doesn't.
-  - An unreadable `dh.meta` behaves as `release` and is rewritten.
-  - `lastUpdateCheck` throttles; `DH_UPDATE_INTERVAL=0` doesn't.
-  - A `dev` build never fetches.
-- [ ] Installer (fake GitHub): default installs from `cli-channel-release` and
-      writes `dh.meta` `{"channel":"release"}`; `DH_CHANNEL=rc` installs the rc
-      manifest's version and writes `rc`; `DH_CHANNEL=nope` fails with
-      `no channel`; `DH_CHANNEL=dev` and `DH_CHANNEL=Rc` fail before any
-      request; `DH_INSTALL_VERSION` works as `9.9.9` and `cli-v9.9.9`.
-- [ ] CLI (`tests/cli.test.ts`, from source so `CHANNEL` is `dev`):
-  - `dh --help` contains `Channel: dev (config `.
-  - `dh -o json` includes `"channel":"dev"`.
-  - `dh channel` prints `dev (never updates)`.
-  - `dh channel use rc` fails with `usage` (not installed).
-  - `dh agents -o json` lists `channel`, `channel use` and `channel_not_found`.
-- [ ] `configDir()` (`tests/auth/store.test.ts`): `release` → `…/cli`, `rc` →
-      `…/cli-rc`, `dev` → `…/cli-dev`, `DH_CONFIG_DIR` wins.
-- [ ] End to end on a fork with the repo setup applied:
+- [ ] (PR 2) `nextVersion` and `bun run next-version` produce every case in the
+      next-version table; `cli-v3.1.1-alpha-1.0` parses as channel `alpha-1`,
+      build `0`; notes start at `cli-v3.1.0` for `cli-v3.1.1` and for
+      `cli-v3.1.1-rc.0` (with only `cli-v3.1.0`), and at `cli-v3.1.1-rc.0` for
+      `cli-v3.1.1-rc.1`.
+- [ ] (PR 2) Auto-update fetches `cli-channel-<channel>/manifest.json` for the
+      channel in `dh.meta`, else `release`; installs a lower version and skips
+      an equal one; treats a bad `dh.meta` as `release` and rewrites it;
+      throttles on `lastUpdateCheck`; never fetches on a `dev` build.
+- [ ] (PR 2) The install scripts install from `cli-channel-release` by default
+      and from `DH_CHANNEL`'s channel otherwise, writing `dh.meta`;
+      `DH_CHANNEL=nope` fails with `no channel`; `dev` and `Rc` fail before
+      any request; `DH_INSTALL_VERSION` accepts `9.9.9` and `cli-v9.9.9`.
+- [ ] (PR 2) From source: `dh --help` shows `Channel: dev (config …)`,
+      `dh -o json` has `"channel":"dev"`, `dh channel` prints
+      `dev (never updates)`, `dh channel use rc` fails with `usage`, and
+      `dh agents -o json` lists `channel`, `channel use` and
+      `channel_not_found`.
+- [ ] (PR 2) An installed `dh channel use` fails with `channel_not_found` and
+      saves nothing for an unpublished channel, and otherwise switches and
+      installs immediately; `dh channel` shows the mismatch notice when the
+      build's channel differs.
+- [ ] (PR 2) `configDir()` is `…/cli` on release, `…/cli-rc`, `…/cli-dev`, and
+      `DH_CONFIG_DIR` wins.
+- [ ] (PR 2) The docs match the implementation.
+- [ ] (Every PR) `bun run check` passes; `bun test` passes on Linux, macOS and
+      Windows.
+- [ ] (Manual) Repo setup applied.
+- [ ] (Manual) End to end on a fork with the repo setup applied:
   1. Push to `cli-channel/rc` → `cli-v<x>-rc.0` released as a prerelease, not
      latest; `cli-channel-rc` exists, titled `rc channel (currently …)`, its tag
      on the pushed commit.
@@ -368,26 +338,3 @@ Not code; record it in the DEVELOPER_GUIDE's Releasing section.
      merged into `v3_rewrite` and then `rc`.
   6. `dh channel use release` on the rc install switches immediately; the
      repo's `releases/latest` never changes.
-
-## Relevant Files
-
-- `src/channel.ts` (new): channel names, tags, next version, notes start tag
-- `src/version.ts`: `CHANNEL`
-- `src/updater.ts`
-- install metadata module (new, e.g. `src/install-meta.ts`)
-- `src/actions/auth/store.ts`: `configDir()`
-- `src/main.ts`: `Channel:` help line
-- `src/commands/root.ts`: `channel` command, JSON `channel`
-- `src/commands/channel/index.ts`, `src/commands/channel/use.ts` (new)
-- `src/errors.ts`: `channel_not_found`
-- `scripts/build.ts`, `scripts/release.ts`
-- `scripts/next-version.ts`, `scripts/publish.ts` (new)
-- `package.json`: `next-version` and `publish` scripts
-- `.github/workflows/release.yml`
-- `.github/workflows/release-checks.yml` (new)
-- `install.sh`, `install.ps1`
-- `tests/channel.test.ts` (new)
-- `tests/auto_update.test.ts`, `tests/cli.test.ts`, `tests/auth/store.test.ts`
-- `README.md`, `docs/CHANNELS.md`, `docs/DEVELOPER_GUIDE.md`, `docs/AUTH.md`:
-  already written; check only
-- `docs/RELEASE_ARCHITECTURE.md`: update if a contract here changes
