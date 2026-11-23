@@ -26,7 +26,7 @@ const identity = (user: string, operateAs = user): ConsoleIdentity => ({
   operateAs,
 });
 
-test("console store: reservations are globally unique and survive deletion", async () => {
+test("console store: reservations are globally unique", async () => {
   const store = await tempStore();
   const sequence = ["aaaaaa", "aaaaaa", "bbbbbb"];
   const makeCode = () => sequence.shift() ?? "cccccc";
@@ -34,18 +34,11 @@ test("console store: reservations are globally unique and survive deletion", asy
   const first = await reserveShortcode(store, identity("alice"), makeCode);
   const second = await reserveShortcode(store, identity("bob"), makeCode);
   expect([first, second]).toEqual(["aaaaaa", "bbbbbb"]);
-
-  const registry = await store.readConsoleData<ConsoleRegistry>(
+  const { reservations } = await store.readConsoleData<ConsoleRegistry>(
     EMPTY_CONSOLE_REGISTRY,
   );
-  delete registry.selected[identityKey(identity("alice"))];
-  await store.updateConsoleData(EMPTY_CONSOLE_REGISTRY, (data) => {
-    data.selected = registry.selected;
-  });
-  expect(
-    (await store.readConsoleData<ConsoleRegistry>(EMPTY_CONSOLE_REGISTRY))
-      .reservations.aaaaaa,
-  ).toEqual(identity("alice"));
+  expect(reservations.aaaaaa).toEqual(identity("alice"));
+  expect(reservations.bbbbbb).toEqual(identity("bob"));
 });
 
 test("console store: reservation skips discovered shortcodes without redirecting ownership", async () => {

@@ -66,14 +66,17 @@ test("console settings: validation retains input-specific errors", () => {
 });
 
 test("console settings: effective creation settings reject empty names and invalid numeric overrides", () => {
-  for (const patch of [
-    { server: "" },
-    { engine: "" },
-    { heapSizeGb: Number.NaN },
-    { heapSizeGb: -1 },
-    { autoDeleteTimeoutSeconds: 0.5 },
-  ]) {
-    expect(() => mergeConsoleSettings(base, {}, patch)).toThrow();
+  for (const [patch, message] of [
+    [{ server: "" }, "Console server must be a non-empty name"],
+    [{ engine: "" }, "Console engine must be a non-empty name"],
+    [{ heapSizeGb: Number.NaN }, "Console heap size must be a positive number"],
+    [{ heapSizeGb: -1 }, "Console heap size must be a positive number"],
+    [
+      { autoDeleteTimeoutSeconds: 0.5 },
+      "Console auto-delete timeout must be a positive integer",
+    ],
+  ] as const) {
+    expect(() => mergeConsoleSettings(base, {}, patch)).toThrow(message);
   }
   expect(parseConsoleSettings('{"server":""}')).toEqual({ server: "" });
   expect(mergeConsoleSettings(base, {}, { heapSizeGb: 0.5 }).heapSizeGb).toBe(

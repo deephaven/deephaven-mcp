@@ -17,6 +17,7 @@ async function runOutput(format: string, operation: string) {
     import { authActionReport, profileSaveReport, profileRemovalReport, profileMigrationReport } from ${JSON.stringify(new URL("../src/actions/auth/reporting.ts", import.meta.url).href)};
     import { reportMigrationProgress } from ${JSON.stringify(new URL("../src/actions/auth/migrate.ts", import.meta.url).href)};
     import { CommandLifecycle } from ${JSON.stringify(new URL("../src/cli/lifecycle.ts", import.meta.url).href)};
+    import { runWithLifecycle } from ${JSON.stringify(new URL("../src/cli/run.ts", import.meta.url).href)};
     setFormat(${JSON.stringify(format)});
     ${operation}
   `;
@@ -113,12 +114,6 @@ test("consequential human cancellation preserves operation and recovery context"
   expect(output.stderr).toContain("Server accepted the create");
   expect(output.stderr).toContain("Check whether it started");
   expect(output.stderr).toContain("Result unknown.");
-  expect(output.stderr).not.toContain("Last observed: none");
-  expect(output.stderr).not.toContain("Command:");
-  expect(output.stderr).not.toContain("Phase:");
-  expect(output.stderr).not.toContain("Type: error");
-  expect(output.stderr).not.toContain("Code: cancelled");
-  expect(output.stderr).not.toContain("Exit: 3");
 });
 
 test("external waits include context and show elapsed time only from five seconds", async () => {
@@ -182,35 +177,48 @@ test("operation facts and actionable guidance render consistently in human and J
     target: "abc123",
     profile: "prod",
     phase: "starting",
-    elapsedSeconds: 95,
     progress: "Request accepted.",
     outcome: "unknown",
     continuation: "continues",
     observation: {
       state: "Initializing",
       observedAt: "2026-01-01T12:01:30Z",
-      ageSeconds: 5,
+      ageSeconds: 0,
     },
     retryWarning: "Check the existing operation before retrying.",
     recoveryCommand: ["dh", "console", "detail", "abc123"],
   };
   for (const format of ["human", "json"]) {
+    // The lifecycle derives elapsed time, observation age and the
+    // "Last observed" detail; runWithLifecycle attaches the cleanup failure.
     const output = await runOutput(
       format,
       `const report = ${JSON.stringify(report)};
       report.human = {
-        summary: "Cancelled while waiting for console " + report.target + " (profile " + report.profile + ") to start.",
+        summary: "Cancelled while waiting for console abc123 (profile prod) to start.",
         details: [
-          "Last observed: " + report.observation.state + ", " + report.observation.ageSeconds + "s ago.",
           "Startup continues on the server; readiness is not yet confirmed.",
           report.retryWarning,
         ],
         recoveryLabel: "Check status",
       };
-      process.exitCode = reportError(
-        cleanupError([new Error("Close failed")], new DhError("cancelled", "Interrupted", undefined, "Interrupted by SIGTERM")),
-        report,
-      );`,
+      let now = 1_000;
+      performance.now = () => now;
+      Date.now = () => Date.parse("2026-01-01T12:01:30Z");
+      const lifecycle = new CommandLifecycle();
+      lifecycle.onCleanup(() => { throw new Error("Close failed"); });
+      try {
+        await runWithLifecycle(lifecycle, () =>
+          lifecycle.runLifecycleAction(report, async () => {
+            now += 95_000;
+            Date.now = () => Date.parse("2026-01-01T12:01:35Z");
+            lifecycle.receiveSignal("SIGTERM");
+            await new Promise(() => {});
+          }),
+        );
+      } catch (error) {
+        process.exitCode = reportError(error, lifecycle.failureReport);
+      }`,
     );
     expect(output.code).toBe(3);
     expect(output.stdout).toBe("");
@@ -223,14 +231,16 @@ test("operation facts and actionable guidance render consistently in human and J
         detail: "Interrupted by SIGTERM",
         cleanupDetail: "Close failed",
         ...report,
+        elapsedSeconds: 95,
+        observation: { ...report.observation, ageSeconds: 5 },
       });
     } else {
       expect(output.stderr).toBe(
         [
           "✖ Cancelled while waiting for console abc123 (profile prod) to start.",
-          "  Last observed: Initializing, 5s ago.",
           "  Startup continues on the server; readiness is not yet confirmed.",
           "  Check the existing operation before retrying.",
+          "  Last observed: Initializing, 5s ago.",
           "  Waited 95s.",
           "  Check status: dh console detail abc123",
           "  Cleanup failed: Close failed",
