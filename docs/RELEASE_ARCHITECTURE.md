@@ -281,11 +281,12 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 | `release` changes are reviewed | PR required; the PR review is the sign-off |
 | Releases come from `rc` or a hotfix | Required status check `release-source`: a PR into `cli-channel/release` must come from `cli-channel/rc` or a `hotfix/*` branch |
 | A release never drops released work | Required status check `release-contains` |
+| Only a merged `rc` or hotfix PR publishes to `release` | The release workflow: for `cli-channel/release`, it publishes only if the pushed commit is the merge of a PR from `cli-channel/rc` or `hotfix/*`, so a stray direct push never reaches users |
 | Merges into `release` keep their commits | Merge commits only (no squash or rebase) |
 | Version tags never change | Tag ruleset on `cli-v*`: no update, no deletion |
 | Only CI moves channel tags | Tag ruleset on `cli-channel-*`: no update or deletion, except by the release workflow |
 
-Merging is publishing: no channel has a separate approval step. Anyone who can bypass these rulesets, such as a repo admin force-pushing, can publish without them and accepts that risk.
+Merging is publishing: no channel has a separate approval step. Anyone who can bypass these rulesets, such as a repo admin, skips them and accepts that risk; the release workflow's PR check still keeps an accidental push to `release` from publishing. A commit that lands that way stays on the branch until someone removes it, and `release-contains` flags it on the next `rc` PR.
 
 `release-contains` fails a release PR if any commit already on `release` is missing from the branch being released. It compares diffs, not hashes, so cherry-picked fixes count:
 

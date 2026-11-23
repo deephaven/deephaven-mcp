@@ -135,15 +135,23 @@ Gotchas:
   Gotcha: GitHub keeps only the newest pending run per group and cancels older
   pending ones. That is fine: the newest commit is the one that should publish.
 - Jobs: `ci` (reuse `ci.yml`), then `release` on `macos-latest` (darwin
-  codesign), `timeout-minutes: 15`, `permissions: contents: write`. No
-  `environment`: merging is publishing, with no approval step.
+  codesign), `timeout-minutes: 15`, `permissions: { contents: write,
+  pull-requests: read }`. No `environment`: merging is publishing, with no
+  approval step.
 - Steps:
-  1. Checkout with `fetch-depth: 0` (all tags) and `persist-credentials: false`.
-  2. `CHANNEL=${GITHUB_REF_NAME#cli-channel/}`; fail if it isn't a valid,
+  1. Only on `cli-channel/release`, before anything else: the pushed commit
+     must be the merge of a PR from `cli-channel/rc` or `hotfix/*`. Check with
+     `gh api repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls --jq '.[] | select(.merged_at != null and .base.ref == "cli-channel/release" and .merge_commit_sha == env.GITHUB_SHA) | .head.ref'`
+     (`GH_TOKEN: ${{ github.token }}`); fail with
+     `<sha> is not a merged PR from cli-channel/rc or hotfix/*; nothing published`
+     if no head matches. This catches accidental direct pushes, which bypass
+     the PR checks.
+  2. Checkout with `fetch-depth: 0` (all tags) and `persist-credentials: false`.
+  3. `CHANNEL=${GITHUB_REF_NAME#cli-channel/}`; fail if it isn't a valid,
      non-`dev` channel name.
-  3. `VERSION=$(bun run next-version "$CHANNEL")`, `TAG=cli-v$VERSION`.
-  4. `bun run release "$TAG" dist`.
-  5. `bun run publish "$TAG" dist` with `GH_TOKEN: ${{ github.token }}`.
+  4. `VERSION=$(bun run next-version "$CHANNEL")`, `TAG=cli-v$VERSION`.
+  5. `bun run release "$TAG" dist`.
+  6. `bun run publish "$TAG" dist` with `GH_TOKEN: ${{ github.token }}`.
 
 **`.github/workflows/release-checks.yml`** (new): on `pull_request` to
 `cli-channel/release`, two jobs whose names are the required-check names:
@@ -337,5 +345,7 @@ it:
   5. A PR from any other branch fails `release-source`. A hotfix PR into
      release passes; the next rc PR fails `release-contains` until the fix is
      merged into `v3_rewrite` and then `rc`.
-  6. `dh channel use release` on the rc install switches immediately; the
+  6. An admin's direct push to `cli-channel/release` fails the release job's
+     PR check and publishes nothing.
+  7. `dh channel use release` on the rc install switches immediately; the
      repo's `releases/latest` never changes.
