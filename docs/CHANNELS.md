@@ -79,10 +79,10 @@ In `dh channel use`, `from` equals `to` when the install was already current.
   [Where profiles are stored](AUTH.md#where-profiles-are-stored)). Each starts
   empty, so sign in once per channel.
 - `bun run dev` and local `bun run build` binaries are `dev` builds: they never
-  update, and `dh channel` shows `dev (never updates)`. `dh channel use` needs
-  an installed `dh`; on a local `bun run build` binary it installs the
-  channel's build over it.
-- Errors: an invalid name or `dev` fails with `usage`; a channel with no
-  published build fails with `channel_not_found` (exit 2); a failed download
-  fails with `server_unreachable`. If the download fails after the channel is
-  saved, it installs at the next update check.
+  update, `dh channel` shows `dev (never updates)`, and `dh channel use` fails
+  with `usage`. Install `dh` with the install script to follow a channel.
+- `dh channel use` errors:
+  - `usage`: an invalid channel name, the reserved name `dev`, or a dev build.
+  - `channel_not_found` (exit 2): the channel has no published build.
+  - `server_unreachable`: the download failed. If that happens after the
+    channel is saved, the build installs at the next update check.

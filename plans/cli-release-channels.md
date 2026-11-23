@@ -212,9 +212,10 @@ Gotchas:
   - JSON: `{ "channel": "rc", "build": "<CHANNEL>", "version": "<VERSION>" }`;
     `channel` is `dev` on a dev build.
 - `dh channel use <name>`:
-  1. Invalid name or `dev` → `usage` error.
-  2. Running from source (`STANDALONE` false) → `usage` error:
-     `dh channel use needs an installed dh` with hint to install it.
+  1. Invalid name, or the reserved name `dev` → `usage` error.
+  2. A dev build (`CHANNEL === "dev"`: from source or a local `bun run build`)
+     → `usage` error `dh channel use needs an installed dh`, with a hint to
+     install it. Dev builds are never replaced, like auto-update.
   3. Fetch the channel's manifest. 404 → new error code `channel_not_found`
      (exit 2, "No published build on that channel"); network failure →
      `server_unreachable`. Nothing is saved on failure.
@@ -309,7 +310,8 @@ it:
       any request; `DH_INSTALL_VERSION` accepts `9.9.9` and `cli-v9.9.9`.
 - [ ] (PR 2) From source: `dh --help` shows `Channel: dev (config …)`,
       `dh -o json` has `"channel":"dev"`, `dh channel` prints
-      `dev (never updates)`, `dh channel use rc` fails with `usage`, and
+      `dev (never updates)`, `dh channel use rc` fails with `usage` (a dev
+      build), and
       `dh agents -o json` lists `channel`, `channel use` and
       `channel_not_found`.
 - [ ] (PR 2) An installed `dh channel use` fails with `channel_not_found` and
