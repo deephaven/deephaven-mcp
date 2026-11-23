@@ -53,18 +53,18 @@ gitGraph
   branch cli-channel/alpha-bar order: 3
   checkout "v3_rewrite (future main)"
   branch cli-channel/rc order: 4
-  commit tag: "3.1.0-rc.2"
+  commit tag: "cli-v3.1.0-rc.2"
   checkout cli-channel/release
-  merge cli-channel/rc tag: "3.1.0"
+  merge cli-channel/rc tag: "cli-v3.1.0"
   checkout "v3_rewrite (future main)"
   commit
   checkout cli-channel/rc
-  merge "v3_rewrite (future main)" tag: "3.1.1-rc.0"
+  merge "v3_rewrite (future main)" tag: "cli-v3.1.1-rc.0"
   checkout "v3_rewrite (future main)"
   branch feature/bar order: 0
   commit
   checkout cli-channel/alpha-bar
-  merge feature/bar tag: "3.1.1-alpha-bar.0"
+  merge feature/bar tag: "cli-v3.1.1-alpha-bar.0"
   checkout "v3_rewrite (future main)"
   commit
   branch feature/foo order: 1
@@ -73,17 +73,17 @@ gitGraph
   checkout "v3_rewrite (future main)"
   merge feature/foo
   checkout cli-channel/rc
-  merge "v3_rewrite (future main)" tag: "3.1.1-rc.1"
+  merge "v3_rewrite (future main)" tag: "cli-v3.1.1-rc.1"
   checkout feature/bar
   commit
   checkout cli-channel/alpha-bar
-  merge feature/bar tag: "3.1.1-alpha-bar.1"
+  merge feature/bar tag: "cli-v3.1.1-alpha-bar.1"
   checkout "v3_rewrite (future main)"
   merge feature/bar
   checkout cli-channel/rc
-  merge "v3_rewrite (future main)" tag: "3.1.1-rc.2"
+  merge "v3_rewrite (future main)" tag: "cli-v3.1.1-rc.2"
   checkout cli-channel/release
-  merge cli-channel/rc tag: "3.1.1"
+  merge cli-channel/rc tag: "cli-v3.1.1"
 ```
 
 ### Hotfixes
@@ -109,13 +109,13 @@ gitGraph
   branch cli-channel/release order: 3
   checkout "v3_rewrite (future main)"
   branch cli-channel/rc order: 2
-  commit tag: "3.1.0-rc.1"
+  commit tag: "cli-v3.1.0-rc.1"
   checkout "v3_rewrite (future main)"
   commit
   checkout cli-channel/rc
-  merge "v3_rewrite (future main)" tag: "3.1.0-rc.2"
+  merge "v3_rewrite (future main)" tag: "cli-v3.1.0-rc.2"
   checkout cli-channel/release
-  merge cli-channel/rc tag: "3.1.0"
+  merge cli-channel/rc tag: "cli-v3.1.0"
   checkout "v3_rewrite (future main)"
   branch hotfix/crash order: 0
   checkout "v3_rewrite (future main)"
@@ -124,13 +124,13 @@ gitGraph
   checkout hotfix/crash
   commit
   checkout cli-channel/release
-  merge hotfix/crash tag: "3.1.1"
+  merge hotfix/crash tag: "cli-v3.1.1"
   checkout "v3_rewrite (future main)"
   merge hotfix/crash
   checkout cli-channel/rc
-  merge "v3_rewrite (future main)" tag: "3.1.2-rc.0"
+  merge "v3_rewrite (future main)" tag: "cli-v3.1.2-rc.0"
   checkout cli-channel/release
-  merge cli-channel/rc tag: "3.1.2"
+  merge cli-channel/rc tag: "cli-v3.1.2"
 ```
 
 1. Branch `hotfix/<name>` from the last released `v3_rewrite` commit: `git merge-base origin/cli-channel/release origin/v3_rewrite`.
