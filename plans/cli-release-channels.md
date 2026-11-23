@@ -120,14 +120,16 @@ versioned release.
    - `<notes>`: `Moving release for the <channel> channel. Its tag and
      manifest.json are replaced on every publish. Do not delete.`
 
-Gotchas:
+Notes:
 - `gh release upload --clobber` deletes before it uploads, so the manifest URL
   can 404 for a moment. That is expected; the updater treats it as a failed
   check.
 - GitHub dates a release by its tag's commit, so moving the tag keeps the
   channel release next to its current build (verified on a scratch repo).
-- Tags created or moved with `GITHUB_TOKEN` never trigger workflows, and this
-  workflow triggers on branches anyway.
+- Tags and releases made with `GITHUB_TOKEN` never start workflows (GitHub's
+  protection against loops), so publishing can't retrigger itself. A future
+  workflow that should react to new CLI tags or releases won't run for these
+  without a GitHub App or personal token.
 
 **`.github/workflows/release.yml`** (replace the current tag-triggered one):
 
