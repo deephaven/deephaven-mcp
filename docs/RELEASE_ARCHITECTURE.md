@@ -297,9 +297,9 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 | Version tags never change | Tag ruleset on `cli-v*`: no update, no deletion |
 | Only CI moves channel tags | Tag ruleset on `cli-channel-*`: no update or deletion, except by the release workflow |
 
-Merging is publishing: no channel has a separate approval step. Anyone who can bypass these rulesets, such as a repo admin, skips them and accepts that risk; the release workflow's PR check still keeps an accidental push to `release` from publishing. A commit that lands that way stays on the branch until someone removes it, and `release-contains` flags it on the next `rc` PR.
+Merging publishes; there's no separate approval step. Repo admins can bypass these rules, but an accidental direct push to `release` still won't publish: the workflow only publishes merged `rc` or hotfix PRs.
 
-`release-contains` fails a release PR if any commit already on `release` is missing from the branch being released. It compares diffs, not hashes, so cherry-picked fixes count:
+`release-contains` fails a release PR if the branch is missing any change already on `release`. It matches changes by content, so cherry-picked fixes count:
 
 ```sh
 git log --no-merges --cherry-pick --right-only --format='%h %s' HEAD...origin/cli-channel/release
