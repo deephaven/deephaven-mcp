@@ -24,9 +24,6 @@ small file next to the executable (`dh.exe.meta` on Windows), so every later
 update comes from it. Without `DH_CHANNEL`, the install follows
 `release`.
 
-Only the install scripts read `DH_CHANNEL`: setting it before a `dh` command
-changes nothing. To switch an installed `dh`, use `dh channel use`.
-
 ```sh
 curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_CHANNEL=rc sh
 ```
@@ -34,6 +31,10 @@ curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-chan
 ```powershell
 $env:DH_CHANNEL = 'rc'; irm https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.ps1 | iex
 ```
+
+> [!NOTE]
+> Only the install scripts read `DH_CHANNEL`: setting it before a `dh` command
+> changes nothing. To switch an installed `dh`, use `dh channel use`.
 
 To try a channel side by side, install a second copy with its own
 `DH_INSTALL_DIR`; each copy follows its own channel. `DH_INSTALL_VERSION` pins a
