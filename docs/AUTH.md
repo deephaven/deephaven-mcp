@@ -179,7 +179,8 @@ channels use a sibling folder named after the channel, such as `cli-rc` or
 `cli-alpha-<id>`, so they can't break a working `release` setup. Dev builds (run
 from source or built locally) use `cli-dev`. Each folder starts empty, and
 logging out in one never revokes another's keys. Set `DH_CONFIG_DIR` to use
-another directory.
+another directory; it replaces the folder for every channel, so builds that
+share a value share profiles and keys.
 
 On macOS and Linux, `dh` refuses to read `credentials.json` if other users can
 read it. Fix the permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
