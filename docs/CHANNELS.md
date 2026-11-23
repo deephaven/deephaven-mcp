@@ -18,9 +18,13 @@ switches back to the default.
 
 ## Installing on a channel
 
-Only the install scripts read `DH_CHANNEL` (default `release`): setting it
-before a `dh` command changes nothing. To switch an installed `dh`, use
-`dh channel use`.
+Set `DH_CHANNEL` when installing to follow that channel: the install script
+installs the channel's current build and saves the channel in `dh.meta`, so
+every later update comes from it. Without `DH_CHANNEL`, the install follows
+`release`.
+
+Only the install scripts read `DH_CHANNEL`: setting it before a `dh` command
+changes nothing. To switch an installed `dh`, use `dh channel use`.
 
 ```sh
 curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_CHANNEL=rc sh
