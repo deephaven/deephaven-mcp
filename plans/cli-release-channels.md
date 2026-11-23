@@ -305,36 +305,42 @@ it:
 
 ## Done when
 
-- [ ] (PR 2) `nextVersion` and `bun run next-version` produce every case in the
+Each item has an ID. The implementing PR proves every `(PR n)` item with tests
+in `tests/contract/` whose names start with its ID, e.g.
+`test("[C3] DH_CHANNEL=nope fails with no channel", …)`, and its description
+maps each ID to those tests. `(Manual)` items are proven by the recorded fork
+run. Changing a contract test, or the docs this plan relies on, needs a
+callout in the PR.
+
+- [ ] **C1** (PR 2) `nextVersion` and `bun run next-version` produce every case in the
       next-version table; `cli-v3.1.1-alpha-1.0` parses as channel `alpha-1`,
       build `0`; notes start at `cli-v3.1.0` for `cli-v3.1.1` and for
       `cli-v3.1.1-rc.0` (with only `cli-v3.1.0`), and at `cli-v3.1.1-rc.0` for
       `cli-v3.1.1-rc.1`.
-- [ ] (PR 2) Auto-update fetches `cli-channel-<channel>/manifest.json` for the
+- [ ] **C2** (PR 2) Auto-update fetches `cli-channel-<channel>/manifest.json` for the
       channel in `dh.meta`, else `release`; installs a lower version and skips
       an equal one; treats a bad `dh.meta` as `release` and rewrites it;
       throttles on `lastUpdateCheck`; never fetches on a `dev` build.
-- [ ] (PR 2) The install scripts install from `cli-channel-release` by default
+- [ ] **C3** (PR 2) The install scripts install from `cli-channel-release` by default
       and from `DH_CHANNEL`'s channel otherwise, writing `dh.meta`;
       `DH_CHANNEL=nope` fails with `no channel`; `dev` and `Rc` fail before
       any request; `DH_INSTALL_VERSION` accepts `9.9.9` and `cli-v9.9.9`.
-- [ ] (PR 2) From source: `dh --help` shows `Channel: dev (config …)`,
+- [ ] **C4** (PR 2) From source: `dh --help` shows `Channel: dev (config …)`,
       `dh -o json` has `"channel":"dev"`, `dh channel` prints
       `dev (never updates)`, `dh channel use rc` fails with `usage` (a dev
-      build), and
-      `dh agents -o json` lists `channel`, `channel use` and
+      build), and `dh agents -o json` lists `channel`, `channel use` and
       `channel_not_found`.
-- [ ] (PR 2) An installed `dh channel use` fails with `channel_not_found` and
+- [ ] **C5** (PR 2) An installed `dh channel use` fails with `channel_not_found` and
       saves nothing for an unpublished channel, and otherwise switches and
       installs immediately; `dh channel` shows the mismatch notice when the
       build's channel differs.
-- [ ] (PR 2) `configDir()` is `…/cli` on release, `…/cli-rc`, `…/cli-dev`, and
+- [ ] **C6** (PR 2) `configDir()` is `…/cli` on release, `…/cli-rc`, `…/cli-dev`, and
       `DH_CONFIG_DIR` wins.
-- [ ] (PR 2) The docs match the implementation.
-- [ ] (Every PR) `bun run check` passes; `bun test` passes on Linux, macOS and
+- [ ] **C7** (PR 2) The docs match the implementation.
+- [ ] **C8** (Every PR) `bun run check` passes; `bun test` passes on Linux, macOS and
       Windows.
-- [ ] (Manual) Repo setup applied.
-- [ ] (Manual) End to end on a fork with the repo setup applied:
+- [ ] **C9** (Manual) Repo setup applied.
+- [ ] **C10** (Manual) End to end on a fork with the repo setup applied:
   1. Push to `cli-channel/rc` → `cli-v<x>-rc.0` released as a pre-release, not
      latest; `cli-channel-rc` exists, titled `rc channel (currently …)`, its tag
      on the pushed commit.
