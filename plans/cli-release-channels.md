@@ -32,10 +32,10 @@ New module (e.g. `src/channel.ts`), imported by the CLI and the scripts.
 | Kind | Format | Regex |
 | --- | --- | --- |
 | Release | `cli-vX.Y.Z` | `/^cli-v(0\|[1-9]\d*)\.(0\|[1-9]\d*)\.(0\|[1-9]\d*)$/` |
-| Prerelease | `cli-vX.Y.Z-<channel>.<build>` | `/^cli-v(\d+\.\d+\.\d+)-([a-z][a-z0-9-]*)\.(0\|[1-9]\d*)$/` |
+| Pre-release | `cli-vX.Y.Z-<channel>.<build>` | `/^cli-v(\d+\.\d+\.\d+)-([a-z][a-z0-9-]*)\.(0\|[1-9]\d*)$/` |
 | Channel release | `cli-channel-<channel>` | — (never parsed as a version) |
 
-- The prerelease regex splits on the **last** dot, so `alpha-1.0` is channel
+- The pre-release regex splits on the **last** dot, so `alpha-1.0` is channel
   `alpha-1`, build `0`. Tags matching neither regex (including the Python
   `v*` tags) are ignored.
 - The version is the tag minus `cli-v`. It is valid semver;
@@ -45,7 +45,7 @@ New module (e.g. `src/channel.ts`), imported by the CLI and the scripts.
 channel):
 
 1. `last` = the semver maximum of release tags, or `0.0.0` if none.
-2. `pkg` = `package.json` `version`; it must be plain `X.Y.Z` (no prerelease),
+2. `pkg` = `package.json` `version`; it must be plain `X.Y.Z` (no pre-release),
    else error.
 3. `base` = the higher of `semver.inc(last, "patch")` and `pkg`.
 4. Channel `release` → `base`. Any other channel →
@@ -60,7 +60,7 @@ It reads tags with `git tag --list 'cli-v*'`, so it needs a checkout with all
 tags (see the workflow's `fetch-depth: 0`).
 
 **Release-notes start tag** (a pure function of: all tag names, the tag being
-published): for a release, the highest release tag below it; for a prerelease,
+published): for a release, the highest release tag below it; for a pre-release,
 the highest tag of the same channel below it, falling back to the highest
 release tag below its `X.Y.Z`. None → omit.
 
@@ -92,7 +92,7 @@ Next-version cases (from tag lists):
   `bun run build` therefore makes `dev` builds.
 
 **`scripts/release.ts`**: takes a full tag (`cli-v3.1.1-rc.2`), derives version
-and channel from it (`release` when there is no prerelease part), passes both
+and channel from it (`release` when there is no pre-release part), passes both
 to `build()`, and drops the `package.json` version check. Base URLs stay
 tagged (`releases/download/<tag>/`). Install scripts are still attached to every
 versioned release.
@@ -261,7 +261,7 @@ Gotchas:
     `TAG=cli-v$version`, then continue as today with the binary and
     `SHA256SUMS` from `releases/download/$TAG/`.
   - `ps1`: install from the manifest as today.
-- `DH_INSTALL_VERSION` accepts `3.1.1`, `v3.1.1` or `cli-v3.1.1` (prereleases
+- `DH_INSTALL_VERSION` accepts `3.1.1`, `v3.1.1` or `cli-v3.1.1` (pre-releases
   too) and normalizes to `cli-v…`.
 - After installing, always write the metadata file fresh:
   `{"channel":"<channel>"}` to `<dir>/dh.meta` (`dh.exe.meta` on Windows), via a
