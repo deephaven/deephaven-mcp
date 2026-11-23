@@ -258,9 +258,9 @@ CI computes every version from the tags already in the repo plus `package.json`.
 
 Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `package.json`, normally the same PR as the change that needs it:
 
-1. A PR into `v3_rewrite` sets `package.json` to `3.2.0` (or `4.0.0`).
-2. The next `rc` build is `3.2.0-rc.0`, so `rc` labels jump from `3.1.x`.
-3. Promoting it releases `3.2.0`.
+1. A PR into `v3_rewrite` sets `package.json` to `3.2.0` (or `4.0.0`). Nothing publishes yet.
+2. Merging `v3_rewrite` into `rc` publishes `3.2.0-rc.0`, so `rc` labels jump from `3.1.x`.
+3. Promoting `rc` to `release` publishes `3.2.0`.
 4. Patches then continue automatically (`3.2.1-rc.0`, …). `package.json` stays at `3.2.0` until the next bump.
 
 - **A bump only counts if it's above the last release.** Setting `3.2.0` after `3.2.0` has shipped changes nothing.

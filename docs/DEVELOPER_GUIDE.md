@@ -78,7 +78,8 @@ publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
   first push creates the channel.
 - **Hotfix:** follow [Hotfixes](RELEASE_ARCHITECTURE.md#hotfixes).
 - **Minor or major bump:** set `version` in `package.json` (e.g. `3.2.0`) in a PR
-  into `v3_rewrite`; see
+  into `v3_rewrite`. It takes effect when `v3_rewrite` is next merged into
+  `cli-channel/rc` (`3.2.0-rc.0`), then promoted to release (`3.2.0`); see
   [Minor and major bumps](RELEASE_ARCHITECTURE.md#minor-and-major-bumps).
 
 To test a published channel without switching an install:
