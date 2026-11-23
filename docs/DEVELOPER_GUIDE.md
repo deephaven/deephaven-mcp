@@ -27,11 +27,12 @@ Channels, publishing and versions are described in
 [Release architecture](RELEASE_ARCHITECTURE.md); this section covers what the
 binary does.
 
-After a run, `dh` reads its channel from `dh.meta` beside the executable (else
-`release`) and fetches that channel release's manifest, e.g.
+After each command finishes and prints its output (except `--help` and
+`--version`), `dh` checks for an update, at most once per `DH_UPDATE_INTERVAL`.
+It reads its channel from `dh.meta` beside the executable (else `release`) and
+fetches that channel release's manifest, e.g.
 `https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-rc/manifest.json`
-(the repo comes from `repository` in `package.json`), at most once per
-`DH_UPDATE_INTERVAL`. If the manifest's version differs from its own (higher or
+(the repo comes from `repository` in `package.json`). If the manifest's version differs from its own (higher or
 lower), `dh` downloads the build for this platform, checks the SHA-256, and swaps
 it in place of its own executable. The time of the last check is kept in
 `dh.meta` too. Only compiled binaries on a published channel update themselves:
