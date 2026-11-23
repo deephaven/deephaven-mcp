@@ -59,9 +59,10 @@ channel, invalid `pkg` or an existing tag print an error to stderr and exit 1.
 It reads tags with `git tag --list 'cli-v*'`, so it needs a checkout with all
 tags (see the workflow's `fetch-depth: 0`).
 
-**Release-notes start tag** (also pure): for a release, the highest release tag
-below it; for a prerelease, the highest tag of the same channel below it,
-falling back to the highest release tag below its `X.Y.Z`. None → omit.
+**Release-notes start tag** (a pure function of: all tag names, the tag being
+published): for a release, the highest release tag below it; for a prerelease,
+the highest tag of the same channel below it, falling back to the highest
+release tag below its `X.Y.Z`. None → omit.
 
 Next-version cases (from tag lists):
 
