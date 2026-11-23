@@ -140,8 +140,9 @@ Notes:
   pending ones. That is fine: the newest commit is the one that should publish.
 - Jobs: `ci` (reuse `ci.yml`), then `release` on `macos-latest` (darwin
   codesign), `timeout-minutes: 15`, `permissions: { contents: write,
-  pull-requests: read }`. No `environment`: merging is publishing, with no
-  approval step.
+  pull-requests: read }`. No `environment`: the job publishes as soon as the
+  merge lands, with no deployment approval. Review happens on the PR (required
+  on `release`).
 - Steps:
   1. Only on `cli-channel/release`, before anything else: the pushed commit
      must be the merge of a PR from `cli-channel/rc` or `hotfix/*`. Check with
@@ -353,7 +354,7 @@ callout in the PR.
   3. Install with `DH_CHANNEL=rc`; `dh --help` shows `Channel: rc`; push to rc
      again and `DH_UPDATE_INTERVAL=0 dh` updates to the new build.
   4. PR `cli-channel/rc` → `cli-channel/release`: both checks pass; merge
-     → `cli-v<x>` released with no approval step, `cli-channel-release`
+     → `cli-v<x>` released with no deployment approval, `cli-channel-release`
      carries the install scripts.
   5. A PR from any other branch fails `release-source`. A hotfix PR into
      release passes; the next rc PR fails `release-contains` until the fix is
