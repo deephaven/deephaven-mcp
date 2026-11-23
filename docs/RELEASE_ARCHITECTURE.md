@@ -18,7 +18,7 @@ Using channels as a user is covered in [Release channels](CHANNELS.md); the one-
 - **The CLI follows one channel:** the one saved at install or with `dh channel use`, else `release`. It installs the channel's latest build whenever that version differs from the one running.
 - **Releases always come from the `rc` channel.** The one exception is a hotfix, which goes straight into `release` and is then merged into `v3_rewrite` and on to `rc`, so the next promotion includes it (see [Hotfixes](#hotfixes)).
 - **CI computes every version.** People only edit `package.json` to bump minor or major.
-- **Every publish creates a GitHub release** (never marked latest; v2 currently uses `releases/latest` for its own process). On `release` it's tagged `cli-vX.Y.Z`; on every other channel it's tagged `cli-vX.Y.Z-<channel>.<build>` and marked as a pre-release.
+- **Every publish creates a GitHub release.** On the `release` channel it's a regular release tagged `cli-vX.Y.Z`, but not marked latest, since v2 currently uses `releases/latest` for its own process. On every other channel it's a pre-release tagged `cli-vX.Y.Z-<channel>.<build>`.
 
 ## Branches
 
