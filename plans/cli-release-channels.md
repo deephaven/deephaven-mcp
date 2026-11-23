@@ -332,7 +332,7 @@ it:
       Windows.
 - [ ] (Manual) Repo setup applied.
 - [ ] (Manual) End to end on a fork with the repo setup applied:
-  1. Push to `cli-channel/rc` → `cli-v<x>-rc.0` released as a prerelease, not
+  1. Push to `cli-channel/rc` → `cli-v<x>-rc.0` released as a pre-release, not
      latest; `cli-channel-rc` exists, titled `rc channel (currently …)`, its tag
      on the pushed commit.
   2. Push again → `rc.1`; `cli-channel-rc` moved to the new commit and sits

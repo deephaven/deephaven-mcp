@@ -20,7 +20,7 @@ that directory to your `PATH`: on macOS/Linux via your shell's startup file
 Windows via the user `PATH`. Set `DH_INSTALL_NO_MODIFY_PATH=1` to skip that. The
 directory must be writable by the user, or `dh` can't update itself.
 
-To install a specific version (`3.0.1`, `v3.0.1` or `cli-v3.0.1`, prereleases
+To install a specific version (`3.0.1`, `v3.0.1` or `cli-v3.0.1`, pre-releases
 included), set `DH_INSTALL_VERSION`. To stay on it, also set
 `DH_AUTO_UPDATE=off`; otherwise the next `dh` command updates to the channel's
 build.
