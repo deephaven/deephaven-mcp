@@ -72,11 +72,13 @@ Every push or merge to a `cli-channel/<channel>` branch publishes the next build
 on that channel; CI computes the version. Why it works this way, and what each
 publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
 
-- **Release candidate:** merge `v3_rewrite` into `cli-channel/rc`.
+- **Release candidate:** open a PR from `v3_rewrite` into `cli-channel/rc` and
+  merge it with a merge commit. PRs into every `cli-channel/*` branch use merge
+  commits, never squash.
 - **Release:** open a PR from `cli-channel/rc` into `cli-channel/release`. The
   `release-source` and `release-contains` checks must pass; merging publishes.
-- **Experiment:** merge a feature branch into `cli-channel/alpha-<id>`; the
-  first push creates the channel.
+- **Experiment:** push a new `cli-channel/alpha-<id>` branch to create the
+  channel, then merge a feature branch into it with a PR.
 - **Hotfix:** follow [Hotfixes](RELEASE_ARCHITECTURE.md#hotfixes).
 - **Minor or major bump:** set `version` in `package.json` (e.g. `3.2.0`) in a PR
   into `v3_rewrite`. It takes effect when `v3_rewrite` is next merged into
@@ -95,9 +97,12 @@ DH_UPDATE_URL=https://github.com/deephaven/deephaven-mcp/releases/download/cli-c
 Done once by a repo admin:
 
 - Create `cli-channel/release` and `cli-channel/rc` from `v3_rewrite`.
-- Branch ruleset on `cli-channel/**`: block force pushes and deletion.
-- Branch ruleset on `cli-channel/release`: require a pull request, allow only
-  merge commits, and require the checks `release-source` and `release-contains`.
+- Branch ruleset on `cli-channel/**`: block force pushes and deletion; require
+  a pull request with 0 approvals and allow only merge commits (no squash or
+  rebase).
+- Branch ruleset on `cli-channel/release`: require a pull request with an
+  approving review, and require the checks `release-source` and
+  `release-contains`.
 - Tag ruleset on `cli-v*`: block updates and deletion.
 - Tag ruleset on `cli-channel-*`: block updates and deletion, with GitHub Actions
   as the only bypass actor.

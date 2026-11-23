@@ -277,9 +277,12 @@ Manual, by a repo admin, before the first publish; the Developer Guide records
 it:
 
 - Create `cli-channel/release` and `cli-channel/rc` from `v3_rewrite`.
-- Branch ruleset on `cli-channel/**`: block force pushes and deletion.
-- Branch ruleset on `cli-channel/release`: require a pull request, allow only
-  merge commits, require checks `release-source` and `release-contains`.
+- Branch ruleset on `cli-channel/**`: block force pushes and deletion; require
+  a pull request with 0 approvals and allow only merge commits (no squash or
+  rebase).
+- Branch ruleset on `cli-channel/release`: require a pull request with an
+  approving review, and require the checks `release-source` and
+  `release-contains`.
 - Tag ruleset on `cli-v*`: block updates and deletion.
 - Tag ruleset on `cli-channel-*`: block updates and deletion, with GitHub
   Actions as the only bypass actor. Verify on a fork that the workflow can
