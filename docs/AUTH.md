@@ -175,10 +175,11 @@ Other accounts on the computer can't read `credentials.json`, but any program
 running as you can, including AI agents and other tools.
 
 On Windows the directory is `%APPDATA%\Deephaven\cli`. Builds on other release
-channels use a sibling folder, so they can't break a working `release` setup:
-`cli-rc`, `cli-alpha-<id>`, and `cli-dev` when run from source. Each starts
-empty, and logging out on one never revokes another's keys. Set `DH_CONFIG_DIR`
-to use another directory.
+channels use a sibling folder named after the channel, such as `cli-rc` or
+`cli-alpha-<id>`, so they can't break a working `release` setup. Dev builds (run
+from source or built locally) use `cli-dev`. Each folder starts empty, and
+logging out in one never revokes another's keys. Set `DH_CONFIG_DIR` to use
+another directory.
 
 On macOS and Linux, `dh` refuses to read `credentials.json` if other users can
 read it. Fix the permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
