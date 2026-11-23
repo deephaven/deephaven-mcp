@@ -14,7 +14,7 @@ Using channels as a user is covered in [Release channels](CHANNELS.md); the one-
 | `rc` | `cli-channel/rc` | Testers who opt in | Merges from `v3_rewrite` |
 | `alpha-<id>` | `cli-channel/alpha-<id>` | Testers of one experiment | Merges from that feature branch |
 
-- **Merging starts a publish.** Every merge or push to a channel branch triggers CI, which builds and publishes it. Nothing is released from a local machine.
+- **Merging starts a publish.** Every merge or push to a channel branch triggers CI, which builds and publishes it; `release` publishes only a merged `rc` or hotfix PR. Nothing is released from a local machine.
 - **The CLI follows one channel:** the one saved at install or with `dh channel use`, else `release`. It installs the channel's latest build whenever that version differs from the one running.
 - **Releases promote `rc`.** Hotfixes are the one exception, with a set process that brings `rc` back in line.
 - **CI computes every version.** People only edit `package.json` to bump minor or major.
@@ -140,17 +140,17 @@ gitGraph
 
 ## What a publish does
 
-A publish starts when something is merged or pushed to a `cli-channel/<channel>` branch; nothing else publishes. Each publish updates two GitHub releases:
+A publish starts when something is merged or pushed to a `cli-channel/<channel>` branch; nothing else publishes. On `release`, the workflow first checks that the pushed commit is the merge of a PR from `cli-channel/rc` or `hotfix/*`, and publishes nothing otherwise (see [Rules](#rules)). Each publish updates two GitHub releases:
 
 - **Versioned release** (`cli-v3.1.1-rc.2`, `cli-v3.1.1`): created new, never changed afterwards. Holds the binaries, `manifest.json`, `SHA256SUMS` and the install scripts. Created with `--latest=false`, so `releases/latest` stays with the Python MCP releases.
-- **Channel release** (`cli-channel-rc`, `cli-channel-release`): one per channel, same name forever, created on the channel's first publish. Each publish moves its tag to the published commit, replaces its `manifest.json` to point at the new versioned release, and updates its title to show the current build, for example `rc channel (currently cli-v3.1.1-rc.2)`. GitHub dates a release by its tag's commit, so the channel release sits next to its current build on the Releases page.
+- **Channel release** (`cli-channel-rc`, `cli-channel-release`): one per channel, same name forever, created on the channel's first publish. Each publish moves its tag to the published commit, replaces its `manifest.json` to point at the new versioned release, and updates its title to show the current build, for example `rc channel (currently cli-v3.1.1-rc.2)`. The `release` channel's release also carries `install.sh` and `install.ps1`, which the install one-liners download. GitHub dates a release by its tag's commit, so the channel release sits next to its current build on the Releases page.
 
 Every channel runs the same steps:
 
 ```mermaid
 %%{init: {'themeVariables': {'fontSize': '12px'}, 'flowchart': {'nodeSpacing': 20, 'rankSpacing': 22, 'padding': 6, 'subGraphTitleMargin': {'top': 2, 'bottom': 2}}}}%%
 flowchart TB
-  push(["PR merged into cli-channel/#lt;channel#gt;"])
+  push(["Merge into cli-channel/#lt;channel#gt;"])
   subgraph ci["CI release workflow"]
     direction LR
     ver["Compute version<br/>last release + patch<br/>+ -#lt;channel#gt;.#lt;build#gt; suffix<br/>for non-release channels<br/>rc: 3.1.0 → 3.1.1-rc.2<br/>release: 3.1.0 → 3.1.1"] --> build["Build CLI binaries<br/>for each platform"] --> rel["Tag + GitHub release<br/>cli-v3.1.1-rc.2"]
@@ -213,17 +213,18 @@ flowchart LR
 Each CLI's channel comes from its `dh.meta`, else `release`. Channel releases keep their names forever while their tag and manifest move on each publish; versioned releases never change. `cli-v3.1.0` is an older release that no channel release names anymore: it can still be downloaded, but no CLI updates to it.
 
 1. **Pick a channel:** `channel` in the install metadata file, else `release`.
-2. **Check, at most once per `DH_UPDATE_INTERVAL`** (default 24 hours): fetch `releases/download/cli-channel-<channel>/manifest.json`.
+2. **Check after a command finishes, at most once per `DH_UPDATE_INTERVAL`** (default 24 hours; never with `DH_AUTO_UPDATE=off`): fetch `releases/download/cli-channel-<channel>/manifest.json`.
 3. **If the manifest's version differs from its own,** download the binary for this platform, verify its SHA-256, and replace itself.
 
-- **No higher-or-lower comparison.** Switching channels takes effect at the next check, even if that channel's version is lower.
+- **No higher-or-lower comparison.** Any difference installs, so switching channels can move to a lower version.
 - **Install on a channel:** `curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_CHANNEL=rc sh`. The script installs that channel's latest build and saves the channel in the metadata file. `DH_CHANNEL` is read only by the install script; the CLI ignores it. Any copy of the script behaves the same; without `DH_CHANNEL` it installs `release`. An unpublished channel fails with "no channel", and an invalid name fails before anything downloads.
   - **Try a channel side by side:** install a second copy elsewhere, for example `DH_CHANNEL=rc DH_INSTALL_DIR=~/dh-rc`. It gets its own metadata file, so the main install keeps its channel.
-- **Switch an existing install:** `dh channel` shows the channel the install follows. `dh channel use rc` saves `rc` in `dh.meta` and checks for an update right away, so the switch happens now rather than at the next daily check. `dh channel use release` switches back. A channel that hasn't been published fails with `channel_not_found` and saves nothing. This follows the CLI's noun + `use` pattern (`dh auth use <profile>`).
-- **Install metadata file:** one file next to the binary, named after it: `dh.meta` beside `dh`, `dh.exe.meta` beside `dh.exe`. No extension, so its format stays an implementation detail. It holds install-level data such as the channel and the last update-check time. The install script writes it fresh; the CLI and updater each update only their own fields, writing to a temp file and renaming it into place. An unreadable file means defaults (`release`, check now), never a failed command.
-- **Dev builds never update.** A CLI run from source or built locally reports channel `dev` and never checks for updates, so it can't replace itself with a published build.
+- **Switch an existing install:** `dh channel` shows the channel the install follows, and says so when the running build is from another channel. `dh channel use rc` saves `rc` in `dh.meta` and installs rc's build right away, ignoring the interval and `DH_AUTO_UPDATE`; on the channel already followed, that makes it a manual update. `dh channel use release` switches back. A channel that hasn't been published fails with `channel_not_found` and saves nothing, and dev builds refuse it. This follows the CLI's noun + `use` pattern (`dh auth use <profile>`).
+- **Pinning a version:** install it with `DH_INSTALL_VERSION` (any channel's version; it downloads that `cli-v…` release directly) and set `DH_AUTO_UPDATE=off`. Both are needed: without the second, the next command updates to the channel's build.
+- **Install metadata file:** one file next to the binary, named after it: `dh.meta` beside `dh`, `dh.exe.meta` beside `dh.exe`. It's a JSON object of install-level data, such as the channel and the last update-check time, with no extension because it isn't meant to be edited by hand. The install script writes it fresh, so its format is a contract between the scripts and the CLI; the CLI and updater each update only their own fields, writing to a temp file and renaming it into place. An unreadable file means defaults (`release`, check now), never a failed command.
+- **Dev builds never update.** A CLI run from source or built locally reports channel `dev`, never checks for updates and refuses `dh channel use`, so it can't be replaced by a published build.
 - **A failed check is harmless.** Replacing the manifest returns 404 for a moment; the CLI just checks again next interval.
-- **Help shows a non-release channel.** Top-level help prints `Version:` under `Usage:`. On any build other than `release`, it adds a `Channel:` line with the build's channel and config folder, for example `Channel: rc (config ~/.deephaven/cli-rc)`, or `Channel: dev` when run from source. Release builds show nothing extra.
+- **Help shows a non-release channel.** Top-level help prints `Version:` under `Usage:`. On any build other than `release`, it adds a `Channel:` line with the build's channel and config folder, for example `Channel: rc (config ~/.deephaven/cli-rc)`, or `Channel: dev (config ~/.deephaven/cli-dev)` on a dev build. Release builds show nothing extra.
 
 ## Config per channel
 
@@ -233,11 +234,11 @@ Each channel keeps its own config folder (profiles and credentials), so an `rc` 
 | --- | --- |
 | `release` | `~/.deephaven/cli` (`%APPDATA%\Deephaven\cli` on Windows) |
 | Any other channel | A sibling folder: `~/.deephaven/cli-rc`, `~/.deephaven/cli-alpha-bar`, … |
-| Run from source (`bun run dev`) | `~/.deephaven/cli-dev` |
+| Dev build (`bun run dev`, or a local `bun run build`) | `~/.deephaven/cli-dev` |
 
 - **The build decides, not `dh.meta`.** The channel is baked into the binary at build time, like the version, so a channel's folder is only ever read and written by that channel's code. Switching channels switches folders when the new channel's build installs, not when `dh.meta` changes.
 - **Each channel starts empty.** Testers sign in once per channel. A channel only manages credentials it created, so logging out on `rc` never revokes a key `release` uses.
-- **`DH_CONFIG_DIR` overrides the folder** for every channel.
+- **`DH_CONFIG_DIR` overrides the folder** for every channel, so builds that share a value share profiles and keys.
 
 ## Versions
 
