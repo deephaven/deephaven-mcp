@@ -78,8 +78,8 @@ Next-version cases (from tag lists):
 | `cli-v3.1.1` | `3.2.0` | `rc` | `3.2.0-rc.0` |
 | `cli-v3.2.0` | `3.2.0` | `rc` | `3.2.1-rc.0` |
 | `v2.1.0`, `cli-vfoo`, `cli-v3.1.0` | `3.1.0` | `rc` | `3.1.1-rc.0` (others ignored) |
-| any | `3.2.0-beta` | any | error |
-| any | any | `Rc`, `dev`, `-x` | error |
+| any | `3.2.0-beta` | any | error: `package.json` must be plain `X.Y.Z` |
+| any | any | `Rc`, `dev`, `-x` | error: invalid channel name (`Rc`, `-x`) or reserved (`dev`) |
 
 ### 2. Publishing
 
