@@ -20,15 +20,15 @@ that directory to your `PATH`: on macOS/Linux via your shell's startup file
 Windows via the user `PATH`. Set `DH_INSTALL_NO_MODIFY_PATH=1` to skip that. The
 directory must be writable by the user, or `dh` can't update itself.
 
-To install a specific version (including prereleases), set `DH_INSTALL_VERSION`
-to `3.0.1`, `v3.0.1` or the tag `cli-v3.0.1`.
+To install a specific version (`3.0.1`, `v3.0.1` or `cli-v3.0.1`, prereleases
+included), set `DH_INSTALL_VERSION`. To stay on it, also set
+`DH_AUTO_UPDATE=off`; otherwise the next `dh` command updates to the channel's
+build.
 
 ```sh
 curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_INSTALL_VERSION=3.0.1 sh
+export DH_AUTO_UPDATE=off
 ```
-
-Note that running `dh` still updates itself to its channel's build unless
-`DH_AUTO_UPDATE=off`.
 
 ## Signing in
 
