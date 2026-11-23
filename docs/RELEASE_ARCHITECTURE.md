@@ -291,10 +291,8 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 | --- | --- |
 | Channels only move forward | Branch ruleset on `cli-channel/**`: no force-push, no deletion |
 | Who can publish | Standard repo permissions: anyone with write access can merge into a channel branch, including creating an `alpha-<id>` one |
-| `release` changes are reviewed | PR required; the PR review is the sign-off |
-| Releases come from `rc` or a hotfix | Required status check `release-source`: a PR into `cli-channel/release` must come from `cli-channel/rc` or a `hotfix/*` branch |
+| `release` only takes a reviewed PR from `rc` or a hotfix | Ruleset: PR required, and its review is the sign-off. Required status check `release-source`: the PR must come from `cli-channel/rc` or a `hotfix/*` branch. The release workflow: publishes only if the pushed commit is the merge of such a PR, so a stray direct push never reaches users |
 | A release never drops released work | Required status check `release-contains` |
-| Only a merged `rc` or hotfix PR publishes to `release` | The release workflow: for `cli-channel/release`, it publishes only if the pushed commit is the merge of a PR from `cli-channel/rc` or `hotfix/*`, so a stray direct push never reaches users |
 | Merges into `release` keep their commits | Merge commits only (no squash or rebase) |
 | Version tags never change | Tag ruleset on `cli-v*`: no update, no deletion |
 | Only CI moves channel tags | Tag ruleset on `cli-channel-*`: no update or deletion, except by the release workflow |
