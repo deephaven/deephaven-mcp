@@ -16,7 +16,7 @@ Using channels as a user is covered in [Release channels](CHANNELS.md); the one-
 
 - **Merging starts a publish.** Every merge or push to a channel branch triggers CI, which builds and publishes it; `release` publishes only a merged `rc` or hotfix PR. Nothing is released from a local machine.
 - **The CLI follows one channel:** the one saved at install or with `dh channel use`, else `release`. It installs the channel's latest build whenever that version differs from the one running.
-- **Releases promote `rc`.** Hotfixes are the one exception, with a set process that brings `rc` back in line.
+- **Releases always come from the `rc` channel.** The one exception is a hotfix, which goes straight into `release` and is then merged into `v3_rewrite` and on to `rc`, so the next promotion includes it (see [Hotfixes](#hotfixes)).
 - **CI computes every version.** People only edit `package.json` to bump minor or major.
 - **GitHub's `releases/latest` stays with the Python MCP releases.** CLI releases use `cli-v*` tags and are never marked latest.
 
