@@ -84,6 +84,9 @@ gitGraph
   merge "v3_rewrite (future main)" tag: "cli-v3.1.1-rc.2"
   checkout cli-channel/release
   merge cli-channel/rc tag: "cli-v3.1.1"
+  checkout "v3_rewrite (future main)"
+  commit
+  commit
 ```
 
 ### Hotfixes
@@ -131,6 +134,9 @@ gitGraph
   merge "v3_rewrite (future main)" tag: "cli-v3.1.2-rc.0"
   checkout cli-channel/release
   merge cli-channel/rc tag: "cli-v3.1.2"
+  checkout "v3_rewrite (future main)"
+  commit
+  commit
 ```
 
 1. Branch `hotfix/<name>` from the last released `v3_rewrite` commit: `git merge-base origin/cli-channel/release origin/v3_rewrite`.
