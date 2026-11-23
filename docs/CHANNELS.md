@@ -37,9 +37,12 @@ $env:DH_CHANNEL = 'rc'; irm https://github.com/deephaven/deephaven-mcp/releases/
 > changes nothing. To switch an installed `dh`, use `dh channel use`.
 
 To try a channel side by side, install a second copy with its own
-`DH_INSTALL_DIR`; each copy follows its own channel. `DH_INSTALL_VERSION` pins a
-version instead (`3.1.1`, `v3.1.1` or `cli-v3.1.1`, prereleases included); the
-install still follows `DH_CHANNEL` from its next update.
+`DH_INSTALL_DIR`. Each copy follows its own channel and keeps its own profiles.
+
+To install a specific version instead (`3.1.1`, `v3.1.1` or `cli-v3.1.1`,
+prereleases included), set `DH_INSTALL_VERSION`. To stay on it, also set
+`DH_AUTO_UPDATE=off`; otherwise the next `dh` command updates to the channel's
+build.
 
 ## JSON output
 
