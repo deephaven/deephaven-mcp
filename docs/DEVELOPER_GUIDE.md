@@ -73,8 +73,7 @@ publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
 
 - **Release candidate:** merge `v3_rewrite` into `cli-channel/rc`.
 - **Release:** open a PR from `cli-channel/rc` into `cli-channel/release`. The
-  `release-source` and `release-contains` checks must pass, and the publish
-  waits for approval in the `cli-release` environment.
+  `release-source` and `release-contains` checks must pass; merging publishes.
 - **Experiment:** merge a feature branch into `cli-channel/alpha-<id>`; the
   first push creates the channel.
 - **Hotfix:** follow [Hotfixes](RELEASE_ARCHITECTURE.md#hotfixes).
@@ -100,7 +99,6 @@ Done once by a repo admin:
 - Tag ruleset on `cli-v*`: block updates and deletion.
 - Tag ruleset on `cli-channel-*`: block updates and deletion, with GitHub Actions
   as the only bypass actor.
-- Environments: `cli-release` (required reviewers) and `cli-prerelease` (none).
 
 ### Testing on a fork
 

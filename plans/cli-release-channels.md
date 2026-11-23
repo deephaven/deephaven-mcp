@@ -135,8 +135,8 @@ Gotchas:
   Gotcha: GitHub keeps only the newest pending run per group and cancels older
   pending ones. That is fine: the newest commit is the one that should publish.
 - Jobs: `ci` (reuse `ci.yml`), then `release` on `macos-latest` (darwin
-  codesign), `timeout-minutes: 15`, `permissions: contents: write`,
-  `environment: ${{ github.ref_name == 'cli-channel/release' && 'cli-release' || 'cli-prerelease' }}`.
+  codesign), `timeout-minutes: 15`, `permissions: contents: write`. No
+  `environment`: merging is publishing, with no approval step.
 - Steps:
   1. Checkout with `fetch-depth: 0` (all tags) and `persist-credentials: false`.
   2. `CHANNEL=${GITHUB_REF_NAME#cli-channel/}`; fail if it isn't a valid,
@@ -276,8 +276,7 @@ it:
 - Tag ruleset on `cli-channel-*`: block updates and deletion, with GitHub
   Actions as the only bypass actor. Verify on a fork that the workflow can
   still move the tag; if it can't, use a GitHub App token for that step.
-- Environments: `cli-release` (required reviewers) and `cli-prerelease` (none).
-- Delete the old `release` environment once nothing references it.
+- Delete the old `release` environment; the workflow no longer references it.
 
 ## Stack
 
@@ -333,7 +332,7 @@ it:
   3. Install with `DH_CHANNEL=rc`; `dh --help` shows `Channel: rc`; push to rc
      again and `DH_UPDATE_INTERVAL=0 dh` updates to the new build.
   4. PR `cli-channel/rc` → `cli-channel/release`: both checks pass; merge
-     → `cli-v<x>` released (needs `cli-release` approval), `cli-channel-release`
+     → `cli-v<x>` released with no approval step, `cli-channel-release`
      carries the install scripts.
   5. A PR from any other branch fails `release-source`. A hotfix PR into
      release passes; the next rc PR fails `release-contains` until the fix is
