@@ -276,7 +276,7 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 3. Promoting `rc` to `release` publishes `3.2.0`.
 4. Patches then continue automatically (`3.2.1-rc.0`, …). `package.json` stays at `3.2.0` until the next bump.
 
-- **Only minor and major bumps go in `package.json`.** Patches are automatic: with `3.2.0` released, leaving `package.json` at `3.2.0` or setting `3.2.1` changes nothing, and the next publish is `3.2.1` either way. `package.json` usually lags behind the released patch (still `3.2.0` when releases reach `3.2.4`); that's expected, and the next bump is `3.3.0`. It must be plain `X.Y.Z`: a pre-release such as `3.2.0-beta` fails the publish.
+- **`package.json` is a minimum.** The default is to bump the last release by one patch, unless `package.json` has a higher version, in which case that version becomes the next release. This allows bumping the major or minor version in `package.json` to set the floor for subsequent releases.
 - **Branches made before the bump keep their old `package.json`.** An `alpha-<id>` channel stays on `3.1.x` labels until its feature branch merges `v3_rewrite`. A breaking feature can bump `package.json` on its own branch, so its alpha builds read `4.0.0-alpha-bar.N`.
 - **A hotfix is a patch on the current release.** With `3.1.0` released and `v3_rewrite` already bumped to `3.2.0`, a hotfix ships as `3.1.1`: its branch starts from the released commit, where `package.json` is still `3.1.0`. The bump arrives later through `rc` as `3.2.0-rc.0`.
 
