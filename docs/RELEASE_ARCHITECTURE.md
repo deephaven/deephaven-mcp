@@ -250,7 +250,7 @@ Each channel keeps its own config folder (profiles and credentials), so an `rc` 
 
 - **The build decides, not `dh.meta`.** The channel is baked into the binary at build time, like the version, so a channel's folder is only ever read and written by that channel's code. Switching channels switches folders when the new channel's build installs, not when `dh.meta` changes.
 - **Each channel starts empty.** Testers sign in once per channel. A channel only manages credentials it created, so logging out on `rc` never revokes a key `release` uses.
-- **`DH_CONFIG_DIR` overrides the folder** for every channel, so builds that share a value share profiles and keys.
+- **`DH_CONFIG_DIR` overrides the folder** for every channel. Builds that share a value share one config and lose the isolation above: an `rc` build can change the config format a `release` build reads, and logging out on one channel revokes keys the other uses.
 
 ## Versions
 
