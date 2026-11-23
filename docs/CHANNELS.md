@@ -19,8 +19,9 @@ switches back to the default.
 ## Installing on a channel
 
 Set `DH_CHANNEL` when installing to follow that channel: the install script
-installs the channel's current build and saves the channel in `dh.meta`, so
-every later update comes from it. Without `DH_CHANNEL`, the install follows
+installs the channel's current build and saves the channel in `dh.meta`, a
+small file next to the executable (`dh.exe.meta` on Windows), so every later
+update comes from it. Without `DH_CHANNEL`, the install follows
 `release`.
 
 Only the install scripts read `DH_CHANNEL`: setting it before a `dh` command
@@ -52,8 +53,8 @@ In `dh channel use`, `from` equals `to` when the install was already current.
 
 ## Behavior and limits
 
-- The channel is saved in `dh.meta` (`dh.exe.meta` on Windows) next to the
-  executable. The install scripts write it; an unreadable file means `release`.
+- `dh channel use` updates the channel in `dh.meta`. If the file is missing or
+  unreadable, the install follows `release`.
 - `dh` installs its channel's build whenever the version differs, even if it is
   lower, so switching channels can move to an older version.
 - If the running build is from another channel than the one followed, for
