@@ -9,6 +9,8 @@
     "dev": "bun --experimental-http2-fetch src/main.ts",
     "build": "bun run scripts/build.ts",
     "release": "bun run scripts/release.ts",
+    "next-version": "bun run scripts/next-version.ts",
+    "publish": "bun run scripts/publish.ts",
     "check": "biome check . && tsc --noEmit"
   },
   "dependencies": {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import pkg from "../package.json" with { type: "json" };
+import { DEV_CHANNEL } from "../src/channel.ts";
 import { type Manifest, PLATFORM } from "../src/updater.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -42,6 +43,8 @@ async function adhocSign(file: string): Promise<void> {
 
 export interface BuildOptions {
   version?: string;
+  /** The channel baked into the binary; local builds are `dev`. */
+  channel?: string;
   /** GitHub `owner/repo` baked in as the default update source. */
   repository?: string;
   targets?: string[];
@@ -54,6 +57,7 @@ export async function build(
   outDir: string,
   {
     version = pkg.version,
+    channel = DEV_CHANNEL,
     repository = pkg.repository,
     targets = [PLATFORM],
     baseUrl = "",
@@ -81,6 +85,8 @@ export async function build(
       `DH_BUILD_VERSION=${JSON.stringify(version)}`,
       "--define",
       `DH_BUILD_REPOSITORY=${JSON.stringify(repository)}`,
+      "--define",
+      `DH_BUILD_CHANNEL=${JSON.stringify(channel)}`,
       "--outfile",
       output,
       join(ROOT, "src/main.ts"),

@@ -1,11 +1,29 @@
 #!/bin/sh
-# Installs the Deephaven CLI: curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.sh | sh
+# Installs the Deephaven CLI: curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | sh
+# On another release channel: ... | DH_CHANNEL=rc sh
 set -eu
 
 # Rewritten from package.json "name" by scripts/release.ts.
 BIN=dh
 
 REPO_URL="${DH_INSTALL_REPO_URL:-https://github.com/deephaven/deephaven-mcp}"
+CHANNEL="${DH_CHANNEL:-release}"
+# Same rules as src/channel.ts; dev is reserved for builds run from source.
+# Letters spelled out: in bash (macOS sh), [a-z] follows the locale and matches uppercase.
+lower=abcdefghijklmnopqrstuvwxyz
+case "$CHANNEL" in
+  dev)
+    echo "$BIN: channel dev is reserved for builds run from source" >&2
+    exit 1
+    ;;
+  ["$lower"]*) ;;
+  *) CHANNEL_INVALID=1 ;;
+esac
+case "$CHANNEL" in *[!"$lower"0123456789-]*) CHANNEL_INVALID=1 ;; esac
+if [ -n "${CHANNEL_INVALID:-}" ] || [ "${#CHANNEL}" -gt 40 ]; then
+  echo "$BIN: invalid channel \"$CHANNEL\": use lowercase letters, digits and hyphens, starting with a letter" >&2
+  exit 1
+fi
 # Must be user-writable, or auto-update can't replace the binary.
 DIR="${DH_INSTALL_DIR:-$HOME/.local/bin}"
 # Made absolute now, because the script later cd's into a temp directory.
@@ -45,26 +63,37 @@ esac
 # Redirects must be HTTPS even from loopback; release downloads never need more.
 fetch() { curl --proto '=http,https' --proto-redir '=https' "$@"; }
 
-# Pin one tag so the binary and checksums come from the same release.
-if [ -n "${DH_INSTALL_VERSION:-}" ]; then
-  TAG="v${DH_INSTALL_VERSION#v}"
-else
-  # Read the tag from the first redirect (.../releases/tag/vX) without following it.
-  latest=$(fetch -fsSI -o /dev/null -w '%{redirect_url}' "$REPO_URL/releases/latest")
-  TAG="${latest##*/}"
-fi
-case "$TAG" in
-  v*) ;;
-  *)
-    echo "$BIN: no release found at $REPO_URL/releases" >&2
-    exit 1
-    ;;
-esac
-BASE="$REPO_URL/releases/download/$TAG"
-
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
+
+# Pin one tag so the binary and checksums come from the same release.
+if [ -n "${DH_INSTALL_VERSION:-}" ]; then
+  # Accepts 3.1.1, v3.1.1 or cli-v3.1.1.
+  version="${DH_INSTALL_VERSION#cli-}"
+  TAG="cli-v${version#v}"
+else
+  # The channel release's manifest names its current version.
+  url="$REPO_URL/releases/download/cli-channel-$CHANNEL/manifest.json"
+  status=$(fetch -sSL -o manifest.json -w '%{http_code}' "$url")
+  if [ "$status" = 404 ]; then
+    echo "$BIN: no channel $CHANNEL at $REPO_URL" >&2
+    exit 1
+  elif [ "$status" != 200 ]; then
+    echo "$BIN: HTTP $status fetching $url" >&2
+    exit 1
+  fi
+  # build.ts writes one key per line, so the first "version" line is the release's.
+  version=$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' manifest.json | head -n 1)
+  case "$version" in
+    [0-9]*) TAG="cli-v$version" ;;
+    *)
+      echo "$BIN: no version in $url" >&2
+      exit 1
+      ;;
+  esac
+fi
+BASE="$REPO_URL/releases/download/$TAG"
 
 echo "Downloading $BIN $TAG for $TARGET..."
 fetch -fsSL -o "$NAME" "$BASE/$NAME"
@@ -83,7 +112,10 @@ fi
 mkdir -p "$DIR"
 chmod 755 "$NAME"
 mv "$NAME" "$DIR/$BIN"
-echo "Installed $BIN $TAG to $DIR/$BIN"
+# Install metadata the CLI reads (see src/install-meta.ts); written fresh on every install.
+printf '{"channel":"%s"}\n' "$CHANNEL" >"$DIR/$BIN.meta.$$.tmp"
+mv "$DIR/$BIN.meta.$$.tmp" "$DIR/$BIN.meta"
+echo "Installed $BIN v${TAG#cli-v} ($CHANNEL channel) to $DIR/$BIN"
 
 # Adds DIR to PATH in the user's shell startup file, once.
 add_to_path() {

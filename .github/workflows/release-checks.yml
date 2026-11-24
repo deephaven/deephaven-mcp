@@ -1,0 +1,42 @@
+name: Release checks
+
+# Required status checks on PRs into cli-channel/release (set in its ruleset).
+# The logic is in scripts/release-check.ts, which imports nothing, so no install.
+on:
+  pull_request:
+    branches: ["cli-channel/release"]
+
+permissions:
+  contents: read
+
+jobs:
+  release-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Releases come from this repo's rc or a hotfix
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: bun scripts/release-check.ts source "$HEAD_REF" "$HEAD_REPO"
+
+  release-contains:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Nothing on release is missing
+        run: bun scripts/release-check.ts contains

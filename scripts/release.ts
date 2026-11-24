@@ -1,7 +1,12 @@
-/** Builds every target for a GitHub release: `bun run release <tag> [outDir]`. */
+/**
+ * Builds every target for a versioned GitHub release:
+ * `bun run release <tag> [outDir]`, where `<tag>` is `cli-vX.Y.Z` or
+ * `cli-vX.Y.Z-<channel>.<build>`; the version and channel come from it.
+ */
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import pkg from "../package.json" with { type: "json" };
+import { parseTag } from "../src/channel.ts";
 import { releasesUrl } from "../src/updater.ts";
 import { build, TARGETS } from "./build.ts";
 
@@ -10,10 +15,9 @@ const [tag, out] = process.argv.slice(2);
 // Set by GitHub Actions, so a fork's release installs and updates from the fork.
 const repository = process.env.GITHUB_REPOSITORY ?? pkg.repository;
 
-if (tag !== `v${pkg.version}`) {
-  console.error(
-    `Tag ${tag} does not match package.json version ${pkg.version}`,
-  );
+const parsed = tag ? parseTag(tag) : undefined;
+if (!parsed) {
+  console.error(`Not a CLI release tag: ${tag ?? "(none)"}`);
   process.exit(1);
 }
 if (process.platform !== "darwin") {
@@ -24,6 +28,8 @@ if (process.platform !== "darwin") {
 const outDir = resolve(out ?? join(ROOT, "dist"));
 // Tagged URLs, so a release published mid-update can't mix binaries.
 await build(outDir, {
+  version: parsed.version,
+  channel: parsed.channel,
   repository,
   targets: TARGETS,
   baseUrl: `${releasesUrl(repository)}/download/${tag}/`,

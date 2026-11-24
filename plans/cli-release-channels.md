@@ -381,29 +381,29 @@ or moved item's ID isn't reused.
 
 ### PR 2: Publishing
 
-- [ ] **channels-pub-1** Next versions match the next-version table in section
+- [x] **channels-pub-1** Next versions match the next-version table in section
       1, and tags parse as in Tags: `cli-v3.1.1-alpha-1.0` is channel `alpha-1`,
       build `0`; the same tag with a leading zero, `cli-v03.1.1-alpha-1.0` or
       `cli-v3.01.1-alpha-1.0`, is ignored (not valid semver).
-- [ ] **channels-pub-2** Release notes start where Release-notes start tag
+- [x] **channels-pub-2** Release notes start where Release-notes start tag
       (section 1) says: at `cli-v3.1.0` for `cli-v3.1.1`, and for
       `cli-v3.1.1-rc.0` when only `cli-v3.1.0` exists; at `cli-v3.1.1-rc.0` for
       `cli-v3.1.1-rc.1`.
-- [ ] **channels-pub-3** A publish creates the versioned tag and release first.
+- [x] **channels-pub-3** A publish creates the versioned tag and release first.
       If the branch has moved on, it stops there; otherwise it moves
       `cli-channel-<channel>` to the commit, creates or retitles that release,
       and uploads `manifest.json` last (after the install scripts on `release`).
-- [ ] **channels-pub-4** `cli-channel/release` publishes only the merge of a PR
+- [x] **channels-pub-4** `cli-channel/release` publishes only the merge of a PR
       from this repo's `cli-channel/rc` or `hotfix/*`; any other commit,
       including a merged PR from another repo's branch of the same name,
       publishes nothing.
-- [ ] **channels-pub-5** `release-source` passes only PRs from this repo's
+- [x] **channels-pub-5** `release-source` passes only PRs from this repo's
       `cli-channel/rc` or `hotfix/*`, so a PR from a fork's `cli-channel/rc`
       fails. `release-contains` fails while a change already on
       `release` is missing from the PR's branch, such as a hotfix not yet merged
       through `v3_rewrite` into `rc`, or an earlier hotfix missing from a later
       hotfix's branch, and passes once it's there.
-- [ ] **channels-pub-6** The install scripts (`install.sh`, `install.ps1`) match
+- [x] **channels-pub-6** The install scripts (`install.sh`, `install.ps1`) match
       Installing on a channel in `docs/CHANNELS.md`: `release` by default;
       `DH_CHANNEL` picks the channel and is saved in `dh.meta`; an unpublished
       channel fails with `no channel`; an invalid name or `dev` fails before any
@@ -428,7 +428,7 @@ or moved item's ID isn't reused.
   5. An admin's direct push to `cli-channel/release` fails the release job's
      PR check and publishes nothing.
   6. The repo's `releases/latest` never changes.
-- [ ] **channels-pub-8** The docs match the implementation.
+- [x] **channels-pub-8** The docs match the implementation.
 - [ ] **channels-pub-9** `bun run check` passes; `bun test` passes on Linux,
       macOS and Windows.
 
