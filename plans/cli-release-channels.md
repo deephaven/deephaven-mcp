@@ -321,34 +321,35 @@ only to a fork.
 
 ## Done when
 
-Each item is a behavior the implementation must show. IDs are prefixed
-`channels-` to stay unique across plans, so they can be referenced by tests as
-part of implementation.
+Each item is a behavior the implementation must show. IDs (`channels-<pr>-<n>`)
+are stable so tests can reference them: numbers are append-only, and a removed
+or moved item's ID isn't reused.
 
 ### PR 2: Publishing
 
-- [ ] **channels-C1** Next versions match the next-version table in section 1,
-      and tags parse as in Tags: `cli-v3.1.1-alpha-1.0` is channel `alpha-1`,
+- [ ] **channels-pub-1** Next versions match the next-version table in section
+      1, and tags parse as in Tags: `cli-v3.1.1-alpha-1.0` is channel `alpha-1`,
       build `0`.
-- [ ] **channels-C2** Release notes start where Release-notes start tag (section
-      1) says: at `cli-v3.1.0` for `cli-v3.1.1`, and for `cli-v3.1.1-rc.0` when
-      only `cli-v3.1.0` exists; at `cli-v3.1.1-rc.0` for `cli-v3.1.1-rc.1`.
-- [ ] **channels-C3** A publish creates the versioned tag and release first. If
-      the branch has moved on, it stops there; otherwise it moves
+- [ ] **channels-pub-2** Release notes start where Release-notes start tag
+      (section 1) says: at `cli-v3.1.0` for `cli-v3.1.1`, and for
+      `cli-v3.1.1-rc.0` when only `cli-v3.1.0` exists; at `cli-v3.1.1-rc.0` for
+      `cli-v3.1.1-rc.1`.
+- [ ] **channels-pub-3** A publish creates the versioned tag and release first.
+      If the branch has moved on, it stops there; otherwise it moves
       `cli-channel-<channel>` to the commit, creates or retitles that release,
       and uploads `manifest.json` last (after the install scripts on `release`).
-- [ ] **channels-C4** `cli-channel/release` publishes only the merge of a PR
+- [ ] **channels-pub-4** `cli-channel/release` publishes only the merge of a PR
       from `cli-channel/rc` or `hotfix/*`; any other commit publishes nothing.
-- [ ] **channels-C5** `release-source` passes only PRs from `cli-channel/rc` or
-      `hotfix/*`. `release-contains` fails while a change already on `release`
-      is missing from the PR's branch, such as a hotfix not yet merged through
-      `v3_rewrite` into `rc`, and passes once it's there.
-- [ ] **channels-C6** The install scripts (`install.sh`, `install.ps1`) match
+- [ ] **channels-pub-5** `release-source` passes only PRs from `cli-channel/rc`
+      or `hotfix/*`. `release-contains` fails while a change already on
+      `release` is missing from the PR's branch, such as a hotfix not yet merged
+      through `v3_rewrite` into `rc`, and passes once it's there.
+- [ ] **channels-pub-6** The install scripts (`install.sh`, `install.ps1`) match
       Installing on a channel in `docs/CHANNELS.md`: `release` by default;
       `DH_CHANNEL` picks the channel and is saved in `dh.meta`; an unpublished
       channel fails with `no channel`; an invalid name or `dev` fails before any
       download; `DH_INSTALL_VERSION` accepts `3.1.1`, `v3.1.1` and `cli-v3.1.1`.
-- [ ] **channels-C7** (Manual) Publishing works end to end on a fork with the
+- [ ] **channels-pub-7** (Manual) Publishing works end to end on a fork with the
       repo setup applied:
   1. Merge a PR into `cli-channel/rc` → `cli-v<x>-rc.0` released as a
      pre-release, not latest; `cli-channel-rc` exists, titled
@@ -364,34 +365,34 @@ part of implementation.
   5. An admin's direct push to `cli-channel/release` fails the release job's
      PR check and publishes nothing.
   6. The repo's `releases/latest` never changes.
-- [ ] **channels-C8** The docs match the implementation.
-- [ ] **channels-C9** `bun run check` passes; `bun test` passes on Linux, macOS
-      and Windows.
+- [ ] **channels-pub-8** The docs match the implementation.
+- [ ] **channels-pub-9** `bun run check` passes; `bun test` passes on Linux,
+      macOS and Windows.
 
 ### PR 3: CLI
 
-- [ ] **channels-C10** Auto-update matches How the CLI updates in
+- [ ] **channels-cli-1** Auto-update matches How the CLI updates in
       `docs/RELEASE_ARCHITECTURE.md`: it follows the channel in `dh.meta`, else
       `release`; installs whenever the version differs, lower included; treats a
       bad `dh.meta` as `release`; throttles on `lastUpdateCheck`; and never runs
       on a dev build.
-- [ ] **channels-C11** `dh channel` and `dh channel use` match
+- [ ] **channels-cli-2** `dh channel` and `dh channel use` match
       `docs/CHANNELS.md`: output, JSON and errors (`usage`, `channel_not_found`,
       `server_unreachable`); a failed channel check saves nothing; dev builds
       refuse `dh channel use`.
-- [ ] **channels-C12** Config folders match Config per channel in
+- [ ] **channels-cli-3** Config folders match Config per channel in
       `docs/RELEASE_ARCHITECTURE.md`: `cli` on `release`, `cli-<channel>` on
       other channels, `cli-dev` on dev builds; `DH_CONFIG_DIR` overrides all of
       them.
-- [ ] **channels-C13** Non-release builds show `Channel: <channel> (config
+- [ ] **channels-cli-4** Non-release builds show `Channel: <channel> (config
       <dir>)` in `dh --help`; `dh -o json` includes `channel`; `dh agents` lists
       `channel`, `channel use` and `channel_not_found`.
-- [ ] **channels-C14** (Manual) Installing and updating work end to end on the
-      fork from channels-C7:
+- [ ] **channels-cli-5** (Manual) Installing and updating work end to end on the
+      fork from channels-pub-7:
   1. Install with `DH_CHANNEL=rc`; `dh --help` shows `Channel: rc`; merge
      another PR into rc and `DH_UPDATE_INTERVAL=0 dh` updates to the new build.
   2. `dh channel use release` on the rc install switches immediately.
-- [ ] **channels-C15** (Manual) Repo setup is applied to the real repo.
-- [ ] **channels-C16** The docs match the implementation.
-- [ ] **channels-C17** `bun run check` passes; `bun test` passes on Linux, macOS
-      and Windows.
+- [ ] **channels-cli-6** (Manual) Repo setup is applied to the real repo.
+- [ ] **channels-cli-7** The docs match the implementation.
+- [ ] **channels-cli-8** `bun run check` passes; `bun test` passes on Linux,
+      macOS and Windows.
