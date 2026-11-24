@@ -364,34 +364,34 @@ part of implementation.
   5. An admin's direct push to `cli-channel/release` fails the release job's
      PR check and publishes nothing.
   6. The repo's `releases/latest` never changes.
+- [ ] **channels-C8** The docs match the implementation.
+- [ ] **channels-C9** `bun run check` passes; `bun test` passes on Linux, macOS
+      and Windows.
 
 ### PR 3: CLI
 
-- [ ] **channels-C8** Auto-update matches How the CLI updates in
+- [ ] **channels-C10** Auto-update matches How the CLI updates in
       `docs/RELEASE_ARCHITECTURE.md`: it follows the channel in `dh.meta`, else
       `release`; installs whenever the version differs, lower included; treats a
       bad `dh.meta` as `release`; throttles on `lastUpdateCheck`; and never runs
       on a dev build.
-- [ ] **channels-C9** `dh channel` and `dh channel use` match
+- [ ] **channels-C11** `dh channel` and `dh channel use` match
       `docs/CHANNELS.md`: output, JSON and errors (`usage`, `channel_not_found`,
       `server_unreachable`); a failed channel check saves nothing; dev builds
       refuse `dh channel use`.
-- [ ] **channels-C10** Config folders match Config per channel in
+- [ ] **channels-C12** Config folders match Config per channel in
       `docs/RELEASE_ARCHITECTURE.md`: `cli` on `release`, `cli-<channel>` on
       other channels, `cli-dev` on dev builds; `DH_CONFIG_DIR` overrides all of
       them.
-- [ ] **channels-C11** Non-release builds show `Channel: <channel> (config
+- [ ] **channels-C13** Non-release builds show `Channel: <channel> (config
       <dir>)` in `dh --help`; `dh -o json` includes `channel`; `dh agents` lists
       `channel`, `channel use` and `channel_not_found`.
-- [ ] **channels-C12** (Manual) Installing and updating work end to end on the
+- [ ] **channels-C14** (Manual) Installing and updating work end to end on the
       fork from channels-C7:
   1. Install with `DH_CHANNEL=rc`; `dh --help` shows `Channel: rc`; merge
      another PR into rc and `DH_UPDATE_INTERVAL=0 dh` updates to the new build.
   2. `dh channel use release` on the rc install switches immediately.
-- [ ] **channels-C13** (Manual) Repo setup is applied to the real repo.
-
-### Every implementing PR
-
-- [ ] **channels-C14** The docs match the implementation.
-- [ ] **channels-C15** `bun run check` passes; `bun test` passes on Linux, macOS
+- [ ] **channels-C15** (Manual) Repo setup is applied to the real repo.
+- [ ] **channels-C16** The docs match the implementation.
+- [ ] **channels-C17** `bun run check` passes; `bun test` passes on Linux, macOS
       and Windows.
