@@ -4,7 +4,15 @@ import {
   type CommandLifecycle,
   runLifecycleAction,
 } from "../../cli/lifecycle.ts";
-import { asDhError, cleanupError, DhError, describe } from "../../errors.ts";
+import {
+  asDhError,
+  cleanupError,
+  DhError,
+  describe,
+  timeoutMs,
+  withTimeout,
+} from "../../errors.ts";
+import { note } from "../../output.ts";
 import { requireAuth } from "../auth/session.ts";
 import type { Session } from "../auth/signin.ts";
 import type { Store } from "../auth/store.ts";
@@ -237,18 +245,11 @@ async function execInConsoleAction(
     phase: "opening",
   });
 
-  const ideSession = await openIdeSession(resolved.session, resolved.console);
-  try {
-    lifecycle.signal.throwIfAborted();
-    lifecycle.onCleanup(() => ideSession.close());
-  } catch (error) {
-    try {
-      ideSession.close();
-    } catch (cleanup) {
-      throw cleanupError([cleanup], asDhError(error));
-    }
-    throw error;
-  }
+  const ideSession = await openTimedIdeSession(
+    resolved.session,
+    resolved.console,
+    lifecycle,
+  );
   lifecycle.setFailureReport({
     phase: "running",
     outcome: "unknown",
@@ -310,15 +311,69 @@ async function execInConsoleAction(
   };
 }
 
+/** Bound session opening without imposing a deadline on script execution. */
+async function openTimedIdeSession(
+  session: Session,
+  console: ConsoleInfo,
+  lifecycle: CommandLifecycle,
+): Promise<dh.IdeSession> {
+  const deadline = new AbortController();
+  const signal = AbortSignal.any([lifecycle.signal, deadline.signal]);
+  return await withTimeout(
+    acquireIdeSession(session, console, lifecycle, signal, deadline.signal),
+    timeoutMs(),
+    () => {
+      const error = new DhError(
+        "server_unreachable",
+        "Timed out while opening the console session",
+      );
+      deadline.abort(error);
+      return error;
+    },
+  );
+}
+
+/** Register an opened session, or close it if opening outlived its caller. */
+async function acquireIdeSession(
+  session: Session,
+  console: ConsoleInfo,
+  lifecycle: CommandLifecycle,
+  signal: AbortSignal,
+  deadline: AbortSignal,
+): Promise<dh.IdeSession> {
+  const ideSession = await openIdeSession(session, console, signal);
+  try {
+    signal.throwIfAborted();
+    lifecycle.onCleanup(() => ideSession.close());
+  } catch (error) {
+    try {
+      ideSession.close();
+    } catch (cleanup) {
+      if (deadline.aborted) {
+        note(
+          "! Could not close a console session opened after timeout.",
+          "warning",
+        );
+      }
+      throw cleanupError([cleanup], asDhError(error));
+    }
+    throw error;
+  }
+  return ideSession;
+}
+
 /** Open the JS API session used to run code on the resolved console. */
 async function openIdeSession(
   session: Session,
   console: ConsoleInfo,
+  signal: AbortSignal,
 ): Promise<dh.IdeSession> {
   try {
-    if (session.community) return await openCommunityIdeSession(session);
-    return await openEnterpriseIdeSession(session, console);
+    if (session.community)
+      return await openCommunityIdeSession(session, signal);
+    return await openEnterpriseIdeSession(session, console, signal);
   } catch (e) {
+    signal.throwIfAborted();
     if (e instanceof DhError) throw e;
     const code = consoleFailureCode(e);
     const messages = {
@@ -334,6 +389,7 @@ async function openIdeSession(
 /** Open and start the Community shared-console IDE session. */
 async function openCommunityIdeSession(
   session: Session,
+  signal: AbortSignal,
 ): Promise<dh.IdeSession> {
   if (!session.community) {
     throw new DhError(
@@ -342,8 +398,11 @@ async function openCommunityIdeSession(
     );
   }
   const ide = await session.community.client.getAsIdeConnection();
+  signal.throwIfAborted();
   await ide.running();
+  signal.throwIfAborted();
   const languages = await ide.getConsoleTypes();
+  signal.throwIfAborted();
   const language =
     languages.find((type) => type.toLowerCase() === "python") ??
     languages.find((type) => type.toLowerCase() === "groovy");
@@ -360,6 +419,7 @@ async function openCommunityIdeSession(
 async function openEnterpriseIdeSession(
   session: Session,
   console: ConsoleInfo,
+  signal: AbortSignal,
 ): Promise<dh.IdeSession> {
   if (!session.enterprise) {
     throw new DhError(
@@ -372,10 +432,13 @@ async function openEnterpriseIdeSession(
     dh: session.enterprise.dhe,
     queryNameOrSerial: console.id,
   });
+  signal.throwIfAborted();
   const ide = await new session.enterprise.dhe.Ide(
     session.enterprise.client,
   ).getQueryConnection(query);
+  signal.throwIfAborted();
   await ide.running();
+  signal.throwIfAborted();
   return await ide.startSession(sessionLanguage(console.language));
 }
 

@@ -15,6 +15,7 @@ import {
 import { CommandLifecycle } from "../../src/cli/lifecycle.ts";
 import { exec } from "../../src/commands/console/exec.ts";
 import { askExecSource } from "../../src/commands/console/questions.ts";
+import * as output from "../../src/output.ts";
 import { lazyPrompter } from "../../src/ui/prompt.ts";
 import { run, tempDir } from "../helpers.ts";
 
@@ -297,6 +298,266 @@ test.each(["abort", "cleanup"])(
     }
   },
 );
+
+test.each(["connection", "running", "languages", "start"])(
+  "exec: opening times out during %s without running the script",
+  async (stage) => {
+    const store = new Store(join(await tempDir("dh-exec-timeout-"), "cli"));
+    const previousTimeout = process.env.DH_TIMEOUT;
+    process.env.DH_TIMEOUT = "0.05";
+    const gate = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const pause = async (name: string) => {
+      if (stage !== name) return;
+      reached.resolve();
+      await gate.promise;
+    };
+    const ideSession = {
+      close: mock(() => closed.resolve()),
+      runCode: mock(async () => ({})),
+    };
+    const ide = {
+      running: mock(async () => {
+        await pause("running");
+        return ide;
+      }),
+      getConsoleTypes: mock(async () => {
+        await pause("languages");
+        return ["python"];
+      }),
+      startSession: mock(async () => {
+        await pause("start");
+        return ideSession;
+      }),
+    };
+    const getAsIdeConnection = mock(async () => {
+      await pause("connection");
+      return ide;
+    });
+    const session = {
+      origin: "https://community.example.com",
+      kind: "community",
+      community: { client: { getAsIdeConnection } },
+    } as unknown as Session;
+    const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+    const lifecycle = new CommandLifecycle();
+    try {
+      const startedAt = performance.now();
+      const execution = execInConsole(
+        store,
+        { code: "x=1" },
+        undefined,
+        undefined,
+        lifecycle,
+      );
+      await reached.promise;
+      await expect(execution).rejects.toMatchObject({
+        code: "server_unreachable",
+        headline: "Timed out while opening the console session",
+      });
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(40);
+      expect(performance.now() - startedAt).toBeLessThan(2_000);
+      expect(lifecycle.failureReport.phase).toBe("opening");
+      expect(ideSession.runCode).not.toHaveBeenCalled();
+      await lifecycle.cleanup();
+      gate.resolve();
+      if (stage === "start") await closed.promise;
+      else await Bun.sleep(10);
+      expect(ideSession.close).toHaveBeenCalledTimes(stage === "start" ? 1 : 0);
+      if (stage !== "start") expect(ide.startSession).not.toHaveBeenCalled();
+      expect(ideSession.runCode).not.toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+      login.mockRestore();
+      if (previousTimeout === undefined) delete process.env.DH_TIMEOUT;
+      else process.env.DH_TIMEOUT = previousTimeout;
+    }
+  },
+);
+
+test("exec: a late session cleanup failure is reported after timeout", async () => {
+  const store = new Store(join(await tempDir("dh-exec-timeout-close-"), "cli"));
+  const previousTimeout = process.env.DH_TIMEOUT;
+  process.env.DH_TIMEOUT = "0.05";
+  const gate = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const warned = Promise.withResolvers<void>();
+  const ideSession = {
+    close: mock(() => {
+      throw new Error("private vendor detail");
+    }),
+    runCode: mock(async () => ({})),
+  };
+  const ide = {
+    running: async () => ide,
+    getConsoleTypes: async () => ["python"],
+    startSession: async () => {
+      started.resolve();
+      await gate.promise;
+      return ideSession;
+    },
+  };
+  const session = {
+    origin: "https://community.example.com",
+    kind: "community",
+    community: { client: { getAsIdeConnection: async () => ide } },
+  } as unknown as Session;
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+  const note = spyOn(output, "note").mockImplementation(() => warned.resolve());
+  try {
+    const execution = execInConsole(
+      store,
+      { code: "x=1" },
+      undefined,
+      undefined,
+      new CommandLifecycle(),
+    );
+    await started.promise;
+    await expect(execution).rejects.toMatchObject({
+      code: "server_unreachable",
+    });
+    gate.resolve();
+    await warned.promise;
+    expect(note).toHaveBeenCalledWith(
+      "! Could not close a console session opened after timeout.",
+      "warning",
+    );
+    expect(ideSession.runCode).not.toHaveBeenCalled();
+  } finally {
+    gate.resolve();
+    note.mockRestore();
+    login.mockRestore();
+    if (previousTimeout === undefined) delete process.env.DH_TIMEOUT;
+    else process.env.DH_TIMEOUT = previousTimeout;
+  }
+});
+
+test.each(["worker", "start"])(
+  "exec Enterprise: timeout during %s stops opening and closes late sessions",
+  async (stage) => {
+    const store = new Store(
+      join(await tempDir("dh-exec-enterprise-timeout-"), "cli"),
+    );
+    const previousTimeout = process.env.DH_TIMEOUT;
+    process.env.DH_TIMEOUT = "0.05";
+    const gate = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const ideSession = {
+      close: mock(() => closed.resolve()),
+      runCode: mock(async () => ({})),
+    };
+    const worker = {
+      running: async () => worker,
+      startSession: mock(async () => {
+        if (stage === "start") {
+          reached.resolve();
+          await gate.promise;
+        }
+        return ideSession;
+      }),
+    };
+    class Ide {
+      async getQueryConnection() {
+        if (stage === "worker") {
+          reached.resolve();
+          await gate.promise;
+        }
+        return worker;
+      }
+    }
+    const query = {
+      type: "InteractiveConsole",
+      name: "IC - dh CLI - abc123",
+      serial: "server-id",
+      designated: { status: "Running" },
+      replicas: [],
+      scriptLanguage: "Python",
+      heapSize: 4,
+      dbServerName: "Query 1",
+      workerKind: "python",
+      jvmArguments: [],
+      envVarEntries: [],
+    };
+    const session = {
+      origin: "https://enterprise.example.com",
+      kind: "enterprise",
+      user: "alice",
+      enterprise: {
+        client: { getKnownConfigs: () => [query] },
+        dhe: { Ide },
+      },
+    } as unknown as Session;
+    const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+    const lifecycle = new CommandLifecycle();
+    try {
+      const execution = execInConsole(
+        store,
+        { code: "x=1" },
+        undefined,
+        undefined,
+        lifecycle,
+      );
+      await reached.promise;
+      await expect(execution).rejects.toMatchObject({
+        code: "server_unreachable",
+      });
+      await lifecycle.cleanup();
+      gate.resolve();
+      if (stage === "start") await closed.promise;
+      else await Bun.sleep(10);
+      expect(ideSession.close).toHaveBeenCalledTimes(stage === "start" ? 1 : 0);
+      if (stage === "worker")
+        expect(worker.startSession).not.toHaveBeenCalled();
+      expect(ideSession.runCode).not.toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+      login.mockRestore();
+      if (previousTimeout === undefined) delete process.env.DH_TIMEOUT;
+      else process.env.DH_TIMEOUT = previousTimeout;
+    }
+  },
+);
+
+test("exec: DH_TIMEOUT does not limit script runtime", async () => {
+  const store = new Store(join(await tempDir("dh-exec-runtime-"), "cli"));
+  const previousTimeout = process.env.DH_TIMEOUT;
+  process.env.DH_TIMEOUT = "0.02";
+  const ideSession = {
+    close: mock(() => {}),
+    runCode: mock(async () => {
+      await Bun.sleep(80);
+      return { error: "", changes: { created: [], updated: [], removed: [] } };
+    }),
+  };
+  const ide = {
+    running: async () => ide,
+    getConsoleTypes: async () => ["python"],
+    startSession: async () => ideSession,
+  };
+  const session = {
+    origin: "https://community.example.com",
+    kind: "community",
+    community: { client: { getAsIdeConnection: async () => ide } },
+  } as unknown as Session;
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+  const lifecycle = new CommandLifecycle();
+  try {
+    await expect(
+      execInConsole(store, { code: "x=1" }, undefined, undefined, lifecycle),
+    ).resolves.toMatchObject({
+      changes: { created: [], updated: [], removed: [] },
+    });
+    expect(ideSession.runCode).toHaveBeenCalledTimes(1);
+    await lifecycle.cleanup();
+    expect(ideSession.close).toHaveBeenCalledTimes(1);
+  } finally {
+    login.mockRestore();
+    if (previousTimeout === undefined) delete process.env.DH_TIMEOUT;
+    else process.env.DH_TIMEOUT = previousTimeout;
+  }
+});
 
 test("exec: a reused console with no changes still emits its JSON result", async () => {
   const store = new Store(join(await tempDir("dh-exec-empty-"), "cli"));

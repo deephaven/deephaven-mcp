@@ -72,3 +72,6 @@ all overrides.
 - Execution reports created, updated, and removed exports. `-o json` adds the
   console identity and change categories. `-o silent` suppresses success
   output, while warnings and failures remain on stderr.
+- Opening an execution session is limited by `DH_TIMEOUT` (seconds, default 30);
+  the script itself has no CLI timeout. Interrupting the CLI does not
+  necessarily stop a running script on the server.
