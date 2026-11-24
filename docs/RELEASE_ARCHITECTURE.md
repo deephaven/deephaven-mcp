@@ -179,7 +179,7 @@ flowchart TB
 
 ## How the CLI updates
 
-The CLI never talks to CI or to branches. It only reads the GitHub release for its channel.
+The CLI never talks to CI or to branches. It only reads channel releases' `manifest.json`: its own channel's to update, and `release`'s and `rc`'s when `dh channel` lists them.
 
 ```mermaid
 %%{init: {'themeVariables': {'fontSize': '12px'}, 'flowchart': {'nodeSpacing': 15, 'rankSpacing': 40, 'padding': 6}}}%%
@@ -231,7 +231,7 @@ Each CLI's channel comes from its `dh.meta`, else `release`. Channel releases ke
   3. Saves the channel in `dh.meta` and replaces the executable together, under the lock that guards `dh.meta`.
 
   Run on the channel already followed, it's a manual update; on a pinned install, it moves to the channel's current build, which stays put while `DH_AUTO_UPDATE=off` is still set. `dh channel use release` switches back. Dev builds refuse `dh channel use`.
-- **Show the channel:** `dh channel` prints the channel the install follows. If the running build is from another channel, it names both and gives the `dh channel use` command to fix it; on a dev build it prints `dev (never updates)`.
+- **Show the channels:** `dh channel` lists `release` and `rc` with their current versions and marks the one the install follows; an install on any other channel shows it as a third row. Other channels are never listed, so neither people nor agents pick an experiment without being given its name. If the running build is from another channel, it names both and gives the `dh channel use` command to fix it; on a dev build it prints `dev (never updates)`.
 - **Pinning a version:** install it with `DH_INSTALL_VERSION` (any channel's version; it downloads that `cli-v…` release directly) and set `DH_AUTO_UPDATE=off`. Both are needed: without the second, the next command updates to the channel's build.
 - **Install metadata file:** one file next to the binary, named after it: `dh.meta` beside `dh`, `dh.exe.meta` beside `dh.exe`. It's a JSON object of install-level data, such as the channel and the last update-check time, with no extension because it isn't meant to be edited by hand. The install script writes it fresh, so its format is a contract between the scripts and the CLI; the CLI and updater each update only their own fields, writing to a temp file and renaming it into place. An unreadable file means defaults (`release`, check now), never a failed command.
 - **Dev builds never update.** A CLI run from source or built locally reports channel `dev`, never checks for updates and refuses `dh channel use`, so it can't be replaced by a published build.

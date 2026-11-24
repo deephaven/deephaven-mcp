@@ -275,14 +275,38 @@ Notes:
 
 **`dh channel`** (new group, `src/commands/channel/`)
 
-- `dh channel`: shows the followed channel.
-  - Human: the channel, e.g. `rc`. If the running build's `CHANNEL` differs,
-    add `! Running <VERSION> from the <CHANNEL> channel, not <channel>.`
+- `dh channel`: lists channels, like `dh auth` lists profiles.
+  - Rows: `release`, then `rc`, then the followed channel if it is neither.
+    No other channel is ever listed, and the releases API is never called:
+    alpha channels must not be advertised to people or agents.
+  - Versions: fetch each row's channel manifest (the updater's
+    `cli-channel-<channel>/manifest.json` URL, ignoring `DH_UPDATE_URL`) in
+    parallel, with the updater's manifest timeout. 404 → `not published`; any
+    other failure → `?`.
+  - Human: one line per row, `● ` (green, as in `dh auth`) on the followed
+    channel and two spaces otherwise, the name padded to the longest, three
+    spaces, then the version. If any row shows `?`, add
+    `! Couldn't check <names, comma-separated>.` If the running build's
+    `CHANNEL` differs from the followed channel, add
+    `! Running <VERSION> from the <CHANNEL> channel, not <channel>.`
     (`…, not <channel>; auto-update is off.` with `DH_AUTO_UPDATE=off`) and the
     indented hint `` Run `dh channel use <channel>` to install <channel>'s build now. ``
-  - On a `dev` build: `dev (never updates)`, without reading the metadata file.
-  - JSON: `{ "channel": "rc", "build": "<CHANNEL>", "version": "<VERSION>" }`;
-    `channel` is `dev` on a dev build.
+    Always exits 0.
+  - On a `dev` build: `dev (never updates)`, without reading the metadata file
+    or fetching anything.
+  - JSON: `{ "channels": [{ "channel": "release", "version": "3.1.1", "following": true }, …], "build": "<CHANNEL>", "version": "<VERSION>" }`,
+    rows in the human order; `version` is `null` for `not published` and `?`.
+    On a dev build, `channels` is `[]`.
+  - Example, following `alpha-bar`:
+
+    ```
+      release     3.1.1
+      rc          3.2.0-rc.3
+    ● alpha-bar   3.2.1-alpha-bar.0
+    ```
+
+  - Help and the `dh agents` manifest may describe `alpha-<id>` channels, but
+    never name a specific one; example channels are `release` and `rc`.
 - `dh channel use <name>`:
   1. Invalid name, or the reserved name `dev` → `usage` error.
   2. A dev build (`CHANNEL === "dev"`: from source or a local `bun run build`)
@@ -417,7 +441,14 @@ or moved item's ID isn't reused.
       on a dev build.
 - [ ] **channels-cli-2** `dh channel` and `dh channel use` match
       `docs/CHANNELS.md`: output, JSON and errors (`usage`, `channel_not_found`,
-      `server_unreachable`); a failed channel check or a failed download
+      `server_unreachable`); `dh channel` lists `release` and `rc` with their
+      manifests' versions and adds the followed channel only when it is neither
+      (an install following `alpha-bar` shows three rows; one following `rc`
+      shows two); an unpublished channel shows `not published` and an
+      unreachable one `?` with the note, and the command still exits 0;
+      `DH_UPDATE_URL` doesn't change the listed versions; no help text or
+      `dh agents` entry names a specific alpha channel (nothing matches
+      `/alpha-[a-z0-9]/`; the `alpha-<id>` placeholder is fine); a failed channel check or a failed download
       leaves `dh.meta` and the executable unchanged (unit test: a stubbed
       download fails, and `dh.meta` still has the old channel); dev builds
       refuse `dh channel use`.

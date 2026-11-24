@@ -9,8 +9,30 @@ channels carry experiments. How channels are published is covered in
 
 | Command | Argument | Options | Purpose |
 | --- | --- | --- | --- |
-| `dh channel` | — | — | Show the channel this install follows. |
+| `dh channel` | — | — | List `release` and `rc` with their current versions, marking the channel this install follows. |
 | `dh channel use` | `<channel>` channel name | — | Follow a channel and update to its build now. |
+
+```
+$ dh channel
+● release   3.1.1
+  rc        3.2.0-rc.3
+```
+
+`●` marks the channel this install follows. Only `release` and `rc` are
+listed, plus the followed channel when it's neither. An install following an
+`alpha-<id>` channel you were given shows it as a third row:
+
+```
+$ dh channel
+  release     3.1.1
+  rc          3.2.0-rc.3
+● alpha-bar   3.2.1-alpha-bar.0
+```
+
+Other `alpha-<id>` channels are never listed: you follow one only when someone
+gives you its name. Versions come from each channel's
+`manifest.json`: an unpublished channel shows `not published`, and one that
+can't be checked shows `?`, with a note naming it. The command still succeeds.
 
 `dh channel use` checks the channel and downloads its build before saving
 anything, so a misspelled or unpublished channel, or a failed download, leaves
@@ -49,11 +71,15 @@ build.
 
 | Command | stdout |
 | --- | --- |
-| `dh channel` | `{"channel", "build", "version"}` |
+| `dh channel` | `{"channels": [{"channel", "version", "following"}], "build", "version"}` |
 | `dh channel use` | `{"channel", "from", "to"}` |
 
-`channel` is the channel the install follows; `build` and `version` are the
-running build's channel and version. On a `dev` build, `channel` is `dev` too.
+In `dh channel`, `channels` lists the same rows as the human output, in the
+same order; `version` is `null` when the channel isn't published or couldn't be
+checked, and `following` is `true` on the followed channel. `build` and
+`version` at the top level are the running build's channel and version. On a
+`dev` build, `channels` is empty and `build` is `dev`.
+
 In `dh channel use`, `from` equals `to` when the install was already current.
 
 ## Behavior and limits
@@ -67,7 +93,8 @@ In `dh channel use`, `from` equals `to` when the install was already current.
   so and how to fix it:
 
   ```
-  rc
+    release   3.1.1
+  ● rc        3.2.0-rc.3
   ! Running 3.1.0 from the release channel, not rc.
     Run `dh channel use rc` to install rc's build now.
   ```
