@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { isErrno } from "../src/errors.ts";
-import { BIN } from "../src/version.ts";
+import { BIN, VERSION } from "../src/version.ts";
 import {
   CLI,
   http2OnlyEnterprise,
@@ -707,7 +707,7 @@ test("cli: migrate refuses a remote plain-HTTP server even when it can't sign in
   expect(login.stderr).toContain("<server>");
 });
 
-test("cli: agents summarizes, and lists every command and error code as JSON", async () => {
+test("[channels-cli-4] cli: agents summarizes, and lists every command and error code as JSON", async () => {
   const { run } = await setup();
   const summary = await run(["agents"]);
   expect(summary.code).toBe(0);
@@ -753,6 +753,12 @@ test("cli: agents summarizes, and lists every command and error code as JSON", a
   expect(auth.commands.map((c: { command: string }) => c.command)).toContain(
     `${BIN} auth login`,
   );
+  const channel = manifest.commands.find(
+    (c: { command: string }) => c.command === `${BIN} channel`,
+  );
+  expect(channel.commands.map((c: { command: string }) => c.command)).toEqual([
+    `${BIN} channel use`,
+  ]);
   const login = auth.commands.find(
     (c: { command: string }) => c.command === `${BIN} auth login`,
   );
@@ -767,8 +773,46 @@ test("cli: agents summarizes, and lists every command and error code as JSON", a
     "credential_unavailable",
     "key_upload_failed",
     "server_unreachable",
+    "channel_not_found",
   ]) {
     expect(codes).toContain(code);
+  }
+});
+
+test("[channels-cli-2] [channels-cli-4] cli: from source, the build channel is dev and channels can't be switched", async () => {
+  const { run } = await setup();
+  const help = await run(["--help"]);
+  expect(help.stdout).toContain("Channel: dev (config ");
+
+  const root = JSON.parse((await run(["-o", "json"])).stdout);
+  expect(root.channel).toBe("dev");
+
+  const shown = await run(["channel"]);
+  expect(shown.code).toBe(0);
+  expect(shown.stdout).toBe("dev (never updates)\n");
+  expect(JSON.parse((await run(["channel", "-o", "json"])).stdout)).toEqual({
+    channels: [],
+    build: "dev",
+    version: VERSION,
+  });
+
+  // Alpha channels may be described, but none is ever named to people or agents.
+  const helpTexts = await Promise.all(
+    [
+      ["channel", "--help"],
+      ["channel", "use", "--help"],
+      ["agents", "-o", "json"],
+    ].map(async (args) => (await run(args)).stdout),
+  );
+  for (const text of helpTexts) expect(text).not.toMatch(/alpha-[a-z0-9]/);
+
+  const installed = await run(["channel", "use", "rc"]);
+  expect(installed.code).toBe(2);
+  expect(installed.stderr).toContain("needs an installed");
+  for (const name of ["dev", "Rc"]) {
+    const bad = await run(["channel", "use", name, "-o", "json"]);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain('"code":"usage"');
   }
 });
 

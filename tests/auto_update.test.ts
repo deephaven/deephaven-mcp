@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   copyFile,
   mkdir,
@@ -11,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { binaryName, build } from "../scripts/build.ts";
+import { withFileLock } from "../src/actions/auth/lock.ts";
 import { PLATFORM } from "../src/updater.ts";
 import { BIN, VERSION } from "../src/version.ts";
 import { http2OnlyEnterprise, TEST_CA } from "./helpers.ts";
@@ -130,7 +132,21 @@ function fakeGitHub(root: string, requests = { count: 0 }) {
   });
 }
 
-test("auto-update uses the default URL when DH_UPDATE_URL is unset or empty", async () => {
+/**
+ * Runs autoUpdate() in a child process as a compiled `channel` build at
+ * `execPath`, printing each URL it fetches. By default every fetch returns a
+ * manifest for this version, so nothing installs; `fetchBody` replaces the
+ * fetch function's body (it gets `url`).
+ */
+async function probeUpdate(
+  execPath: string,
+  env: Record<string, string | undefined>,
+  {
+    channel = "release",
+    version = "3.0.0",
+    fetchBody = `return Response.json({ version: "3.0.0", binaries: {} });`,
+  } = {},
+): Promise<Result> {
   const probe = `
     import { mock } from "bun:test";
     Object.defineProperty(process, "execPath", {
@@ -138,53 +154,144 @@ test("auto-update uses the default URL when DH_UPDATE_URL is unset or empty", as
     });
     mock.module("./src/version.ts", () => ({
       BIN: "dh",
+      CHANNEL: ${JSON.stringify(channel)},
       REPOSITORY: "example/repo",
       STANDALONE: true,
-      VERSION: "3.0.0",
+      VERSION: ${JSON.stringify(version)},
     }));
     globalThis.fetch = async (url) => {
       console.log(String(url));
-      return Response.json({ version: "3.0.0", binaries: {} });
+      ${fetchBody}
     };
     const { autoUpdate } = await import("./src/updater.ts");
     await autoUpdate();
   `;
-  const tmp = await mkdtemp(join(tmpdir(), "dh-update-probe-"));
-  const cwd = resolve(import.meta.dir, "..");
-  const env = {
-    DH_AUTO_UPDATE: "",
-    DH_TEST_EXEC_PATH: join(tmp, "dh"),
-    DH_UPDATE_INTERVAL: "0",
-  };
-  const defaultUrl =
-    "https://github.com/example/repo/releases/latest/download/manifest.json";
-  const overrideUrl = "https://updates.example.invalid/manifest.json";
+  return run(
+    process.execPath,
+    ["--no-env-file", "-e", probe],
+    {
+      DH_AUTO_UPDATE: "",
+      DH_UPDATE_INTERVAL: "0",
+      DH_UPDATE_URL: undefined,
+      ...env,
+      DH_TEST_EXEC_PATH: execPath,
+    },
+    resolve(import.meta.dir, ".."),
+  );
+}
 
-  const cases: [string | undefined, string][] = [
-    [undefined, defaultUrl],
-    ["", defaultUrl],
-    [overrideUrl, overrideUrl],
-  ];
+const channelUrl = (channel: string) =>
+  `https://github.com/example/repo/releases/download/cli-channel-${channel}/manifest.json`;
+
+test("[channels-cli-1] auto-update fetches the followed channel's manifest, or DH_UPDATE_URL", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "dh-update-probe-"));
+  const exe = join(tmp, "dh");
+  const meta = `${exe}.meta`;
+  const overrideUrl = "https://updates.example.invalid/manifest.json";
   try {
+    const cases: [string | undefined, string][] = [
+      [undefined, channelUrl("release")],
+      ["", channelUrl("release")],
+      [overrideUrl, overrideUrl],
+    ];
     for (const [value, expected] of cases) {
-      const result = await run(
-        process.execPath,
-        ["--no-env-file", "-e", probe],
-        { ...env, DH_UPDATE_URL: value },
-        cwd,
-      );
+      const result = await probeUpdate(exe, { DH_UPDATE_URL: value });
       expect(result.success, result.stderr).toBe(true);
       expect(result.stdout.trim()).toBe(expected);
     }
 
-    const invalid = await run(
-      process.execPath,
-      ["--no-env-file", "-e", probe],
-      { ...env, DH_UPDATE_URL: "   " },
-      cwd,
-    );
+    const invalid = await probeUpdate(exe, { DH_UPDATE_URL: "   " });
     expect(invalid.success).toBe(false);
     expect(invalid.stderr).toContain("Invalid URL");
+
+    await writeFile(meta, JSON.stringify({ channel: "rc", extra: 1 }));
+    const rc = await probeUpdate(exe, {});
+    expect(rc.stdout.trim()).toBe(channelUrl("rc"));
+    const kept = JSON.parse(await readFile(meta, "utf8"));
+    expect(kept.channel).toBe("rc");
+    expect(kept.extra).toBe(1);
+    expect(Date.parse(kept.lastUpdateCheck)).toBeGreaterThan(0);
+
+    // Throttled by lastUpdateCheck, unless the interval is 0.
+    const throttled = await probeUpdate(exe, { DH_UPDATE_INTERVAL: "1" });
+    expect(throttled.stdout.trim()).toBe("");
+
+    for (const bad of ["{not json", "[]", '{"channel":"Bad Name"}']) {
+      await writeFile(meta, bad);
+      const result = await probeUpdate(exe, {});
+      expect(result.success, result.stderr).toBe(true);
+      expect(result.stdout.trim()).toBe(channelUrl("release"));
+      const rewritten = JSON.parse(await readFile(meta, "utf8"));
+      expect(rewritten.channel).toBeUndefined();
+      expect(typeof rewritten.lastUpdateCheck).toBe("string");
+    }
+
+    await rm(meta);
+    const dev = await probeUpdate(exe, {}, { channel: "dev" });
+    expect(dev.success, dev.stderr).toBe(true);
+    expect(dev.stdout.trim()).toBe("");
+    expect(await stat(meta).catch(() => null)).toBeNull();
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+/**
+ * An update to a new build whose download runs `duringDownload` (probe code)
+ * before returning the binary. Returns whether the executable was replaced.
+ */
+async function updateWith(
+  exe: string,
+  duringDownload = "",
+  env: Record<string, string> = {},
+): Promise<{ replaced: boolean; result: Result }> {
+  const NEW = "new build";
+  await writeFile(exe, "old build");
+  const sha256 = createHash("sha256").update(NEW).digest("hex");
+  const result = await probeUpdate(
+    exe,
+    { DH_DEBUG: "1", ...env },
+    {
+      fetchBody: `
+      if (String(url).endsWith("manifest.json")) {
+        return Response.json({
+          version: "3.0.1",
+          binaries: { ${JSON.stringify(PLATFORM)}: { url: "dh-bin", sha256: ${JSON.stringify(sha256)} } },
+        });
+      }
+      ${duringDownload}
+      return new Response(${JSON.stringify(NEW)});`,
+    },
+  );
+  expect(result.success, result.stderr).toBe(true);
+  return { replaced: (await readFile(exe, "utf8")) === NEW, result };
+}
+
+test("[channels-cli-1] auto-update re-checks the channel under the dh.meta lock before replacing the executable", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "dh-update-race-"));
+  const exe = join(tmp, "dh");
+  const meta = `${exe}.meta`;
+  try {
+    // Control: an uncontended update replaces it.
+    expect((await updateWith(exe)).replaced).toBe(true);
+
+    // dh channel use rc lands during a release update's download.
+    await rm(meta);
+    const switched = await updateWith(
+      exe,
+      `await Bun.write(${JSON.stringify(meta)}, '{"channel":"rc"}');`,
+    );
+    expect(switched.replaced).toBe(false);
+    expect(switched.result.stderr).toContain("channel changed to rc");
+    expect(JSON.parse(await readFile(meta, "utf8")).channel).toBe("rc");
+
+    // Another dh holds the lock: the swap is skipped, not waited on.
+    await rm(meta);
+    const busy = await withFileLock(`${meta}.lock`, 1_000, () =>
+      updateWith(exe),
+    );
+    expect(busy.replaced).toBe(false);
+    expect(busy.result.stderr).toContain("is busy; skipping");
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -308,9 +415,9 @@ test("[channels-pub-6] the install scripts install on a channel", async () => {
   }
 }, 180_000);
 
-test("dh installed with the install script updates itself from GitHub releases", async () => {
+test("[channels-cli-1] [channels-cli-2] dh installed with the install script updates itself from GitHub releases", async () => {
   const gh = await releaseServer();
-  const { tmp, repo, release, buildRelease, publishChannel } = gh;
+  const { tmp, repo, release, baseUrl, buildRelease, publishChannel } = gh;
   let tag = `cli-v${VERSION}`;
   const channelManifest = join(release("cli-channel-release"), "manifest.json");
   try {
@@ -457,10 +564,20 @@ test("dh installed with the install script updates itself from GitHub releases",
     const tampered = await run(exe, [], now);
     expect(tampered.stderr).toContain("Checksum mismatch");
     expect(await version()).toContain(VERSION);
+    // A failed download in dh channel use saves nothing.
+    const metaBeforeUse = await readFile(`${exe}.meta`, "utf8");
+    const failedUse = await run(exe, ["channel", "use", "rc", "-o", "json"], {
+      ...env,
+      DH_AUTO_UPDATE: "off",
+    });
+    expect(failedUse.success).toBe(false);
+    expect(failedUse.stderr).toContain('"code":"server_unreachable"');
+    expect(await readFile(`${exe}.meta`, "utf8")).toBe(metaBeforeUse);
+    expect(await version()).toContain(VERSION);
     await writeFile(asset, good);
 
     const first = await run(exe, [], now);
-    expect(first.stderr).toContain(`Updated ${BIN} ${VERSION} -> ${NEXT}`);
+    expect(first.stderr).toContain(`Updated ${BIN} ${VERSION} → ${NEXT}`);
     expect(await version()).toContain(NEXT);
 
     const second = await run(exe, [], now);
@@ -469,6 +586,57 @@ test("dh installed with the install script updates itself from GitHub releases",
       // The previous binary is cleaned up on the next run.
       expect(await stat(`${exe}.old`).catch(() => null)).toBeNull();
     }
+
+    // A local build is a dev build: dh channel use refuses to replace it.
+    const devDir = join(tmp, "dev-build");
+    await build(devDir, { baseUrl: baseUrl("unused") });
+    const devExe = join(devDir, binaryName(PLATFORM));
+    const devBefore = await readFile(devExe);
+    const devUse = await run(devExe, ["channel", "use", "rc"], env);
+    expect(devUse.success).toBe(false);
+    expect(devUse.stderr).toContain("needs an installed");
+    expect(await readFile(devExe)).toEqual(devBefore);
+    expect(await stat(`${devExe}.meta`).catch(() => null)).toBeNull();
+
+    // Not on the channel: dh channel use fails and saves nothing.
+    const meta = `${exe}.meta`;
+    const metaBefore = await readFile(meta, "utf8");
+    const missing = await run(exe, ["channel", "use", "nope", "-o", "json"], {
+      ...env,
+      DH_UPDATE_URL: `${repo}/releases/download/cli-channel-nope/manifest.json`,
+    });
+    expect(missing.success).toBe(false);
+    expect(missing.stderr).toContain('"code":"channel_not_found"');
+    expect(await readFile(meta, "utf8")).toBe(metaBefore);
+
+    // Versions only need to differ: the channel moving back installs the older build.
+    await publishChannel(`cli-v${VERSION}`);
+    const switched = ok(
+      await run(exe, ["channel", "use", "rc", "-o", "json"], {
+        ...env,
+        DH_AUTO_UPDATE: "off",
+      }),
+    );
+    expect(JSON.parse(switched.stdout)).toEqual({
+      channel: "rc",
+      from: NEXT,
+      to: VERSION,
+    });
+    expect(JSON.parse(await readFile(meta, "utf8")).channel).toBe("rc");
+    expect(await version()).toContain(VERSION);
+    // dh channel's output (and its check of the real channel manifests, which
+    // DH_UPDATE_URL doesn't redirect) is covered in channel_list.test.ts.
+    const again = ok(
+      await run(exe, ["channel", "use", "rc"], {
+        ...env,
+        DH_AUTO_UPDATE: "off",
+      }),
+    ).stdout;
+    expect(again).toBe(`✔ Following rc\n  Already on ${VERSION}\n`);
+
+    await publishChannel(tag);
+    const forward = await run(exe, [], now);
+    expect(forward.stderr).toContain(`Updated ${BIN} ${VERSION} → ${NEXT}`);
 
     const redirect = await run(exe, [], {
       ...now,

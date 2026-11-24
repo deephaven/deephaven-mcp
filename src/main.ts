@@ -1,6 +1,10 @@
 import { writeSync } from "node:fs";
+import { homedir } from "node:os";
+import { sep } from "node:path";
 import { styleText } from "node:util";
 import { Command, CommanderError, Help } from "commander";
+import { configDir } from "./actions/auth/store.ts";
+import { RELEASE_CHANNEL } from "./channel.ts";
 import { commandPath, GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
 import { CommandLifecycle } from "./cli/lifecycle.ts";
 import { runWithLifecycle } from "./cli/run.ts";
@@ -8,7 +12,7 @@ import { rootCommand } from "./commands/root.ts";
 import { commandUsageError } from "./errors.ts";
 import { err, reportError, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
-import { BIN, VERSION } from "./version.ts";
+import { BIN, CHANNEL, VERSION } from "./version.ts";
 
 const blue = (s: string) => styleText("blue", s);
 
@@ -51,6 +55,21 @@ function commandIn(args: string[]): Command {
   return cmd;
 }
 
+/** `rc (config ~/.deephaven/cli-rc)`; just the channel if there's no home directory. */
+function channelLine(): string {
+  let dir: string;
+  try {
+    dir = configDir();
+  } catch {
+    return styleText("yellow", CHANNEL);
+  }
+  const home = homedir();
+  if (home && (dir === home || dir.startsWith(home + sep))) {
+    dir = `~${dir.slice(home.length)}`;
+  }
+  return `${styleText("yellow", CHANNEL)} (config ${dir})`;
+}
+
 const root = new Command()
   .name(BIN)
   .version(`${BIN} ${VERSION}`, "-V, --version", "Show the version number.")
@@ -63,12 +82,17 @@ const root = new Command()
     styleSubcommandTerm: blue,
     styleArgumentTerm: blue,
     // Show the version under "Usage:"; it matters because the CLI updates itself.
+    // Off the release channel, also the channel and its config folder.
     formatHelp(cmd, helper) {
       const [usage = "", ...rest] = Help.prototype.formatHelp
         .call(helper, cmd, helper)
         .split("\n");
       const version = `${helper.styleTitle("Version:")} ${styleText("yellow", VERSION)}`;
-      return [usage, version, ...rest].join("\n");
+      const channel =
+        CHANNEL === RELEASE_CHANNEL
+          ? []
+          : [`${helper.styleTitle("Channel:")} ${channelLine()}`];
+      return [usage, version, ...channel, ...rest].join("\n");
     },
   })
   // Synchronous, so nothing is lost when the process exits right after.

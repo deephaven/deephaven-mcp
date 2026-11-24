@@ -77,13 +77,31 @@ function windowsTryLock(): TryLock {
 
 let tryLock: TryLock | undefined;
 
+const lockFor = (): TryLock =>
+  (tryLock ??=
+    process.platform === "win32" ? windowsTryLock() : posixTryLock());
+
+/** Runs `fn` holding an exclusive lock on `path` if it is free; undefined, without running it, if another process holds it. */
+export async function tryWithFileLock<T>(
+  path: string,
+  fn: () => Promise<T>,
+): Promise<T | undefined> {
+  const release = lockFor()(path);
+  if (!release) return undefined;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 /** Runs `fn` holding an exclusive lock on `path` across processes, waiting up to `waitMs`. */
 export async function withFileLock<T>(
   path: string,
   waitMs: number,
   fn: () => Promise<T>,
 ): Promise<T> {
-  tryLock ??= process.platform === "win32" ? windowsTryLock() : posixTryLock();
+  const tryLock = lockFor();
   const deadline = Date.now() + waitMs;
   let release = tryLock(path);
   while (!release) {
