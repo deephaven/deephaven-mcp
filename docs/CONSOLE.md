@@ -75,3 +75,6 @@ all overrides.
 - Opening an execution session is limited by `DH_TIMEOUT` (seconds, default 30);
   the script itself has no CLI timeout. Interrupting the CLI does not
   necessarily stop a running script on the server.
+- If execution loses its connection or is rejected without a script result,
+  the script outcome is unknown; inspect the console before retrying.
+  Failures after console creation include its identity, even in silent mode.

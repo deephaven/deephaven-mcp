@@ -17,6 +17,7 @@ import {
 import { CommandLifecycle } from "../../src/cli/lifecycle.ts";
 import { exec } from "../../src/commands/console/exec.ts";
 import { askExecSource } from "../../src/commands/console/questions.ts";
+import { DhError } from "../../src/errors.ts";
 import * as output from "../../src/output.ts";
 import { lazyPrompter } from "../../src/ui/prompt.ts";
 import { run, tempDir } from "../helpers.ts";
@@ -83,6 +84,119 @@ test("exec Enterprise: creates a console when none is running", async () => {
     login.mockRestore();
   }
 });
+
+test.each(["failure", "cancel"])(
+  "exec Enterprise: reports an auto-created console on opening %s",
+  async (ending) => {
+    const store = new Store(
+      join(await tempDir("dh-exec-open-created-"), "cli"),
+    );
+    const created = {
+      id: "new-id",
+      shortcode: "abc123",
+      name: "IC - dh CLI - abc123",
+      state: "Running",
+      language: ending === "failure" ? "unsupported" : "Python",
+      heapSizeGb: 4,
+      server: "Query 1",
+      engine: "DeephavenCommunity",
+      jvmArgs: "",
+      environment: {},
+      autoDeleteTimeoutSeconds: 600,
+    } satisfies EnterpriseConsoleInfo;
+    const query = {
+      type: "InteractiveConsole",
+      name: created.name,
+      serial: created.id,
+      designated: { status: "Running" },
+      replicas: [],
+      scriptLanguage: created.language,
+      heapSize: 4,
+      dbServerName: "Query 1",
+      workerKind: "python",
+      jvmArguments: [],
+      envVarEntries: [],
+    };
+    let queries: (typeof query)[] = [];
+    const session = {
+      origin: "https://enterprise.example.com",
+      kind: "enterprise",
+      user: "alice",
+      enterprise: { client: { getKnownConfigs: () => queries }, dhe: {} },
+    } as unknown as Session;
+    const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+    const create = spyOn(consoleActions, "createConsole").mockImplementation(
+      async () => {
+        queries = [query];
+        return created;
+      },
+    );
+    const lifecycle = new CommandLifecycle();
+    const connect = spyOn(core, "connectCorePlusWorker").mockImplementation(
+      async () => {
+        lifecycle.receiveSignal("SIGINT");
+        return {} as dh.IdeConnection;
+      },
+    );
+    try {
+      let failure: unknown;
+      try {
+        await execInConsole(
+          store,
+          { code: "x=1" },
+          undefined,
+          undefined,
+          lifecycle,
+        );
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(DhError);
+      if (!(failure instanceof DhError)) throw new Error("Expected DhError");
+      expect(failure.code).toBe(
+        ending === "failure" ? "console_unsupported" : "cancelled",
+      );
+      expect(lifecycle.failureReport).toMatchObject({
+        phase: "opening",
+        outcome: "not_started",
+        console: { shortcode: "abc123", id: "new-id", created: true },
+      });
+      for (const format of ["human", "silent", "json"]) {
+        const script = `
+          import { DhError } from "./src/errors.ts";
+          import { reportError, setFormat } from "./src/output.ts";
+          const { code, headline, report } = await Bun.stdin.json();
+          setFormat(${JSON.stringify(format)});
+          process.exitCode = reportError(new DhError(code, headline), report);
+        `;
+        const rendered = await run(
+          [process.execPath, ...RUNTIME_FLAGS, "-e", script],
+          {},
+          JSON.stringify({
+            code: failure.code,
+            headline: failure.headline,
+            report: lifecycle.failureReport,
+          }),
+        );
+        expect(rendered.code).toBe(ending === "failure" ? 5 : 3);
+        expect(rendered.stdout).toBe("");
+        if (format === "json") {
+          expect(JSON.parse(rendered.stderr)).toMatchObject({
+            console: { shortcode: "abc123", id: "new-id", created: true },
+            outcome: "not_started",
+          });
+        } else {
+          expect(rendered.stderr).toMatch(/console abc123/i);
+        }
+      }
+    } finally {
+      connect.mockRestore();
+      create.mockRestore();
+      login.mockRestore();
+      await lifecycle.cleanup();
+    }
+  },
+);
 
 test("exec community: runs verbatim and reports API changes", async () => {
   const store = new Store(join(await tempDir("dh-exec-community-"), "cli"));
@@ -735,6 +849,66 @@ test("exec: session errors are classified without exposing vendor details", asyn
         expect(String(error)).not.toContain("SECRET");
         expect(lifecycle.failureReport.phase).toBe("opening");
         expect(lifecycle.failureReport.human?.details).toBeUndefined();
+      }
+    }
+  } finally {
+    login.mockRestore();
+  }
+});
+
+test("exec: rejected runCode calls retain unknown outcome and classify failures", async () => {
+  const store = new Store(join(await tempDir("dh-exec-run-error-"), "cli"));
+  const failures = [
+    { message: "not authorized SECRET", code: "console_forbidden", exit: 4 },
+    { message: "ECONNRESET SECRET", code: "server_unreachable", exit: 5 },
+    {
+      message: "unsupported console language SECRET",
+      code: "console_unsupported",
+      exit: 5,
+    },
+    { message: "unexpected SECRET", code: "console_failed", exit: 5 },
+  ];
+  let message = "";
+  const ideSession = {
+    close: mock(() => {}),
+    runCode: mock(async () => {
+      throw new Error(message);
+    }),
+  };
+  const ide = {
+    running: async () => ide,
+    getConsoleTypes: async () => ["python"],
+    startSession: async () => ideSession,
+  };
+  const session = {
+    origin: "https://community.example.com",
+    kind: "community",
+    community: { client: { getAsIdeConnection: async () => ide } },
+  } as unknown as Session;
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+  try {
+    for (const item of failures) {
+      message = item.message;
+      const lifecycle = new CommandLifecycle();
+      try {
+        await execInConsole(
+          store,
+          { code: "x=1" },
+          undefined,
+          undefined,
+          lifecycle,
+        );
+        throw new Error("expected failure");
+      } catch (error) {
+        expect(error).toMatchObject({ code: item.code, exit: item.exit });
+        expect(String(error)).not.toContain("SECRET");
+        expect(lifecycle.failureReport).toMatchObject({
+          phase: "running",
+          outcome: "unknown",
+          console: { shortcode: "shared", id: "shared", created: false },
+        });
+      } finally {
+        await lifecycle.cleanup();
       }
     }
   } finally {

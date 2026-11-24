@@ -20,6 +20,7 @@ import type {
   EnterpriseConsoleInfo,
 } from "../../src/actions/console/enterprise.ts";
 import * as enterprise from "../../src/actions/console/enterprise.ts";
+import { resolveExecTarget } from "../../src/actions/console/exec.ts";
 import {
   type ConsoleIdentity,
   EMPTY_CONSOLE_REGISTRY,
@@ -117,6 +118,44 @@ async function saveProfile(store: Store, name: string, owner: ConsoleIdentity) {
     state.config.defaultProfile = name;
   });
 }
+
+test.each([false, true])(
+  "exec routing: remembers a %s selected console for later explicit targets",
+  async (alreadySelected) => {
+    const store = new Store(join(await tempDir("dh-exec-routing-"), "cli"));
+    const other = { ...identity, server: "https://other.example.com" };
+    await saveProfile(store, "owner", identity);
+    if (alreadySelected)
+      await rememberConsoleSelection(store, identity, "full-id");
+    const { session } = sessionFixture(identity);
+    const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+    try {
+      await resolveExecTarget(
+        store,
+        undefined,
+        undefined,
+        new CommandLifecycle(),
+      );
+      await saveProfile(store, "other", other);
+      login.mockClear();
+      for (const target of ["abc123", "full-id"]) {
+        await resolveExecTarget(
+          store,
+          target,
+          undefined,
+          new CommandLifecycle(),
+        );
+        expect(login).toHaveBeenLastCalledWith(
+          "owner",
+          store,
+          expect.any(CommandLifecycle),
+        );
+      }
+    } finally {
+      login.mockRestore();
+    }
+  },
+);
 
 test("console routing: cached targets override defaults after profile rename", async () => {
   const store = new Store(join(await tempDir("dh-console-routing-"), "cli"));

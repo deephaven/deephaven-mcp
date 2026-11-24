@@ -8,7 +8,6 @@ import {
   asDhError,
   cleanupError,
   DhError,
-  describe,
   timeoutMs,
   withTimeout,
 } from "../../errors.ts";
@@ -180,6 +179,7 @@ async function resolveEnterpriseDefaultExecTarget(
   if (selected) {
     const console = findEnterpriseConsole(session, selected);
     if (console && isRunning(console.state)) {
+      await rememberConsole(store, console.shortcode, console.id, identity);
       return { session, console, created: false };
     }
   }
@@ -189,6 +189,7 @@ async function resolveEnterpriseDefaultExecTarget(
   if (running.length === 1) {
     const console = running.at(0);
     if (console) {
+      await rememberConsole(store, console.shortcode, console.id, identity);
       await rememberConsoleSelection(store, identity, console.id);
       return { session, console, created: false };
     }
@@ -244,6 +245,16 @@ async function execInConsoleAction(
     profile: profileFlag,
     operation: "script execution",
     phase: "opening",
+    outcome: "not_started",
+    console: {
+      shortcode: resolved.console.shortcode,
+      id: resolved.console.id,
+      created: resolved.created,
+    },
+    human: {
+      summary: `Interrupted while opening console ${resolved.console.shortcode}.`,
+      context: `Console ${resolved.console.shortcode}.`,
+    },
   });
 
   const ideSession = await openTimedIdeSession(
@@ -270,12 +281,14 @@ async function execInConsoleAction(
   } catch (e) {
     lifecycle.signal.throwIfAborted();
     if (e instanceof DhError) throw e;
-    throw new DhError(
-      "exec_failed",
-      "Script execution failed",
-      undefined,
-      describe(e),
-    );
+    const code = consoleFailureCode(e);
+    const messages = {
+      console_forbidden: "The server denied permission to run the script",
+      console_unsupported: "The server cannot run scripts in this console",
+      server_unreachable: "Lost connection while running the script",
+      console_failed: "Could not run the script",
+    };
+    throw new DhError(code, messages[code]);
   }
   const changes = changesOf(result.changes);
   if (result.error) {
