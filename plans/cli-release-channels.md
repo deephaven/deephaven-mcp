@@ -32,7 +32,7 @@ New module (e.g. `src/channel.ts`), imported by the CLI and the scripts.
 | Kind | Format | Regex |
 | --- | --- | --- |
 | Release | `cli-vX.Y.Z` | `/^cli-v(0\|[1-9]\d*)\.(0\|[1-9]\d*)\.(0\|[1-9]\d*)$/` |
-| Pre-release | `cli-vX.Y.Z-<channel>.<build>` | `/^cli-v(\d+\.\d+\.\d+)-([a-z][a-z0-9-]*)\.(0\|[1-9]\d*)$/` |
+| Pre-release | `cli-vX.Y.Z-<channel>.<build>` | `/^cli-v((?:0\|[1-9]\d*)\.(?:0\|[1-9]\d*)\.(?:0\|[1-9]\d*))-([a-z][a-z0-9-]*)\.(0\|[1-9]\d*)$/` |
 | Channel release | `cli-channel-<channel>` | — (never parsed as a version) |
 
 - The pre-release regex splits on the **last** dot, so `alpha-1.0` is channel
@@ -249,6 +249,9 @@ Notes:
   unchanged.
 - Install when `manifest.version !== VERSION`; `manifest.version` must still be
   valid semver (`semver.valid`), else throw. No higher/lower comparison.
+- Before replacing the executable, re-read `channel` from the metadata file;
+  if it no longer matches the channel the manifest came from (a concurrent
+  `dh channel use`), skip the swap and log it under `DH_DEBUG`.
 - Expose a forced check for `dh channel use`: ignores the throttle and
   `DH_AUTO_UPDATE`, reports `{ from, to }` or "already current", throws on
   failure.
@@ -389,8 +392,11 @@ or moved item's ID isn't reused.
 - [ ] **channels-cli-1** Auto-update matches How the CLI updates in
       `docs/RELEASE_ARCHITECTURE.md`: it follows the channel in `dh.meta`, else
       `release`; installs whenever the version differs, lower included; treats a
-      bad `dh.meta` as `release`; throttles on `lastUpdateCheck`; and never runs
-      on a dev build.
+      bad `dh.meta` as `release`; throttles on `lastUpdateCheck`; skips the
+      install if `dh.meta`'s channel changed during the download (unit test: a
+      stubbed download writes `{"channel":"rc"}` to `dh.meta` partway through a
+      `release` update, and the executable isn't replaced); and never runs on a
+      dev build.
 - [ ] **channels-cli-2** `dh channel` and `dh channel use` match
       `docs/CHANNELS.md`: output, JSON and errors (`usage`, `channel_not_found`,
       `server_unreachable`); a failed channel check saves nothing; dev builds

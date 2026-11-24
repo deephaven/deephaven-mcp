@@ -220,7 +220,7 @@ Each CLI's channel comes from its `dh.meta`, else `release`. Channel releases ke
 
 1. **Pick a channel:** `channel` in the install metadata file, else `release`.
 2. **Check after a command finishes, at most once per `DH_UPDATE_INTERVAL`** (default 24 hours; never with `DH_AUTO_UPDATE=off`): fetch `releases/download/cli-channel-<channel>/manifest.json`.
-3. **If the manifest's version differs from its own,** download the binary for this platform, verify its SHA-256, and replace itself.
+3. **If the manifest's version differs from its own,** download the binary for this platform, verify its SHA-256, and replace itself, unless `dh.meta`'s channel changed meanwhile (a `dh channel use` in another terminal).
 
 - **No higher-or-lower comparison.** Any difference installs, so switching channels can move to a lower version.
 - **Install on a channel:** `curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_CHANNEL=rc sh`. The script installs that channel's latest build and saves the channel in the metadata file. `DH_CHANNEL` is read only by the install script; the CLI ignores it. Any copy of the script behaves the same; without `DH_CHANNEL` it installs `release`. An unpublished channel fails with "no channel", and an invalid name fails before anything downloads.
@@ -277,7 +277,7 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 4. Patches then continue automatically (`3.2.1-rc.0`, …). `package.json` stays at `3.2.0` until the next bump.
 
 - **`package.json` is a minimum.** The default is to bump the last release by one patch, unless `package.json` has a higher version, in which case that version becomes the next release. This allows bumping the major or minor version in `package.json` to set the floor for subsequent releases.
-- **Branches made before the bump keep their old `package.json`.** An `alpha-<id>` channel stays on `3.1.x` labels until its feature branch merges `v3_rewrite`. A breaking feature can bump `package.json` on its own branch, so its alpha builds read `4.0.0-alpha-bar.N`.
+- **Branches made before the bump keep their old `package.json`.** An `alpha-<id>` channel stays on `3.1.x` labels until its feature branch merges `v3_rewrite` or `3.2.0` is released; after that the last release sets the minimum, so its builds read `3.2.1-alpha-<id>.N`. A breaking feature can bump `package.json` on its own branch, so its alpha builds read `4.0.0-alpha-bar.N`.
 - **A hotfix is a patch on the current release.** With `3.1.0` released and `v3_rewrite` already bumped to `3.2.0`, a hotfix ships as `3.1.1`: its branch starts from the released commit, where `package.json` is still `3.1.0`. The bump arrives later through `rc` as `3.2.0-rc.0`.
 
 ### Labels and names
