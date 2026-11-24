@@ -12,8 +12,9 @@ channels carry experiments. How channels are published is covered in
 | `dh channel` | — | — | Show the channel this install follows. |
 | `dh channel use` | `<channel>` channel name | — | Follow a channel and update to its build now. |
 
-`dh channel use` checks the channel before saving anything, so a misspelled or
-unpublished channel leaves the install as it was. `dh channel use release`
+`dh channel use` checks the channel and downloads its build before saving
+anything, so a misspelled or unpublished channel, or a failed download, leaves
+the install as it was. `dh channel use release`
 switches back to the default.
 
 ## Installing on a channel
@@ -62,7 +63,7 @@ In `dh channel use`, `from` equals `to` when the install was already current.
 - `dh` installs its channel's build whenever the version differs, even if it is
   lower, so switching channels can move to an older version.
 - If the running build is from another channel than the one followed, for
-  example after a failed download or with a pinned version, `dh channel` says
+  example after installing a pinned version or testing with `DH_UPDATE_URL`, `dh channel` says
   so and how to fix it:
 
   ```
