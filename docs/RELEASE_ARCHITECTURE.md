@@ -227,8 +227,8 @@ Each CLI's channel comes from its `dh.meta`, else `release`. Channel releases ke
   - **Try a channel side by side:** install a second copy elsewhere, for example `DH_CHANNEL=rc DH_INSTALL_DIR=~/dh-rc`. It gets its own metadata file, so the main install keeps its channel.
 - **Switch an existing install:** `dh channel use <channel>` follows the CLI's noun + `use` pattern (`dh auth use <profile>`).
   1. Checks the channel: one that hasn't been published fails with `channel_not_found`, and nothing is saved.
-  2. Saves the channel in `dh.meta`.
-  3. Installs the channel's build now if its version differs, ignoring the interval and `DH_AUTO_UPDATE`. If the download fails, the channel stays saved and installs at the next check.
+  2. Downloads and verifies the channel's build if its version differs, ignoring the interval and `DH_AUTO_UPDATE`. If the download fails, nothing is saved; run it again.
+  3. Saves the channel in `dh.meta` and replaces the executable together, under the lock that guards `dh.meta`.
 
   Run on the channel already followed, it's a manual update; on a pinned install, it moves to the channel's current build, which stays put while `DH_AUTO_UPDATE=off` is still set. `dh channel use release` switches back. Dev builds refuse `dh channel use`.
 - **Show the channel:** `dh channel` prints the channel the install follows. If the running build is from another channel, it names both and gives the `dh channel use` command to fix it; on a dev build it prints `dev (never updates)`.

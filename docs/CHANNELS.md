@@ -85,5 +85,5 @@ In `dh channel use`, `from` equals `to` when the install was already current.
 - `dh channel use` errors:
   - `usage`: an invalid channel name, the reserved name `dev`, or a dev build.
   - `channel_not_found` (exit 2): the channel has no published build.
-  - `server_unreachable`: the download failed. If that happens after the
-    channel is saved, the build installs at the next update check.
+  - `server_unreachable`: the manifest or the build couldn't be downloaded.
+    Nothing is saved; run `dh channel use` again.
