@@ -51,11 +51,10 @@ channel):
 4. Channel `release` → `base`. Any other channel →
    `base-<channel>.<build>`, where `<build>` = 1 + the highest build among
    existing `cli-v<base>-<channel>.*` tags, or `0`.
-5. If the resulting `cli-v…` tag already exists, error.
 
 Expose it as a script for the workflow: `bun run next-version <channel>` prints
-the version (no `cli-v`, no trailing text) to stdout and exits 0; invalid
-channel, invalid `pkg` or an existing tag print an error to stderr and exit 1.
+the version (no `cli-v`, no trailing text) to stdout and exits 0; an invalid
+channel or invalid `pkg` prints an error to stderr and exits 1.
 It reads tags with `git tag --list 'cli-v*'`, so it needs a checkout with all
 tags (see the workflow's `fetch-depth: 0`).
 
@@ -82,9 +81,6 @@ Next-version cases (from tag lists). Base says where `base` came from: `tag`
 | `v2.1.0`, `cli-vfoo`, `cli-v03.1.1-rc.0`, `cli-v3.1.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.0` | Non-CLI, malformed and leading-zero tags are ignored: parsing `cli-v03.1.1-rc.0` would give `rc.1` |
 | any | `3.2.0-beta` | err | any | error | `package.json` must be plain `X.Y.Z` |
 | any | any | — | `Rc`, `dev`, `-x` | error | Invalid channel name (`Rc`, `-x`), or the reserved `dev` |
-
-Step 5's existing-tag error has no row: the base is always above every release
-and the build number is always new, so it's only a guard.
 
 ### 2. Publishing (PR 2)
 
