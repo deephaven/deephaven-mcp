@@ -220,7 +220,7 @@ Each CLI's channel comes from its `dh.meta`, else `release`. Channel releases ke
 
 1. **Pick a channel:** `channel` in the install metadata file, else `release`.
 2. **Check after a command finishes, at most once per `DH_UPDATE_INTERVAL`** (default 24 hours; never with `DH_AUTO_UPDATE=off`): fetch `releases/download/cli-channel-<channel>/manifest.json`.
-3. **If the manifest's version differs from its own,** download the binary for this platform, verify its SHA-256, and replace itself, unless `dh.meta`'s channel changed meanwhile (a `dh channel use` in another terminal).
+3. **If the manifest's version differs from its own,** download the binary for this platform, verify its SHA-256, and replace itself, unless `dh.meta`'s channel changed meanwhile (a `dh channel use` in another terminal). The check and the swap happen under the same lock that guards `dh.meta`, so the installed build always matches the saved channel.
 
 - **No higher-or-lower comparison.** Any difference installs, so switching channels can move to a lower version.
 - **Install on a channel:** `curl -fsSL https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.sh | DH_CHANNEL=rc sh`. The script installs that channel's latest build and saves the channel in the metadata file. `DH_CHANNEL` is read only by the install script; the CLI ignores it. Any copy of the script behaves the same; without `DH_CHANNEL` it installs `release`. An unpublished channel fails with "no channel", and an invalid name fails before anything downloads.

@@ -249,9 +249,15 @@ Notes:
   unchanged.
 - Install when `manifest.version !== VERSION`; `manifest.version` must still be
   valid semver (`semver.valid`), else throw. No higher/lower comparison.
-- Before replacing the executable, re-read `channel` from the metadata file;
-  if it no longer matches the channel the manifest came from (a concurrent
-  `dh channel use`), skip the swap and log it under `DH_DEBUG`.
+- Replacing the executable, in both auto-update and `dh channel use`: after
+  the download (outside the lock), take the metadata file's lock, re-read
+  `channel`, replace the executable only if it still matches the channel the
+  manifest came from, then release the lock. Otherwise (a concurrent
+  `dh channel use`) skip the swap and log it under `DH_DEBUG`. `channel` only
+  changes under the same lock, so the installed build always belongs to the
+  saved channel. As with writes, the auto-updater skips the swap if the lock is
+  busy; `dh channel use` waits. With `DH_UPDATE_URL` set, the manifest's
+  channel is the saved one.
 - Expose a forced check for `dh channel use`: ignores the throttle and
   `DH_AUTO_UPDATE`, reports `{ from, to }` or "already current", throws on
   failure.
@@ -397,15 +403,19 @@ or moved item's ID isn't reused.
       `release`; with `DH_UPDATE_URL` set, installs from that manifest and leaves
       `dh.meta`'s channel unchanged; installs whenever the version differs,
       lower included; treats a
-      bad `dh.meta` as `release`; throttles on `lastUpdateCheck`; skips the
-      install if `dh.meta`'s channel changed during the download (unit test: a
-      stubbed download writes `{"channel":"rc"}` to `dh.meta` partway through a
-      `release` update, and the executable isn't replaced); and never runs on a
-      dev build.
+      bad `dh.meta` as `release`; throttles on `lastUpdateCheck`; re-checks the
+      channel under the `dh.meta` lock before replacing the executable (unit
+      tests: a stubbed download writes `{"channel":"rc"}` to `dh.meta` partway
+      through a `release` update, and the executable isn't replaced; with the
+      lock held by the test, the swap is skipped, not waited on); and never runs
+      on a dev build.
 - [ ] **channels-cli-2** `dh channel` and `dh channel use` match
       `docs/CHANNELS.md`: output, JSON and errors (`usage`, `channel_not_found`,
-      `server_unreachable`); a failed channel check saves nothing; dev builds
-      refuse `dh channel use`.
+      `server_unreachable`); a failed channel check saves nothing;
+      `dh channel use` re-checks the channel under the `dh.meta` lock before
+      its swap (unit test: another `dh channel use` changes the channel during
+      its download, and it doesn't replace the executable); dev builds refuse
+      `dh channel use`.
 - [ ] **channels-cli-3** Config folders match Config per channel in
       `docs/RELEASE_ARCHITECTURE.md`: `cli` on `release`, `cli-<channel>` on
       other channels, `cli-dev` on dev builds; `DH_CONFIG_DIR` overrides all of
