@@ -321,13 +321,9 @@ only to a fork.
 
 ## Done when
 
-Each item is a behavior the implementation must show. Its ID, prefixed
-`channels-` to stay unique across plans, is how the implementing PRs refer to
-it. Each implementing PR lists its items in its description with the tests that
-prove each one and how they run, and names those tests with the ID, e.g.
-`[channels-C6] …`. `(Manual)` items are checked in the fork run or on the repo.
-Changing what an item requires, or a doc it points to, needs a callout in the
-PR.
+Each item is a behavior the implementation must show. IDs are prefixed
+`channels-` to stay unique across plans, so they can be referenced by tests as
+part of implementation.
 
 - [ ] **channels-C1** (PR 2) Next versions match the next-version table in
       section 1, and tags parse as in Tags: `cli-v3.1.1-alpha-1.0` is channel
