@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { dh } from "@deephaven/jsapi-types";
+import Log, { LoggerLevel } from "@deephaven/log";
 import type { EnterpriseDhType } from "@deephaven-enterprise/jsapi-nodejs";
+import { debugEnabled } from "../../debug.ts";
 import { DhError, describe } from "../../errors.ts";
 import { isTrustedSource } from "../../net.ts";
 
@@ -39,7 +41,7 @@ let quieted = false;
 function quietLibraries(libraryDir: string): void {
   if (quieted) return;
   quieted = true;
-  const debug = process.env.DH_DEBUG;
+  const debug = debugEnabled();
   if (debug) {
     // stdout is for results, and `-o json` promises a single value there.
     for (const m of ["log", "info", "debug"] as const) {
@@ -57,6 +59,11 @@ function quietLibraries(libraryDir: string): void {
       console[m] = () => {};
     }
   }
+  // Vendor debug logs include worker credentials, even when DH_DEBUG is set.
+  // Rebind existing loggers after quieting and keep them below debug level.
+  const infoLevel = LoggerLevel.INFO;
+  if (infoLevel === undefined) throw new Error("Missing vendor INFO log level");
+  Log.setLogLevel(Math.min(Log.level, infoLevel));
   process.on("unhandledRejection", (reason) => {
     const fromLibrary =
       !(reason instanceof Error) || String(reason.stack).includes(libraryDir);
@@ -179,16 +186,39 @@ export async function loadCommunityApi(
   cacheRoot: string,
   timeout: number,
 ): Promise<CoreApi> {
-  assertTrusted(origin);
-  const dir = await originDir(cacheRoot, origin);
-  await download(
+  return await loadCoreApi(
     new URL("/jsapi/dh-core.js", origin),
-    join(dir, "dh-core.js"),
+    cacheRoot,
     timeout,
   );
+}
+
+/** Downloads a Core+ worker's jsapi, preserving its proxy path. */
+export async function loadCorePlusApi(
+  jsApiUrl: string,
+  cacheRoot: string,
+  timeout: number,
+): Promise<CoreApi> {
+  const url = new URL(jsApiUrl);
+  if (!url.pathname.endsWith("/jsapi/dh-core.js")) {
+    throw new DhError("server_unsupported", "Invalid Core+ JS API URL");
+  }
+  return await loadCoreApi(url, cacheRoot, timeout);
+}
+
+/** Download both modules beside each other for their relative imports. */
+async function loadCoreApi(
+  url: URL,
+  cacheRoot: string,
+  timeout: number,
+): Promise<CoreApi> {
+  assertTrusted(url);
+  const dir = join(await runDir(cacheRoot), encodeURIComponent(url.href));
+  await mkdir(dir, { recursive: true });
+  await download(url, join(dir, "dh-core.js"), timeout);
   // Removed from newer servers; the core module still imports it.
   await download(
-    new URL("/jsapi/dh-internal.js", origin),
+    new URL("dh-internal.js", url),
     join(dir, "dh-internal.js"),
     timeout,
     true,

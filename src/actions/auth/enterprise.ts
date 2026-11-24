@@ -16,6 +16,7 @@ import {
   type Username,
   uploadPublicKey,
 } from "@deephaven-enterprise/jsapi-nodejs";
+import { debugEnabled } from "../../debug.ts";
 import {
   DhError,
   describe,
@@ -259,7 +260,7 @@ export async function loginSaml(
         note("Browser error? Interrupt and retry.", "instruction");
         showedRetryNotice = true;
       }
-      if (process.env.DH_DEBUG) {
+      if (debugEnabled()) {
         err(`${BIN}: SSO login call ended (${describe(e)}); asking again`);
       }
     }

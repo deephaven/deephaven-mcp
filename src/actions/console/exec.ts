@@ -22,6 +22,7 @@ import {
   identityOf,
   sessionForTarget,
 } from "./actions.ts";
+import { connectCorePlusWorker } from "./core.ts";
 import {
   type ConsoleInfo,
   consoleFailureCode,
@@ -341,7 +342,7 @@ async function acquireIdeSession(
   signal: AbortSignal,
   deadline: AbortSignal,
 ): Promise<dh.IdeSession> {
-  const ideSession = await openIdeSession(session, console, signal);
+  const ideSession = await openIdeSession(session, console, lifecycle, signal);
   try {
     signal.throwIfAborted();
     lifecycle.onCleanup(() => ideSession.close());
@@ -366,12 +367,13 @@ async function acquireIdeSession(
 async function openIdeSession(
   session: Session,
   console: ConsoleInfo,
+  lifecycle: CommandLifecycle,
   signal: AbortSignal,
 ): Promise<dh.IdeSession> {
   try {
     if (session.community)
       return await openCommunityIdeSession(session, signal);
-    return await openEnterpriseIdeSession(session, console, signal);
+    return await openEnterpriseIdeSession(session, console, lifecycle, signal);
   } catch (e) {
     signal.throwIfAborted();
     if (e instanceof DhError) throw e;
@@ -419,6 +421,7 @@ async function openCommunityIdeSession(
 async function openEnterpriseIdeSession(
   session: Session,
   console: ConsoleInfo,
+  lifecycle: CommandLifecycle,
   signal: AbortSignal,
 ): Promise<dh.IdeSession> {
   if (!session.enterprise) {
@@ -427,19 +430,16 @@ async function openEnterpriseIdeSession(
       "The server cannot run scripts in this console",
     );
   }
+  const language = sessionLanguage(console.language);
   const query = await getQueryInfoForNameOrSerial({
     client: session.enterprise.client,
     dh: session.enterprise.dhe,
     queryNameOrSerial: console.id,
   });
   signal.throwIfAborted();
-  const ide = await new session.enterprise.dhe.Ide(
-    session.enterprise.client,
-  ).getQueryConnection(query);
+  const ide = await connectCorePlusWorker(session, query, lifecycle, signal);
   signal.throwIfAborted();
-  await ide.running();
-  signal.throwIfAborted();
-  return await ide.startSession(sessionLanguage(console.language));
+  return await ide.startSession(language);
 }
 
 /** Convert JS API change collections into the CLI's JSON shape. */
@@ -455,5 +455,15 @@ function changesOf(changes: dh.ide.VariableChanges): ExecChanges {
 
 /** Normalize server labels to the JS API's Python/Groovy session names. */
 function sessionLanguage(language: string | null): "python" | "groovy" {
-  return language?.toLowerCase() === "groovy" ? "groovy" : "python";
+  switch (language?.toLowerCase()) {
+    case "python":
+      return "python";
+    case "groovy":
+      return "groovy";
+    default:
+      throw new DhError(
+        "console_unsupported",
+        "The console has no supported script language",
+      );
+  }
 }

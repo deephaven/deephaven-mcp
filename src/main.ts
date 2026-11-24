@@ -5,6 +5,7 @@ import { commandPath, GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
 import { CommandLifecycle } from "./cli/lifecycle.ts";
 import { runWithLifecycle } from "./cli/run.ts";
 import { rootCommand } from "./commands/root.ts";
+import { debugEnabled } from "./debug.ts";
 import { commandUsageError } from "./errors.ts";
 import { err, reportError, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
@@ -116,7 +117,7 @@ if (code !== 3) {
   try {
     await autoUpdate();
   } catch (e) {
-    if (process.env.DH_DEBUG) err(`${BIN}: auto-update failed: ${e}`);
+    if (debugEnabled()) err(`${BIN}: auto-update failed: ${e}`);
   }
 }
 // The Deephaven client libraries keep sockets open.

@@ -1,5 +1,6 @@
 import { writeSync } from "node:fs";
 import { styleText } from "node:util";
+import { debugEnabled } from "./debug.ts";
 import { asDhError, type DhError, type FailureReport } from "./errors.ts";
 
 /** `-o human` (default), `-o json`, or `-o silent`. */
@@ -94,7 +95,7 @@ export function result(
 /** Prints `e` and returns the process exit code. */
 export function reportError(e: unknown, report: FailureReport = {}): number {
   const error = asDhError(e);
-  if (error.code === "internal" && process.env.DH_DEBUG && e instanceof Error) {
+  if (error.code === "internal" && debugEnabled() && e instanceof Error) {
     err(e.stack ?? e.message);
   }
   if (isJson()) {

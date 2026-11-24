@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@deephaven-enterprise/jsapi-nodejs": "2026.1.59",
+    "@deephaven/log": "^1.8.0",
     "@deephaven/jsapi-nodejs": "^1.29.0",
     "commander": "^15.0.0",
     "ink": "^7.1.1",

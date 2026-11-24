@@ -1,12 +1,14 @@
 import { expect, mock, spyOn, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { dh } from "@deephaven/jsapi-types";
 import { Command } from "commander";
 import { RUNTIME_FLAGS } from "../../scripts/build.ts";
 import * as auth from "../../src/actions/auth/session.ts";
 import type { Session } from "../../src/actions/auth/signin.ts";
 import { Store } from "../../src/actions/auth/store.ts";
 import * as consoleActions from "../../src/actions/console/actions.ts";
+import * as core from "../../src/actions/console/core.ts";
 import type { EnterpriseConsoleInfo } from "../../src/actions/console/enterprise.ts";
 import {
   execInConsole,
@@ -458,15 +460,15 @@ test.each(["worker", "start"])(
         return ideSession;
       }),
     };
-    class Ide {
-      async getQueryConnection() {
+    const connect = spyOn(core, "connectCorePlusWorker").mockImplementation(
+      async () => {
         if (stage === "worker") {
           reached.resolve();
           await gate.promise;
         }
-        return worker;
-      }
-    }
+        return worker as unknown as dh.IdeConnection;
+      },
+    );
     const query = {
       type: "InteractiveConsole",
       name: "IC - dh CLI - abc123",
@@ -486,7 +488,7 @@ test.each(["worker", "start"])(
       user: "alice",
       enterprise: {
         client: { getKnownConfigs: () => [query] },
-        dhe: { Ide },
+        dhe: {},
       },
     } as unknown as Session;
     const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
@@ -513,9 +515,82 @@ test.each(["worker", "start"])(
       expect(ideSession.runCode).not.toHaveBeenCalled();
     } finally {
       gate.resolve();
+      connect.mockRestore();
       login.mockRestore();
       if (previousTimeout === undefined) delete process.env.DH_TIMEOUT;
       else process.env.DH_TIMEOUT = previousTimeout;
+    }
+  },
+);
+
+test.each([
+  ["Groovy", "groovy"],
+  ["Python", "python"],
+  ["unsupported", undefined],
+  [null, undefined],
+])(
+  "exec Enterprise: respects console language %s",
+  async (language, expected) => {
+    const store = new Store(
+      join(await tempDir("dh-exec-enterprise-language-"), "cli"),
+    );
+    const ideSession = {
+      close: mock(() => {}),
+      runCode: mock(async () => ({
+        error: "",
+        changes: { created: [], updated: [], removed: [] },
+      })),
+    };
+    const worker = {
+      startSession: mock(async () => ideSession),
+    } as unknown as dh.IdeConnection;
+    const query = {
+      type: "InteractiveConsole",
+      name: "IC - dh CLI - abc123",
+      serial: "server-id",
+      designated: { status: "Running" },
+      replicas: [],
+      scriptLanguage: language,
+      heapSize: 4,
+      dbServerName: "Query 1",
+      workerKind: "python",
+      jvmArguments: [],
+      envVarEntries: [],
+    };
+    const session = {
+      origin: "https://enterprise.example.com",
+      kind: "enterprise",
+      user: "alice",
+      enterprise: { client: { getKnownConfigs: () => [query] }, dhe: {} },
+    } as unknown as Session;
+    const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+    const connect = spyOn(core, "connectCorePlusWorker").mockResolvedValue(
+      worker,
+    );
+    const lifecycle = new CommandLifecycle();
+    try {
+      const execution = execInConsole(
+        store,
+        { code: "x=1" },
+        undefined,
+        undefined,
+        lifecycle,
+      );
+      if (expected) {
+        await expect(execution).resolves.toMatchObject({
+          console: { id: "server-id" },
+        });
+        expect(worker.startSession).toHaveBeenCalledWith(expected);
+      } else {
+        await expect(execution).rejects.toMatchObject({
+          code: "console_unsupported",
+        });
+        expect(connect).not.toHaveBeenCalled();
+      }
+      expect((await lifecycle.cleanup()).failures).toEqual([]);
+    } finally {
+      connect.mockRestore();
+      login.mockRestore();
     }
   },
 );

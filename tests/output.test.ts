@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { RUNTIME_FLAGS } from "../scripts/build.ts";
+import { run } from "./helpers.ts";
 
 const outputUrl = pathToFileURL(
   resolve(import.meta.dir, "../src/output.ts"),
@@ -32,6 +33,25 @@ async function runOutput(format: string, operation: string) {
   ]);
   return { stdout, stderr, code };
 }
+
+test("DH_DEBUG=0 suppresses internal stacks; DH_DEBUG=1 shows them", async () => {
+  const script = `
+    import { reportError } from ${JSON.stringify(outputUrl)};
+    const error = new Error("test failure");
+    error.stack = "test stack marker";
+    reportError(error);
+  `;
+  for (const [value, enabled] of [
+    ["0", false],
+    ["1", true],
+  ] as const) {
+    const result = await run([process.execPath, "-e", script], {
+      DH_DEBUG: value,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stderr.includes("test stack marker")).toBe(enabled);
+  }
+});
 
 test("note routes categories by output format", async () => {
   const operation = `
