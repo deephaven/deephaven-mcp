@@ -6,8 +6,9 @@ import {
   forwardSignalsToChild,
   runLifecycleAction,
 } from "../../cli/lifecycle.ts";
+import { stdinForRestart } from "../../cli/stdin.ts";
 import { DhError, isErrno, reasonOf } from "../../errors.ts";
-import { note } from "../../output.ts";
+import { getFormat, note } from "../../output.ts";
 import { BIN, STANDALONE } from "../../version.ts";
 import type { CommunityMethod } from "./community.ts";
 import { keyPairOf } from "./flows.ts";
@@ -101,12 +102,15 @@ export async function ensureCa(
   const runtime = STANDALONE
     ? []
     : [...process.execArgv, process.argv[1] ?? ""];
-  const args = command ?? process.argv.slice(2);
+  const args = command ? restartCommand(command) : process.argv.slice(2);
+  const input = await stdinForRestart();
   const proc = Bun.spawn(
     [process.execPath, ...runtime, ...args, ...extraArgs],
     {
       env: { ...process.env, NODE_EXTRA_CA_CERTS: bundle, [LOADED_CA]: caCert },
-      stdio: ["inherit", "inherit", "inherit"],
+      stdin: input ?? "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
       // Avoid delivering terminal signals both directly and via the parent.
       detached: process.platform !== "win32",
     },
@@ -121,6 +125,18 @@ export async function ensureCa(
     stopForwarding();
   }
   process.exit(code);
+}
+
+/** Preserve the effective format even if replacement arguments contain another. */
+function restartCommand(command: string[]): string[] {
+  const boundary = command.indexOf("--");
+  const position = boundary < 0 ? command.length : boundary;
+  return [
+    ...command.slice(0, position),
+    "--output",
+    getFormat(),
+    ...command.slice(position),
+  ];
 }
 
 const KIND_LABEL: Record<Kind, string> = {

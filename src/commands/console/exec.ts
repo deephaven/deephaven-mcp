@@ -32,7 +32,6 @@ export const exec = defineCommand<ExecOptions>({
     return {
       human,
       json: result,
-      empty: human.length === 0,
     };
   },
 });

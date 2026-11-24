@@ -98,7 +98,10 @@ test("loginSaml: retries server wait-limit rejections beyond five minutes", asyn
     expect(Date.now()).toBe(360_000);
     expect(reconnect).toHaveBeenCalledTimes(6);
     expect(notice).toHaveBeenCalledTimes(1);
-    expect(notice).toHaveBeenCalledWith("Browser error? Interrupt and retry.");
+    expect(notice).toHaveBeenCalledWith(
+      "Browser error? Interrupt and retry.",
+      "instruction",
+    );
     for (const attempt of [...failures, success]) {
       expect(attempt.call.mock.calls).toEqual([
         [{ type: "saml", token: "same-nonce" }],

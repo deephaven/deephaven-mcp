@@ -11,6 +11,11 @@ export function setFormat(value: Format): void {
   format = value;
 }
 
+/** Output format to retain when an invocation restarts. */
+export function getFormat(): Format {
+  return format;
+}
+
 export function isJson(): boolean {
   return format === "json";
 }
@@ -29,8 +34,12 @@ export function err(text: string): void {
   writeSync(2, `${text}\n`);
 }
 
-/** Progress and notices; never mixed into JSON stdout. */
-export function note(text: string): void {
+/** Progress is suppressed in silent mode; warnings and instructions remain visible. */
+export function note(
+  text: string,
+  category: "progress" | "warning" | "instruction" = "progress",
+): void {
+  if (isSilent() && category === "progress") return;
   if (isJson() || isSilent()) err(styled(text, process.stderr));
   else out(styled(text, process.stdout));
 }

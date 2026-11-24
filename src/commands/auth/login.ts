@@ -174,7 +174,7 @@ export const login = defineCommand<LoginOptions>({
           ctx.lifecycle,
         );
         if (saved.key) note(`✔ Authorized this computer (key "${saved.key}")`);
-        for (const warning of saved.warnings) note(warning);
+        for (const warning of saved.warnings) note(warning, "warning");
         return loggedInOutput(saved, session);
       } finally {
         disconnectServer(session);

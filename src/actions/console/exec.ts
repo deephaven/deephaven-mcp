@@ -4,7 +4,7 @@ import {
   type CommandLifecycle,
   runLifecycleAction,
 } from "../../cli/lifecycle.ts";
-import { DhError, describe } from "../../errors.ts";
+import { asDhError, cleanupError, DhError, describe } from "../../errors.ts";
 import { requireAuth } from "../auth/session.ts";
 import type { Session } from "../auth/signin.ts";
 import type { Store } from "../auth/store.ts";
@@ -16,6 +16,7 @@ import {
 } from "./actions.ts";
 import {
   type ConsoleInfo,
+  consoleFailureCode,
   findEnterpriseConsole,
   isRunning,
   listEnterpriseConsoles,
@@ -233,6 +234,22 @@ async function execInConsoleAction(
     target: resolved.console.shortcode,
     profile: profileFlag,
     operation: "script execution",
+    phase: "opening",
+  });
+
+  const ideSession = await openIdeSession(resolved.session, resolved.console);
+  try {
+    lifecycle.signal.throwIfAborted();
+    lifecycle.onCleanup(() => ideSession.close());
+  } catch (error) {
+    try {
+      ideSession.close();
+    } catch (cleanup) {
+      throw cleanupError([cleanup], asDhError(error));
+    }
+    throw error;
+  }
+  lifecycle.setFailureReport({
     phase: "running",
     outcome: "unknown",
     human: {
@@ -242,15 +259,6 @@ async function execInConsoleAction(
         "The console and script outcome are unknown; dh exiting does not stop the remote script.",
       ],
     },
-  });
-
-  const ideSession = await openIdeSession(resolved.session, resolved.console);
-  lifecycle.onCleanup(() => {
-    try {
-      ideSession.close();
-    } catch {
-      // The IDE connection may already be unusable.
-    }
   });
   let result: dh.ide.CommandResult;
   try {
@@ -271,6 +279,10 @@ async function execInConsoleAction(
   if (result.error) {
     lifecycle.setFailureReport({
       outcome: "failed",
+      human: {
+        summary: "Script execution failed.",
+        context: `Console ${resolved.console.shortcode}.`,
+      },
       changes,
       console: {
         shortcode: resolved.console.shortcode,
@@ -304,24 +316,24 @@ async function openIdeSession(
   console: ConsoleInfo,
 ): Promise<dh.IdeSession> {
   try {
-    if (session.community)
-      return await openCommunityIdeSession(session, console);
+    if (session.community) return await openCommunityIdeSession(session);
     return await openEnterpriseIdeSession(session, console);
   } catch (e) {
     if (e instanceof DhError) throw e;
-    throw new DhError(
-      "console_unsupported",
-      "This worker cannot run scripts",
-      undefined,
-      describe(e),
-    );
+    const code = consoleFailureCode(e);
+    const messages = {
+      console_forbidden: "The server denied permission to open the console",
+      console_unsupported: "The server cannot run scripts in this console",
+      server_unreachable: "Could not reach the console server",
+      console_failed: "Could not open the console session",
+    };
+    throw new DhError(code, messages[code]);
   }
 }
 
 /** Open and start the Community shared-console IDE session. */
 async function openCommunityIdeSession(
   session: Session,
-  console: ConsoleInfo,
 ): Promise<dh.IdeSession> {
   if (!session.community) {
     throw new DhError(
@@ -331,7 +343,17 @@ async function openCommunityIdeSession(
   }
   const ide = await session.community.client.getAsIdeConnection();
   await ide.running();
-  return await ide.startSession(sessionLanguage(console.language));
+  const languages = await ide.getConsoleTypes();
+  const language =
+    languages.find((type) => type.toLowerCase() === "python") ??
+    languages.find((type) => type.toLowerCase() === "groovy");
+  if (!language) {
+    throw new DhError(
+      "console_unsupported",
+      "The Community server has no supported console language",
+    );
+  }
+  return await ide.startSession(language);
 }
 
 /** Resolve an Enterprise query and open its worker IDE session. */

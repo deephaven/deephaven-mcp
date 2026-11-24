@@ -256,7 +256,7 @@ export async function loginSaml(
             );
       }
       if (!showedRetryNotice) {
-        note("Browser error? Interrupt and retry.");
+        note("Browser error? Interrupt and retry.", "instruction");
         showedRetryNotice = true;
       }
       if (process.env.DH_DEBUG) {

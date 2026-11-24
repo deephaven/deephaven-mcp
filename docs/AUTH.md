@@ -29,6 +29,7 @@ Global flags, accepted by every command:
 | ------------------ | ---------------------------------------------------------- |
 | `--profile <name>` | Use this profile instead of the default (env `DH_PROFILE`) |
 | `-o json`          | Print results as JSON ([JSON output](#json-output))        |
+| `-o silent`        | Suppress results and progress; keep warnings, errors and required sign-in instructions on stderr |
 | `--no-prompt`      | Never prompt; fail with the flag to pass instead           |
 
 In a terminal, `dh` asks for anything the flags leave out: the server, the

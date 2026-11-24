@@ -4,6 +4,7 @@ import {
   type ConsoleSettings,
   parseConsoleSettings,
 } from "../../actions/console/settings.ts";
+import { readStdin } from "../../cli/stdin.ts";
 import { DhError, isErrno, reasonOf } from "../../errors.ts";
 import type { Prompter } from "../../ui/prompt.ts";
 
@@ -62,7 +63,7 @@ async function readExecStdin(): Promise<ExecSource> {
       "Pipe or redirect a script with `dh exec -c`, or pass `-c '<code>'.",
     );
   }
-  const stdin = await Bun.stdin.text();
+  const stdin = await readStdin();
   if (stdin.length === 0) {
     throw new DhError(
       "usage",

@@ -12,7 +12,7 @@ const errorsUrl = pathToFileURL(
 
 async function runOutput(format: string, operation: string) {
   const script = `
-    import { result, reportError, setFormat } from ${JSON.stringify(outputUrl)};
+    import { result, reportError, setFormat, note } from ${JSON.stringify(outputUrl)};
     import { DhError, cleanupError } from ${JSON.stringify(errorsUrl)};
     import { authActionReport, profileSaveReport, profileRemovalReport, profileMigrationReport } from ${JSON.stringify(new URL("../src/actions/auth/reporting.ts", import.meta.url).href)};
     import { reportMigrationProgress } from ${JSON.stringify(new URL("../src/actions/auth/migrate.ts", import.meta.url).href)};
@@ -32,6 +32,32 @@ async function runOutput(format: string, operation: string) {
   ]);
   return { stdout, stderr, code };
 }
+
+test("note routes categories by output format", async () => {
+  const operation = `
+    note("default progress");
+    note("explicit progress", "progress");
+    note("warning", "warning");
+    note("sign-in instruction", "instruction");
+  `;
+  const all =
+    "default progress\nexplicit progress\nwarning\nsign-in instruction\n";
+  expect(await runOutput("human", operation)).toEqual({
+    stdout: all,
+    stderr: "",
+    code: 0,
+  });
+  expect(await runOutput("json", operation)).toEqual({
+    stdout: "",
+    stderr: all,
+    code: 0,
+  });
+  expect(await runOutput("silent", operation)).toEqual({
+    stdout: "",
+    stderr: "warning\nsign-in instruction\n",
+    code: 0,
+  });
+});
 
 test("empty success emits nothing in human or JSON mode", async () => {
   for (const format of ["human", "json"]) {

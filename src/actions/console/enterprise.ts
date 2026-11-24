@@ -523,6 +523,31 @@ export async function waitForConsoleDeletion(
   }
 }
 
+/** Classify permission and transport failures without exposing vendor details. */
+export function consoleFailureCode(
+  error: unknown,
+):
+  | "console_forbidden"
+  | "console_unsupported"
+  | "server_unreachable"
+  | "console_failed" {
+  const reason = reasonOf(error) ?? "";
+  if (/not authorized/i.test(reason)) return "console_forbidden";
+  if (
+    /\b(unavailable|econnrefused|econnreset|etimedout|network error|connection (closed|refused|reset))\b/i.test(
+      reason,
+    )
+  )
+    return "server_unreachable";
+  if (
+    /\b(?:console|scripting|language)\b.{0,80}\b(?:unsupported|not supported)\b|\b(?:unsupported|not supported)\b.{0,80}\b(?:console|scripting|language)\b/i.test(
+      reason,
+    )
+  )
+    return "console_unsupported";
+  return "console_failed";
+}
+
 /** Apply a timeout and translate API failures into console-specific errors. */
 async function call<T>(value: Promise<T>, operation: string): Promise<T> {
   try {
@@ -538,7 +563,7 @@ async function call<T>(value: Promise<T>, operation: string): Promise<T> {
   } catch (error) {
     if (error instanceof DhError) throw error;
     const detail = reasonOf(error);
-    if (/not authorized/i.test(detail ?? "")) {
+    if (consoleFailureCode(error) === "console_forbidden") {
       throw new DhError(
         "console_forbidden",
         `The server denied permission to ${operation}`,
