@@ -49,6 +49,53 @@ test("Enterprise Core+ manager respects CLI logging after API initialization", a
   }
 });
 
+test("Core+ API loader handles long proxy paths without mixing modules", async () => {
+  const paths: string[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      paths.push(path);
+      if (path.endsWith("/dh-core.js")) {
+        return new Response(
+          `export default { marker: ${JSON.stringify(path)} };`,
+        );
+      }
+      return new Response("", { status: 404 });
+    },
+  });
+  try {
+    const cache = await tempDir("dh-core-long-path-");
+    const base = `http://127.0.0.1:${server.port}`;
+    const prefix = `/${"a".repeat(90)}/${"b".repeat(90)}/${"c".repeat(60)}`;
+    const first = `${prefix}/one/jsapi/dh-core.js`;
+    const second = `${prefix}/two/jsapi/dh-core.js`;
+    expect(encodeURIComponent(`${base}${first}`).length).toBeGreaterThan(255);
+    const script = `
+      import { loadCorePlusApi } from ${JSON.stringify(new URL("../../src/actions/auth/jsapi.ts", import.meta.url).href)};
+      const first = await loadCorePlusApi(${JSON.stringify(`${base}${first}`)}, ${JSON.stringify(cache)}, 5000);
+      const second = await loadCorePlusApi(${JSON.stringify(`${base}${second}`)}, ${JSON.stringify(cache)}, 5000);
+      process.stdout.write(JSON.stringify([first.marker, second.marker]));
+    `;
+    const result = await run(
+      [process.execPath, ...RUNTIME_FLAGS, "-e", script],
+      { DH_DEBUG: undefined },
+    );
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toEqual([first, second]);
+    expect(paths).toEqual([
+      first,
+      `${prefix}/one/jsapi/dh-internal.js`,
+      second,
+      `${prefix}/two/jsapi/dh-internal.js`,
+    ]);
+  } finally {
+    await server.stop(true);
+  }
+});
+
 test("Core+ API loader retains proxy prefix and isolates server paths", async () => {
   const paths: string[] = [];
   const server = Bun.serve({

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { rmSync, writeSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -213,7 +214,8 @@ async function loadCoreApi(
   timeout: number,
 ): Promise<CoreApi> {
   assertTrusted(url);
-  const dir = join(await runDir(cacheRoot), encodeURIComponent(url.href));
+  const key = createHash("sha256").update(url.href).digest("hex");
+  const dir = join(await runDir(cacheRoot), key);
   await mkdir(dir, { recursive: true });
   await download(url, join(dir, "dh-core.js"), timeout);
   // Removed from newer servers; the core module still imports it.
