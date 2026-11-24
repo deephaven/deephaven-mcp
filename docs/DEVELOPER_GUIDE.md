@@ -112,7 +112,9 @@ Done once by a repo admin:
 The release workflow takes the repo from `GITHUB_REPOSITORY`, so merging into a
 fork's `cli-channel/<channel>` branch (with Actions enabled) produces binaries,
 a manifest and install scripts that all point at the fork. Apply the repo setup
-to the fork too, to test the rulesets. Merge into `cli-channel/release` once so
+to the fork too, to test the rulesets. Make every PR within the fork: GitHub's
+new-PR page defaults the base to the upstream repo, and the release checks
+reject a PR that crosses repos. Merge into `cli-channel/release` once so
 the install scripts exist, install from the fork's
 `releases/download/cli-channel-release/install.sh` with `DH_CHANNEL=rc`, merge
 into `cli-channel/rc` twice, and run `DH_UPDATE_INTERVAL=0 DH_DEBUG=1 dh` to see

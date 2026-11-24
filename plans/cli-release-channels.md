@@ -153,8 +153,9 @@ Notes:
   on `release`).
 - Steps:
   1. Only on `cli-channel/release`, before anything else: the pushed commit
-     must be the merge of a PR from `cli-channel/rc` or `hotfix/*`. Check with
-     `gh api repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls --jq '.[] | select(.merged_at != null and .base.ref == "cli-channel/release" and .merge_commit_sha == env.GITHUB_SHA) | .head.ref'`
+     must be the merge of a PR from this repo's `cli-channel/rc` or `hotfix/*`.
+     Check with
+     `gh api repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls --jq '.[] | select(.merged_at != null and .base.ref == "cli-channel/release" and .merge_commit_sha == env.GITHUB_SHA and .head.repo.full_name == env.GITHUB_REPOSITORY) | .head.ref'`
      (`GH_TOKEN: ${{ github.token }}`); fail with
      `<sha> is not a merged PR from cli-channel/rc or hotfix/*; nothing published`
      if no head matches. This catches accidental direct pushes, which bypass
@@ -169,9 +170,12 @@ Notes:
 **`.github/workflows/release-checks.yml`** (new): on `pull_request` to
 `cli-channel/release`, two jobs whose names are the required-check names:
 
-- `release-source`: fail unless `github.head_ref` is `cli-channel/rc` or starts
-  with `hotfix/`. Error: `PRs into cli-channel/release must come from
-  cli-channel/rc or a hotfix/* branch`.
+- `release-source`: fail unless `github.event.pull_request.head.repo.full_name`
+  equals `github.repository` and `github.head_ref` is `cli-channel/rc` or
+  starts with `hotfix/`. Error: `PRs into cli-channel/release must come from
+  cli-channel/rc or a hotfix/* branch in this repo`. Comparing with
+  `github.repository` rather than a fixed name keeps the check working on a
+  fork, for PRs within that fork.
 - `release-contains`: checkout the PR head with `fetch-depth: 0`, then
 
   ```sh
@@ -180,6 +184,8 @@ Notes:
 
   and fail if it is non-empty, printing the list and
   `Merge the hotfix into v3_rewrite, then v3_rewrite into cli-channel/rc.`
+  This matches commits by patch; it doesn't catch a fix undone by a later
+  conflict resolution, and isn't meant to.
 
 ### 3. Install scripts (PR 2)
 
@@ -222,9 +228,13 @@ Notes:
 - Missing, unparseable, not an object, or an invalid `channel` → treat as `{}`:
   channel `release`, check due. Never fail a command over it; log the reason
   under `DH_DEBUG`.
-- Writes: read, change only the caller's keys, write
-  `<path>.<pid>.tmp`, rename over `<path>`. If the existing file was unreadable,
-  write a fresh object.
+- Writes: hold `<path>.lock` (the `withFileLock` helper `Store.update()` uses)
+  around the whole read, change and rename, so the updater's
+  `lastUpdateCheck` write can't undo a concurrent `dh channel use`. Read,
+  change only the caller's keys, write `<path>.<pid>.tmp`, rename over
+  `<path>`. If the existing file was unreadable, write a fresh object. The
+  auto-updater skips its write if the lock is busy instead of waiting;
+  `dh channel use` waits. The install scripts write without the lock.
 
 **Updater** (`src/updater.ts`)
 
@@ -339,9 +349,12 @@ or moved item's ID isn't reused.
       `cli-channel-<channel>` to the commit, creates or retitles that release,
       and uploads `manifest.json` last (after the install scripts on `release`).
 - [ ] **channels-pub-4** `cli-channel/release` publishes only the merge of a PR
-      from `cli-channel/rc` or `hotfix/*`; any other commit publishes nothing.
-- [ ] **channels-pub-5** `release-source` passes only PRs from `cli-channel/rc`
-      or `hotfix/*`. `release-contains` fails while a change already on
+      from this repo's `cli-channel/rc` or `hotfix/*`; any other commit,
+      including a merged PR from another repo's branch of the same name,
+      publishes nothing.
+- [ ] **channels-pub-5** `release-source` passes only PRs from this repo's
+      `cli-channel/rc` or `hotfix/*`, so a PR from a fork's `cli-channel/rc`
+      fails. `release-contains` fails while a change already on
       `release` is missing from the PR's branch, such as a hotfix not yet merged
       through `v3_rewrite` into `rc`, and passes once it's there.
 - [ ] **channels-pub-6** The install scripts (`install.sh`, `install.ps1`) match
@@ -350,7 +363,8 @@ or moved item's ID isn't reused.
       channel fails with `no channel`; an invalid name or `dev` fails before any
       download; `DH_INSTALL_VERSION` accepts `3.1.1`, `v3.1.1` and `cli-v3.1.1`.
 - [ ] **channels-pub-7** (Manual) Publishing works end to end on a fork with the
-      repo setup applied:
+      repo setup applied, with every PR made within the fork (GitHub's new-PR
+      page defaults the base to the upstream repo; switch it to the fork):
   1. Merge a PR into `cli-channel/rc` → `cli-v<x>-rc.0` released as a
      pre-release, not latest; `cli-channel-rc` exists, titled
      `rc channel (currently …)`, its tag on the merge commit.
@@ -359,7 +373,8 @@ or moved item's ID isn't reused.
   3. PR `cli-channel/rc` → `cli-channel/release`: both checks pass; merge
      → `cli-v<x>` released with no deployment approval, `cli-channel-release`
      carries the install scripts.
-  4. A PR from any other branch fails `release-source`. A hotfix PR into
+  4. A PR from any other branch, or from another repo's `cli-channel/rc`,
+     fails `release-source`. A hotfix PR into
      release passes; the next rc PR fails `release-contains` until the fix is
      merged into `v3_rewrite` and then `rc`.
   5. An admin's direct push to `cli-channel/release` fails the release job's

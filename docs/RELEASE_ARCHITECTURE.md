@@ -142,7 +142,7 @@ gitGraph
 1. Branch `hotfix/<name>` from the last released `v3_rewrite` commit: `git merge-base origin/cli-channel/release origin/v3_rewrite`.
 2. PR it into `release`. It ships as `3.1.1`.
 3. Merge it into `v3_rewrite`, then `v3_rewrite` into `rc` as usual.
-4. Promote `rc` as usual. Until the fix reaches `rc`, `release-contains` blocks the promotion, so a hotfix can't be undone by accident.
+4. Promote `rc` as usual. Until the fix reaches `rc`, `release-contains` blocks the promotion, so a hotfix can't be left out by accident.
 
 ## What a publish does
 
@@ -291,15 +291,15 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 | --- | --- |
 | Channels only move forward | Branch ruleset on `cli-channel/**`: no force-push, no deletion |
 | Who can publish | Standard repo permissions: anyone with write access can merge into a channel branch, including creating an `alpha-<id>` one |
-| `release` only takes a reviewed PR from `rc` or a hotfix | Ruleset on `cli-channel/release`: an approving review is required, and it's the sign-off. Required status check `release-source`: the PR must come from `cli-channel/rc` or a `hotfix/*` branch. The release workflow: publishes only if the pushed commit is the merge of such a PR, so a stray direct push never reaches users |
-| A release never drops released work | Required status check `release-contains` |
+| `release` only takes a reviewed PR from `rc` or a hotfix | Ruleset on `cli-channel/release`: an approving review is required, and it's the sign-off. Required status check `release-source`: the PR must come from this repo's `cli-channel/rc` or a `hotfix/*` branch, not a fork's. The release workflow: publishes only if the pushed commit is the merge of such a PR, so a stray direct push never reaches users |
+| A release never leaves out a released commit | Required status check `release-contains` |
 | Channel branches keep their history | Branch ruleset on `cli-channel/**`: changes go through a PR (no approval needed outside `release`) merged with a merge commit, never squash or rebase. The source branch stays an ancestor, so each merge's diff shows only what's new and `release-contains` can find hotfixes. Feature PRs into `v3_rewrite` still squash |
 | Version tags never change | Tag ruleset on `cli-v*`: no update, no deletion |
 | Only CI moves channel tags | Tag ruleset on `cli-channel-*`: no update or deletion, except by the release workflow |
 
 Merging publishes; there's no separate deployment approval after the PR's review. Repo admins can bypass these rules, but an accidental direct push to `release` still won't publish: the workflow only publishes merged `rc` or hotfix PRs.
 
-`release-contains` fails a release PR if the branch is missing any change already on `release`. It matches changes by content, so cherry-picked fixes count:
+`release-contains` fails a release PR if the branch is missing any change already on `release`. It matches commits by patch, so cherry-picked fixes count. It doesn't catch a fix undone by a later conflict resolution:
 
 ```sh
 git log --no-merges --cherry-pick --right-only --format='%h %s' HEAD...origin/cli-channel/release
