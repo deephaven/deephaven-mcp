@@ -15,6 +15,7 @@ import {
   resolveExecTarget,
 } from "../../src/actions/console/exec.ts";
 import { CommandLifecycle } from "../../src/cli/lifecycle.ts";
+import { runWithLifecycle } from "../../src/cli/run.ts";
 import { exec } from "../../src/commands/console/exec.ts";
 import { askExecSource } from "../../src/commands/console/questions.ts";
 import { DhError } from "../../src/errors.ts";
@@ -194,6 +195,128 @@ test.each(["failure", "cancel"])(
       create.mockRestore();
       login.mockRestore();
       await lifecycle.cleanup();
+    }
+  },
+);
+
+test.each(["failure", "interrupt"])(
+  "exec: cleanup %s reports successful execution and the created console",
+  async (ending) => {
+    const store = new Store(join(await tempDir("dh-exec-cleanup-"), "cli"));
+    const created = {
+      id: "new-id",
+      shortcode: "abc123",
+      name: "IC - dh CLI - abc123",
+      state: "Running",
+      language: "Python",
+      heapSizeGb: 4,
+      server: "Query 1",
+      engine: "DeephavenCommunity",
+      jvmArgs: "",
+      environment: {},
+      autoDeleteTimeoutSeconds: 600,
+    } satisfies EnterpriseConsoleInfo;
+    const query = {
+      type: "InteractiveConsole",
+      name: created.name,
+      serial: created.id,
+      designated: { status: "Running" },
+      replicas: [],
+      scriptLanguage: "Python",
+      heapSize: 4,
+      dbServerName: "Query 1",
+      workerKind: "python",
+      jvmArguments: [],
+      envVarEntries: [],
+    };
+    let queries: (typeof query)[] = [];
+    const session = {
+      origin: "https://enterprise.example.com",
+      kind: "enterprise",
+      user: "alice",
+      enterprise: { client: { getKnownConfigs: () => queries }, dhe: {} },
+    } as unknown as Session;
+    const ideSession = {
+      runCode: mock(async () => ({
+        error: "",
+        changes: { created: [], updated: [], removed: [] },
+      })),
+      close: mock(() => {
+        if (ending === "interrupt") process.emit("SIGINT", "SIGINT");
+        else throw new Error("Close failed");
+      }),
+    };
+    const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+    const create = spyOn(consoleActions, "createConsole").mockImplementation(
+      async () => {
+        queries = [query];
+        return created;
+      },
+    );
+    const connect = spyOn(core, "connectCorePlusWorker").mockResolvedValue({
+      startSession: async () => ideSession,
+    } as unknown as dh.IdeConnection);
+    const lifecycle = new CommandLifecycle();
+    try {
+      let failure: unknown;
+      try {
+        await runWithLifecycle(lifecycle, () =>
+          execInConsole(
+            store,
+            { code: "x=1" },
+            undefined,
+            undefined,
+            lifecycle,
+          ),
+        );
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(DhError);
+      if (!(failure instanceof DhError)) throw new Error("Expected DhError");
+      expect(failure.code).toBe(
+        ending === "failure" ? "internal" : "cancelled",
+      );
+      expect(ideSession.runCode).toHaveBeenCalledTimes(1);
+      expect(lifecycle.failureReport).toMatchObject({
+        phase: "completed",
+        outcome: "succeeded",
+        console: { shortcode: "abc123", id: "new-id", created: true },
+      });
+      for (const format of ["human", "silent", "json"]) {
+        const script = `
+          import { DhError } from "./src/errors.ts";
+          import { reportError, setFormat } from "./src/output.ts";
+          const { code, headline, detail, report } = await Bun.stdin.json();
+          setFormat(${JSON.stringify(format)});
+          process.exitCode = reportError(new DhError(code, headline, undefined, detail), report);
+        `;
+        const rendered = await run(
+          [process.execPath, ...RUNTIME_FLAGS, "-e", script],
+          {},
+          JSON.stringify({
+            code: failure.code,
+            headline: failure.headline,
+            detail: failure.detail,
+            report: lifecycle.failureReport,
+          }),
+        );
+        expect(rendered.code).toBe(ending === "failure" ? 1 : 3);
+        if (format === "json") {
+          expect(JSON.parse(rendered.stderr)).toMatchObject({
+            outcome: "succeeded",
+            console: { shortcode: "abc123", id: "new-id", created: true },
+          });
+        } else {
+          expect(rendered.stderr).toContain(
+            "script succeeded on console abc123",
+          );
+        }
+      }
+    } finally {
+      connect.mockRestore();
+      create.mockRestore();
+      login.mockRestore();
     }
   },
 );

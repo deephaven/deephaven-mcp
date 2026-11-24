@@ -34,7 +34,6 @@ import {
   EMPTY_CONSOLE_REGISTRY,
   identityKey,
   rememberConsole,
-  rememberConsoleSelection,
 } from "./store.ts";
 
 export interface ExecChange {
@@ -138,7 +137,6 @@ async function resolveExplicitExecTarget(
     console.id,
     identityOf(session),
   );
-  await rememberConsoleSelection(store, identityOf(session), console.id);
   return { session, console, created: false };
 }
 
@@ -190,7 +188,6 @@ async function resolveEnterpriseDefaultExecTarget(
     const console = running.at(0);
     if (console) {
       await rememberConsole(store, console.shortcode, console.id, identity);
-      await rememberConsoleSelection(store, identity, console.id);
       return { session, console, created: false };
     }
   }
@@ -213,7 +210,7 @@ export async function execInConsole(
   profileFlag: string | undefined,
   lifecycle: CommandLifecycle,
 ): Promise<ExecResult> {
-  return await runLifecycleAction(
+  const result = await runLifecycleAction(
     lifecycle,
     { command: "console exec", operation: "console execution" },
     execInConsoleAction,
@@ -223,6 +220,21 @@ export async function execInConsole(
     profileFlag,
     lifecycle,
   );
+  lifecycle.setFailureReport({
+    command: "console exec",
+    target: result.console.shortcode,
+    profile: profileFlag,
+    operation: "script execution",
+    phase: "completed",
+    outcome: "succeeded",
+    console: result.console,
+    changes: result.changes,
+    human: {
+      summary: `Interrupted after the script succeeded on console ${result.console.shortcode}.`,
+      context: `The script succeeded on console ${result.console.shortcode}.`,
+    },
+  });
+  return result;
 }
 
 /** Resolve the target, open a session, run the source, and retain partial changes on failure. */

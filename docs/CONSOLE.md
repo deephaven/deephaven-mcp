@@ -68,7 +68,10 @@ all overrides.
   one sole running Enterprise console is used. If no Enterprise console is
   running, Enterprise creates one; if multiple Enterprise consoles are running,
   use `--console` to choose one. Community uses its shared console.
-  `--console` always targets the named console and does not create it.
+  Using `--console` or the sole running console does not change the selection.
+  Without a running selected console, a later unqualified exec becomes
+  ambiguous if another console starts. An auto-created console is selected,
+  as with `dh console create`.
 - Execution reports created, updated, and removed exports. `-o json` adds the
   console identity and change categories. `-o silent` suppresses success
   output, while warnings and failures remain on stderr.

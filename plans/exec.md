@@ -42,6 +42,9 @@ $ dh exec analysis.py -o json
 - Target: `--console` → current console → sole running console. With no running
   Enterprise console, create a console; with multiple running consoles, require
   `--console`. Community → shared console.
+- Explicit and sole-running targets do not change the selection; an
+  auto-created console is selected. If another console starts after a
+  sole-running target was used, a later unqualified exec can be ambiguous.
 - Existing profile and console-default rules apply.
 - Both entry points listed in help and `dh agents`.
 - Human output: `Created console <shortcode>` only for a new console, then changed exports.

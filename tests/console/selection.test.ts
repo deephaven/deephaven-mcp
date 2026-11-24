@@ -136,6 +136,11 @@ test.each([false, true])(
         undefined,
         new CommandLifecycle(),
       );
+      expect(
+        (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).selected[
+          identityKey(identity)
+        ],
+      ).toBe(alreadySelected ? "full-id" : undefined);
       await saveProfile(store, "other", other);
       login.mockClear();
       for (const target of ["abc123", "full-id"]) {
@@ -156,6 +161,107 @@ test.each([false, true])(
     }
   },
 );
+
+test("exec targeting: an explicit console does not change the selection", async () => {
+  const store = new Store(join(await tempDir("dh-exec-explicit-"), "cli"));
+  const first = consoleFixture("first-id", "Running");
+  const second = {
+    ...consoleFixture("second-id", "Running"),
+    shortcode: "def456",
+    name: "IC - dh CLI - def456",
+  };
+  await saveProfile(store, "owner", identity);
+  await rememberConsoleSelection(store, identity, first.id);
+  const { session } = sessionFixture(identity, [first, second]);
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+  try {
+    expect(
+      (
+        await resolveExecTarget(
+          store,
+          "def456",
+          undefined,
+          new CommandLifecycle(),
+        )
+      ).console.id,
+    ).toBe(second.id);
+    expect(
+      (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).selected[
+        identityKey(identity)
+      ],
+    ).toBe(first.id);
+    expect(
+      (
+        await resolveExecTarget(
+          store,
+          undefined,
+          undefined,
+          new CommandLifecycle(),
+        )
+      ).console.id,
+    ).toBe(first.id);
+  } finally {
+    login.mockRestore();
+  }
+});
+
+test("exec targeting: a sole running console does not replace a stale selection", async () => {
+  const store = new Store(join(await tempDir("dh-exec-stale-"), "cli"));
+  await saveProfile(store, "owner", identity);
+  await rememberConsoleSelection(store, identity, "stale-id");
+  const { session } = sessionFixture(identity);
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+  try {
+    const result = await resolveExecTarget(
+      store,
+      undefined,
+      undefined,
+      new CommandLifecycle(),
+    );
+    expect(result.console.id).toBe("full-id");
+    expect(
+      (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).selected[
+        identityKey(identity)
+      ],
+    ).toBe("stale-id");
+  } finally {
+    login.mockRestore();
+  }
+});
+
+test("exec targeting: a later second console makes a sole-console target ambiguous", async () => {
+  const store = new Store(join(await tempDir("dh-exec-sole-"), "cli"));
+  await saveProfile(store, "owner", identity);
+  const { session } = sessionFixture(identity);
+  const login = spyOn(auth, "requireAuth").mockResolvedValue(session);
+  try {
+    const lifecycle = new CommandLifecycle();
+    expect(
+      (await resolveExecTarget(store, undefined, undefined, lifecycle)).console
+        .id,
+    ).toBe("full-id");
+    const queries = session.enterprise?.client.getKnownConfigs();
+    if (!queries?.[0]) throw new Error("Missing console fixture");
+    queries.push({
+      ...queries[0],
+      name: "IC - dh CLI - def456",
+      serial: "second-id",
+    });
+    await expect(
+      resolveExecTarget(store, undefined, undefined, lifecycle),
+    ).rejects.toMatchObject({
+      code: "usage",
+      headline: "Multiple consoles are running",
+    });
+    expect(
+      (await store.readConsoleData(EMPTY_CONSOLE_REGISTRY)).selected[
+        identityKey(identity)
+      ],
+    ).toBeUndefined();
+  } finally {
+    login.mockRestore();
+  }
+});
 
 test("console routing: cached targets override defaults after profile rename", async () => {
   const store = new Store(join(await tempDir("dh-console-routing-"), "cli"));
