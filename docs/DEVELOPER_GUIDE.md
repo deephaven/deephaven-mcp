@@ -84,6 +84,11 @@ publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
   into `v3_rewrite`. It takes effect when `v3_rewrite` is next merged into
   `cli-channel/rc` (`3.2.0-rc.0`), then promoted to release (`3.2.0`); see
   [Minor and major bumps](RELEASE_ARCHITECTURE.md#minor-and-major-bumps).
+- **Failed publish:** nothing is published, and the channel stays on its
+  previous build. Fix the cause if needed, then use "Re-run jobs" on the failed
+  run in Actions. Re-run only the latest commit's run on that branch: re-running
+  an older one after a newer build published moves the channel back to the
+  older build.
 
 To try a published channel's build in an existing install without changing its
 saved channel (this replaces the binary when the versions differ, and the next
