@@ -67,21 +67,24 @@ release tag below its `X.Y.Z`. None → omit.
 Next-version cases (from tag lists). Base says where `base` came from: `tag`
 (last release + patch), `pkg` (`package.json`), or `err`:
 
-| Tags | `package.json` | Base | Channel | Result |
-| --- | --- | --- | --- | --- |
-| none | `3.0.0` | pkg | `release` | `3.0.0` |
-| none | `3.0.0` | pkg | `rc` | `3.0.0-rc.0` |
-| `cli-v3.1.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.0` |
-| `cli-v3.1.0`, `cli-v3.1.1-rc.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.1` |
-| `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | tag | `alpha-bar` | `3.1.1-alpha-bar.0` |
-| `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | tag | `release` | `3.1.1` |
-| `cli-v3.1.1` | `3.1.0` | tag | `rc` | `3.1.2-rc.0` |
-| `cli-v3.1.1` | `3.2.0` | pkg | `rc` | `3.2.0-rc.0` |
-| `cli-v3.2.0` | `3.2.0` | tag | `rc` | `3.2.1-rc.0` |
-| `cli-v3.2.0` | `3.1.0` | tag | `alpha-bar` | `3.2.1-alpha-bar.0` |
-| `v2.1.0`, `cli-vfoo`, `cli-v03.1.1-rc.0`, `cli-v3.1.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.0` (others ignored) |
-| any | `3.2.0-beta` | err | any | error: `package.json` must be plain `X.Y.Z` |
-| any | any | — | `Rc`, `dev`, `-x` | error: invalid channel name (`Rc`, `-x`) or reserved (`dev`) |
+| Tags | `package.json` | Base | Channel | Result | Shows |
+| --- | --- | --- | --- | --- | --- |
+| none | `3.0.0` | pkg | `release` | `3.0.0` | With no release tags, `package.json` is the first release |
+| none | `3.0.0` | pkg | `rc` | `3.0.0-rc.0` | A channel's first build is `.0` |
+| `cli-v3.1.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.0` | `package.json` equal to the last release: base is last + patch |
+| `cli-v3.1.0`, `cli-v3.1.1-rc.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.1` | Build is 1 + the channel's highest build on that base |
+| `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | tag | `alpha-bar` | `3.1.1-alpha-bar.0` | Build counts only this channel's tags: `rc.1` doesn't make this `alpha-bar.2` |
+| `cli-v3.1.0`, `cli-v3.1.1-rc.1` | `3.1.0` | tag | `release` | `3.1.1` | Pre-release tags aren't releases, so they don't move the base: counting `3.1.1-rc.1` would give `3.1.2` |
+| `cli-v3.1.1` | `3.1.0` | tag | `rc` | `3.1.2-rc.0` | A new release moves the base on; build restarts at `.0` |
+| `cli-v3.1.1` | `3.2.0` | pkg | `rc` | `3.2.0-rc.0` | `package.json` above last + patch wins (a bump) |
+| `cli-v3.2.0` | `3.2.0` | tag | `rc` | `3.2.1-rc.0` | Once the bump is released, patches resume |
+| `cli-v3.2.0` | `3.1.0` | tag | `alpha-bar` | `3.2.1-alpha-bar.0` | `package.json` below the last release is ignored (old branch) |
+| `v2.1.0`, `cli-vfoo`, `cli-v03.1.1-rc.0`, `cli-v3.1.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.0` | Non-CLI, malformed and leading-zero tags are ignored: parsing `cli-v03.1.1-rc.0` would give `rc.1` |
+| any | `3.2.0-beta` | err | any | error | `package.json` must be plain `X.Y.Z` |
+| any | any | — | `Rc`, `dev`, `-x` | error | Invalid channel name (`Rc`, `-x`), or the reserved `dev` |
+
+Step 5's existing-tag error has no row: the base is always above every release
+and the build number is always new, so it's only a guard.
 
 ### 2. Publishing (PR 2)
 
