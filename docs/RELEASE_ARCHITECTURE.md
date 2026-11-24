@@ -139,7 +139,7 @@ gitGraph
   commit
 ```
 
-1. Branch `hotfix/<name>` from the last released `v3_rewrite` commit: `git merge-base origin/cli-channel/release origin/v3_rewrite`.
+1. Branch `hotfix/<name>` from the last released `v3_rewrite` commit: `git merge-base origin/cli-channel/release origin/v3_rewrite`. If an earlier hotfix hasn't been merged into `v3_rewrite` yet, do step 3 for it first; otherwise the new branch lacks that fix and `release-contains` rejects it.
 2. PR it into `release`. It ships as `3.1.1`.
 3. Merge it into `v3_rewrite`, then `v3_rewrite` into `rc` as usual.
 4. Promote `rc` as usual. Until the fix reaches `rc`, `release-contains` blocks the promotion, so a hotfix can't be left out by accident.

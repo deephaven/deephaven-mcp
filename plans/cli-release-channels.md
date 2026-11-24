@@ -359,7 +359,8 @@ or moved item's ID isn't reused.
       `cli-channel/rc` or `hotfix/*`, so a PR from a fork's `cli-channel/rc`
       fails. `release-contains` fails while a change already on
       `release` is missing from the PR's branch, such as a hotfix not yet merged
-      through `v3_rewrite` into `rc`, and passes once it's there.
+      through `v3_rewrite` into `rc`, or an earlier hotfix missing from a later
+      hotfix's branch, and passes once it's there.
 - [ ] **channels-pub-6** The install scripts (`install.sh`, `install.ps1`) match
       Installing on a channel in `docs/CHANNELS.md`: `release` by default;
       `DH_CHANNEL` picks the channel and is saved in `dh.meta`; an unpublished
@@ -379,7 +380,9 @@ or moved item's ID isn't reused.
   4. A PR from any other branch, or from another repo's `cli-channel/rc`,
      fails `release-source`. A hotfix PR into
      release passes; the next rc PR fails `release-contains` until the fix is
-     merged into `v3_rewrite` and then `rc`.
+     merged into `v3_rewrite` and then `rc`. A second hotfix branched before
+     the first reached `v3_rewrite` fails `release-contains`; branched after,
+     it passes.
   5. An admin's direct push to `cli-channel/release` fails the release job's
      PR check and publishes nothing.
   6. The repo's `releases/latest` never changes.
@@ -391,7 +394,9 @@ or moved item's ID isn't reused.
 
 - [ ] **channels-cli-1** Auto-update matches How the CLI updates in
       `docs/RELEASE_ARCHITECTURE.md`: it follows the channel in `dh.meta`, else
-      `release`; installs whenever the version differs, lower included; treats a
+      `release`; with `DH_UPDATE_URL` set, installs from that manifest and leaves
+      `dh.meta`'s channel unchanged; installs whenever the version differs,
+      lower included; treats a
       bad `dh.meta` as `release`; throttles on `lastUpdateCheck`; skips the
       install if `dh.meta`'s channel changed during the download (unit test: a
       stubbed download writes `{"channel":"rc"}` to `dh.meta` partway through a

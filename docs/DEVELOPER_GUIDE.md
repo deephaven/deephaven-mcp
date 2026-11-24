@@ -85,12 +85,17 @@ publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
   `cli-channel/rc` (`3.2.0-rc.0`), then promoted to release (`3.2.0`); see
   [Minor and major bumps](RELEASE_ARCHITECTURE.md#minor-and-major-bumps).
 
-To test a published channel without switching an install:
+To try a published channel's build in an existing install without changing its
+saved channel (this replaces the binary when the versions differ, and the next
+normal update puts the saved channel's build back):
 
 ```sh
 DH_UPDATE_URL=https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-rc/manifest.json \
   DH_UPDATE_INTERVAL=0 DH_DEBUG=1 dh
 ```
+
+To leave the main install untouched, install a second copy instead:
+`DH_CHANNEL=rc DH_INSTALL_DIR=~/dh-rc`.
 
 ### Repo setup
 
