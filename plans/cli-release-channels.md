@@ -343,11 +343,11 @@ part of implementation.
       `cli-channel/rc` or `hotfix/*`. `release-contains` fails while a change
       already on `release` is missing from the PR's branch, such as a hotfix not
       yet merged through `v3_rewrite` into `rc`, and passes once it's there.
-- [ ] **channels-C6** (PR 2) Installing matches Installing on a channel in
-      `docs/CHANNELS.md`: `release` by default; `DH_CHANNEL` picks the channel
-      and is saved in `dh.meta`; an unpublished channel fails with `no channel`;
-      an invalid name or `dev` fails before any download; `DH_INSTALL_VERSION`
-      accepts `3.1.1`, `v3.1.1` and `cli-v3.1.1`.
+- [ ] **channels-C6** (PR 2) The install scripts (`install.sh`, `install.ps1`)
+      match Installing on a channel in `docs/CHANNELS.md`: `release` by default;
+      `DH_CHANNEL` picks the channel and is saved in `dh.meta`; an unpublished
+      channel fails with `no channel`; an invalid name or `dev` fails before any
+      download; `DH_INSTALL_VERSION` accepts `3.1.1`, `v3.1.1` and `cli-v3.1.1`.
 - [ ] **channels-C7** (PR 3) Auto-update matches How the CLI updates in
       `docs/RELEASE_ARCHITECTURE.md`: it follows the channel in `dh.meta`, else
       `release`; installs whenever the version differs, lower included; treats a
