@@ -78,7 +78,8 @@ Next-version cases (from tag lists). Base says where `base` came from: `tag`
 | `cli-v3.1.1` | `3.1.0` | tag | `rc` | `3.1.2-rc.0` |
 | `cli-v3.1.1` | `3.2.0` | pkg | `rc` | `3.2.0-rc.0` |
 | `cli-v3.2.0` | `3.2.0` | tag | `rc` | `3.2.1-rc.0` |
-| `v2.1.0`, `cli-vfoo`, `cli-v3.1.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.0` (others ignored) |
+| `cli-v3.2.0` | `3.1.0` | tag | `alpha-bar` | `3.2.1-alpha-bar.0` |
+| `v2.1.0`, `cli-vfoo`, `cli-v03.1.1-rc.0`, `cli-v3.1.0` | `3.1.0` | tag | `rc` | `3.1.1-rc.0` (others ignored) |
 | any | `3.2.0-beta` | err | any | error: `package.json` must be plain `X.Y.Z` |
 | any | any | — | `Rc`, `dev`, `-x` | error: invalid channel name (`Rc`, `-x`) or reserved (`dev`) |
 
@@ -353,7 +354,7 @@ or moved item's ID isn't reused.
 
 - [ ] **channels-pub-1** Next versions match the next-version table in section
       1, and tags parse as in Tags: `cli-v3.1.1-alpha-1.0` is channel `alpha-1`,
-      build `0`.
+      build `0`; `cli-v03.1.1-rc.0` and `cli-v3.01.1-rc.0` are ignored.
 - [ ] **channels-pub-2** Release notes start where Release-notes start tag
       (section 1) says: at `cli-v3.1.0` for `cli-v3.1.1`, and for
       `cli-v3.1.1-rc.0` when only `cli-v3.1.0` exists; at `cli-v3.1.1-rc.0` for
