@@ -314,7 +314,7 @@ git log --no-merges --cherry-pick --right-only --format='%h %s' HEAD...origin/cl
 | Channel names, `cli-v` tags, next version, release-notes start | [src/channel.ts](../src/channel.ts), [scripts/next-version.ts](../scripts/next-version.ts) |
 | Build (channel baked in with `--define`) | [scripts/build.ts](../scripts/build.ts), [scripts/release.ts](../scripts/release.ts), [src/version.ts](../src/version.ts) |
 | Publishing the versioned and channel releases | [scripts/publish.ts](../scripts/publish.ts), [.github/workflows/release.yml](../.github/workflows/release.yml) |
-| `release-source` and `release-contains` | [.github/workflows/release-checks.yml](../.github/workflows/release-checks.yml) |
+| `release-source`, `release-contains` and the publish-time PR check | [scripts/release-check.ts](../scripts/release-check.ts), run by [.github/workflows/release-checks.yml](../.github/workflows/release-checks.yml) and `release.yml` |
 | Update checks and installs | [src/updater.ts](../src/updater.ts) |
 | `dh.meta` | [src/install-meta.ts](../src/install-meta.ts) |
 | `dh channel`, `dh channel use` | [src/commands/channel/](../src/commands/channel/) |

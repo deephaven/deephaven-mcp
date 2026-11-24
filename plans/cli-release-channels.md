@@ -152,15 +152,17 @@ Notes:
   merge lands, with no deployment approval. Review happens on the PR (required
   on `release`).
 - Steps:
-  1. Only on `cli-channel/release`, before anything else: the pushed commit
-     must be the merge of a PR from this repo's `cli-channel/rc` or `hotfix/*`.
-     Check with
-     `gh api repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls --jq '.[] | select(.merged_at != null and .base.ref == "cli-channel/release" and .merge_commit_sha == env.GITHUB_SHA and .head.repo.full_name == env.GITHUB_REPOSITORY) | .head.ref'`
-     (`GH_TOKEN: ${{ github.token }}`); fail with
-     `<sha> is not a merged PR from cli-channel/rc or hotfix/*; nothing published`
-     if no head matches. This catches accidental direct pushes, which bypass
-     the PR checks.
-  2. Checkout with `fetch-depth: 0` (all tags) and `persist-credentials: false`.
+  1. Checkout with `fetch-depth: 0` (all tags) and `persist-credentials: false`.
+  2. Only on `cli-channel/release`, before anything is built or published:
+     `bun scripts/release-check.ts origin "$GITHUB_SHA"`
+     (`GH_TOKEN: ${{ github.token }}`). It reads
+     `gh api repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls` and passes
+     only if one is merged, based on `cli-channel/release`, has
+     `merge_commit_sha` equal to the pushed commit, and comes from this repo's
+     (`head.repo.full_name` equals `GITHUB_REPOSITORY`) `cli-channel/rc` or
+     `hotfix/*`; otherwise it fails with
+     `<sha> is not a merged PR from cli-channel/rc or hotfix/*; nothing published`.
+     This catches accidental direct pushes, which bypass the PR checks.
   3. `CHANNEL=${GITHUB_REF_NAME#cli-channel/}`; fail if it isn't a valid,
      non-`dev` channel name.
   4. `VERSION=$(bun run next-version "$CHANNEL")`, `TAG=cli-v$VERSION`.
@@ -168,21 +170,25 @@ Notes:
   6. `bun run publish "$TAG" dist` with `GH_TOKEN: ${{ github.token }}`.
 
 **`.github/workflows/release-checks.yml`** (new): on `pull_request` to
-`cli-channel/release`, two jobs whose names are the required-check names:
+`cli-channel/release`, two jobs whose names are the required-check names. Both
+run `scripts/release-check.ts`, which imports nothing, so the jobs only set up
+Bun (no `bun install`); the workflow in `release.yml` uses it too:
 
-- `release-source`: fail unless `github.event.pull_request.head.repo.full_name`
-  equals `github.repository` and `github.head_ref` is `cli-channel/rc` or
-  starts with `hotfix/`. Error: `PRs into cli-channel/release must come from
-  cli-channel/rc or a hotfix/* branch in this repo`. Comparing with
-  `github.repository` rather than a fixed name keeps the check working on a
-  fork, for PRs within that fork.
+- `release-source`: `bun scripts/release-check.ts source "$HEAD_REF" "$HEAD_REPO"`
+  with `github.head_ref` and `github.event.pull_request.head.repo.full_name`;
+  fails unless the head repo equals `GITHUB_REPOSITORY` and the ref is
+  `cli-channel/rc` or starts with `hotfix/`. Error: `PRs into
+  cli-channel/release must come from cli-channel/rc or a hotfix/* branch in
+  this repo`. Comparing with `GITHUB_REPOSITORY` rather than a fixed name keeps
+  the check working on a fork, for PRs within that fork.
 - `release-contains`: checkout the PR head with `fetch-depth: 0`, then
+  `bun scripts/release-check.ts contains`, which runs
 
   ```sh
-  missing=$(git log --no-merges --cherry-pick --right-only --format='%h %s' HEAD...origin/cli-channel/release)
+  git log --no-merges --cherry-pick --right-only --format='%h %s' HEAD...origin/cli-channel/release
   ```
 
-  and fail if it is non-empty, printing the list and
+  and fails if the output is non-empty, printing the list and
   `Merge the hotfix into v3_rewrite, then v3_rewrite into cli-channel/rc.`
   This matches commits by patch; it doesn't catch a fix undone by a later
   conflict resolution, and isn't meant to.
@@ -357,7 +363,7 @@ only to a fork.
 | # | PR | Contents |
 | --- | --- | --- |
 | 1 | Design and surface | Release architecture, user docs, this plan |
-| 2 | Publishing | Sections 1–3: channel rules, `next-version`, build channel, `release.ts`, `publish.ts`, `release.yml`, `release-checks.yml`, install scripts |
+| 2 | Publishing | Sections 1–3: channel rules, `next-version`, build channel, `release.ts`, `publish.ts`, `release-check.ts`, `release.yml`, `release-checks.yml`, install scripts |
 | 3 | CLI | Section 4: `dh.meta`, updater, per-channel config, `dh channel`, help line |
 
 ## Out of scope
