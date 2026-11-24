@@ -86,9 +86,8 @@ publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
   [Minor and major bumps](RELEASE_ARCHITECTURE.md#minor-and-major-bumps).
 - **Failed publish:** nothing is published, and the channel stays on its
   previous build. Fix the cause if needed, then use "Re-run jobs" on the failed
-  run in Actions. Re-run only the latest commit's run on that branch: re-running
-  an older one after a newer build published moves the channel back to the
-  older build.
+  run in Actions. Re-running an older commit's run never moves the channel back:
+  it only adds a versioned release that no channel points to.
 
 To try a published channel's build in an existing install without changing its
 saved channel (this replaces the binary when the versions differ, and the next
