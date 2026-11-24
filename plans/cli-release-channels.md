@@ -441,17 +441,19 @@ or moved item's ID isn't reused.
       on a dev build.
 - [ ] **channels-cli-2** `dh channel` and `dh channel use` match
       `docs/CHANNELS.md`: output, JSON and errors (`usage`, `channel_not_found`,
-      `server_unreachable`); `dh channel` lists `release` and `rc` with their
-      manifests' versions and adds the followed channel only when it is neither
-      (an install following `alpha-bar` shows three rows; one following `rc`
-      shows two); an unpublished channel shows `not published` and an
-      unreachable one `?` with the note, and the command still exits 0;
-      `DH_UPDATE_URL` doesn't change the listed versions; no help text or
-      `dh agents` entry names a specific alpha channel (nothing matches
-      `/alpha-[a-z0-9]/`; the `alpha-<id>` placeholder is fine); a failed channel check or a failed download
-      leaves `dh.meta` and the executable unchanged (unit test: a stubbed
-      download fails, and `dh.meta` still has the old channel); dev builds
-      refuse `dh channel use`.
+      `server_unreachable`).
+      - `dh channel` lists `release` and `rc` with their manifests' versions
+        and adds the followed channel only when it is neither (an install
+        following `alpha-bar` shows three rows; one following `rc` shows two);
+        an unpublished channel shows `not published` and an unreachable one `?`
+        with the note, and the command still exits 0; `DH_UPDATE_URL` doesn't
+        change the listed versions.
+      - `dh channel use`: a failed manifest fetch or a failed download leaves
+        `dh.meta` and the executable unchanged (unit test: a stubbed download
+        fails, and `dh.meta` still has the old channel); dev builds refuse it.
+      - No help text or `dh agents` entry names a specific alpha channel
+        (nothing matches `/alpha-[a-z0-9]/`; the `alpha-<id>` placeholder is
+        fine).
 - [ ] **channels-cli-3** Config folders match Config per channel in
       `docs/RELEASE_ARCHITECTURE.md`: `cli` on `release`, `cli-<channel>` on
       other channels, `cli-dev` on dev builds; `DH_CONFIG_DIR` overrides all of
