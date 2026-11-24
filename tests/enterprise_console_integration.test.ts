@@ -13,14 +13,20 @@ async function run(
   dir: string,
   args: string[],
   env: Record<string, string> = {},
+  stdin?: string,
 ) {
-  const result = await spawn([...CLI, ...args, "-o", "json", "--no-prompt"], {
-    DH_CONFIG_DIR: dir,
-    DH_AUTO_UPDATE: "off",
-    DH_PROFILE: undefined,
-    DH_SERVER: undefined,
-    ...env,
-  });
+  const result = await spawn(
+    [...CLI, ...args, "-o", "json", "--no-prompt"],
+    {
+      DH_CONFIG_DIR: dir,
+      DH_AUTO_UPDATE: "off",
+      DH_DEBUG: undefined,
+      DH_PROFILE: undefined,
+      DH_SERVER: undefined,
+      ...env,
+    },
+    stdin,
+  );
   return {
     code: result.code,
     json: result.stdout ? JSON.parse(result.stdout) : null,
@@ -86,6 +92,42 @@ test.skipIf(!SERVER || !USER || !PASSWORD)(
         id: second.id,
         shortcode: second.shortcode,
         state: "Running",
+      });
+
+      const execution = await run(
+        dir,
+        ["exec", "-c", "--console", first.shortcode],
+        env,
+        "from deephaven import empty_table\nexec_integration_table = empty_table(3)\n",
+      );
+      expect(execution.code, execution.stderr).toBe(0);
+      expect(execution.stderr).toBe("");
+      expect(execution.json).toMatchObject({
+        console: { id: first.id, shortcode: first.shortcode, created: false },
+        changes: {
+          created: [{ name: "exec_integration_table", type: "Table" }],
+          updated: [],
+          removed: [],
+        },
+      });
+
+      const failure = await run(
+        dir,
+        [
+          "console",
+          "exec",
+          "-c",
+          "raise RuntimeError('exec integration failure')",
+          "--console",
+          first.shortcode,
+        ],
+        env,
+      );
+      expect(failure.code).toBe(5);
+      expect(JSON.parse(failure.stderr)).toMatchObject({
+        code: "exec_failed",
+        outcome: "failed",
+        detail: expect.stringContaining("exec integration failure"),
       });
     } finally {
       try {

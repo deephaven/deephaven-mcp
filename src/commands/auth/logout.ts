@@ -43,6 +43,7 @@ export const logout = defineCommand<LogoutOptions>({
     for (const id of skipped) {
       note(
         `! Kept ${nameOf(id)}: its server uses a different CA certificate.\n  Run \`${BIN} auth logout ${nameOf(id)}\`.`,
+        "warning",
       );
     }
 
@@ -53,10 +54,11 @@ export const logout = defineCommand<LogoutOptions>({
       (what) => note(`… ${what}`),
       ctx.lifecycle,
     );
-    for (const warning of done.warnings) note(warning);
+    for (const warning of done.warnings) note(warning, "warning");
     for (const resaved of done.resaved) {
       note(
         `! Kept ${resaved}: it was signed in again during logout.\n  Run \`${BIN} auth logout ${resaved}\` again.`,
+        "warning",
       );
     }
     return removedOutput(done, skipped.map(nameOf));
@@ -71,7 +73,6 @@ function logoutCommand(ctx: Context, names: string[] | undefined): string[] {
   return [
     "auth",
     "logout",
-    ...(ctx.json ? ["-o", "json"] : []),
     ...(ctx.noPrompt ? ["--no-prompt"] : []),
     // `--`: names may start with `-`.
     ...(names ? ["--", ...names] : ["--all"]),

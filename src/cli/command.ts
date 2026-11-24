@@ -75,7 +75,7 @@ export function defineCommand<Opts = Record<string, never>>(
 export const GLOBAL_OPTIONS = [
   new Option("--profile <name>", "Profile to use (env DH_PROFILE)."),
   new Option("-o, --output <format>", "Output format.")
-    .choices(["human", "json"])
+    .choices(["human", "json", "silent"])
     .default("human"),
   new Option(
     "--no-prompt",
@@ -88,7 +88,7 @@ export const GLOBAL_OPTIONS = [
 /** {@link GLOBAL_OPTIONS} as commander parses them. `prompt`/`input` are false with `--no-prompt`/`--no-input`. */
 interface GlobalOptions {
   profile?: string;
-  output?: "human" | "json";
+  output?: "human" | "json" | "silent";
   prompt?: boolean;
   input?: boolean;
 }

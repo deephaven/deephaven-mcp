@@ -78,7 +78,8 @@ export async function migrateLegacy(
     "Migrating signs in to each server to check its credentials,\nso the servers must be reachable now (for example, on VPN).",
   );
   const chosen = await askLegacyEntriesToMigrate(ctx.ui, pending, opts.yes);
-  for (const n of legacy.notImported) note(`  – ${n}: not used, not migrated`);
+  for (const n of legacy.notImported)
+    note(`  – ${n}: not used, not migrated`, "warning");
 
   const outcomes: Migrated[] = [];
   let migrated = 0;
@@ -91,6 +92,7 @@ export async function migrateLegacy(
   if (failed) {
     note(
       `${failed} not migrated. Fix the problems above (for example, connect to the servers' network),\nthen run \`${BIN} auth migrate\` to retry. Migrated servers are skipped.`,
+      "warning",
     );
   }
 
@@ -116,12 +118,15 @@ async function migrateAndReport(
       ),
     ctx.lifecycle,
   );
-  note(
-    outcome.ok
-      ? `  ✔ ${item.name} → ${outcome.profile}  ${outcome.detail}`
-      : `  ! ${item.name}: ${outcome.detail.replaceAll("\n", "\n    ")}`,
-  );
-  for (const warning of outcome.warnings) note(`    ${warning}`);
+  if (outcome.ok) {
+    note(`  ✔ ${item.name} → ${outcome.profile}  ${outcome.detail}`);
+  } else {
+    note(
+      `  ! ${item.name}: ${outcome.detail.replaceAll("\n", "\n    ")}`,
+      "warning",
+    );
+  }
+  for (const warning of outcome.warnings) note(`    ${warning}`, "warning");
   return outcome;
 }
 

@@ -289,10 +289,11 @@ async function waitForSaml(
   if (request.browser) {
     note(
       `Opening your browser to sign in. If it doesn't open, go to:\n  ${url}`,
+      "instruction",
     );
     await openBrowser(url);
   } else {
-    note(`Sign in at:\n  ${url}`);
+    note(`Sign in at:\n  ${url}`, "instruction");
   }
   note("Waiting for sign-in…\n  Ctrl-C to cancel");
   lifecycle?.signal.throwIfAborted();

@@ -29,6 +29,7 @@ Global flags, accepted by every command:
 | ------------------ | ---------------------------------------------------------- |
 | `--profile <name>` | Use this profile instead of the default (env `DH_PROFILE`) |
 | `-o json`          | Print results as JSON ([JSON output](#json-output))        |
+| `-o silent`        | Suppress results and progress; keep warnings, errors and required sign-in instructions on stderr |
 | `--no-prompt`      | Never prompt; fail with the flag to pass instead           |
 
 In a terminal, `dh` asks for anything the flags leave out: the server, the
@@ -361,7 +362,7 @@ prints what it's waiting on for each server:
 | `DH_PROFILE`                           | Profile to use, like `--profile`                                |
 | `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`)                   |
 | `DH_TIMEOUT`                           | Seconds to wait for connecting and non-SSO sign-in (default 30) |
-| `DH_DEBUG`                             | Show client library logs (on stderr) and internal error details |
+| `DH_DEBUG`                             | Set to `1` for client library logs (on stderr) and internal error details; unset, empty, or `0` disables them. Other nonempty values also enable them. |
 | `DH_SERVER`, …                         | Environment-only sign-in ([above](#environment-only-sign-in))   |
 | `DH_MCP_CONFIG_FILE`, `DH_AI_DATA_DIR` | Where to look for an old config to migrate                      |
 

@@ -8,11 +8,13 @@ import { tempDir } from "../helpers.ts";
 
 const COMMANDS = [
   ["console"],
+  ["console", "exec", "-c", "print('ok')"],
   ["console", "detail"],
   ["console", "use", "abc123"],
   ["console", "create"],
   ["console", "default"],
   ["console", "delete"],
+  ["exec", "-c", "print('ok')"],
 ];
 
 // DH_PROFILE is resolved by authentication's own precedence; commands must

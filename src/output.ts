@@ -1,9 +1,10 @@
 import { writeSync } from "node:fs";
 import { styleText } from "node:util";
+import { debugEnabled } from "./debug.ts";
 import { asDhError, type DhError, type FailureReport } from "./errors.ts";
 
-/** `-o human` (default) or `-o json`. */
-export type Format = "human" | "json";
+/** `-o human` (default), `-o json`, or `-o silent`. */
+export type Format = "human" | "json" | "silent";
 
 let format: Format = "human";
 
@@ -11,8 +12,17 @@ export function setFormat(value: Format): void {
   format = value;
 }
 
+/** Output format to retain when an invocation restarts. */
+export function getFormat(): Format {
+  return format;
+}
+
 export function isJson(): boolean {
   return format === "json";
+}
+
+export function isSilent(): boolean {
+  return format === "silent";
 }
 
 // Not console: it is silenced while the Deephaven client libraries run.
@@ -25,9 +35,13 @@ export function err(text: string): void {
   writeSync(2, `${text}\n`);
 }
 
-/** Progress and notices; never mixed into JSON stdout. */
-export function note(text: string): void {
-  if (isJson()) err(styled(text, process.stderr));
+/** Progress is suppressed in silent mode; warnings and instructions remain visible. */
+export function note(
+  text: string,
+  category: "progress" | "warning" | "instruction" = "progress",
+): void {
+  if (isSilent() && category === "progress") return;
+  if (isJson() || isSilent()) err(styled(text, process.stderr));
   else out(styled(text, process.stdout));
 }
 
@@ -67,7 +81,7 @@ export function result(
   json: unknown,
   empty = false,
 ): void {
-  if (empty) return;
+  if (empty || isSilent()) return;
   if (isJson()) {
     out(JSON.stringify(json));
     return;
@@ -81,7 +95,7 @@ export function result(
 /** Prints `e` and returns the process exit code. */
 export function reportError(e: unknown, report: FailureReport = {}): number {
   const error = asDhError(e);
-  if (error.code === "internal" && process.env.DH_DEBUG && e instanceof Error) {
+  if (error.code === "internal" && debugEnabled() && e instanceof Error) {
     err(e.stack ?? e.message);
   }
   if (isJson()) {

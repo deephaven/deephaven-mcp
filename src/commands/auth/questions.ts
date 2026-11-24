@@ -119,11 +119,12 @@ async function askLoginMenuChoice(
   ui: Prompter,
   config: Config,
 ): Promise<"server" | "user" | "reauth" | "use" | "remove"> {
-  note("Authenticated profiles:");
+  note("Authenticated profiles:", "instruction");
   for (const [id, p] of sortedProfiles(config)) {
     const isDefault = id === config.defaultProfile;
     note(
       `  ${isDefault ? styleText("green", "●") : " "} ${p.name}${isDefault ? "   (default)" : ""}`,
+      "instruction",
     );
   }
   const choice = await ui.select(
@@ -330,6 +331,7 @@ export async function askSignInCredentials(
       if (!pw.env) {
         note(
           "! The password is saved in credentials.json, readable only by your account. Use --password-env to save a variable name instead.",
+          "warning",
         );
       }
       return {

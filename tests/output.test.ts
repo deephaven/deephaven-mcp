@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { RUNTIME_FLAGS } from "../scripts/build.ts";
+import { run } from "./helpers.ts";
 
 const outputUrl = pathToFileURL(
   resolve(import.meta.dir, "../src/output.ts"),
@@ -12,7 +13,7 @@ const errorsUrl = pathToFileURL(
 
 async function runOutput(format: string, operation: string) {
   const script = `
-    import { result, reportError, setFormat } from ${JSON.stringify(outputUrl)};
+    import { result, reportError, setFormat, note } from ${JSON.stringify(outputUrl)};
     import { DhError, cleanupError } from ${JSON.stringify(errorsUrl)};
     import { authActionReport, profileSaveReport, profileRemovalReport, profileMigrationReport } from ${JSON.stringify(new URL("../src/actions/auth/reporting.ts", import.meta.url).href)};
     import { reportMigrationProgress } from ${JSON.stringify(new URL("../src/actions/auth/migrate.ts", import.meta.url).href)};
@@ -33,6 +34,51 @@ async function runOutput(format: string, operation: string) {
   return { stdout, stderr, code };
 }
 
+test("DH_DEBUG=0 suppresses internal stacks; DH_DEBUG=1 shows them", async () => {
+  const script = `
+    import { reportError } from ${JSON.stringify(outputUrl)};
+    const error = new Error("test failure");
+    error.stack = "test stack marker";
+    reportError(error);
+  `;
+  for (const [value, enabled] of [
+    ["0", false],
+    ["1", true],
+  ] as const) {
+    const result = await run([process.execPath, "-e", script], {
+      DH_DEBUG: value,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stderr.includes("test stack marker")).toBe(enabled);
+  }
+});
+
+test("note routes categories by output format", async () => {
+  const operation = `
+    note("default progress");
+    note("explicit progress", "progress");
+    note("warning", "warning");
+    note("sign-in instruction", "instruction");
+  `;
+  const all =
+    "default progress\nexplicit progress\nwarning\nsign-in instruction\n";
+  expect(await runOutput("human", operation)).toEqual({
+    stdout: all,
+    stderr: "",
+    code: 0,
+  });
+  expect(await runOutput("json", operation)).toEqual({
+    stdout: "",
+    stderr: all,
+    code: 0,
+  });
+  expect(await runOutput("silent", operation)).toEqual({
+    stdout: "",
+    stderr: "warning\nsign-in instruction\n",
+    code: 0,
+  });
+});
+
 test("empty success emits nothing in human or JSON mode", async () => {
   for (const format of ["human", "json"]) {
     const output = await runOutput(
@@ -41,6 +87,25 @@ test("empty success emits nothing in human or JSON mode", async () => {
     );
     expect(output).toEqual({ stdout: "", stderr: "", code: 0 });
   }
+});
+
+test("silent success emits nothing and silent failures stay on stderr", async () => {
+  const success = await runOutput(
+    "silent",
+    `result(() => ["Created console abc123"], { console: "abc123" });`,
+  );
+  expect(success).toEqual({ stdout: "", stderr: "", code: 0 });
+  const failure = await runOutput(
+    "silent",
+    `process.exitCode = reportError(
+      new DhError("exec_failed", "Script execution failed", undefined, "NameError"),
+      { target: "abc123", changes: { created: [], updated: [], removed: [] } },
+    );`,
+  );
+  expect(failure.code).toBe(5);
+  expect(failure.stdout).toBe("");
+  expect(failure.stderr).toContain("Script execution failed");
+  expect(failure.stderr).toContain("NameError");
 });
 
 test("JSON failure reports keep detail and recovery argv separate", async () => {

@@ -5,6 +5,7 @@ import { commandPath, GLOBAL_OPTIONS, registerCommand } from "./cli/command.ts";
 import { CommandLifecycle } from "./cli/lifecycle.ts";
 import { runWithLifecycle } from "./cli/run.ts";
 import { rootCommand } from "./commands/root.ts";
+import { debugEnabled } from "./debug.ts";
 import { commandUsageError } from "./errors.ts";
 import { err, reportError, setFormat } from "./output.ts";
 import { autoUpdate } from "./updater.ts";
@@ -13,13 +14,14 @@ import { BIN, VERSION } from "./version.ts";
 const blue = (s: string) => styleText("blue", s);
 
 /** Known before parsing, so even argument errors honor `-o json`. Last one wins, as in commander. */
-function formatFromArgs(args: string[]): "human" | "json" {
-  let format: "human" | "json" = "human";
+function formatFromArgs(args: string[]): "human" | "json" | "silent" {
+  let format: "human" | "json" | "silent" = "human";
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? "";
     if (a === "--") break;
     const value = outputFlagValue(a, args[i + 1]);
-    if (value === "json" || value === "human") format = value;
+    if (value === "json" || value === "human" || value === "silent")
+      format = value;
   }
   return format;
 }
@@ -115,7 +117,7 @@ if (code !== 3) {
   try {
     await autoUpdate();
   } catch (e) {
-    if (process.env.DH_DEBUG) err(`${BIN}: auto-update failed: ${e}`);
+    if (debugEnabled()) err(`${BIN}: auto-update failed: ${e}`);
   }
 }
 // The Deephaven client libraries keep sockets open.

@@ -104,7 +104,7 @@ function sameIdentity(a: ConsoleIdentity, b: ConsoleIdentity): boolean {
 }
 
 /** Derive the registry owner from an authenticated session. */
-function identityOf(session: Session): ConsoleIdentity {
+export function identityOf(session: Session): ConsoleIdentity {
   return consoleIdentity({
     server: session.origin,
     user: session.user,
@@ -129,7 +129,7 @@ function itemsForSession(
 }
 
 /** Represent Community's always-selected singleton without inventing Enterprise settings. */
-function communitySharedConsole(origin: string): ConsoleListItem {
+export function communitySharedConsole(origin: string): ConsoleListItem {
   return {
     id: COMMUNITY_SHARED_ID,
     shortcode: COMMUNITY_SHARED_ID,
@@ -220,7 +220,7 @@ export async function requireEnterpriseConsole(
 }
 
 /** Resolve a mapped target before normal environment and default-profile precedence. */
-async function sessionForTarget(
+export async function sessionForTarget(
   store: Store,
   target: string,
   profileFlag: string | undefined,

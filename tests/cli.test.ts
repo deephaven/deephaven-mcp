@@ -198,6 +198,7 @@ test("cli: console commands and errors are discoverable to agents", async () => 
     "dh console detail",
     "dh console use",
     "dh console create",
+    "dh console exec",
     "dh console default",
     "dh console delete",
   ]);
@@ -209,6 +210,7 @@ test("cli: console commands and errors are discoverable to agents", async () => 
       "console_not_ready",
       "console_unsupported",
       "console_failed",
+      "exec_failed",
     ]),
   );
 });

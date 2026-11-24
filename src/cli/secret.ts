@@ -1,14 +1,15 @@
 import { DhError } from "../errors.ts";
+import { readStdin } from "./stdin.ts";
 
 let stdinUsed = false;
 
 /** All of stdin, minus one trailing newline. Only one `--*-stdin` flag per run can use it. */
-async function readStdin(flag: string): Promise<string> {
+async function readSecretStdin(flag: string): Promise<string> {
   if (stdinUsed) {
     throw new DhError("usage", `Only one --*-stdin flag can be used (${flag})`);
   }
   stdinUsed = true;
-  const text = await Bun.stdin.text();
+  const text = await readStdin();
   const value = text.replace(/\r?\n$/, "");
   if (!value) throw new DhError("usage", `${flag}: stdin was empty`);
   return value;
@@ -28,7 +29,7 @@ export async function readSecret(
   env: string | undefined,
   ask: () => Promise<string>,
 ): Promise<Secret> {
-  if (stdin) return { value: await readStdin(`--${name}-stdin`) };
+  if (stdin) return { value: await readSecretStdin(`--${name}-stdin`) };
   if (env) {
     const value = process.env[env];
     if (!value) throw new DhError("usage", `--${name}-env: ${env} is not set`);
