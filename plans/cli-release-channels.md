@@ -15,7 +15,7 @@ so nothing needs migrating: the old `releases/latest` URL and
 
 ## Implementation
 
-### 1. Channel and version rules
+### 1. Channel and version rules (PR 2)
 
 New module (e.g. `src/channel.ts`), imported by the CLI and the scripts.
 
@@ -82,7 +82,7 @@ Next-version cases (from tag lists). Base says where `base` came from: `tag`
 | any | `3.2.0-beta` | err | any | error: `package.json` must be plain `X.Y.Z` |
 | any | any | — | `Rc`, `dev`, `-x` | error: invalid channel name (`Rc`, `-x`) or reserved (`dev`) |
 
-### 2. Publishing
+### 2. Publishing (PR 2)
 
 **Build** (`scripts/build.ts`, `src/version.ts`)
 
@@ -98,21 +98,22 @@ to `build()`, and drops the `package.json` version check. Base URLs stay
 tagged (`releases/download/<tag>/`). Install scripts are still attached to every
 versioned release.
 
-**`scripts/publish.ts <tag> <dir>`**, run by the workflow with `GH_TOKEN`:
+**`scripts/publish.ts <tag> <dir>`**, run by the workflow with `GH_TOKEN`. Tags
+and the branch-head check use `git` against the checkout's `origin`, so they can
+be tested against a local bare repository; only release objects use `gh`:
 
-1. `gh release create <tag> <dir>/* --target $GITHUB_SHA --latest=false
-   --generate-notes [--notes-start-tag <start>]`, plus `--prerelease` unless the
-   channel is `release`.
-2. Newest-commit check:
-   `gh api repos/$GITHUB_REPOSITORY/git/ref/heads/cli-channel/<channel> --jq .object.sha`
-   must equal `$GITHUB_SHA`. If not, print
+1. Versioned tag: `git push origin $GITHUB_SHA:refs/tags/<tag>`.
+2. Versioned release: `gh release create <tag> <dir>/* --verify-tag
+   --latest=false --generate-notes [--notes-start-tag <start>]`, plus
+   `--prerelease` unless the channel is `release`.
+3. Newest-commit check: `git ls-remote origin refs/heads/cli-channel/<channel>`
+   must name `$GITHUB_SHA`. If not, print
    `cli-channel/<channel> moved on; channel release unchanged` and exit 0.
-3. Channel release `cli-channel-<channel>`:
-   - Missing: `gh release create cli-channel-<channel> --target $GITHUB_SHA
+4. Channel tag: `git push --force origin $GITHUB_SHA:refs/tags/cli-channel-<channel>`.
+5. Channel release `cli-channel-<channel>`:
+   - Missing: `gh release create cli-channel-<channel> --verify-tag
      --prerelease --latest=false --title "<title>" --notes "<notes>"`.
-   - Exists: move its tag with
-     `gh api -X PATCH repos/$GITHUB_REPOSITORY/git/refs/tags/cli-channel-<channel> -f sha=$GITHUB_SHA -F force=true`,
-     then `gh release edit cli-channel-<channel> --title "<title>"`.
+   - Exists: `gh release edit cli-channel-<channel> --title "<title>"`.
    - Upload: for channel `release` only, `install.sh` and `install.ps1` first;
      then always `manifest.json` last, each with `gh release upload … --clobber`.
    - `<title>`: `<channel> channel (currently <tag>)`, e.g.
@@ -120,13 +121,20 @@ versioned release.
    - `<notes>`: `Moving release for the <channel> channel. Its tag and
      manifest.json are replaced on every publish. Do not delete.`
 
+`git push` authentication: the checkout keeps no credentials
+(`persist-credentials: false`), so when `GH_TOKEN` is set, `publish.ts` passes
+it only to its own `git` commands, as an `http.https://github.com/.extraheader`
+of `AUTHORIZATION: basic <base64 of x-access-token:$GH_TOKEN>` through
+`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0`. Without `GH_TOKEN`
+(tests against a local bare repository) it adds nothing.
+
 Notes:
 - `gh release upload --clobber` deletes before it uploads, so the manifest URL
   can 404 for a moment. That is expected; the updater treats it as a failed
   check.
 - GitHub dates a release by its tag's commit, so moving the tag keeps the
   channel release next to its current build (verified on a scratch repo).
-- Tags and releases made with `GITHUB_TOKEN` never start workflows (GitHub's
+- Tags pushed and releases made with `GITHUB_TOKEN` never start workflows (GitHub's
   protection against loops), so publishing can't retrigger itself. A future
   workflow that should react to new CLI tags or releases won't run for these
   without a GitHub App or personal token.
@@ -136,8 +144,8 @@ Notes:
 - `on: push: branches: ["cli-channel/**"]`. No `workflow_dispatch`, no tag
   trigger.
 - `concurrency: { group: "cli-release-${{ github.ref }}", cancel-in-progress: false }`.
-  Gotcha: GitHub keeps only the newest pending run per group and cancels older
-  pending ones. That is fine: the newest commit is the one that should publish.
+  GitHub keeps only the newest pending run per group and cancels older pending
+  ones, which is what we want: the newest commit is the one that should publish.
 - Jobs: `ci` (reuse `ci.yml`), then `release` on `macos-latest` (darwin
   codesign), `timeout-minutes: 15`, `permissions: { contents: write,
   pull-requests: read }`. No `environment`: the job publishes as soon as the
@@ -173,7 +181,36 @@ Notes:
   and fail if it is non-empty, printing the list and
   `Merge the hotfix into v3_rewrite, then v3_rewrite into cli-channel/rc.`
 
-### 3. CLI
+### 3. Install scripts (PR 2)
+
+**`install.sh` / `install.ps1`**
+
+- `DH_CHANNEL`, default `release`, validated like a channel name (`dev`
+  rejected) before any download.
+  - Gotcha: macOS `sh` is bash, where `[a-z]` in a `case` pattern follows the
+    locale and matches uppercase. Spell the letters out
+    (`abcdefghijklmnopqrstuvwxyz`) so `Rc` is rejected.
+- Without `DH_INSTALL_VERSION`: fetch
+  `$REPO_URL/releases/download/cli-channel-$CHANNEL/manifest.json`. 404 → exit
+  non-zero with `dh: no channel <channel> at <repo>`.
+  - `sh`: read the version with
+    `sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' | head -n 1` (build.ts writes
+    the manifest with `JSON.stringify(m, null, 2)`, one key per line), set
+    `TAG=cli-v$version`, then continue as today with the binary and
+    `SHA256SUMS` from `releases/download/$TAG/`.
+  - `ps1`: install from the manifest as today.
+- `DH_INSTALL_VERSION` accepts `3.1.1`, `v3.1.1` or `cli-v3.1.1` (pre-releases
+  too) and normalizes to `cli-v…`.
+- After installing, always write the metadata file fresh:
+  `{"channel":"<channel>"}` to `<dir>/dh.meta` (`dh.exe.meta` on Windows), via a
+  temp file and rename.
+  - Gotcha: in Windows PowerShell 5.1, `Set-Content -Encoding utf8` writes a
+    BOM, which `JSON.parse` rejects. Use
+    `[IO.File]::WriteAllText($path, $json, [Text.UTF8Encoding]::new($false))`.
+- The header comments' one-liners become
+  `…/releases/download/cli-channel-release/install.sh` (and `.ps1`).
+
+### 4. CLI (PR 3)
 
 **Install metadata file**
 
@@ -247,39 +284,12 @@ Notes:
   the home directory shown as `~`.
 - Root command JSON gains `"channel": "<CHANNEL>"`.
 
-### 4. Install scripts
-
-**`install.sh` / `install.ps1`**
-
-- `DH_CHANNEL`, default `release`, validated like a channel name (`dev`
-  rejected) before any download.
-  - Gotcha: macOS `sh` is bash, where `[a-z]` in a `case` pattern follows the
-    locale and matches uppercase. Spell the letters out
-    (`abcdefghijklmnopqrstuvwxyz`) so `Rc` is rejected.
-- Without `DH_INSTALL_VERSION`: fetch
-  `$REPO_URL/releases/download/cli-channel-$CHANNEL/manifest.json`. 404 → exit
-  non-zero with `dh: no channel <channel> at <repo>`.
-  - `sh`: read the version with
-    `sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' | head -n 1` (build.ts writes
-    the manifest with `JSON.stringify(m, null, 2)`, one key per line), set
-    `TAG=cli-v$version`, then continue as today with the binary and
-    `SHA256SUMS` from `releases/download/$TAG/`.
-  - `ps1`: install from the manifest as today.
-- `DH_INSTALL_VERSION` accepts `3.1.1`, `v3.1.1` or `cli-v3.1.1` (pre-releases
-  too) and normalizes to `cli-v…`.
-- After installing, always write the metadata file fresh:
-  `{"channel":"<channel>"}` to `<dir>/dh.meta` (`dh.exe.meta` on Windows), via a
-  temp file and rename.
-  - Gotcha: in Windows PowerShell 5.1, `Set-Content -Encoding utf8` writes a
-    BOM, which `JSON.parse` rejects. Use
-    `[IO.File]::WriteAllText($path, $json, [Text.UTF8Encoding]::new($false))`.
-- The header comments' one-liners become
-  `…/releases/download/cli-channel-release/install.sh` (and `.ps1`).
-
 ### Repo setup
 
-Manual, by a repo admin, before the first publish; the Developer Guide records
-it:
+Manual, by a repo admin; the Developer Guide records it. Do it on the real repo
+only after PR 3 merges: builds published before then lack per-channel config,
+so an `rc` build would share the `release` config folder. Until then, publish
+only to a fork.
 
 - Create `cli-channel/release` and `cli-channel/rc` from `v3_rewrite`.
 - Branch ruleset on `cli-channel/**`: block force pushes and deletion; require
@@ -299,7 +309,8 @@ it:
 | # | PR | Contents |
 | --- | --- | --- |
 | 1 | Design and surface | Release architecture, user docs, this plan |
-| 2 | Implementation | Channel rules, publishing, CLI, install scripts, tests |
+| 2 | Publishing | Sections 1–3: channel rules, `next-version`, build channel, `release.ts`, `publish.ts`, `release.yml`, `release-checks.yml`, install scripts |
+| 3 | CLI | Section 4: `dh.meta`, updater, per-channel config, `dh channel`, help line |
 
 ## Out of scope
 
@@ -313,54 +324,72 @@ it:
 Each item has an ID, prefixed `channels-` so it stays unique across plans. The
 implementing PR proves every `(PR n)` item with tests in
 `tests/contract/cli-release-channels/` whose names start with its ID, e.g.
-`test("[channels-C3] DH_CHANNEL=nope fails with no channel", …)`, and its
-description maps each ID to those tests. `(Manual)` items are proven by the recorded fork
-run. Changing a contract test, or the docs this plan relies on, needs a
-callout in the PR.
+`test("[channels-C5] DH_CHANNEL=nope fails with no channel", …)`, and its
+description maps each ID to those tests. `(Manual)` items are proven by the
+recorded fork run. Changing a contract test, or the docs this plan relies on,
+needs a callout in the PR.
 
-- [ ] **channels-C1** (PR 2) `nextVersion` and `bun run next-version` produce every case in the
-      next-version table; `cli-v3.1.1-alpha-1.0` parses as channel `alpha-1`,
-      build `0`; notes start at `cli-v3.1.0` for `cli-v3.1.1` and for
-      `cli-v3.1.1-rc.0` (with only `cli-v3.1.0`), and at `cli-v3.1.1-rc.0` for
-      `cli-v3.1.1-rc.1`.
-- [ ] **channels-C2** (PR 2) Auto-update fetches `cli-channel-<channel>/manifest.json` for the
-      channel in `dh.meta`, else `release`; installs a lower version and skips
-      an equal one; treats a bad `dh.meta` as `release` and rewrites it;
-      throttles on `lastUpdateCheck`; never fetches on a `dev` build.
-- [ ] **channels-C3** (PR 2) The install scripts install from `cli-channel-release` by default
-      and from `DH_CHANNEL`'s channel otherwise, writing `dh.meta`;
-      `DH_CHANNEL=nope` fails with `no channel`; `dev` and `Rc` fail before
-      any request; `DH_INSTALL_VERSION` accepts `9.9.9` and `cli-v9.9.9`.
-- [ ] **channels-C4** (PR 2) From source: `dh --help` shows `Channel: dev (config …)`,
-      `dh -o json` has `"channel":"dev"`, `dh channel` prints
-      `dev (never updates)`, `dh channel use rc` fails with `usage` (a dev
-      build), and `dh agents -o json` lists `channel`, `channel use` and
+- [ ] **channels-C1** (PR 2) `nextVersion` and `bun run next-version` produce
+      every case in the next-version table; `cli-v3.1.1-alpha-1.0` parses as
+      channel `alpha-1`, build `0`; notes start at `cli-v3.1.0` for `cli-v3.1.1`
+      and for `cli-v3.1.1-rc.0` (with only `cli-v3.1.0`), and at
+      `cli-v3.1.1-rc.0` for `cli-v3.1.1-rc.1`.
+- [ ] **channels-C2** (PR 2) `release-contains`, run against local git
+      repositories built for the test, fails a promotion until a hotfix on
+      `release` reaches `rc` through `v3_rewrite`, then passes; a squashed
+      `v3_rewrite` → `rc` merge makes it fail even with the fix present.
+- [ ] **channels-C3** (PR 2) `publish.ts`, against a local bare repository and a
+      fake `gh` on `PATH` that records its calls: pushes the versioned tag, then
+      creates the release with the right flags; on an older commit, stops after
+      the versioned release; otherwise moves `cli-channel-<channel>` to the
+      commit, creates or retitles its release, and uploads `manifest.json` last
+      (after the install scripts on `release`).
+- [ ] **channels-C4** (PR 2) The release workflow's PR-origin step, against a
+      fake `gh`, passes only for a commit that is the merge of a PR from
+      `cli-channel/rc` or `hotfix/*` into `cli-channel/release`.
+- [ ] **channels-C5** (PR 2) The install scripts install from
+      `cli-channel-release` by default and from `DH_CHANNEL`'s channel
+      otherwise, writing `dh.meta`; `DH_CHANNEL=nope` fails with `no channel`;
+      `dev` and `Rc` fail before any request; `DH_INSTALL_VERSION` accepts
+      `9.9.9` and `cli-v9.9.9`.
+- [ ] **channels-C6** (PR 3) Auto-update fetches
+      `cli-channel-<channel>/manifest.json` for the channel in `dh.meta`, else
+      `release`; installs a lower version and skips an equal one; treats a bad
+      `dh.meta` as `release` and rewrites it; throttles on `lastUpdateCheck`;
+      never fetches on a `dev` build.
+- [ ] **channels-C7** (PR 3) From source: `dh --help` shows `Channel: dev
+      (config …)`, `dh -o json` has `"channel":"dev"`, `dh channel` prints `dev
+      (never updates)`, `dh channel use rc` fails with `usage` (a dev build),
+      and `dh agents -o json` lists `channel`, `channel use` and
       `channel_not_found`.
-- [ ] **channels-C5** (PR 2) An installed `dh channel use` fails with `channel_not_found` and
-      saves nothing for an unpublished channel, and otherwise switches and
-      installs immediately; `dh channel` shows the mismatch notice when the
-      build's channel differs.
-- [ ] **channels-C6** (PR 2) `configDir()` is `…/cli` on release, `…/cli-rc`, `…/cli-dev`, and
-      `DH_CONFIG_DIR` wins.
-- [ ] **channels-C7** (PR 2) The docs match the implementation.
-- [ ] **channels-C8** (Every PR) `bun run check` passes; `bun test` passes on Linux, macOS and
-      Windows.
-- [ ] **channels-C9** (Manual) Repo setup applied.
-- [ ] **channels-C10** (Manual) End to end on a fork with the repo setup applied:
-  1. Push to `cli-channel/rc` → `cli-v<x>-rc.0` released as a pre-release, not
+- [ ] **channels-C8** (PR 3) An installed `dh channel use` fails with
+      `channel_not_found` and saves nothing for an unpublished channel, and
+      otherwise switches and installs immediately; `dh channel` shows the
+      mismatch notice when the build's channel differs.
+- [ ] **channels-C9** (PR 3) `configDir()` is `…/cli` on release, `…/cli-rc`,
+      `…/cli-dev`, and `DH_CONFIG_DIR` wins.
+- [ ] **channels-C10** (PR 2, PR 3) The docs match the implementation.
+- [ ] **channels-C11** (Every PR) `bun run check` passes; `bun test` passes on
+      Linux, macOS and Windows.
+- [ ] **channels-C12** (Manual, after PR 3) Repo setup applied to the real repo.
+- [ ] **channels-C13** (Manual, after PR 2) Publishing end to end on a fork with
+      the repo setup applied:
+  1. Merge a PR into `cli-channel/rc` → `cli-v<x>-rc.0` released as a pre-release, not
      latest; `cli-channel-rc` exists, titled `rc channel (currently …)`, its tag
      on the pushed commit.
-  2. Push again → `rc.1`; `cli-channel-rc` moved to the new commit and sits
+  2. Merge another → `rc.1`; `cli-channel-rc` moved to the new commit and sits
      next to `rc.1` on the Releases page.
-  3. Install with `DH_CHANNEL=rc`; `dh --help` shows `Channel: rc`; push to rc
-     again and `DH_UPDATE_INTERVAL=0 dh` updates to the new build.
-  4. PR `cli-channel/rc` → `cli-channel/release`: both checks pass; merge
+  3. PR `cli-channel/rc` → `cli-channel/release`: both checks pass; merge
      → `cli-v<x>` released with no deployment approval, `cli-channel-release`
      carries the install scripts.
-  5. A PR from any other branch fails `release-source`. A hotfix PR into
+  4. A PR from any other branch fails `release-source`. A hotfix PR into
      release passes; the next rc PR fails `release-contains` until the fix is
      merged into `v3_rewrite` and then `rc`.
-  6. An admin's direct push to `cli-channel/release` fails the release job's
+  5. An admin's direct push to `cli-channel/release` fails the release job's
      PR check and publishes nothing.
-  7. `dh channel use release` on the rc install switches immediately; the
-     repo's `releases/latest` never changes.
+  6. The repo's `releases/latest` never changes.
+- [ ] **channels-C14** (Manual, after PR 3) Installing and updating end to end
+      on the same fork:
+  1. Install with `DH_CHANNEL=rc`; `dh --help` shows `Channel: rc`; merge
+     another PR into rc and `DH_UPDATE_INTERVAL=0 dh` updates to the new build.
+  2. `dh channel use release` on the rc install switches immediately.

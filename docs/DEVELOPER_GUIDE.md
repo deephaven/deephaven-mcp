@@ -109,10 +109,11 @@ Done once by a repo admin:
 
 ### Testing on a fork
 
-The release workflow takes the repo from `GITHUB_REPOSITORY`, so a push to a
-fork's `cli-channel/<channel>` branch (with Actions enabled) produces binaries, a
-manifest and install scripts that all point at the fork. Push to
-`cli-channel/release` once so the install scripts exist, install from the fork's
-`releases/download/cli-channel-release/install.sh` with `DH_CHANNEL=rc`, push to
-`cli-channel/rc` twice, and run `DH_UPDATE_INTERVAL=0 DH_DEBUG=1 dh` to see it
-update, with no other overrides.
+The release workflow takes the repo from `GITHUB_REPOSITORY`, so merging into a
+fork's `cli-channel/<channel>` branch (with Actions enabled) produces binaries,
+a manifest and install scripts that all point at the fork. Apply the repo setup
+to the fork too, to test the rulesets. Merge into `cli-channel/release` once so
+the install scripts exist, install from the fork's
+`releases/download/cli-channel-release/install.sh` with `DH_CHANNEL=rc`, merge
+into `cli-channel/rc` twice, and run `DH_UPDATE_INTERVAL=0 DH_DEBUG=1 dh` to see
+it update, with no other overrides.
