@@ -4,13 +4,14 @@ import { create } from "./create.ts";
 import { defaults } from "./default.ts";
 import { remove } from "./delete.ts";
 import { detail } from "./detail.ts";
+import { exec } from "./exec.ts";
 import { consoleListLines } from "./formatting.ts";
 import { use } from "./use.ts";
 
 export const consoleCommand = defineCommand({
   name: "console",
   description: "Manage interactive consoles.",
-  commands: [detail, use, create, defaults, remove],
+  commands: [detail, use, create, exec, defaults, remove],
 
   async run(ctx) {
     const consoles = await listConsoles(

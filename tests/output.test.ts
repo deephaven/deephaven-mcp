@@ -43,6 +43,25 @@ test("empty success emits nothing in human or JSON mode", async () => {
   }
 });
 
+test("silent success emits nothing and silent failures stay on stderr", async () => {
+  const success = await runOutput(
+    "silent",
+    `result(() => ["Created console abc123"], { console: "abc123" });`,
+  );
+  expect(success).toEqual({ stdout: "", stderr: "", code: 0 });
+  const failure = await runOutput(
+    "silent",
+    `process.exitCode = reportError(
+      new DhError("exec_failed", "Script execution failed", undefined, "NameError"),
+      { target: "abc123", changes: { created: [], updated: [], removed: [] } },
+    );`,
+  );
+  expect(failure.code).toBe(5);
+  expect(failure.stdout).toBe("");
+  expect(failure.stderr).toContain("Script execution failed");
+  expect(failure.stderr).toContain("NameError");
+});
+
 test("JSON failure reports keep detail and recovery argv separate", async () => {
   const output = await runOutput(
     "json",

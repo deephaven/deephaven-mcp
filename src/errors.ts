@@ -56,6 +56,10 @@ export const ERROR_CODES = {
     exit: 5,
     description: "Server rejected the console operation",
   },
+  exec_failed: {
+    exit: 5,
+    description: "Script execution failed",
+  },
 } as const;
 
 /** A key of {@link ERROR_CODES}. */
@@ -81,6 +85,14 @@ export interface FailureReport {
     ageSeconds: number;
   } | null;
   recoveryCommand?: string[];
+  /** Console identity and whether this invocation created it. */
+  console?: { shortcode: string; id: string; created: boolean };
+  /** Partial variable changes retained after script failure. */
+  changes?: {
+    created: { name: string; type: string }[];
+    updated: { name: string; type: string }[];
+    removed: { name: string; type: string }[];
+  };
 }
 
 export interface HumanFailure {

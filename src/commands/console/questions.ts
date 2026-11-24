@@ -1,8 +1,10 @@
+import { readFile } from "node:fs/promises";
+import type { ExecSource } from "../../actions/console/exec.ts";
 import {
   type ConsoleSettings,
   parseConsoleSettings,
 } from "../../actions/console/settings.ts";
-import { DhError } from "../../errors.ts";
+import { DhError, isErrno, reasonOf } from "../../errors.ts";
 import type { Prompter } from "../../ui/prompt.ts";
 
 export interface ConsoleSettingOptions {
@@ -11,6 +13,64 @@ export interface ConsoleSettingOptions {
   server?: string;
   engine?: string;
   json?: string;
+}
+
+/** Read and validate one exec code source before remote or config work starts. */
+export async function askExecSource(
+  file: string | undefined,
+  code: string | boolean | undefined,
+): Promise<ExecSource> {
+  if (file && code !== undefined) {
+    throw new DhError(
+      "usage",
+      "Use one code source: a file or -c",
+      "Pass a file or -c '<code>', not both.",
+    );
+  }
+  if (file) return await readExecFile(file);
+  if (typeof code === "string") return { code };
+  if (code === true) return await readExecStdin();
+  throw new DhError(
+    "usage",
+    "A code source is required",
+    "Pass `dh exec <file>` or `dh exec -c '<code>'`.",
+  );
+}
+
+/** Read a script file selected by the command argument. */
+async function readExecFile(file: string): Promise<ExecSource> {
+  try {
+    return { code: await readFile(file, "utf8") };
+  } catch (e) {
+    throw isErrno(e, "ENOENT")
+      ? new DhError("usage", `Script file not found: ${file}`)
+      : new DhError(
+          "usage",
+          `Can't read script file: ${file}`,
+          undefined,
+          reasonOf(e),
+        );
+  }
+}
+
+/** Read nonempty code when `-c` has no inline argument. */
+async function readExecStdin(): Promise<ExecSource> {
+  if (process.stdin.isTTY) {
+    throw new DhError(
+      "usage",
+      "No code received from stdin",
+      "Pipe or redirect a script with `dh exec -c`, or pass `-c '<code>'.",
+    );
+  }
+  const stdin = await Bun.stdin.text();
+  if (stdin.length === 0) {
+    throw new DhError(
+      "usage",
+      "No code received from stdin",
+      "Pipe or redirect a script with `dh exec -c`, or pass `-c '<code>'.",
+    );
+  }
+  return { code: stdin };
 }
 
 /** Read JSON settings and apply explicit CLI flags over matching fields. */

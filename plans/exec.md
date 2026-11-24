@@ -39,7 +39,9 @@ $ dh exec analysis.py -o json
 
 - One code source per call, validated before any remote work.
 - Source sent verbatim; quoted heredocs keep multiline input intact.
-- Target: `--console` → current console → sole running console → new console (Enterprise). Community → shared console.
+- Target: `--console` → current console → sole running console. With no running
+  Enterprise console, create a console; with multiple running consoles, require
+  `--console`. Community → shared console.
 - Existing profile and console-default rules apply.
 - Both entry points listed in help and `dh agents`.
 - Human output: `Created console <shortcode>` only for a new console, then changed exports.

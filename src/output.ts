@@ -2,8 +2,8 @@ import { writeSync } from "node:fs";
 import { styleText } from "node:util";
 import { asDhError, type DhError, type FailureReport } from "./errors.ts";
 
-/** `-o human` (default) or `-o json`. */
-export type Format = "human" | "json";
+/** `-o human` (default), `-o json`, or `-o silent`. */
+export type Format = "human" | "json" | "silent";
 
 let format: Format = "human";
 
@@ -13,6 +13,10 @@ export function setFormat(value: Format): void {
 
 export function isJson(): boolean {
   return format === "json";
+}
+
+export function isSilent(): boolean {
+  return format === "silent";
 }
 
 // Not console: it is silenced while the Deephaven client libraries run.
@@ -27,7 +31,7 @@ export function err(text: string): void {
 
 /** Progress and notices; never mixed into JSON stdout. */
 export function note(text: string): void {
-  if (isJson()) err(styled(text, process.stderr));
+  if (isJson() || isSilent()) err(styled(text, process.stderr));
   else out(styled(text, process.stdout));
 }
 
@@ -67,7 +71,7 @@ export function result(
   json: unknown,
   empty = false,
 ): void {
-  if (empty) return;
+  if (empty || isSilent()) return;
   if (isJson()) {
     out(JSON.stringify(json));
     return;

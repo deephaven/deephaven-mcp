@@ -14,6 +14,8 @@ delete.
 | `dh console create` | `[settings]` JSON object | Settings below; `--json <settings>`; `--no-use` | Create and select a console unless `--no-use` is set. |
 | `dh console default` | `[settings]` JSON object | Settings below; `--json <settings>`; `--reset` | Show or change global creation defaults. |
 | `dh console delete` | `[console]` shortcode or full server ID | `-f, --force` | Delete the selected console or target; prompts unless forced. |
+| `dh console exec` | `[file]` local script path | `-c, --code [code]`; `--console <shortcode-or-id>` | Run a script or inline code on a console. |
+| `dh exec` | `[file]` local script path | Same options as `dh console exec` | Top-level alias for `dh console exec`. |
 
 `--profile <name>` applies to every command. `use` changes only that profile's
 console, not the default profile.
@@ -58,3 +60,15 @@ all overrides.
   `dh console detail <shortcode>` before retrying.
 - `detail` includes JVM arguments and environment values; treat its output as
   sensitive. JSON results go to stdout; errors and warnings go to stderr.
+- `dh console exec <file>` and `dh exec <file>` run the file verbatim relative
+  to the invocation directory. `dh exec -c '<code>'` runs inline code;
+  `dh exec -c` reads code from piped or redirected stdin. Do not pass a file
+  and `-c` together.
+- With no `--console`, the profile's current console is used. If it has none,
+  one sole running Enterprise console is used. If no Enterprise console is
+  running, Enterprise creates one; if multiple Enterprise consoles are running,
+  use `--console` to choose one. Community uses its shared console.
+  `--console` always targets the named console and does not create it.
+- Execution reports created, updated, and removed exports. `-o json` adds the
+  console identity and change categories. `-o silent` suppresses success
+  output, while warnings and failures remain on stderr.
