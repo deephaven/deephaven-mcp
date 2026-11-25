@@ -49,6 +49,14 @@ or select an existing one with `dh console use`. See
 [Interactive consoles](docs/CONSOLE.md) for settings, defaults, cancellation,
 and Community support.
 
+## Plugins
+
+Plugins installed on your Deephaven server can add commands to `dh`: ways to
+look at objects, such as `dh object ui-dashboard` for `deephaven.ui` dashboards, and new
+top-level commands. `dh` finds them on the server; there's nothing to install.
+See [TypeScript plugins](docs/PLUGINS_TS.md), and
+[Writing a TypeScript plugin](docs/PLUGINS_TS_AUTHORING.md) to make one.
+
 ## Auto-update
 
 `dh` checks for a newer release at most once per `DH_UPDATE_INTERVAL` (default
