@@ -291,8 +291,14 @@ test("[channels-pub-6] the install scripts install on a channel", async () => {
       expect(requests.count).toBe(before);
     }
 
-    // A pinned version, in either spelling, regardless of the channel.
-    for (const pinned of [NEXT, `cli-v${NEXT}`]) {
+    // A pinned version, in any spelling, pre-releases included, regardless
+    // of the channel.
+    for (const [pinned, version] of [
+      [NEXT, NEXT],
+      [`v${NEXT}`, NEXT],
+      [`cli-v${NEXT}`, NEXT],
+      [`cli-v${rcVersion}`, rcVersion],
+    ]) {
       const dir = join(tmp, `bin-pinned-${pinned}`);
       const out = ok(
         await run(INSTALL.cmd, INSTALL.args, {
@@ -301,7 +307,8 @@ test("[channels-pub-6] the install scripts install on a channel", async () => {
           DH_INSTALL_VERSION: pinned,
         }),
       );
-      expect(out.stdout).toContain(NEXT);
+      expect(out.stdout).toContain(`Installed ${BIN} v${version}`);
+      expect(await metaOf(dir)).toEqual({ channel: "release" });
     }
   } finally {
     await gh.stop();
