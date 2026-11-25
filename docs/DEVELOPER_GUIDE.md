@@ -88,9 +88,11 @@ publish creates, is in [Release architecture](RELEASE_ARCHITECTURE.md).
   versioned release that no channel points to, which is harmless, or a channel
   release without its `manifest.json`, so updates and installs on that channel
   fail until it's republished. Check the run's log, fix the cause if needed, and
-  use "Re-run jobs" on the failed run in Actions: it publishes the next version
-  and completes the channel release. Re-running an older commit's run never
-  moves the channel back.
+  use "Re-run jobs" in Actions on the run for the branch's newest commit (the
+  failed run, unless a newer commit has landed since): it publishes the next
+  version and completes the channel release. Don't re-run an older commit's
+  run: it never moves the channel, and while the newest commit's run is still
+  pending, starting it cancels that run, so nothing publishes the newest commit.
 
 To try a published channel's build in an existing install without changing its
 saved channel (this replaces the binary when the versions differ, and the next
