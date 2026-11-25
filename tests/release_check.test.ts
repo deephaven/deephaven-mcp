@@ -195,4 +195,19 @@ describe.skipIf(WINDOWS)("[channels-pub-4] release origin", () => {
       `${SHA} is not a merged PR from cli-channel/rc or hotfix/*; nothing published`,
     );
   });
+
+  test("a failed gh call is reported as an annotation", async () => {
+    const { tmp } = await originAndClone();
+    const gh = await fakeGh(tmp);
+    await gh.failApi();
+    const r = check(["origin", SHA], ROOT, {
+      ...gh.env,
+      GITHUB_REPOSITORY: "example/repo",
+      GITHUB_ACTIONS: "true",
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr.trim()).toBe(
+      `::error::origin check could not run: gh api repos/example/repo/commits/${SHA}/pulls failed: HTTP 502: Bad Gateway`,
+    );
+  });
 });

@@ -109,11 +109,18 @@ function checkOrigin(sha: string | undefined): void {
 
 if (import.meta.main) {
   const [check, arg, arg2] = process.argv.slice(2);
-  if (check === "source") checkSource(arg, arg2);
-  else if (check === "contains") checkContains();
-  else if (check === "origin") checkOrigin(arg);
-  else
+  try {
+    if (check === "source") checkSource(arg, arg2);
+    else if (check === "contains") checkContains();
+    else if (check === "origin") checkOrigin(arg);
+    else
+      fail(
+        "usage: release-check.ts source <head-ref> <head-repo> | contains | origin <sha>",
+      );
+  } catch (error) {
+    // A failed git or gh call: report it as an annotation, not a stack trace.
     fail(
-      "usage: release-check.ts source <head-ref> <head-repo> | contains | origin <sha>",
+      `${check} check could not run: ${error instanceof Error ? error.message : error}`,
     );
+  }
 }

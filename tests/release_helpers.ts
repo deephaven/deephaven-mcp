@@ -95,7 +95,9 @@ export async function fakeGh(dir: string) {
     `#!/bin/sh
 printf '%s\\n' "$*" >> "${log}"
 case "$1 $2" in
-  "api "*) cat "${pulls}" ;;
+  "api "*)
+    if [ -e "${state}/fail-api" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi
+    cat "${pulls}" ;;
   "release view")
     if [ -e "${state}/fail-view" ]; then echo "HTTP 403: API rate limit exceeded" >&2; exit 1; fi
     [ -e "${state}/$3" ] || { echo "release not found" >&2; exit 1; } ;;
@@ -110,6 +112,8 @@ esac
     calls: async () =>
       (await readFile(log, "utf8")).split("\n").filter(Boolean),
     setPulls: (value: unknown) => writeFile(pulls, JSON.stringify(value)),
+    /** Makes every later `gh api` call fail. */
+    failApi: () => writeFile(join(state, "fail-api"), ""),
     /** Makes every later `gh release view` fail with a non-404 error. */
     failView: () => writeFile(join(state, "fail-view"), ""),
   };
