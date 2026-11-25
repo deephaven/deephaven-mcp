@@ -104,6 +104,20 @@ describe.skipIf(WINDOWS)("[channels-pub-3] publish", () => {
     expect(newer).not.toBe(older);
   });
 
+  test("fails, without creating the channel release, when viewing it fails for another reason", async () => {
+    const { gh, land, publish } = await setup("rc");
+    const sha = await land("one");
+    await gh.failView();
+    const r = publish("cli-v3.0.0-rc.0", sha);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("rate limit");
+    const calls = await gh.calls();
+    expect(calls.at(-1)).toBe("release view cli-channel-rc --json tagName");
+    expect(
+      calls.some((c) => c.startsWith("release create cli-channel-rc")),
+    ).toBe(false);
+  });
+
   test("on release: a regular release, install scripts before the manifest", async () => {
     const { gh, out, land, publish } = await setup("release");
     const sha = await land("one");

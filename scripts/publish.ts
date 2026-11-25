@@ -111,7 +111,9 @@ try {
   run(["gh", "release", "view", channelTag, "--json", "tagName"], {
     quiet: true,
   });
-} catch {
+} catch (error) {
+  // Only a missing release; anything else (auth, rate limit) must not look like one.
+  if (!String(error).includes("release not found")) throw error;
   exists = false;
 }
 if (exists) {
