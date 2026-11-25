@@ -1,4 +1,5 @@
 import pkg from "../package.json" with { type: "json" };
+import { DEV_CHANNEL } from "./channel.ts";
 
 // Baked in by scripts/build.ts (`bun build --define`); undefined when run from source.
 declare const DH_BUILD_VERSION: string | undefined;
@@ -14,7 +15,7 @@ export const VERSION: string =
  * run from source or built locally. Picks the config folder; `dev` never updates.
  */
 export const CHANNEL: string =
-  typeof DH_BUILD_CHANNEL !== "undefined" ? DH_BUILD_CHANNEL : "dev";
+  typeof DH_BUILD_CHANNEL !== "undefined" ? DH_BUILD_CHANNEL : DEV_CHANNEL;
 /** Command name; also names release binaries and install targets. */
 export const BIN: string = pkg.name;
 /** GitHub `owner/repo` that releases (and updates) come from. */
