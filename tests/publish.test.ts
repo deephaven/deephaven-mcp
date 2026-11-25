@@ -23,7 +23,7 @@ async function dist(dir: string) {
 
 async function setup(channel: string) {
   const repo = await originAndClone();
-  const gh = await fakeGh(repo.tmp);
+  const gh = await fakeGh(repo.tmp, repo.origin);
   const out = await dist(join(repo.tmp, "dist"));
   const branch = `cli-channel/${channel}`;
   repo.git(repo.work, "checkout", "-q", "-b", branch);
@@ -64,7 +64,7 @@ describe.skipIf(WINDOWS)("[channels-pub-3] publish", () => {
     const calls1 = await gh.calls();
     expect(calls1[0]).toStartWith("release create cli-v3.0.0-rc.0 ");
     expect(calls1[0]).toContain(
-      "--verify-tag --latest=false --generate-notes --prerelease",
+      `--target ${first} --latest=false --generate-notes --prerelease`,
     );
     expect(calls1[0]).not.toContain("--notes-start-tag");
     expect(calls1.slice(1)).toEqual([
@@ -104,6 +104,16 @@ describe.skipIf(WINDOWS)("[channels-pub-3] publish", () => {
     expect(newer).not.toBe(older);
   });
 
+  test("a failed release create leaves no versioned tag", async () => {
+    const { gh, land, publish, originRef } = await setup("rc");
+    const sha = await land("one");
+    await gh.failCreate();
+    const r = publish("cli-v3.0.0-rc.0", sha);
+    expect(r.code).not.toBe(0);
+    expect(originRef("refs/tags/cli-v3.0.0-rc.0")).toBe("");
+    expect(originRef("refs/tags/cli-channel-rc")).toBe("");
+  });
+
   test("fails, without creating the channel release, when viewing it fails for another reason", async () => {
     const { gh, land, publish } = await setup("rc");
     const sha = await land("one");
@@ -124,7 +134,9 @@ describe.skipIf(WINDOWS)("[channels-pub-3] publish", () => {
     const r = publish("cli-v3.0.0", sha);
     expect(r.code, r.stderr).toBe(0);
     const calls = await gh.calls();
-    expect(calls[0]).toContain("--verify-tag --latest=false --generate-notes");
+    expect(calls[0]).toContain(
+      `--target ${sha} --latest=false --generate-notes`,
+    );
     expect(calls[0]).not.toContain("--prerelease");
     expect(calls.filter((c) => c.startsWith("release upload"))).toEqual(
       ["install.sh", "install.ps1", "manifest.json"].map(

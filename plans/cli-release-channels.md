@@ -98,19 +98,22 @@ to `build()`, and drops the `package.json` version check. Base URLs stay
 tagged (`releases/download/<tag>/`). Install scripts are still attached to every
 versioned release.
 
-**`scripts/publish.ts <tag> <dir>`**, run by the workflow with `GH_TOKEN`. Tags
-and the branch-head check use `git` against the checkout's `origin`, so they can
-be tested against a local bare repository; only release objects use `gh`:
+**`scripts/publish.ts <tag> <dir>`**, run by the workflow with `GH_TOKEN`. The
+channel tag and the branch-head check use `git` against the checkout's
+`origin`, so they can be tested against a local bare repository; releases (and
+the versioned tag) use `gh`:
 
-1. Versioned tag: `git push origin $GITHUB_SHA:refs/tags/<tag>`.
-2. Versioned release: `gh release create <tag> <dir>/* --verify-tag
-   --latest=false --generate-notes [--notes-start-tag <start>]`, plus
-   `--prerelease` unless the channel is `release`.
-3. Newest-commit check: `git ls-remote origin refs/heads/cli-channel/<channel>`
+1. Versioned tag and release, in one call: `gh release create <tag> <dir>/*
+   --target $GITHUB_SHA --latest=false --generate-notes
+   [--notes-start-tag <start>]`, plus `--prerelease` unless the channel is
+   `release`. GitHub creates the tag with the release, so a failed create
+   leaves no `cli-v*` tag behind; the tag ruleset would block deleting one,
+   and `next-version` would count it as released.
+2. Newest-commit check: `git ls-remote origin refs/heads/cli-channel/<channel>`
    must name `$GITHUB_SHA`. If not, print
    `cli-channel/<channel> moved on; channel release unchanged` and exit 0.
-4. Channel tag: `git push --force origin $GITHUB_SHA:refs/tags/cli-channel-<channel>`.
-5. Channel release `cli-channel-<channel>`:
+3. Channel tag: `git push --force origin $GITHUB_SHA:refs/tags/cli-channel-<channel>`.
+4. Channel release `cli-channel-<channel>`:
    - Missing: `gh release create cli-channel-<channel> --verify-tag
      --prerelease --latest=false --title "<title>" --notes "<notes>"`.
    - Exists: `gh release edit cli-channel-<channel> --title "<title>"`.

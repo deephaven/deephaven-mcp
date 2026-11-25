@@ -79,9 +79,10 @@ export async function originAndClone() {
 /**
  * A fake `gh` on `PATH`: logs each call's arguments, one line per call, to
  * `log`. `release create <name>` records `<name>`, so a later
- * `release view <name>` succeeds; `api` prints the `pulls` file.
+ * `release view <name>` succeeds, and with `--target` tags it in the bare
+ * repository `origin`, if given; `api` prints the `pulls` file.
  */
-export async function fakeGh(dir: string) {
+export async function fakeGh(dir: string, origin = "") {
   const bin = join(dir, "fake-bin");
   const state = join(dir, "fake-gh-state");
   await mkdir(bin, { recursive: true });
@@ -101,7 +102,13 @@ case "$1 $2" in
   "release view")
     if [ -e "${state}/fail-view" ]; then echo "HTTP 403: API rate limit exceeded" >&2; exit 1; fi
     [ -e "${state}/$3" ] || { echo "release not found" >&2; exit 1; } ;;
-  "release create") touch "${state}/$3" ;;
+  "release create")
+    if [ -e "${state}/fail-create" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi
+    touch "${state}/$3"
+    # Like GitHub, --target creates the tag along with the release.
+    target= prev=
+    for arg in "$@"; do [ "$prev" = --target ] && target=$arg; prev=$arg; done
+    if [ -n "$target" ] && [ -n "${origin}" ]; then git --git-dir="${origin}" tag "$3" "$target"; fi ;;
 esac
 `,
   );
@@ -112,6 +119,8 @@ esac
     calls: async () =>
       (await readFile(log, "utf8")).split("\n").filter(Boolean),
     setPulls: (value: unknown) => writeFile(pulls, JSON.stringify(value)),
+    /** Makes every later `gh release create` fail. */
+    failCreate: () => writeFile(join(state, "fail-create"), ""),
     /** Makes every later `gh api` call fail. */
     failApi: () => writeFile(join(state, "fail-api"), ""),
     /** Makes every later `gh release view` fail with a non-404 error. */

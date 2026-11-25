@@ -1,15 +1,16 @@
 /**
  * Publishes a built release from CI: `bun run publish <tag> <dir>`.
  *
- * Pushes the versioned tag `<tag>` and creates its release from every file in
- * `<dir>`. Then, if this commit is still the newest on
+ * Creates the versioned release `<tag>`, and with it the tag at `GITHUB_SHA`,
+ * from every file in `<dir>`. Then, if this commit is still the newest on
  * `cli-channel/<channel>`, moves the `cli-channel-<channel>` tag to it and
  * points that channel release at it: retitles it and replaces its
  * `manifest.json` (plus the install scripts on `release`).
  *
- * Tags and the branch check use `git` against the checkout's `origin`; only
- * release objects use `gh`. Needs `GITHUB_REPOSITORY` and `GITHUB_SHA`, and
- * `GH_TOKEN` on CI (also used to authenticate `git push`).
+ * The channel tag and the branch check use `git` against the checkout's
+ * `origin`; releases (and the versioned tag) use `gh`. Needs
+ * `GITHUB_REPOSITORY` and `GITHUB_SHA`, and `GH_TOKEN` on CI (also used to
+ * authenticate `git push`).
  */
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -71,24 +72,26 @@ function cliTags(): string[] {
   return git("tag", "--list", "cli-v*").split("\n").filter(Boolean);
 }
 
-// 1–2. The versioned tag and release.
+// 1. The versioned tag and release.
 const start = notesStartTag([...cliTags(), tag], tag);
-git("push", "origin", `${sha}:refs/tags/${tag}`);
 const files = (await readdir(outDir)).map((name) => join(outDir, name));
+// GitHub creates the tag with the release, so a failed create leaves no tag:
+// the cli-v* ruleset would block deleting one, and it would count as released.
 run([
   "gh",
   "release",
   "create",
   tag,
   ...files,
-  "--verify-tag",
+  "--target",
+  sha,
   "--latest=false",
   "--generate-notes",
   ...(start ? ["--notes-start-tag", start] : []),
   ...(channel === RELEASE_CHANNEL ? [] : ["--prerelease"]),
 ]);
 
-// 3. Only the newest commit on the branch may move the channel release.
+// 2. Only the newest commit on the branch may move the channel release.
 const head = git(
   "ls-remote",
   "origin",
@@ -99,11 +102,11 @@ if (head !== sha) {
   process.exit(0);
 }
 
-// 4. The channel tag.
+// 3. The channel tag.
 const channelTag = `cli-channel-${channel}`;
 git("push", "--force", "origin", `${sha}:refs/tags/${channelTag}`);
 
-// 5. The channel release.
+// 4. The channel release.
 const title = `${channel} channel (currently ${tag})`;
 const notes = `Moving release for the ${channel} channel. Its tag and manifest.json are replaced on every publish. Do not delete.`;
 let exists = true;
