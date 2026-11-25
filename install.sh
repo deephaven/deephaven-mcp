@@ -21,7 +21,7 @@ case "$CHANNEL" in
 esac
 case "$CHANNEL" in *[!"$lower"0123456789-]*) CHANNEL_INVALID=1 ;; esac
 if [ -n "${CHANNEL_INVALID:-}" ] || [ "${#CHANNEL}" -gt 40 ]; then
-  echo "$BIN: invalid channel \"$CHANNEL\": use lowercase letters, digits and hyphens, starting with a letter" >&2
+  echo "$BIN: invalid channel \"$CHANNEL\": use lowercase letters, digits and hyphens, starting with a letter, at most 40 characters" >&2
   exit 1
 fi
 # Must be user-writable, or auto-update can't replace the binary.

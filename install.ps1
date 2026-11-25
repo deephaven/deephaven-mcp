@@ -46,7 +46,7 @@
   # Same rules as src/channel.ts; -cmatch is case-sensitive. dev is reserved for builds run from source.
   if ($channel -ceq 'dev') { throw 'Channel dev is reserved for builds run from source' }
   if ($channel -cnotmatch '^[a-z][a-z0-9-]*$' -or $channel.Length -gt 40) {
-    throw "Invalid channel ""$channel"": use lowercase letters, digits and hyphens, starting with a letter"
+    throw "Invalid channel ""$channel"": use lowercase letters, digits and hyphens, starting with a letter, at most 40 characters"
   }
   # Must be user-writable, or auto-update can't replace the binary.
   $dir = if ($env:DH_INSTALL_DIR) { $env:DH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\$bin" }

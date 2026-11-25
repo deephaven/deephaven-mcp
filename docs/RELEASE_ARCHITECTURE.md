@@ -283,7 +283,7 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 ### Labels and names
 
 - **A pre-release version is a guess at the release it leads to.** `3.1.1-rc.1` means "would be `3.1.1` if released now". If a hotfix ships `3.1.1` first, the rc work is released as `3.1.2`, so the `3.1.1-rc.N` builds never became `3.1.1`. That's harmless: CLIs only check whether a version differs, never which is higher.
-- **Channel names match `^[a-z][a-z0-9-]*$`.** Hyphens are fine: `3.1.1-alpha-bar.0` is valid semver. `dev` is reserved for builds run from source or built locally.
+- **Channel names match `^[a-z][a-z0-9-]*$`, at most 40 characters.** Hyphens are fine: `3.1.1-alpha-bar.0` is valid semver. `dev` is reserved for builds run from source or built locally.
 
 ## Rules
 
