@@ -419,7 +419,9 @@ name, so `bun test -t channels-<pr>` runs them all.
      pre-release, not latest; `cli-channel-rc` exists, titled
      `rc channel (currently …)`, its tag on the merge commit.
   2. Merge another → `rc.1`; `cli-channel-rc` moved to the new commit and sits
-     next to `rc.1` on the Releases page.
+     next to `rc.1` on the Releases page. This proves the `cli-channel-*` tag
+     ruleset lets the workflow move the tag; if the push is rejected, switch
+     that step to a GitHub App token (see Repo setup).
   3. PR `cli-channel/rc` → `cli-channel/release`: both checks pass; merge
      → `cli-v<x>` released with no deployment approval, `cli-channel-release`
      carries the install scripts.
@@ -446,7 +448,7 @@ name, so `bun test -t channels-<pr>` runs them all.
 | pub-4 | `tests/release_check.test.ts`: `[channels-pub-4]` release origin (Unix only). That `release.yml` runs this check before publishing is shown by pub-7 step 5. |
 | pub-5 | `tests/release_check.test.ts`: `[channels-pub-5]` release-source; release-contains (Unix only) |
 | pub-6 | `tests/auto_update.test.ts`: `[channels-pub-6]`; runs `install.sh` on Linux and macOS, `install.ps1` on Windows |
-| pub-7 | Manual, on a fork; record the results in the PR |
+| pub-7 | Manual, on a fork with the repo setup applied; record the results in the PR. Step 2 also proves the `cli-channel-*` tag ruleset's Actions bypass. |
 | pub-8 | Review `docs/CHANNELS.md` and `docs/RELEASE_ARCHITECTURE.md` against the code |
 | pub-9 | CI: the `check` job and the `test` job's ubuntu, macos and windows runs (`.github/workflows/ci.yml`) |
 
