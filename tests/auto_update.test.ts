@@ -277,7 +277,7 @@ test("[channels-pub-6] the install scripts install on a channel", async () => {
       DH_CHANNEL: "nope",
     });
     expect(unpublished.success).toBe(false);
-    expect(unpublished.stderr).toContain("no channel nope");
+    expect(unpublished.stderr).toContain(`${BIN}: no channel nope`);
 
     // 40 characters is the longest valid name: it gets as far as the download.
     const longest = await run(INSTALL.cmd, INSTALL.args, {
@@ -288,7 +288,15 @@ test("[channels-pub-6] the install scripts install on a channel", async () => {
     expect(longest.success).toBe(false);
     expect(longest.stderr).toContain(`no channel ${"a".repeat(40)}`);
 
-    for (const channel of ["dev", "Rc", "-x", "1a", "a_b", "a".repeat(41)]) {
+    for (const channel of [
+      "dev",
+      "Rc",
+      "-x",
+      "1a",
+      "a_b",
+      "rc\n",
+      "a".repeat(41),
+    ]) {
       const before = requests.count;
       const rejected = await run(INSTALL.cmd, INSTALL.args, {
         ...installEnv,

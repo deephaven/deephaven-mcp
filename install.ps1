@@ -43,9 +43,10 @@
   $repoUrl = if ($env:DH_INSTALL_REPO_URL) { $env:DH_INSTALL_REPO_URL } else { 'https://github.com/deephaven/deephaven-mcp' }
   Assert-Trusted $repoUrl
   $channel = if ($env:DH_CHANNEL) { $env:DH_CHANNEL } else { 'release' }
-  # Same rules as src/channel.ts; -cmatch is case-sensitive. dev is reserved for builds run from source.
+  # Same rules as src/channel.ts; -cmatch is case-sensitive, and \z because $ also matches before a final newline.
+  # dev is reserved for builds run from source.
   if ($channel -ceq 'dev') { throw 'Channel dev is reserved for builds run from source' }
-  if ($channel -cnotmatch '^[a-z][a-z0-9-]*$' -or $channel.Length -gt 40) {
+  if ($channel -cnotmatch '^[a-z][a-z0-9-]*\z' -or $channel.Length -gt 40) {
     throw "Invalid channel ""$channel"": use lowercase letters, digits and hyphens, starting with a letter, at most 40 characters"
   }
   # Must be user-writable, or auto-update can't replace the binary.
@@ -74,7 +75,7 @@
       $e = $_.Exception
       while ($e -and -not ($e -is [Net.WebException])) { $e = $e.InnerException }
       if (-not $env:DH_INSTALL_VERSION -and $e -and $e.Response -and [int]$e.Response.StatusCode -eq 404) {
-        throw "no channel $channel at $repoUrl"
+        throw "${bin}: no channel $channel at $repoUrl"
       }
       throw
     }
