@@ -20,6 +20,7 @@ async function run(
     DH_CONFIG_DIR: dir,
     DH_AI_DATA_DIR: join(dir, "none"),
     DH_AUTO_UPDATE: "off",
+    DH_PLUGIN_REFRESH: "off",
     DH_PROFILE: undefined,
     DH_SERVER: undefined,
     ...env,

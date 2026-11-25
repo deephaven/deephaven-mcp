@@ -186,7 +186,8 @@ Progress, in commits on this branch:
      a file (ssh may have read it): then `plugin_unavailable`, "run the
      command again".
    - The periodic check runs after any command but plugin commands,
-     `dh plugin …` and `dh auth login`, with a 5 s timeout.
+     `dh plugin …` and `dh auth login`, as a detached
+     `dh plugin sync --no-prompt` that the command doesn't wait for.
    - `dh agents` marks a plugin's nouns with `plugin` (its name),
      `pluginTool` and `pluginExec`; `pluginVersion` and `pluginState` are
      gone.
@@ -213,7 +214,7 @@ Progress, in commits on this branch:
    - `dh plugin sync` reports each channel; if one fails, it prints both
      lines and exits with the failure's code.
    - The periodic check stamps each attempt (`<cache>/<channel>/checked`)
-     before fetching, so an unreachable server is retried once per
+     before starting the sync, so an unreachable server is retried once per
      interval, as the self-updater's check is. It doesn't run with
      `DH_PLUGIN_BUNDLE`, which replaces both of the server's parts.
    - New error codes' exits: `plugin_failed` 6, `not_found` 2, `conflict` 2,

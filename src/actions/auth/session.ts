@@ -107,6 +107,15 @@ export async function ensureCa(
   process.exit(code);
 }
 
+/** The argv that runs `dh` with `args`, from source or compiled. */
+export function selfCommand(args: string[]): string[] {
+  // Compiled: argv[1] is a virtual path to skip, and runtime flags are built in.
+  const runtime = STANDALONE
+    ? []
+    : [...process.execArgv, process.argv[1] ?? ""];
+  return [process.execPath, ...runtime, ...args];
+}
+
 /**
  * Runs `dh` again with `args` and `env` added to this process's, stdio
  * inherited; resolves to its exit code.
@@ -116,11 +125,7 @@ export async function runSelf(
   env: Record<string, string>,
   lifecycle?: CommandLifecycle,
 ): Promise<number> {
-  // Compiled: argv[1] is a virtual path to skip, and runtime flags are built in.
-  const runtime = STANDALONE
-    ? []
-    : [...process.execArgv, process.argv[1] ?? ""];
-  const proc = Bun.spawn([process.execPath, ...runtime, ...args], {
+  const proc = Bun.spawn(selfCommand(args), {
     env: { ...process.env, ...env },
     stdio: ["inherit", "inherit", "inherit"],
     // Avoid delivering terminal signals both directly and via the parent.

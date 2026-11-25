@@ -58,6 +58,23 @@ export async function run(
   return { code, stdout, stderr };
 }
 
+/** `fn`'s first result that `done` accepts, polled; throws after `ms`. For work `dh` leaves running in the background. */
+export async function eventually<T>(
+  fn: () => Promise<T>,
+  done: (value: T) => boolean,
+  ms = 5_000,
+): Promise<T> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = await fn();
+    if (done(value)) return value;
+    if (Date.now() > deadline) {
+      throw new Error(`Not done within ${ms} ms: ${JSON.stringify(value)}`);
+    }
+    await Bun.sleep(50);
+  }
+}
+
 export function tempDir(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix));
 }

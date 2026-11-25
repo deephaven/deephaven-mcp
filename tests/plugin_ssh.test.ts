@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { updateShellSpec, writeShellPart } from "./bundle-helpers.ts";
-import { CLI, run, tempDir, WINDOWS } from "./helpers.ts";
+import { CLI, eventually, run, tempDir, WINDOWS } from "./helpers.ts";
 
 const FIXTURES = resolve(import.meta.dir, "fixtures/plugins");
 
@@ -554,17 +554,37 @@ describe.skipIf(WINDOWS)("ssh plugins: the shell channel", () => {
     expect(await logged()).toEqual([]);
     const due = await dh(["auth"], { DH_PLUGIN_REFRESH: "0" });
     expect(due.code).toBe(0);
-    const runs = await logged();
-    expect(runs).toHaveLength(1);
+    // In the background: `dh` has already exited.
+    const runs = await eventually(logged, (r) => r.length === 1);
     expect(isCopy(runs[0] ?? [])).toBe(true);
     expect(runs[0]).toContain("BatchMode=yes");
-    expect(runs[0]).toContain("ConnectTimeout=5");
     const failing = await dh(["auth"], {
       DH_PLUGIN_REFRESH: "0",
       FAKE_SSH_FAIL: "dns",
     });
     expect(failing.code).toBe(0);
     expect(failing.stderr).toBe("");
+    await eventually(logged, (r) => r.length === 2);
+  });
+
+  test("DH_PLUGIN_REFRESH=off skips the check after other commands, even when due", async () => {
+    // Nothing cached yet, so the check is due.
+    const { dh, dir, logged } = await setup({ sync: false });
+    const stamp = join(
+      dir,
+      "plugins",
+      "cache",
+      encodeURIComponent(ORIGIN1),
+      "shell",
+      "checked",
+    );
+    const off = await dh(["auth"], { DH_PLUGIN_REFRESH: "off" });
+    expect(off.code).toBe(0);
+    // A check is stamped before it starts.
+    expect(await Bun.file(stamp).exists()).toBe(false);
+    await dh(["auth"]);
+    expect(await Bun.file(stamp).exists()).toBe(true);
+    await eventually(logged, (r) => r.length === 1);
   });
 
   test("DH_PLUGIN_BUNDLE without a profile runs plugins locally, with no ssh", async () => {

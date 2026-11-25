@@ -45,7 +45,7 @@ export async function syncShell(
   store: Store,
   config: Config,
   origin: string,
-  opts: { host?: string; prompt: boolean; timeoutMs?: number },
+  opts: { host?: string; prompt: boolean },
 ): Promise<PartSync> {
   const ssh = serverSsh(config, origin);
   const host = opts.host ?? ssh.defaultHost;
@@ -57,7 +57,6 @@ export async function syncShell(
     shellDir,
     old?.revision,
     opts.prompt ? "prompt" : "batch",
-    opts.timeoutMs,
   );
   const result = (status: PartSync["status"], now?: Manifest): PartSync => ({
     channel: "shell",
@@ -133,9 +132,12 @@ export async function storeShellCopy(
   return read.manifest;
 }
 
-/** Where a server serves its `js/` part. */
+/**
+ * Where a server serves its `js/` part. Built from `origin`'s origin alone,
+ * so any user info, path, query or fragment in it is never requested.
+ */
 export function jsBase(origin: string): URL {
-  return new URL("/iriside/cli-plugins/", origin);
+  return new URL("/iriside/cli-plugins/", new URL(origin).origin);
 }
 
 /** `revision`'s state on the server: unchanged, gone (404), or this new revision. */
@@ -196,7 +198,6 @@ export async function syncJs(
   opts: {
     profileFlag?: string;
     groups: boolean;
-    timeoutMs?: number;
     /** Where the user's groups come from; default: signing in as `profileFlag`'s profile. */
     groupsOf?: () => Promise<string[]>;
     /** The command's, for signing in. */
@@ -206,7 +207,7 @@ export async function syncJs(
   const groupsOf =
     opts.groupsOf ??
     (() => userGroups(store, opts.profileFlag, opts.lifecycle));
-  const timeout = opts.timeoutMs ?? timeoutMs();
+  const timeout = timeoutMs();
   const before = await readCachedPart(origin, "js");
   const old = before?.manifest?.ok ? before.manifest.manifest : undefined;
   const result = (status: PartSync["status"], now?: Manifest) => ({

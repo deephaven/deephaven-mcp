@@ -17,6 +17,7 @@ async function run(
   const result = await spawn([...CLI, ...args, "-o", "json", "--no-prompt"], {
     DH_CONFIG_DIR: dir,
     DH_AUTO_UPDATE: "off",
+    DH_PLUGIN_REFRESH: "off",
     DH_PROFILE: undefined,
     DH_SERVER: undefined,
     ...env,
