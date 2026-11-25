@@ -379,6 +379,10 @@ Each item is a behavior the implementation must show. IDs (`channels-<pr>-<n>`)
 are stable so tests can reference them: numbers are append-only, and a removed
 or moved item's ID isn't reused.
 
+Each PR's group ends with a Proof table: where a reviewer can confirm each
+item without reading the implementation. Tests carry their item's ID in their
+name, so `bun test -t channels-<pr>` runs them all.
+
 ### PR 2: Publishing
 
 - [x] **channels-pub-1** Next versions match the next-version table in section
@@ -431,6 +435,23 @@ or moved item's ID isn't reused.
 - [x] **channels-pub-8** The docs match the implementation.
 - [ ] **channels-pub-9** `bun run check` passes; `bun test` passes on Linux,
       macOS and Windows.
+
+#### Proof
+
+| Item | Proven by |
+| --- | --- |
+| pub-1 | `tests/channel.test.ts`: `[channels-pub-1]` parseTag, nextVersion, next-version script |
+| pub-2 | `tests/channel.test.ts`: `[channels-pub-2]` notesStartTag |
+| pub-3 | `tests/publish.test.ts`: `[channels-pub-3]` publish (Unix only) |
+| pub-4 | `tests/release_check.test.ts`: `[channels-pub-4]` release origin (Unix only). That `release.yml` runs this check before publishing is shown by pub-7 step 5. |
+| pub-5 | `tests/release_check.test.ts`: `[channels-pub-5]` release-source; release-contains (Unix only) |
+| pub-6 | `tests/auto_update.test.ts`: `[channels-pub-6]`; runs `install.sh` on Linux and macOS, `install.ps1` on Windows |
+| pub-7 | Manual, on a fork; record the results in the PR |
+| pub-8 | Review `docs/CHANNELS.md` and `docs/RELEASE_ARCHITECTURE.md` against the code |
+| pub-9 | CI: the `check` job and the `test` job's ubuntu, macos and windows runs (`.github/workflows/ci.yml`) |
+
+Unix only: these tests use a fake `gh` written in sh and are skipped on
+Windows.
 
 ### PR 3: CLI
 
