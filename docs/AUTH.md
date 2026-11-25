@@ -174,8 +174,13 @@ cancel.
 Other accounts on the computer can't read `credentials.json`, but any program
 running as you can, including AI agents and other tools.
 
-On Windows the directory is `%APPDATA%\Deephaven\cli`. Set `DH_CONFIG_DIR` to
-use another directory.
+On Windows the directory is `%APPDATA%\Deephaven\cli`. Builds on other release
+channels use a sibling folder named after the channel, such as `cli-rc` or
+`cli-alpha-<id>`, so they can't break a working `release` setup. Dev builds (run
+from source or built locally) use `cli-dev`. Each folder starts empty, and
+logging out in one never revokes another's keys. Set `DH_CONFIG_DIR` to use
+another directory; it replaces the folder for every channel, so builds that
+share a value share profiles and keys.
 
 On macOS and Linux, `dh` refuses to read `credentials.json` if other users can
 read it. Fix the permissions with `chmod 600 ~/.deephaven/cli/credentials.json`.
@@ -240,18 +245,20 @@ the full manifest, with every flag, as JSON.
 With `-o json`, stdout holds exactly one JSON value. Progress messages and
 errors go to stderr.
 
-| Command           | stdout                                                               |
-| ----------------- | -------------------------------------------------------------------- |
-| `dh`              | `{"version", "default": {"profile", "server", "user"} \| null}`      |
-| `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`          |
-| `dh auth login`   | `{"profile", "server", "user", "default"}`                           |
-| `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                 |
-| `dh auth use`     | `{"default"}`                                                        |
-| `dh auth rename`  | `{"from", "to"}`                                                     |
-| `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}` |
-| `dh auth migrate` | `{"migrated", "failed"}`                                             |
+| Command           | stdout                                                                     |
+| ----------------- | -------------------------------------------------------------------------- |
+| `dh`              | `{"version", "channel", "default": {"profile", "server", "user"} \| null}` |
+| `dh auth`         | `[{"name", "server", "kind", "user", "method", "default"}]`                |
+| `dh auth login`   | `{"profile", "server", "user", "default"}`                                 |
+| `dh auth status`  | `{"profile", "server", "kind", "user", "operateAs"}`                       |
+| `dh auth use`     | `{"default"}`                                                              |
+| `dh auth rename`  | `{"from", "to"}`                                                           |
+| `dh auth logout`  | `{"removed": [{"profile", "server", "revoked"}], "kept", "default"}`       |
+| `dh auth migrate` | `{"migrated", "failed"}`                                                   |
 
 `profile` is `null` in `status` when signed in from environment variables.
+`channel` in `dh` is the running build's [release channel](CHANNELS.md) (`dev`
+when run from source).
 
 ### Errors and exit codes
 
@@ -356,14 +363,14 @@ prints what it's waiting on for each server:
 
 ## Environment variables
 
-| Variable                               | Effect                                                          |
-| -------------------------------------- | --------------------------------------------------------------- |
-| `DH_PROFILE`                           | Profile to use, like `--profile`                                |
-| `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`)                   |
-| `DH_TIMEOUT`                           | Seconds to wait for connecting and non-SSO sign-in (default 30) |
-| `DH_DEBUG`                             | Show client library logs (on stderr) and internal error details |
-| `DH_SERVER`, …                         | Environment-only sign-in ([above](#environment-only-sign-in))   |
-| `DH_MCP_CONFIG_FILE`, `DH_AI_DATA_DIR` | Where to look for an old config to migrate                      |
+| Variable                               | Effect                                                                                               |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `DH_PROFILE`                           | Profile to use, like `--profile`                                                                     |
+| `DH_CONFIG_DIR`                        | Config directory (default `~/.deephaven/cli`, or a [folder per channel](#where-profiles-are-stored)) |
+| `DH_TIMEOUT`                           | Seconds to wait for connecting and non-SSO sign-in (default 30)                                      |
+| `DH_DEBUG`                             | Show client library logs (on stderr) and internal error details                                      |
+| `DH_SERVER`, …                         | Environment-only sign-in ([above](#environment-only-sign-in))                                        |
+| `DH_MCP_CONFIG_FILE`, `DH_AI_DATA_DIR` | Where to look for an old config to migrate                                                           |
 
 ## Troubleshooting
 
