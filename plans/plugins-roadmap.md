@@ -34,7 +34,7 @@ start and finish.
 
 | # | Item | Branch | Builds on | Status | Done when |
 | --- | --- | --- | --- | --- | --- |
-| 1 | TypeScript plugins design | `bmingles_DH-23907_plugins_ts_design` (`37fe63b`) | `v3_rewrite` | review | Approved; then merged |
+| 1 | TypeScript plugins design | `bmingles_DH-23907_plugins_ts_design` | `v3_rewrite` | review | Approved; then merged |
 | 2 | File-system plugins design | `bmingles_DH-23907_plugins_fs_design` | `v3_rewrite` | todo | `plans/plugins-fs.md` and its docs approved |
 | 3 | `dh object` and `dh object table` design and PR | (owner TBD) | `v3_rewrite` | todo | Its own plan; #6 assumes the contract in `plans/plugins-ts.md`'s "Assumed: `dh object`" |
 | 4 | TS PR 2: sandbox | `bmingles_DH-23907_plugins_ts_sandbox` | 1 | todo | `plugins-ts-sandbox-*` |
