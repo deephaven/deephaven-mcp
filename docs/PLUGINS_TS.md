@@ -64,7 +64,7 @@ $ dh object ui-dashboard my_dash
     [picker] "Symbol" selected="AAPL" (12 options)
     [button] "Refresh"
 
-Inspect a nested object: dh object <view> my_dash --ref <id>
+Inspect a nested object: dh object <type> my_dash --ref <id>
   e.g. dh object table my_dash --ref 0 for [table:0]
 ```
 
@@ -78,7 +78,7 @@ $ dh object ui my_el
   [text] "Last refreshed 09:30"
   [table:0] 20 rows, 3 columns
 
-Inspect a nested object: dh object <view> my_el --ref <id>
+Inspect a nested object: dh object <type> my_el --ref <id>
   e.g. dh object table my_el --ref 0 for [table:0]
 ```
 

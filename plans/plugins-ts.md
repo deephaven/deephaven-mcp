@@ -464,7 +464,7 @@ into `dist/cli/` after the web build, and `deephaven.cli.spec` in
   `(<n> options)` for a picker's items. Quoted text longer than 120
   characters is cut to 119 and `…`.
 - **Hint:** only when some exported object has a subcommand, after a blank
-  line, `Inspect a nested object: dh object <view> <name> --ref <id>` and
+  line, `Inspect a nested object: dh object <type> <name> --ref <id>` and
   then `  e.g. dh object <sub> <name> --ref <n> for [<sub>:<n>]`, with the
   lowest-numbered exported object that has a subcommand.
 - **JSON:** `tree` is the root node; a node is
@@ -494,6 +494,9 @@ into `dist/cli/` after the web build, and `deephaven.cli.spec` in
 - Commands discovered from a worker's Python environment.
 - Signing plugin packages.
 - `dh object table`'s options (its own design).
+- Reaching a nested object labeled with its type string (no subcommand
+  displays it), such as `[deephaven.plot.express.DeephavenFigure:2]`; to be
+  decided with the team.
 - File-system (`shell`) plugins (their own design; see
   [Shared with file-system plugins](../docs/PLUGINS_TS_ARCHITECTURE.md#shared-with-file-system-plugins)).
 - Upstreaming the augmentation to deephaven-core and Iris; tracked separately.
