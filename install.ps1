@@ -1,4 +1,5 @@
-# Installs the Deephaven CLI: irm https://github.com/deephaven/deephaven-mcp/releases/latest/download/install.ps1 | iex
+# Installs the Deephaven CLI: irm https://github.com/deephaven/deephaven-mcp/releases/download/cli-channel-release/install.ps1 | iex
+# On another release channel: $env:DH_CHANNEL = 'rc'; irm ... | iex
 # Wrapped in a script block so `iex` doesn't leak variables or exit the caller's shell.
 & {
   $ErrorActionPreference = 'Stop'
@@ -41,6 +42,13 @@
 
   $repoUrl = if ($env:DH_INSTALL_REPO_URL) { $env:DH_INSTALL_REPO_URL } else { 'https://github.com/deephaven/deephaven-mcp' }
   Assert-Trusted $repoUrl
+  $channel = if ($env:DH_CHANNEL) { $env:DH_CHANNEL } else { 'release' }
+  # Same rules as src/channel.ts; -cmatch is case-sensitive, and \z because $ also matches before a final newline.
+  # dev is reserved for builds run from source.
+  if ($channel -ceq 'dev') { throw 'Channel dev is reserved for builds run from source' }
+  if ($channel -cnotmatch '^[a-z][a-z0-9-]*\z' -or $channel.Length -gt 40) {
+    throw "Invalid channel ""$channel"": use lowercase letters, digits and hyphens, starting with a letter, at most 40 characters"
+  }
   # Must be user-writable, or auto-update can't replace the binary.
   $dir = if ($env:DH_INSTALL_DIR) { $env:DH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\$bin" }
   # Absolute against PowerShell's location (not .NET's cwd), since it's persisted in PATH.
@@ -48,10 +56,11 @@
   # x64 also runs on Windows on ARM under emulation.
   $target = 'windows-x64'
 
+  # DH_INSTALL_VERSION accepts 3.1.1, v3.1.1 or cli-v3.1.1; otherwise the channel release's manifest.
   $manifestUrl = if ($env:DH_INSTALL_VERSION) {
-    "$repoUrl/releases/download/v$($env:DH_INSTALL_VERSION -replace '^v', '')/manifest.json"
+    "$repoUrl/releases/download/cli-v$($env:DH_INSTALL_VERSION -replace '^(cli-)?v', '')/manifest.json"
   } else {
-    "$repoUrl/releases/latest/download/manifest.json"
+    "$repoUrl/releases/download/cli-channel-$channel/manifest.json"
   }
 
   $tmp = Join-Path ([IO.Path]::GetTempPath()) "$bin-install-$([Guid]::NewGuid())"
@@ -59,7 +68,17 @@
   try {
     # The manifest pins a tagged URL and checksum, so this can't mix releases.
     $manifestFile = Join-Path $tmp 'manifest.json'
-    Save-Trusted $manifestUrl $manifestFile
+    try {
+      Save-Trusted $manifestUrl $manifestFile
+    } catch {
+      # .NET method errors arrive wrapped; find the WebException for its status.
+      $e = $_.Exception
+      while ($e -and -not ($e -is [Net.WebException])) { $e = $e.InnerException }
+      if (-not $env:DH_INSTALL_VERSION -and $e -and $e.Response -and [int]$e.Response.StatusCode -eq 404) {
+        throw "${bin}: no channel $channel at $repoUrl"
+      }
+      throw
+    }
     $manifest = Get-Content -Raw $manifestFile | ConvertFrom-Json
     $asset = $manifest.binaries.$target
     if (-not $asset) { throw "$bin v$($manifest.version) has no binary for $target" }
@@ -83,10 +102,16 @@
 
     New-Item -ItemType Directory -Force $dir | Out-Null
     Move-Item -Force $exe (Join-Path $dir "$bin.exe")
+    # Install metadata the CLI reads (see src/install-meta.ts); written fresh on every install.
+    # Not Set-Content: Windows PowerShell 5.1 writes a BOM, which JSON.parse rejects.
+    $meta = Join-Path $dir "$bin.exe.meta"
+    $metaTmp = "$meta.$PID.tmp"
+    [IO.File]::WriteAllText($metaTmp, "{""channel"":""$channel""}`n", [Text.UTF8Encoding]::new($false))
+    Move-Item -Force $metaTmp $meta
   } finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp
   }
-  Write-Host "Installed $bin v$($manifest.version) to $dir\$bin.exe"
+  Write-Host "Installed $bin v$($manifest.version) ($channel channel) to $dir\$bin.exe"
 
   # Read and write the raw registry value, so %VAR% entries stay unexpanded.
   $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')

@@ -149,7 +149,7 @@ gitGraph
 A publish starts when something is merged or pushed to a `cli-channel/<channel>` branch; nothing else publishes. On `release`, the workflow first checks that the pushed commit is the merge of a PR from `cli-channel/rc` or `hotfix/*`, and publishes nothing otherwise (see [Rules](#rules)). Each publish updates two GitHub releases:
 
 - **Versioned release** (`cli-v3.1.1-rc.2`, `cli-v3.1.1`): created new, never changed afterwards. Holds the binaries, `manifest.json`, `SHA256SUMS` and the install scripts. Created with `--latest=false`, so `releases/latest` stays with the Python MCP releases.
-- **Channel release** (`cli-channel-rc`, `cli-channel-release`): one per channel, same name forever, created on the channel's first publish. Each publish moves its tag to the published commit, replaces its `manifest.json` to point at the new versioned release, and updates its title to show the current build, for example `rc channel (currently cli-v3.1.1-rc.2)`. The `release` channel's release also carries `install.sh` and `install.ps1`, which the install one-liners download. GitHub dates a release by its tag's commit, so the channel release sits next to its current build on the Releases page.
+- **Channel release** (`cli-channel-rc`, `cli-channel-release`): one per channel, same name forever, created on the channel's first publish. Each publish moves its tag to the published commit, replaces its `manifest.json` to point at the new versioned release, and updates its title to show the current build, for example `rc channel (cli-v3.1.1-rc.2)`. The `release` channel's release also carries `install.sh` and `install.ps1`, which the install one-liners download. GitHub dates a release by its tag's commit, so the channel release sits next to its current build on the Releases page.
 
 Every channel runs the same steps:
 
@@ -162,7 +162,7 @@ flowchart TB
     ver["Compute version<br/>last release + patch<br/>+ -#lt;channel#gt;.#lt;build#gt; suffix<br/>for non-release channels<br/>rc: 3.1.0 → 3.1.1-rc.2<br/>release: 3.1.0 → 3.1.1"] --> build["Build CLI binaries<br/>for each platform"] --> rel["Tag + GitHub release<br/>cli-v3.1.1-rc.2"]
   end
   tip{"Newest commit<br/>on the branch?"}
-  ptr[("Update channel release cli-channel-#lt;channel#gt;<br/>move its tag here · replace manifest.json<br/>title: rc channel (currently cli-v3.1.1-rc.2)")]
+  ptr[("Update channel release cli-channel-#lt;channel#gt;<br/>move its tag here · replace manifest.json<br/>title: rc channel (cli-v3.1.1-rc.2)")]
   push --> ci
   ci --> tip
   tip -- yes --> ptr
@@ -283,7 +283,7 @@ Patch bumps are automatic. For a minor or major bump, a PR sets `version` in `pa
 ### Labels and names
 
 - **A pre-release version is a guess at the release it leads to.** `3.1.1-rc.1` means "would be `3.1.1` if released now". If a hotfix ships `3.1.1` first, the rc work is released as `3.1.2`, so the `3.1.1-rc.N` builds never became `3.1.1`. That's harmless: CLIs only check whether a version differs, never which is higher.
-- **Channel names match `^[a-z][a-z0-9-]*$`.** Hyphens are fine: `3.1.1-alpha-bar.0` is valid semver. `dev` is reserved for builds run from source or built locally.
+- **Channel names match `^[a-z][a-z0-9-]*$`, at most 40 characters.** Hyphens are fine: `3.1.1-alpha-bar.0` is valid semver. `dev` is reserved for builds run from source or built locally.
 
 ## Rules
 

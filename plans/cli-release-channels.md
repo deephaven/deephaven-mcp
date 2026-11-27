@@ -98,28 +98,31 @@ to `build()`, and drops the `package.json` version check. Base URLs stay
 tagged (`releases/download/<tag>/`). Install scripts are still attached to every
 versioned release.
 
-**`scripts/publish.ts <tag> <dir>`**, run by the workflow with `GH_TOKEN`. Tags
-and the branch-head check use `git` against the checkout's `origin`, so they can
-be tested against a local bare repository; only release objects use `gh`:
+**`scripts/publish.ts <tag> <dir>`**, run by the workflow with `GH_TOKEN`. The
+channel tag and the branch-head check use `git` against the checkout's
+`origin`, so they can be tested against a local bare repository; releases (and
+the versioned tag) use `gh`:
 
-1. Versioned tag: `git push origin $GITHUB_SHA:refs/tags/<tag>`.
-2. Versioned release: `gh release create <tag> <dir>/* --verify-tag
-   --latest=false --generate-notes [--notes-start-tag <start>]`, plus
-   `--prerelease` unless the channel is `release`.
-3. Newest-commit check: `git ls-remote origin refs/heads/cli-channel/<channel>`
+1. Versioned tag and release, in one call: `gh release create <tag> <dir>/*
+   --target $GITHUB_SHA --latest=false --generate-notes
+   [--notes-start-tag <start>]`, plus `--prerelease` unless the channel is
+   `release`. GitHub creates the tag with the release, so a failed create
+   leaves no `cli-v*` tag behind; the tag ruleset would block deleting one,
+   and `next-version` would count it as released.
+2. Newest-commit check: `git ls-remote origin refs/heads/cli-channel/<channel>`
    must name `$GITHUB_SHA`. If not, print
    `cli-channel/<channel> moved on; channel release unchanged` and exit 0.
-4. Channel tag: `git push --force origin $GITHUB_SHA:refs/tags/cli-channel-<channel>`.
-5. Channel release `cli-channel-<channel>`:
+3. Channel tag: `git push --force origin $GITHUB_SHA:refs/tags/cli-channel-<channel>`.
+4. Channel release `cli-channel-<channel>`:
    - Missing: `gh release create cli-channel-<channel> --verify-tag
      --prerelease --latest=false --title "<title>" --notes "<notes>"`.
    - Exists: `gh release edit cli-channel-<channel> --title "<title>"`.
    - Upload: for channel `release` only, `install.sh` and `install.ps1` first;
      then always `manifest.json` last, each with `gh release upload … --clobber`.
-   - `<title>`: `<channel> channel (currently <tag>)`, e.g.
-     `rc channel (currently cli-v3.1.1-rc.2)`.
-   - `<notes>`: `Moving release for the <channel> channel. Its tag and
-     manifest.json are replaced on every publish. Do not delete.`
+   - `<title>`: `<channel> channel (<tag>)`, e.g. `rc channel (cli-v3.1.1-rc.2)`.
+   - `<notes>`: `Always points at the most recent <channel> build on the
+     cli-channel/<channel> branch. Its tag and manifest.json are replaced on
+     every publish. Do not delete.`
 
 `git push` authentication: the checkout keeps no credentials
 (`persist-credentials: false`), so when `GH_TOKEN` is set, `publish.ts` passes
@@ -379,31 +382,35 @@ Each item is a behavior the implementation must show. IDs (`channels-<pr>-<n>`)
 are stable so tests can reference them: numbers are append-only, and a removed
 or moved item's ID isn't reused.
 
+Each PR's group ends with a Proof table: where a reviewer can confirm each
+item without reading the implementation. Tests carry their item's ID in their
+name, so `bun test -t channels-<pr>` runs them all.
+
 ### PR 2: Publishing
 
-- [ ] **channels-pub-1** Next versions match the next-version table in section
+- [x] **channels-pub-1** Next versions match the next-version table in section
       1, and tags parse as in Tags: `cli-v3.1.1-alpha-1.0` is channel `alpha-1`,
       build `0`; the same tag with a leading zero, `cli-v03.1.1-alpha-1.0` or
       `cli-v3.01.1-alpha-1.0`, is ignored (not valid semver).
-- [ ] **channels-pub-2** Release notes start where Release-notes start tag
+- [x] **channels-pub-2** Release notes start where Release-notes start tag
       (section 1) says: at `cli-v3.1.0` for `cli-v3.1.1`, and for
       `cli-v3.1.1-rc.0` when only `cli-v3.1.0` exists; at `cli-v3.1.1-rc.0` for
       `cli-v3.1.1-rc.1`.
-- [ ] **channels-pub-3** A publish creates the versioned tag and release first.
+- [x] **channels-pub-3** A publish creates the versioned tag and release first.
       If the branch has moved on, it stops there; otherwise it moves
       `cli-channel-<channel>` to the commit, creates or retitles that release,
       and uploads `manifest.json` last (after the install scripts on `release`).
-- [ ] **channels-pub-4** `cli-channel/release` publishes only the merge of a PR
+- [x] **channels-pub-4** `cli-channel/release` publishes only the merge of a PR
       from this repo's `cli-channel/rc` or `hotfix/*`; any other commit,
       including a merged PR from another repo's branch of the same name,
       publishes nothing.
-- [ ] **channels-pub-5** `release-source` passes only PRs from this repo's
+- [x] **channels-pub-5** `release-source` passes only PRs from this repo's
       `cli-channel/rc` or `hotfix/*`, so a PR from a fork's `cli-channel/rc`
       fails. `release-contains` fails while a change already on
       `release` is missing from the PR's branch, such as a hotfix not yet merged
       through `v3_rewrite` into `rc`, or an earlier hotfix missing from a later
       hotfix's branch, and passes once it's there.
-- [ ] **channels-pub-6** The install scripts (`install.sh`, `install.ps1`) match
+- [x] **channels-pub-6** The install scripts (`install.sh`, `install.ps1`) match
       Installing on a channel in `docs/CHANNELS.md`: `release` by default;
       `DH_CHANNEL` picks the channel and is saved in `dh.meta`; an unpublished
       channel fails with `no channel`; an invalid name or `dev` fails before any
@@ -413,9 +420,11 @@ or moved item's ID isn't reused.
       page defaults the base to the upstream repo; switch it to the fork):
   1. Merge a PR into `cli-channel/rc` → `cli-v<x>-rc.0` released as a
      pre-release, not latest; `cli-channel-rc` exists, titled
-     `rc channel (currently …)`, its tag on the merge commit.
+     `rc channel (…)`, its tag on the merge commit.
   2. Merge another → `rc.1`; `cli-channel-rc` moved to the new commit and sits
-     next to `rc.1` on the Releases page.
+     next to `rc.1` on the Releases page. This proves the `cli-channel-*` tag
+     ruleset lets the workflow move the tag; if the push is rejected, switch
+     that step to a GitHub App token (see Repo setup).
   3. PR `cli-channel/rc` → `cli-channel/release`: both checks pass; merge
      → `cli-v<x>` released with no deployment approval, `cli-channel-release`
      carries the install scripts.
@@ -428,9 +437,26 @@ or moved item's ID isn't reused.
   5. An admin's direct push to `cli-channel/release` fails the release job's
      PR check and publishes nothing.
   6. The repo's `releases/latest` never changes.
-- [ ] **channels-pub-8** The docs match the implementation.
+- [x] **channels-pub-8** The docs match the implementation.
 - [ ] **channels-pub-9** `bun run check` passes; `bun test` passes on Linux,
       macOS and Windows.
+
+#### Proof
+
+| Item | Proven by |
+| --- | --- |
+| pub-1 | `tests/channel.test.ts`: `[channels-pub-1]` parseTag, nextVersion, next-version script |
+| pub-2 | `tests/channel.test.ts`: `[channels-pub-2]` notesStartTag |
+| pub-3 | `tests/publish.test.ts`: `[channels-pub-3]` publish (Unix only) |
+| pub-4 | `tests/release_check.test.ts`: `[channels-pub-4]` release origin (Unix only). That `release.yml` runs this check before publishing is shown by pub-7 step 5. |
+| pub-5 | `tests/release_check.test.ts`: `[channels-pub-5]` release-source; release-contains (Unix only) |
+| pub-6 | `tests/auto_update.test.ts`: `[channels-pub-6]`; runs `install.sh` on Linux and macOS, `install.ps1` on Windows |
+| pub-7 | Manual, on a fork with the repo setup applied; record the results in the PR. Step 2 also proves the `cli-channel-*` tag ruleset's Actions bypass. |
+| pub-8 | Review `docs/CHANNELS.md` and `docs/RELEASE_ARCHITECTURE.md` against the code |
+| pub-9 | CI: the `check` job and the `test` job's ubuntu, macos and windows runs (`.github/workflows/ci.yml`) |
+
+Unix only: these tests use a fake `gh` written in sh and are skipped on
+Windows.
 
 ### PR 3: CLI
 

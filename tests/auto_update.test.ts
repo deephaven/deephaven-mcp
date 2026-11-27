@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -16,7 +17,7 @@ import { http2OnlyEnterprise, TEST_CA } from "./helpers.ts";
 
 const NEXT = "9.9.9";
 // Every asset of this release redirects to plain HTTP (never resolves: .invalid).
-const INSECURE_TAG = "v0.0.0-insecure";
+const INSECURE_TAG = "cli-v0.0.0-insecure";
 const WINDOWS = process.platform === "win32";
 const installer = (name: string) => resolve(import.meta.dir, "..", name);
 const INSTALL = WINDOWS
@@ -106,24 +107,15 @@ async function setUserPath(path: { value: string; kind: string }) {
   );
 }
 
-/** Serves `root` with GitHub's `releases/latest` redirects pointing at `latest.tag`. */
-function fakeGitHub(root: string, latest: { tag: string }) {
+/** Serves `root` as GitHub release downloads; `requests` counts every request. */
+function fakeGitHub(root: string, requests = { count: 0 }) {
   return Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(req) {
+      requests.count++;
       const url = new URL(req.url);
       const path = decodeURIComponent(url.pathname);
-      if (path === "/releases/latest") {
-        return Response.redirect(
-          new URL(`/releases/tag/${latest.tag}`, url).href,
-        );
-      }
-      const asset = path.match(/^\/releases\/latest\/download\/(.+)$/);
-      if (asset) {
-        const to = `/releases/download/${latest.tag}/${asset[1]}`;
-        return Response.redirect(new URL(to, url).href);
-      }
       if (path.startsWith(`/releases/download/${INSECURE_TAG}/`)) {
         return Response.redirect(`http://example.invalid${path}`);
       }
@@ -198,15 +190,156 @@ test("auto-update uses the default URL when DH_UPDATE_URL is unset or empty", as
   }
 });
 
-test("dh installed with the install script updates itself from GitHub releases", async () => {
+/**
+ * A fake GitHub (see {@link fakeGitHub}) in a temp dir, with helpers to build
+ * releases into it and point channel releases at them, as publish.ts does.
+ */
+async function releaseServer() {
   const tmp = await mkdtemp(join(tmpdir(), "dh-update-test-"));
-  const latest = { tag: `v${VERSION}` };
-  const server = fakeGitHub(tmp, latest);
+  const requests = { count: 0 };
+  const server = fakeGitHub(tmp, requests);
   const repo = `http://127.0.0.1:${server.port}`;
   const release = (tag: string) => join(tmp, "releases", "download", tag);
   const baseUrl = (tag: string) => `${repo}/releases/download/${tag}/`;
+  return {
+    tmp,
+    requests,
+    repo,
+    release,
+    baseUrl,
+    buildRelease: (tag: string, version: string, channel = "release") =>
+      build(release(tag), { version, channel, baseUrl: baseUrl(tag) }),
+    /** Points `channel`'s channel release at `tag`. */
+    publishChannel: async (tag: string, channel = "release") => {
+      await mkdir(release(`cli-channel-${channel}`), { recursive: true });
+      await copyFile(
+        join(release(tag), "manifest.json"),
+        join(release(`cli-channel-${channel}`), "manifest.json"),
+      );
+    },
+    /** The install metadata file the install scripts wrote into `dir`. */
+    metaOf: async (dir: string) =>
+      JSON.parse(
+        await readFile(
+          join(dir, WINDOWS ? `${BIN}.exe.meta` : `${BIN}.meta`),
+          "utf8",
+        ),
+      ),
+    stop: async () => {
+      await server.stop(true);
+      await rm(tmp, { recursive: true, force: true });
+    },
+  };
+}
+
+test("[channels-pub-6] the install scripts install on a channel", async () => {
+  const gh = await releaseServer();
+  const { tmp, requests, repo, buildRelease, publishChannel, metaOf } = gh;
+  const tag = `cli-v${VERSION}`;
+  const installEnv = {
+    DH_INSTALL_NO_MODIFY_PATH: "1",
+    DH_INSTALL_REPO_URL: repo,
+  };
   try {
-    await build(release(latest.tag), { baseUrl: baseUrl(latest.tag) });
+    await buildRelease(tag, VERSION);
+    await publishChannel(tag);
+    await buildRelease(`cli-v${NEXT}`, NEXT);
+
+    // release by default, saved in the metadata file.
+    const bin = join(tmp, "bin");
+    const install = ok(
+      await run(INSTALL.cmd, INSTALL.args, {
+        ...installEnv,
+        DH_INSTALL_DIR: bin,
+      }),
+    );
+    expect(install.stdout).toContain(`Installed ${BIN} v${VERSION}`);
+    expect(await metaOf(bin)).toEqual({ channel: "release" });
+
+    // Another channel: its own manifest, saved in dh.meta.
+    const rcVersion = `${VERSION}-rc.0`;
+    await buildRelease(`cli-v${rcVersion}`, rcVersion, "rc");
+    await publishChannel(`cli-v${rcVersion}`, "rc");
+    const rcBin = join(tmp, "bin-rc");
+    const rcInstall = ok(
+      await run(INSTALL.cmd, INSTALL.args, {
+        ...installEnv,
+        DH_INSTALL_DIR: rcBin,
+        DH_CHANNEL: "rc",
+      }),
+    );
+    expect(rcInstall.stdout).toContain(rcVersion);
+    expect(await metaOf(rcBin)).toEqual({ channel: "rc" });
+
+    const unpublished = await run(INSTALL.cmd, INSTALL.args, {
+      ...installEnv,
+      DH_INSTALL_DIR: join(tmp, "bin-nope"),
+      DH_CHANNEL: "nope",
+    });
+    expect(unpublished.success).toBe(false);
+    expect(unpublished.stderr).toContain(`${BIN}: no channel nope`);
+
+    // 40 characters is the longest valid name: it gets as far as the download.
+    const longest = await run(INSTALL.cmd, INSTALL.args, {
+      ...installEnv,
+      DH_INSTALL_DIR: join(tmp, "bin-longest"),
+      DH_CHANNEL: "a".repeat(40),
+    });
+    expect(longest.success).toBe(false);
+    expect(longest.stderr).toContain(`no channel ${"a".repeat(40)}`);
+
+    for (const channel of [
+      "dev",
+      "Rc",
+      "-x",
+      "1a",
+      "a_b",
+      "rc\n",
+      "a".repeat(41),
+    ]) {
+      const before = requests.count;
+      const rejected = await run(INSTALL.cmd, INSTALL.args, {
+        ...installEnv,
+        DH_INSTALL_DIR: join(tmp, "bin-bad"),
+        DH_CHANNEL: channel,
+      });
+      expect(rejected.success).toBe(false);
+      expect(rejected.stderr.toLowerCase()).toMatch(/reserved|invalid channel/);
+      expect(requests.count).toBe(before);
+    }
+
+    // A pinned version, in any spelling, pre-releases included, regardless
+    // of the channel.
+    for (const [pinned, version] of [
+      [NEXT, NEXT],
+      [`v${NEXT}`, NEXT],
+      [`cli-v${NEXT}`, NEXT],
+      [`cli-v${rcVersion}`, rcVersion],
+    ]) {
+      const dir = join(tmp, `bin-pinned-${pinned}`);
+      const out = ok(
+        await run(INSTALL.cmd, INSTALL.args, {
+          ...installEnv,
+          DH_INSTALL_DIR: dir,
+          DH_INSTALL_VERSION: pinned,
+        }),
+      );
+      expect(out.stdout).toContain(`Installed ${BIN} v${version}`);
+      expect(await metaOf(dir)).toEqual({ channel: "release" });
+    }
+  } finally {
+    await gh.stop();
+  }
+}, 180_000);
+
+test("dh installed with the install script updates itself from GitHub releases", async () => {
+  const gh = await releaseServer();
+  const { tmp, repo, release, buildRelease, publishChannel } = gh;
+  let tag = `cli-v${VERSION}`;
+  const channelManifest = join(release("cli-channel-release"), "manifest.json");
+  try {
+    await buildRelease(tag, VERSION);
+    await publishChannel(tag);
 
     const bin = join(tmp, "bin");
     const installEnv = {
@@ -301,7 +434,7 @@ test("dh installed with the install script updates itself from GitHub releases",
 
     const exe = join(bin, WINDOWS ? `${BIN}.exe` : BIN);
     const env = {
-      DH_UPDATE_URL: `${repo}/releases/latest/download/manifest.json`,
+      DH_UPDATE_URL: `${repo}/releases/download/cli-channel-release/manifest.json`,
       DH_DEBUG: "1",
       DH_CONFIG_DIR: join(tmp, "config"),
     };
@@ -323,15 +456,15 @@ test("dh installed with the install script updates itself from GitHub releases",
       await h2.stop(true);
     }
 
-    // Tag exists but its assets aren't uploaded: the check fails, but still starts the interval.
-    latest.tag = `v${NEXT}`;
+    // The manifest is briefly missing while publish.ts replaces it: the check
+    // fails, but still starts the interval.
+    await rm(channelManifest);
     const early = await run(exe, [], env);
     expect(early.stderr).toContain("auto-update failed");
 
-    await build(release(latest.tag), {
-      version: NEXT,
-      baseUrl: baseUrl(latest.tag),
-    });
+    tag = `cli-v${NEXT}`;
+    await buildRelease(tag, NEXT);
+    await publishChannel(tag);
 
     const throttled = await run(exe, [], env);
     expect(throttled.stderr).not.toContain(`Updated ${BIN}`);
@@ -340,7 +473,7 @@ test("dh installed with the install script updates itself from GitHub releases",
     await run(exe, [], { ...now, DH_AUTO_UPDATE: "off" });
     expect(await version()).toContain(VERSION);
 
-    const asset = join(release(latest.tag), binaryName(PLATFORM));
+    const asset = join(release(tag), binaryName(PLATFORM));
     const good = await readFile(asset);
     const corrupt = Buffer.from(good);
     corrupt.writeUInt8(corrupt.readUInt8(0) ^ 0xff, 0);
@@ -391,7 +524,6 @@ test("dh installed with the install script updates itself from GitHub releases",
     expect(inRepo.stderr).not.toContain("PRELOADED");
     expect(inRepo.stderr).not.toContain("auto-update failed");
   } finally {
-    await server.stop(true);
-    await rm(tmp, { recursive: true, force: true });
+    await gh.stop();
   }
 }, 180_000);
