@@ -8,7 +8,7 @@ import {
   revokeOrphans,
   saveProfile,
 } from "../../src/actions/auth/flows.ts";
-import { Store } from "../../src/actions/auth/store.ts";
+import { configDir, Store } from "../../src/actions/auth/store.ts";
 import { run, tempDir, WINDOWS } from "../helpers.ts";
 
 async function tempStore(): Promise<Store> {
@@ -213,6 +213,35 @@ test("store: the config directory is found on first use, not on construction", (
     for (const k of names) delete process.env[k];
     const store = new Store();
     expect(() => store.dir).toThrow();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test("[channels-cli-3] configDir: one folder per build channel; DH_CONFIG_DIR wins", () => {
+  const names = ["HOME", "USERPROFILE", "APPDATA", "DH_CONFIG_DIR"];
+  const saved = Object.fromEntries(names.map((k) => [k, process.env[k]]));
+  try {
+    for (const k of names) delete process.env[k];
+    const home = join("/", "home", "me");
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    const base = join(home, ".deephaven");
+    expect(configDir("release")).toBe(join(base, "cli"));
+    expect(configDir("rc")).toBe(join(base, "cli-rc"));
+    expect(configDir("alpha-bar")).toBe(join(base, "cli-alpha-bar"));
+    expect(configDir("dev")).toBe(join(base, "cli-dev"));
+    if (WINDOWS) {
+      process.env.APPDATA = join("C:", "AppData");
+      expect(configDir("rc")).toBe(
+        join("C:", "AppData", "Deephaven", "cli-rc"),
+      );
+    }
+    process.env.DH_CONFIG_DIR = join(home, "custom");
+    expect(configDir("rc")).toBe(join(home, "custom"));
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];

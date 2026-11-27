@@ -460,7 +460,7 @@ Windows.
 
 ### PR 3: CLI
 
-- [ ] **channels-cli-1** Auto-update matches How the CLI updates in
+- [x] **channels-cli-1** Auto-update matches How the CLI updates in
       `docs/RELEASE_ARCHITECTURE.md`: it follows the channel in `dh.meta`, else
       `release`; with `DH_UPDATE_URL` set, installs from that manifest and leaves
       `dh.meta`'s channel unchanged; installs whenever the version differs,
@@ -471,7 +471,7 @@ Windows.
       through a `release` update, and the executable isn't replaced; with the
       lock held by the test, the swap is skipped, not waited on); and never runs
       on a dev build.
-- [ ] **channels-cli-2** `dh channel` and `dh channel use` match
+- [x] **channels-cli-2** `dh channel` and `dh channel use` match
       `docs/CHANNELS.md`: output, JSON and errors (`usage`, `channel_not_found`,
       `server_unreachable`).
       - `dh channel` lists `release` and `rc` with their manifests' versions
@@ -486,11 +486,11 @@ Windows.
       - No help text or `dh agents` entry names a specific alpha channel
         (nothing matches `/alpha-[a-z0-9]/`; the `alpha-<id>` placeholder is
         fine).
-- [ ] **channels-cli-3** Config folders match Config per channel in
+- [x] **channels-cli-3** Config folders match Config per channel in
       `docs/RELEASE_ARCHITECTURE.md`: `cli` on `release`, `cli-<channel>` on
       other channels, `cli-dev` on dev builds; `DH_CONFIG_DIR` overrides all of
       them.
-- [ ] **channels-cli-4** Non-release builds show `Channel: <channel> (config
+- [x] **channels-cli-4** Non-release builds show `Channel: <channel> (config
       <dir>)` in `dh --help`; `dh -o json` includes `channel`; `dh agents` lists
       `channel`, `channel use` and `channel_not_found`.
 - [ ] **channels-cli-5** (Manual) Installing and updating work end to end on the
@@ -499,6 +499,6 @@ Windows.
      another PR into rc and `DH_UPDATE_INTERVAL=0 dh` updates to the new build.
   2. `dh channel use release` on the rc install switches immediately.
 - [ ] **channels-cli-6** (Manual) Repo setup is applied to the real repo.
-- [ ] **channels-cli-7** The docs match the implementation.
+- [x] **channels-cli-7** The docs match the implementation.
 - [ ] **channels-cli-8** `bun run check` passes; `bun test` passes on Linux,
       macOS and Windows.
