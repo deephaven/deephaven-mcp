@@ -119,10 +119,10 @@ the versioned tag) use `gh`:
    - Exists: `gh release edit cli-channel-<channel> --title "<title>"`.
    - Upload: for channel `release` only, `install.sh` and `install.ps1` first;
      then always `manifest.json` last, each with `gh release upload … --clobber`.
-   - `<title>`: `<channel> channel (currently <tag>)`, e.g.
-     `rc channel (currently cli-v3.1.1-rc.2)`.
-   - `<notes>`: `Always points at the most recent <channel> build. Its tag and
-     manifest.json are replaced on every publish. Do not delete.`
+   - `<title>`: `<channel> channel (<tag>)`, e.g. `rc channel (cli-v3.1.1-rc.2)`.
+   - `<notes>`: `Always points at the most recent <channel> build on the
+     cli-channel/<channel> branch. Its tag and manifest.json are replaced on
+     every publish. Do not delete.`
 
 `git push` authentication: the checkout keeps no credentials
 (`persist-credentials: false`), so when `GH_TOKEN` is set, `publish.ts` passes
@@ -420,7 +420,7 @@ name, so `bun test -t channels-<pr>` runs them all.
       page defaults the base to the upstream repo; switch it to the fork):
   1. Merge a PR into `cli-channel/rc` → `cli-v<x>-rc.0` released as a
      pre-release, not latest; `cli-channel-rc` exists, titled
-     `rc channel (currently …)`, its tag on the merge commit.
+     `rc channel (…)`, its tag on the merge commit.
   2. Merge another → `rc.1`; `cli-channel-rc` moved to the new commit and sits
      next to `rc.1` on the Releases page. This proves the `cli-channel-*` tag
      ruleset lets the workflow move the tag; if the push is rejected, switch

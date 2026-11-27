@@ -69,7 +69,7 @@ describe.skipIf(WINDOWS)("[channels-pub-3] publish", () => {
     expect(calls1[0]).not.toContain("--notes-start-tag");
     expect(calls1.slice(1)).toEqual([
       "release view cli-channel-rc --json tagName",
-      "release create cli-channel-rc --verify-tag --prerelease --latest=false --title rc channel (currently cli-v3.0.0-rc.0) --notes Always points at the most recent rc build. Its tag and manifest.json are replaced on every publish. Do not delete.",
+      "release create cli-channel-rc --verify-tag --prerelease --latest=false --title rc channel (cli-v3.0.0-rc.0) --notes Always points at the most recent rc build on the cli-channel/rc branch. Its tag and manifest.json are replaced on every publish. Do not delete.",
       `release upload cli-channel-rc ${join(out, "manifest.json")} --clobber`,
     ]);
 
@@ -82,7 +82,7 @@ describe.skipIf(WINDOWS)("[channels-pub-3] publish", () => {
     expect(calls2[0]).toContain("--notes-start-tag cli-v3.0.0-rc.0");
     expect(calls2.slice(1)).toEqual([
       "release view cli-channel-rc --json tagName",
-      "release edit cli-channel-rc --title rc channel (currently cli-v3.0.0-rc.1)",
+      "release edit cli-channel-rc --title rc channel (cli-v3.0.0-rc.1)",
       `release upload cli-channel-rc ${join(out, "manifest.json")} --clobber`,
     ]);
   });

@@ -1,19 +1,39 @@
 /**
- * Publishes a built release from CI: `bun run publish <tag> <dir>`.
+ * Publishes a built release from CI.
  *
- * Creates the versioned release `<tag>`, and with it the tag at `GITHUB_SHA`,
- * from every file in `<dir>`. Then, if this commit is still the newest on
- * `cli-channel/<channel>`, moves the `cli-channel-<channel>` tag to it and
- * points that channel release at it: retitles it and replaces its
- * `manifest.json` (plus the install scripts on `release`).
+ *   bun run publish <tag> <dir>
  *
- * For example, the `rc` channel release after publishing `cli-v3.1.0-rc.2`:
+ *   <tag>  `cli-vX.Y.Z` or `cli-vX.Y.Z-<channel>.<build>`
+ *   <dir>  the output of `bun run release <tag> <dir>`
  *
- *   rc channel (currently cli-v3.1.0-rc.2)                       Pre-release
- *   cli-channel-rc
+ * 1. Creates the `<tag>` release attaching every file in `<dir>`. GitHub
+ *    creates the `<tag>` tag itself, on `GITHUB_SHA`, as part of the release.
+ * 2. Moves the `cli-channel-<channel>` release to this build, only if
+ *    `GITHUB_SHA` is still the head of `cli-channel/<channel>`:
+ *    - force-pushes the `cli-channel-<channel>` tag to `GITHUB_SHA`
+ *    - retitles the release, or creates it on the channel's first publish
+ *    - replaces its `manifest.json` (plus `install.sh` and `install.ps1` on
+ *      `release`)
  *
- *   Always points at the most recent rc build. Its tag and manifest.json are
- *   replaced on every publish. Do not delete.
+ * For example, publishing `cli-v3.1.0-rc.2` creates its versioned release:
+ *
+ *   cli-v3.1.0-rc.2    <Pre-release>
+ *   tag: cli-v3.1.0-rc.2
+ *   ----
+ *
+ *   <generated notes>
+ *
+ *   Assets: dh-linux-x64, dh-linux-arm64, dh-darwin-x64, dh-darwin-arm64,
+ *   dh-windows-x64.exe, manifest.json, SHA256SUMS, install.sh, install.ps1
+ *
+ * and updates the `rc` channel release:
+ *
+ *   rc channel (cli-v3.1.0-rc.2)    <Pre-release>
+ *   tag: cli-channel-rc
+ *   ----
+ *
+ *   Always points at the most recent rc build on the cli-channel/rc branch.
+ *   Its tag and manifest.json are replaced on every publish. Do not delete.
  *
  *   Assets: manifest.json
  *
@@ -29,7 +49,7 @@ import { notesStartTag, parseTag, RELEASE_CHANNEL } from "../src/channel.ts";
 const [tag, dir] = process.argv.slice(2);
 const parsed = tag ? parseTag(tag) : undefined;
 if (!tag || !parsed || !dir) {
-  console.error("usage: bun run publish <cli-v tag> <dir>");
+  console.error("usage: bun run publish <tag> <dir>");
   process.exit(1);
 }
 const {
@@ -117,8 +137,8 @@ const channelTag = `cli-channel-${channel}`;
 git("push", "--force", "origin", `${sha}:refs/tags/${channelTag}`);
 
 // 4. The channel release.
-const title = `${channel} channel (currently ${tag})`;
-const notes = `Always points at the most recent ${channel} build. Its tag and manifest.json are replaced on every publish. Do not delete.`;
+const title = `${channel} channel (${tag})`;
+const notes = `Always points at the most recent ${channel} build on the cli-channel/${channel} branch. Its tag and manifest.json are replaced on every publish. Do not delete.`;
 let exists = true;
 try {
   run(["gh", "release", "view", channelTag, "--json", "tagName"], {
