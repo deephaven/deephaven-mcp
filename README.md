@@ -53,7 +53,7 @@ and Community support.
 
 Plugins installed on your Deephaven server can add commands to `dh`: ways to
 look at objects, such as `dh object ui-dashboard` for `deephaven.ui` dashboards, and new
-top-level commands. `dh` finds them on the server; there's nothing to install.
+top-level commands. `dh` finds them on the server; there's nothing to install in `dh` itself.
 See [TypeScript plugins](docs/PLUGINS_TS.md), and
 [Writing a TypeScript plugin](docs/PLUGINS_TS_AUTHORING.md) to make one.
 

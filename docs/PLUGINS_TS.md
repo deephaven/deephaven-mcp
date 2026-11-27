@@ -23,14 +23,14 @@ types a plugin handles, and otherwise the object's type:
 $ dh object
 a:table
 trades:table
-el:ui
-dash:ui-dashboard
+my_el:ui
+my_dash:ui-dashboard
 fig:deephaven.plot.express.DeephavenFigure
 mpl:matplotlib.figure.Figure
 ```
 
-`el` is a `deephaven.ui` element and `dash` a `deephaven.ui` dashboard, which
-`dh object ui` and `dh object ui-dashboard` display. No installed plugin
+`my_el` is a `deephaven.ui` element and `my_dash` a `deephaven.ui` dashboard,
+which `dh object ui` and `dh object ui-dashboard` display. No installed plugin
 displays `fig` or `mpl`, so they show their type.
 
 With `-o json`, each object also has `command`, which is `null` when nothing
@@ -40,8 +40,8 @@ displays it:
 [
   {"name": "a", "type": "Table", "command": "table"},
   {"name": "trades", "type": "Table", "command": "table"},
-  {"name": "el", "type": "deephaven.ui.Element", "command": "ui"},
-  {"name": "dash", "type": "deephaven.ui.Dashboard", "command": "ui-dashboard"},
+  {"name": "my_el", "type": "deephaven.ui.Element", "command": "ui"},
+  {"name": "my_dash", "type": "deephaven.ui.Dashboard", "command": "ui-dashboard"},
   {"name": "fig", "type": "deephaven.plot.express.DeephavenFigure", "command": null},
   {"name": "mpl", "type": "matplotlib.figure.Figure", "command": null}
 ]
@@ -50,7 +50,7 @@ displays it:
 ### An object view: `dh object ui-dashboard`
 
 ```text
-$ dh object ui-dashboard dash
+$ dh object ui-dashboard my_dash
 [dashboard]
   [row]
     [panel] "Trades"
@@ -64,11 +64,23 @@ $ dh object ui-dashboard dash
     [picker] "Symbol" selected="AAPL" (12 options)
     [button] "Refresh"
 
-Inspect a nested object: dh object <view> dash --ref <id>
+Inspect a nested object: dh object <view> my_dash --ref <id>
+  e.g. dh object table my_dash --ref 0 for [table:0]
 ```
 
-`dh object ui el` shows an element the same way, with the element itself at
-the top instead of `[dashboard]`.
+`dh object ui` shows an element the same way, with the element itself at the
+top instead of `[dashboard]`:
+
+```text
+$ dh object ui my_el
+[flex]
+  [picker] "Symbol" selected="AAPL" (12 options)
+  [text] "Last refreshed 09:30"
+  [table:0] 20 rows, 3 columns
+
+Inspect a nested object: dh object <view> my_el --ref <id>
+  e.g. dh object table my_el --ref 0 for [table:0]
+```
 
 - Panels, layout and controls are shown as a tree, with the state they start
   in. `dh` opens the object fresh on each run; clicking or typing into it
@@ -77,7 +89,8 @@ the top instead of `[dashboard]`.
   in the console, so the number is how you reach one. Each is labeled the way
   `dh object` would list it: the subcommand that displays it, or its type when
   none does, as for the figure here.
-- The hint line appears only when some numbered object has a subcommand.
+- The hint appears only when some numbered object has a subcommand. Its
+  example uses the first such object.
 - With `-o json`, the tree is returned as nested objects instead.
 
 ### Nested objects: `--ref`
@@ -86,17 +99,19 @@ Every `dh object` subcommand takes `--ref <id>` to act on an object inside
 another one:
 
 ```text
-$ dh object table dash --ref 0 --sort Price --limit 5
+$ dh object table my_dash --ref 0 --sort Price --limit 5
 ```
 
-`dh` opens `dash`, finds its object `0`, and runs `dh object table` on it, with
-all of that command's options. The subcommand must be the one the tree's label
-names; an object labeled with its type has no subcommand to reach it with.
+`dh` opens `my_dash`, finds its object `0`, and runs `dh object table` on it,
+with all of that command's options, as for a named table.
+
+The subcommand must be the one the tree's label names; an object labeled with
+its type has no subcommand to reach it with.
 
 - Numbers come from the object as it first renders. If the code behind it
   changes, they can change too, so use a number soon after listing it.
-- Refs reach one level: the objects the dashboard holds, not objects inside
-  those.
+- Refs reach one level: the objects an element or dashboard holds, not
+  objects inside those.
 
 ## Plugin commands
 

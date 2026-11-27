@@ -18,7 +18,7 @@ in [Writing a TypeScript plugin](PLUGINS_TS_AUTHORING.md). File-system
 
 | A plugin can add | Example | Discovered from | Registered |
 | --- | --- | --- | --- |
-| **Object views**: `dh object` subcommands, each for some object types | `dh object ui el` | The worker of the console `dh object` targets | When that worker serves it |
+| **Object views**: `dh object` subcommands, each for some object types | `dh object ui my_el` | The worker of the console `dh object` targets | When that worker serves it |
 | **Commands**: top-level nouns | `dh dbserver` | The profile's server (see [Sources](#sources)) | Always, from the cache |
 
 - **One package, one plugin.** A package declares its CLI side in

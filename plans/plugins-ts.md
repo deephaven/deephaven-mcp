@@ -463,9 +463,10 @@ into `dist/cli/` after the web build, and `deephaven.cli.spec` in
   `selected="<key>"` from `selected_key`, else `default_selected_key`; and
   `(<n> options)` for a picker's items. Quoted text longer than 120
   characters is cut to 119 and `…`.
-- **Hint:** after a blank line,
-  `Inspect a nested object: dh object <view> <name> --ref <id>`, only when
-  some exported object has a subcommand.
+- **Hint:** only when some exported object has a subcommand, after a blank
+  line, `Inspect a nested object: dh object <view> <name> --ref <id>` and
+  then `  e.g. dh object <sub> <name> --ref <n> for [<sub>:<n>]`, with the
+  lowest-numbered exported object that has a subcommand.
 - **JSON:** `tree` is the root node; a node is
   `{ "element": "<x>", "label"?: "…", "active"?: true, "selected"?: "…",
   "options"?: <n>, "children"?: [...] }`, an exported object is
