@@ -1,0 +1,17 @@
+import { writeSync } from "node:fs";
+import { loadCommunityApi } from "../../../src/actions/auth/jsapi.ts";
+const { NodeHttp2gRPCTransport } = await import("@deephaven/jsapi-nodejs");
+const log = (m: string) => writeSync(2, `${m}\n`);
+NodeHttp2gRPCTransport.onLogMessage((lvl: string, ...a: unknown[]) => log(`[transport ${lvl}] ${a.map(String).join(" ").slice(0, 200)}`));
+const origin = "http://localhost:10000";
+const dh = await loadCommunityApi(new URL(origin), `${import.meta.dir}/cache`, 30_000);
+const useTransport = process.argv[2] === "h2";
+const client = new dh.CoreClient(origin, useTransport ? { transportFactory: NodeHttp2gRPCTransport.createFactory() } : undefined);
+await client.login({ type: dh.CoreClient.LOGIN_TYPE_ANONYMOUS });
+log("logged in");
+const ide = await client.getAsIdeConnection();
+const session = await ide.startSession("python");
+log("session");
+const r = await Promise.race([session.runCode(process.argv[3] ?? "x = 1"), Bun.sleep(20000).then(() => "TIMEOUT")]);
+log(`runCode: ${r === "TIMEOUT" ? r : "ok, changes=" + JSON.stringify(r.changes?.created?.map((c: any) => c.name))}`);
+process.exit(0);

@@ -1,0 +1,10 @@
+{
+  "name": "plugins-ts-spike",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "quickjs-emscripten-core": "0.32.0",
+    "typescript": "5.9.3"
+  }
+}
