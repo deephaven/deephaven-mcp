@@ -7,6 +7,16 @@
  * points that channel release at it: retitles it and replaces its
  * `manifest.json` (plus the install scripts on `release`).
  *
+ * For example, the `rc` channel release after publishing `cli-v3.1.0-rc.2`:
+ *
+ *   rc channel (currently cli-v3.1.0-rc.2)                       Pre-release
+ *   cli-channel-rc
+ *
+ *   Always points at the most recent rc build. Its tag and manifest.json are
+ *   replaced on every publish. Do not delete.
+ *
+ *   Assets: manifest.json
+ *
  * The channel tag and the branch check use `git` against the checkout's
  * `origin`; releases (and the versioned tag) use `gh`. Needs
  * `GITHUB_REPOSITORY` and `GITHUB_SHA`, and `GH_TOKEN` on CI (also used to
@@ -108,7 +118,7 @@ git("push", "--force", "origin", `${sha}:refs/tags/${channelTag}`);
 
 // 4. The channel release.
 const title = `${channel} channel (currently ${tag})`;
-const notes = `Moving release for the ${channel} channel. Its tag and manifest.json are replaced on every publish. Do not delete.`;
+const notes = `Always points at the most recent ${channel} build. Its tag and manifest.json are replaced on every publish. Do not delete.`;
 let exists = true;
 try {
   run(["gh", "release", "view", channelTag, "--json", "tagName"], {

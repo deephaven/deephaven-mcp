@@ -121,7 +121,7 @@ the versioned tag) use `gh`:
      then always `manifest.json` last, each with `gh release upload … --clobber`.
    - `<title>`: `<channel> channel (currently <tag>)`, e.g.
      `rc channel (currently cli-v3.1.1-rc.2)`.
-   - `<notes>`: `Moving release for the <channel> channel. Its tag and
+   - `<notes>`: `Always points at the most recent <channel> build. Its tag and
      manifest.json are replaced on every publish. Do not delete.`
 
 `git push` authentication: the checkout keeps no credentials
