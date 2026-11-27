@@ -403,7 +403,8 @@ the `ObjectView` and `ctx` types, and the `deephaven-cli-plugin` bin:
 ### 3. Object views (PR 4, after the `dh object` PR)
 
 - **Registration before parsing:** when `argv` is a `dh object` (or
-  `dh console object`) subcommand other than a built-in, and not `--help`,
+  `dh console object`) subcommand other than a built-in, or is `detail`, and
+  not `--help`,
   `dh` resolves the target console, fetches its worker's source (manifest,
   then new or changed packages), records it in `consoles.json`, and registers
   that worker's views. Then it parses. With `--help`, views come from
@@ -424,12 +425,30 @@ the `ObjectView` and `ctx` types, and the `deephaven-cli-plugin` bin:
     `<name> has no object <n>`.
   - The object's type isn't one the invoked subcommand handles: `usage`,
     `<name> --ref <n> is <type>; use dh object <sub> <name> --ref <n>`, or
-    `<name> --ref <n> is <type>, which no dh object subcommand displays`.
+    `<name> --ref <n> is <type>, which no dh object subcommand displays; use
+    dh object detail <name> --ref <n>`.
   - Otherwise the subcommand runs on that object: a built-in on the fetched
     object; a view with `ctx.object` set to it, `name` the outer name and
     `ref` `<n>`.
 - **`objectCommand(type)`:** the built-in subcommand for `type`, else the
-  registered view for it, else `null`.
+  registered view for it, else `null`. Never `detail`.
+- **`dh object detail <name>`:** a built-in that shows any object, taking
+  only `--ref` and `--console`. It resolves `--ref` like any subcommand, then:
+  - Human output: `<name> (<type>)`, or `<name> --ref <n> (<type>)`, then by
+    what `objectCommand(type)` names. Hint lines are indented two spaces under
+    the header, per `docs/ARCHITECTURE.md`.
+    - Nothing: nothing more.
+    - A subcommand with a required option: the hint
+      `dh object <sub> needs options: dh object <sub> --help`. It isn't run.
+    - A subcommand with other options: the hint
+      `More options: dh object <sub> --help`, a blank line, and its human
+      output with no options given.
+    - A subcommand with no options: a blank line and its human output.
+  - `-o json`: `{ "name": "<name>", "ref": <n> | null, "type": "<type>",
+    "command": "<sub>" | null, "output": <the subcommand's -o json result> |
+    null }`. `output` is `null` when the subcommand isn't run.
+  - If the subcommand fails, `detail` fails with the same error and exit
+    code, and prints nothing on stdout.
 
 ### 4. `dh object ui` and `dh object ui-dashboard` (deephaven-plugins)
 
@@ -494,9 +513,6 @@ into `dist/cli/` after the web build, and `deephaven.cli.spec` in
 - Commands discovered from a worker's Python environment.
 - Signing plugin packages.
 - `dh object table`'s options (its own design).
-- Reaching a nested object labeled with its type string (no subcommand
-  displays it), such as `[deephaven.plot.express.DeephavenFigure:2]`; to be
-  decided with the team.
 - File-system (`shell`) plugins (their own design; see
   [Shared with file-system plugins](../docs/PLUGINS_TS_ARCHITECTURE.md#shared-with-file-system-plugins)).
 - Upstreaming the augmentation to deephaven-core and Iris; tracked separately.
@@ -609,6 +625,23 @@ item's ID isn't reused.
 - [ ] **plugins-ts-obj-5** `dh agents` lists views under `dh object` with
       `plugin`, `pluginKind` and `types`; a view claiming `Table` is rejected
       as `invalid: view <view> can't handle Table`.
+- [ ] **plugins-ts-obj-6** `dh object detail <name>` on a `deephaven.ui`
+      element prints `<name> (deephaven.ui.Element)`, a blank line, and the
+      same output as `dh object ui <name>`; `-o json` returns section 3's
+      shape with `output` equal to `dh object ui <name> -o json`.
+- [ ] **plugins-ts-obj-7** `dh object detail` on a type no subcommand
+      displays, named or by `--ref`, prints only its header, exit 0;
+      `-o json` has `command` and `output` `null`.
+      `dh object table <name> --ref <n>` on such an object gives section 3's
+      message naming `dh object detail`.
+- [ ] **plugins-ts-obj-8** When the view fails, `dh object detail` fails
+      with the view's error and exit code and nothing on stdout.
+- [ ] **plugins-ts-obj-9** `dh object detail` on a type whose view has an
+      option prints `More options: dh object <view> --help`, indented
+      under the header, before the view's output; with a required option, it
+      prints `dh object <view> needs options: dh object <view> --help`,
+      indented the same, doesn't run the view, exits 0, and `-o json` has
+      `output` `null`.
 
 ### deephaven-plugins: `dh object ui` and `dh object ui-dashboard`
 

@@ -105,13 +105,58 @@ $ dh object table my_dash --ref 0 --sort Price --limit 5
 `dh` opens `my_dash`, finds its object `0`, and runs `dh object table` on it,
 with all of that command's options, as for a named table.
 
-The subcommand must be the one the tree's label names; an object labeled with
-its type has no subcommand to reach it with.
+The subcommand must be the one the tree's label names. For an object labeled
+with its type, use `dh object detail`.
 
 - Numbers come from the object as it first renders. If the code behind it
   changes, they can change too, so use a number soon after listing it.
 - Refs reach one level: the objects an element or dashboard holds, not
   objects inside those.
+
+### Any object: `dh object detail`
+
+`dh object detail` works on any object. It shows the object's type, then
+what the subcommand for that type shows with no options:
+
+```text
+$ dh object detail my_el
+my_el (deephaven.ui.Element)
+
+[flex]
+  [picker] "Symbol" selected="AAPL" (12 options)
+  [text] "Last refreshed 09:30"
+  [table:0] 20 rows, 3 columns
+
+Inspect a nested object: dh object <type> my_el --ref <id>
+  e.g. dh object table my_el --ref 0 for [table:0]
+```
+
+- If the subcommand has options (`ui` has none), a hint under the type says
+  where to find them:
+
+  ```text
+  $ dh object detail trades
+  trades (Table)
+    More options: dh object table --help
+
+  ...
+  ```
+
+- If one of its options is required, `detail` doesn't run it, and the hint
+  points to it instead:
+  `dh object <type> needs options: dh object <type> --help`.
+- When nothing displays the type, it shows the type only.
+
+It also takes `--ref`, so it reaches nested objects no subcommand displays:
+
+```text
+$ dh object detail my_dash --ref 2
+my_dash --ref 2 (deephaven.plot.express.DeephavenFigure)
+```
+
+With `-o json`, it returns `name`, `ref`, `type`, `command` (the subcommand,
+or `null`) and `output` (that subcommand's `-o json` result, or `null` when
+it isn't run).
 
 ## Plugin commands
 

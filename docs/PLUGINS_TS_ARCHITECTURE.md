@@ -124,19 +124,20 @@ files are cached once and shared by every source serving it.
   periodic background check refresh them. The check runs after other commands
   at most once per `DH_PLUGIN_REFRESH` hours, as a detached `dh plugin sync`
   the command doesn't wait for.
-- **Object views:** for any `dh object` subcommand other than built-ins and
-  `--help`, `dh` resolves the target console, fetches its worker's
-  `manifest.json` and any new or changed package, and registers that worker's
-  views before parsing. So a run always uses the worker's current version, with
-  its current options. `--help` uses the cache, and fetches only if that
-  console has no cache yet.
+- **Object views:** for `dh object detail` and any `dh object` subcommand
+  other than built-ins, but not `--help`, `dh` resolves the target console,
+  fetches its worker's `manifest.json` and any new or changed package, and
+  registers that worker's views before parsing. So a run always uses the
+  worker's current version, with its current options. `--help` uses the cache,
+  and fetches only if that console has no cache yet.
 
 ### Names
 
 Object view names and command nouns follow the built-in rule
-(`^[a-z][a-z0-9-]*$`) and can't be built-in names (`dh object table`, `dh auth`
-and so on). Two packages claiming the same view name, the same object type or
-the same noun are both rejected for it; `dh plugin` shows why.
+(`^[a-z][a-z0-9-]*$`) and can't be built-in names (`dh object table`,
+`dh object detail`, `dh auth` and so on). Two packages claiming the same view
+name, the same object type or the same noun are both rejected for it;
+`dh plugin` shows why.
 
 An object view handles widget types only: any type except the ones
 `dh.VariableType` names for tables, trees and figures (every constant but
@@ -256,6 +257,11 @@ counts them the same way). Rendering only starts when the client sends
   returns, in the same `dh` process and over the same connection. The runtime
   that resolved the ref stays alive, holding the outer object open, until the
   command ends. The nested object's type must be one `<view>` handles.
+- **`dh object detail <name> [--ref <n>]`** shows any object: its type, then
+  the output of `objectCommand(type)` run with no options, with a hint when
+  that subcommand has more. One with a required option isn't run; `detail`
+  points to it instead. When there's no subcommand, it shows the type only, so
+  `--ref` reaches objects no subcommand displays.
 - **Refs are one level deep,** and reflect the object's initial state: each
   run is a fresh connection, and interaction is out of scope.
 

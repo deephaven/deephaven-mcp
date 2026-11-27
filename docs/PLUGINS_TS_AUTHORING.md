@@ -83,7 +83,8 @@ export default definePlugin({
   Usually one view handles one type; a view may list several. Views handle
   widget types only: tables, trees and figures have their own subcommands.
   `dh` supplies the object's name argument, `--ref` and `--console`; declare
-  only your own options.
+  only your own options. `dh object detail` runs your view with none given,
+  or, if one is `required`, points to your view instead of running it.
 - **`commands`** adds top-level nouns. A command with `commands` is a group;
   one with `run` is a leaf, and a noun can be a leaf itself, as `dbserver` is.
   `requires` is `enterprise`, `community` or `any` (the default). A leaf with
